@@ -10,6 +10,7 @@ from pythonjsonlogger.json import JsonFormatter
 from app.config import Settings, get_settings
 from app.database import get_engine
 from app.db_init import create_all_tables
+from app.routers.documents import router as documents_router
 
 
 def configure_logging(log_level: str = "INFO") -> None:
@@ -46,6 +47,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(documents_router)
 
 
 @app.get("/health")
