@@ -1,0 +1,51 @@
+uv — Python package manager (Rust-based, replaces pip/Poetry)
+=================================================================
+
+COMMANDS
+--------
+uv init                         Create new project (generates pyproject.toml + .venv)
+uv add <pkg>                    Add runtime dependency (updates pyproject.toml + uv.lock)
+uv add --dev <pkg>              Add dev dependency (goes into [dependency-groups] dev)
+uv add '<pkg>[extra]'           Add package with optional extras (e.g. 'uvicorn[standard]')
+uv sync                         Install all deps from uv.lock into .venv
+uv sync --dev                   Install including dev deps
+uv run <cmd>                    Run command in project .venv (e.g. uv run pytest)
+uv lock                         Regenerate uv.lock without installing
+uv remove <pkg>                 Remove a dependency
+uv pip install <pkg>            Install directly (bypasses uv.lock — avoid in projects)
+
+PYPROJECT.TOML FORMAT (PEP 621)
+--------------------------------
+[project]
+name = "luminary-backend"
+version = "0.1.0"
+description = "..."
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+RULES
+-----
+- NEVER use pip, Poetry, or pipenv in this project
+- ALWAYS use `uv run` to execute commands (never activate .venv manually)
+- Commit uv.lock to the repo (reproducible installs)
+- Dev deps go in [dependency-groups] dev, not [project] dependencies
+- Use `uv add` to add packages (never manually edit pyproject.toml dependencies)

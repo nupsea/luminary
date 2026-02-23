@@ -1,0 +1,907 @@
+{
+  "product": "Luminary",
+  "branchName": "ralph/luminary-v1",
+
+  "harnessEngineering": {
+    "source": "OpenAI Harness Engineering (2025) — applied to this project",
+    "corePhilosophy": "Humans steer. Agents execute. The engineer's job is to design environments, specify intent, and build feedback loops — not write code directly.",
+    "agentFirstPrinciples": [
+      "AGENTS.md (and CLAUDE.md) is the TABLE OF CONTENTS, not the encyclopedia. Keep it under 100 lines. It points to deeper docs in docs/. Never put all context in one file.",
+      "Repository is the SYSTEM OF RECORD. All architectural decisions, design choices, patterns, and conventions must live as versioned markdown in docs/. If it is not in the repo, the agent cannot see it.",
+      "Progressive disclosure: agents start with CLAUDE.md as a map, follow links to relevant docs/, and are never overwhelmed up front.",
+      "Enforce invariants mechanically. Custom linters with remediation instructions in error messages. CI jobs validate the knowledge base is up to date. Structural tests catch layer violations.",
+      "Layered domain architecture: within each backend domain, dependencies flow forward only — Types → Config → Repo → Service → Runtime → API. Cross-cutting concerns (auth, telemetry, feature flags) enter through explicit Providers. Enforced by linters.",
+      "Agent legibility over human style. The codebase is optimised so an agent can reason about the full business domain from the repo itself. Prefer composable, stable, well-documented dependencies.",
+      "Golden principles encoded in docs/design-docs/core-beliefs.md. A recurring background task (ralph) scans for deviations and opens targeted fix-up pull requests.",
+      "Execution plans are first-class artifacts. Active plans in docs/exec-plans/active/, completed in docs/exec-plans/completed/, known debt in docs/exec-plans/tech-debt-tracker.md. All versioned in the repo.",
+      "Quality grading in docs/QUALITY_SCORE.md — grades each product domain and architectural layer, tracks gaps over time.",
+      "Ephemeral observability per git worktree. Each ralph iteration boots an isolated app instance with its own logs and metrics. Phoenix traces are worktree-scoped.",
+      "Technical debt as garbage collection. Pay it down continuously with automated small PRs, not in painful bursts.",
+      "Parse and validate data at every boundary. Never probe data YOLO-style. Always validate inputs with Pydantic (backend) or Zod (frontend).",
+      "Boring technology wins. Well-known, composable, API-stable libraries are easier for agents to reason about. Avoid opaque upstream dependencies where a focused reimplementation would be more legible.",
+      "Throughput changes the merge philosophy. Minimal blocking merge gates. Short-lived PRs. Corrections are cheap; waiting is expensive."
+    ],
+    "repositoryStructure": {
+      "CLAUDE.md": "Table of contents only (~100 lines). Points to docs/. Contains the 10 most critical invariants. Updated by ralph when patterns change.",
+      "ARCHITECTURE.md": "Top-level domain map. Package layering diagram. Updated when new domains are added.",
+      "docs/design-docs/": "index.md + core-beliefs.md + per-feature design decisions with verification status.",
+      "docs/exec-plans/active/": "Current execution plans with progress logs checked in.",
+      "docs/exec-plans/completed/": "Historical plans for agent context.",
+      "docs/exec-plans/tech-debt-tracker.md": "Known debt, priority, and owner.",
+      "docs/product-specs/": "index.md + per-feature specs referenced by stories.",
+      "docs/references/": "LLM-friendly plain-text reference docs for key dependencies: uv-llms.txt, lancedb-llms.txt, langgraph-llms.txt, kuzu-llms.txt, fsrs-llms.txt.",
+      "docs/generated/": "Auto-generated artifacts: db-schema.md (regenerated on migration), api-schema.md.",
+      "docs/QUALITY_SCORE.md": "Quality grade per domain. Updated by ralph after each phase.",
+      "docs/RELIABILITY.md": "SLOs and reliability requirements per critical path.",
+      "docs/SECURITY.md": "Security boundaries and data handling rules.",
+      "docs/FRONTEND.md": "Frontend conventions, component patterns, state management rules."
+    },
+    "ciPrinciples": [
+      "Every commit must pass: uv run pytest (backend), npx tsc --noEmit + npm run build (frontend), ruff check + ruff format --check (backend linting), custom architectural layer linter.",
+      "CI validates the docs/ knowledge base: checks that ARCHITECTURE.md cross-links are live, QUALITY_SCORE.md is not stale, exec-plans reference real story IDs.",
+      "Linter error messages include remediation instructions so ralph can self-fix without human intervention.",
+      "No human PR review required by default. Agent-to-agent review loop. Humans review only when judgment is required.",
+      "Flaky tests are addressed with a follow-up PR, not by blocking the current one indefinitely."
+    ]
+  },
+
+  "techStack": {
+    "projectLayout": "Monorepo root: /backend (Python FastAPI), /frontend (React+Vite+TypeScript), /evals (RAGAS evaluation scripts), /docs (system of record per Harness Engineering principles)",
+    "backend": {
+      "runtime": "Python 3.13 (latest stable)",
+      "framework": "FastAPI with uvicorn, async throughout",
+      "dependencies": "uv for ALL package management. Never use pip, Poetry, or pipenv. Commands: uv init, uv add <pkg>, uv sync, uv run <cmd>, uv lock. Lockfile: uv.lock committed to repo. pyproject.toml uses [project] table (PEP 621). Dev dependencies in [dependency-groups] dev section.",
+      "workflow": "LangGraph — content-type routing, ingestion pipeline, RAG pipeline. Replace any LangChain chains with LangGraph nodes.",
+      "documentParsing": "PyMuPDF (fitz) for PDF/DOCX/XLSX/PPTX; unstructured.io for complex mixed layouts; chardet for encoding detection",
+      "chunking": "LangGraph node: RecursiveCharacterTextSplitter with per-type sizes — papers: 300 tokens 15% overlap, books: 600 tokens 20% overlap, conversations: 450 tokens 20% overlap, notes/diary: 300 tokens 25% overlap, code: function/class boundaries via tree-sitter",
+      "embeddings": "BAAI/bge-m3 via sentence-transformers with ONNX Runtime acceleration (optimum[onnxruntime]). 1024-dim vectors. Cache model in DATA_DIR/models/",
+      "vectorDB": "LanceDB — embedded, Apache Arrow backend, .lance files in DATA_DIR/vectors/",
+      "keywordIndex": "SQLite FTS5 virtual table on chunks.text — provides BM25 keyword retrieval",
+      "graphDB": "Kuzu — embedded analytical graph DB (like DuckDB but for graphs). Apache 2.0. Cypher query language. DATA_DIR/graph.kuzu",
+      "hybridRetrieval": "Reciprocal Rank Fusion (RRF) combining vector (LanceDB cosine) + keyword (SQLite FTS5 BM25) + graph (Kuzu entity traversal). k=60 in RRF formula.",
+      "ner": "GLiNER (urchade/gliner_multi_pii-v1 or gliner-multi-v2.1) — zero-shot NER with custom entity types: PERSON, ORG, PLACE, CONCEPT, EVENT, TECHNOLOGY, DATE",
+      "llmUnified": "LiteLLM as unified LLM API layer. All LLM calls go through LiteLLM — never call provider SDKs directly. Supports: Ollama (local), OpenAI, Anthropic, Google Gemini.",
+      "localLLM": "Ollama with llama.cpp backend. Default models: mistral:7b (summarization, Q&A), phi3:mini (lightweight classification). Auto-pull if missing.",
+      "spacedRepetition": "FSRS algorithm (fsrs Python package). Replaces SM-2 entirely.",
+      "tracing": "Arize Phoenix (arize-phoenix) running as a local server on port 6006. Instrument all LangGraph nodes and LLM calls with OpenTelemetry via phoenix.otel.",
+      "evaluation": "Langfuse (self-hosted via Docker Compose) + RAGAS for automated RAG metrics. Langfuse stores golden datasets per content type. RAGAS runs evals on every golden dataset.",
+      "metadataDB": "SQLite 3 via SQLAlchemy (async). Single file: DATA_DIR/luminary.db"
+    },
+    "frontend": {
+      "framework": "React 18 + TypeScript 5 + Vite 5",
+      "ui": "shadcn/ui components + Tailwind CSS. Run `npx shadcn-ui@latest init` during scaffold.",
+      "graphViz": "Sigma.js v3 + Graphology v0.25. WebGL-accelerated. Handles 10K+ nodes at 60fps.",
+      "animation": "Framer Motion — flashcard flips, tab transitions, progress animations",
+      "state": "Zustand for global state (current document, LLM mode, study session)",
+      "routing": "React Router v6 — tab-based navigation",
+      "dataFetching": "TanStack Query (React Query) v5 — caching, background refetch, streaming",
+      "charts": "Recharts for progress/retention curves and monitoring metrics"
+    },
+    "desktop": "Tauri v1.6 (Apache 2.0). Added in Phase 5 after core web app is stable. /desktop directory.",
+    "cloudScalingPath": "LanceDB -> Qdrant, SQLite -> PostgreSQL, Ollama -> vLLM, single instance -> Docker Compose. Keep service boundaries clean for this migration."
+  },
+
+  "navigation": {
+    "tabs": [
+      {
+        "id": "learning",
+        "label": "Learning",
+        "description": "Document reader + inline notes linked to passages. Text-selection toolbar for explain/simplify/add-note. Glossary drawer. Content library accessible from this tab."
+      },
+      {
+        "id": "chat",
+        "label": "Chat",
+        "description": "Conversational Q&A. Scope selector: current document or all content. Streaming answers with citation chips and confidence badges. Conversation history sidebar."
+      },
+      {
+        "id": "viz",
+        "label": "Viz",
+        "description": "Interactive knowledge graph via Sigma.js. Filter by entity type and document source. Node click shows detail popover. Cross-document graph toggle."
+      },
+      {
+        "id": "study",
+        "label": "Study",
+        "description": "FSRS flashcard review. Learning modes: Flashcard, Teach-back, Socratic, Synthesis. Progress dashboard: retention curves, mastery heatmap, study streak, weak areas, misconception tracker."
+      },
+      {
+        "id": "monitoring",
+        "label": "Monitoring",
+        "description": "RAG metrics (HR@5, MRR, Faithfulness, Context Precision). Phoenix traces for recent queries. Langfuse eval run results per golden dataset. Model usage breakdown (local vs cloud, latency). Ingestion queue status."
+      }
+    ]
+  },
+
+  "dataModel": {
+    "sqlite": {
+      "documents": "id (uuid), title, format (pdf|docx|txt|md|code), content_type (book|paper|conversation|notes|code), word_count, page_count, file_path, stage (parsing|chunking|embedding|complete|error), created_at, last_accessed_at",
+      "sections": "id (uuid), document_id (fk), heading, level (1-6), page_start, page_end, section_order",
+      "chunks": "id (uuid), document_id (fk), section_id (fk), text, token_count, page_number, speaker (nullable), chunk_index, created_at",
+      "chunks_fts": "FTS5 virtual table over chunks.text — BM25 keyword search",
+      "summaries": "id, document_id (fk), mode (one_sentence|executive|detailed|conversation), content, created_at",
+      "flashcards": "id, document_id (fk), chunk_id (fk), question, answer, source_excerpt, is_user_edited (bool), fsrs_stability (float), fsrs_difficulty (float), due_date, fsrs_state (new|learning|review|relearning), reps, lapses, last_review, created_at",
+      "study_sessions": "id, document_id (fk, nullable), started_at, ended_at, cards_reviewed, cards_correct, mode (flashcard|teachback|socratic|synthesis)",
+      "misconceptions": "id, document_id (fk), flashcard_id (fk), user_answer, error_type (misconception|incomplete|unrelated|memory_lapse), correction_note, detected_at",
+      "notes": "id, document_id (fk, nullable), chunk_id (fk, nullable), content (markdown), tags (json array), group_name, created_at, updated_at",
+      "qa_history": "id, document_id (fk, nullable), scope (single|all), question, answer, citations (json), confidence (high|medium|low), model_used, created_at",
+      "settings": "key (primary key), value (json)",
+      "eval_runs": "id, dataset_name, run_at, hit_rate_5, mrr, faithfulness, answer_relevance, context_precision, context_recall, model_used"
+    },
+    "lancedb": {
+      "chunk_vectors": "chunk_id (str), document_id (str), content_type (str), section_heading (str), page (int), speaker (str), text (str), embedding (vector[1024])"
+    },
+    "kuzu": {
+      "nodeTable_Entity": "id (string PRIMARY KEY), name (string), type (string), frequency (int64)",
+      "nodeTable_Document": "id (string PRIMARY KEY), title (string), content_type (string)",
+      "edgeTable_MENTIONED_IN": "Entity -> Document, count (int64)",
+      "edgeTable_APPEARS_IN": "Entity -> Entity (chunk co-occurrence), weight (float), document_id (string)",
+      "edgeTable_RELATED_TO": "Entity -> Entity, relation_label (string), confidence (float)"
+    }
+  },
+
+  "stories": [
+    {
+      "id": "S00a",
+      "title": "Backend monorepo scaffold — uv, Python 3.13, FastAPI app skeleton",
+      "phase": 1,
+      "priority": 1,
+      "featureRef": "setup",
+      "description": "Create the backend half of the monorepo. At repo root: create .gitignore covering .venv, node_modules, .env, __pycache__, *.pyc, .lance, *.db, DATA_DIR. Create README.md with setup in 3 commands (cd backend && uv sync, cd frontend && npm install, make dev). Create /evals directory with evals/README.md placeholder. BACKEND (/backend): Run `uv init` to initialise the project. Edit pyproject.toml — set [project] name='luminary-backend', version='0.1.0', requires-python='>=3.13'. Run `uv add fastapi 'uvicorn[standard]' pydantic-settings`. Run `uv add --dev pytest pytest-asyncio httpx ruff`. Add [tool.ruff] to pyproject.toml: line-length=100, target-version='py313', select=['E','F','I','UP']. Create app/__init__.py (empty). Create app/main.py with a minimal FastAPI app: app = FastAPI(title='Luminary') and a GET /health endpoint returning {\"status\": \"ok\", \"version\": \"1.0.0\"}. Create app/config.py with a Settings class (pydantic-settings BaseSettings): DATA_DIR (default '~/.luminary'), OLLAMA_URL (default 'http://localhost:11434'), LOG_LEVEL (default 'INFO'), LITELLM_DEFAULT_MODEL (default 'ollama/mistral'), PHOENIX_ENABLED (bool, default True), OPENAI_API_KEY (str, default ''), ANTHROPIC_API_KEY (str, default ''), GOOGLE_API_KEY (str, default ''), LANGFUSE_PUBLIC_KEY (str, default ''), LANGFUSE_SECRET_KEY (str, default ''). Create tests/__init__.py (empty). Create a Makefile at repo root with targets: dev (runs both servers), ci (placeholder for now: echo 'CI not yet configured').",
+      "acceptanceCriteria": [
+        "cd backend && uv sync exits 0",
+        "cd backend && uv run pytest exits 0 (0 tests collected is fine)",
+        "cd backend && uv run ruff check . exits 0",
+        ".gitignore exists at repo root and covers .venv and node_modules",
+        "README.md exists at repo root",
+        "evals/README.md exists"
+      ],
+      "passes": true
+    },
+    {
+      "id": "S00b",
+      "title": "Frontend scaffold — Vite+React+TS, Tailwind, shadcn/ui, 5 tab stubs",
+      "phase": 1,
+      "priority": 1.5,
+      "featureRef": "setup",
+      "description": "Create the frontend half of the monorepo. FRONTEND (/frontend): Run `npm create vite@latest frontend -- --template react-ts` from the repo root. cd frontend. Install Tailwind CSS v3: `npm install -D tailwindcss postcss autoprefixer` and `npx tailwindcss init -p`. Configure tailwind.config.js content to include './src/**/*.{ts,tsx}'. Add Tailwind directives to src/index.css. Initialise shadcn/ui: `npx shadcn-ui@latest init` — choose New York style, zinc base color, enable CSS variables. Install runtime deps: `npm install react-router-dom@6 @tanstack/react-query@5 zustand framer-motion`. Create src/pages/Learning.tsx, Chat.tsx, Viz.tsx, Study.tsx, Monitoring.tsx — each exports a React component that renders a centered heading with the tab name (placeholder only). Create src/store.ts with a Zustand store: useAppStore with fields: activeDocumentId (string | null), llmMode ('local' | 'cloud' | 'unavailable'), and setActiveDocument(id: string | null) action. Update src/App.tsx: wrap the app in QueryClientProvider and BrowserRouter. Render a persistent left sidebar (64px wide, full height, shadcn bg-sidebar) with 5 icon buttons routing to /, /chat, /viz, /study, /monitoring. Use React Router Routes to render the correct page component. Ensure TypeScript strict mode in tsconfig.json (strict: true).",
+      "acceptanceCriteria": [
+        "cd frontend && npm run build exits 0",
+        "cd frontend && npx tsc --noEmit exits 0",
+        "All 5 tab pages have stub components that compile without errors",
+        "Tailwind CSS classes apply correctly (sidebar has a background color)",
+        "Zustand store compiles with correct TypeScript types",
+        "Verify in browser: run `cd frontend && npm run dev`, open http://localhost:5173, confirm 5 sidebar icons are visible and each routes to the correct placeholder page"
+      ],
+      "passes": true
+    },
+    {
+      "id": "S00c",
+      "title": "docs/ knowledge base — Harness Engineering structure and core beliefs",
+      "phase": 1,
+      "priority": 1.8,
+      "featureRef": "setup",
+      "description": "Create the full docs/ knowledge base at the repo root following Harness Engineering principles. Create these files: docs/ARCHITECTURE.md — top-level domain map listing the 5 backend domains (Ingestion, Retrieval, LLM, Learning, Monitoring) and the 6-layer dependency rule (Types → Config → Repo → Service → Runtime → API). Include a placeholder ASCII diagram of the layered architecture. docs/QUALITY_SCORE.md — a markdown table with rows: Ingestion, Summarization, Q&A, Knowledge Graph, Learning Engine, Study Mode, Monitoring; columns: Implemented, Tested, Documented, Quality Grade. All cells: 'not started'. docs/RELIABILITY.md — SLOs placeholder: ingestion p95 < 30s, Q&A p95 < 3s, embedding batch < 60s per 100 chunks. docs/SECURITY.md — security boundaries: all data stays local in DATA_DIR, API keys stored in SQLite settings table (plaintext v1, OS keychain planned), no telemetry to external services unless cloud LLM keys configured. docs/FRONTEND.md — frontend conventions: all components in src/components/, all pages in src/pages/, Zustand for global state, TanStack Query for server state, Zod for runtime validation of API responses, no any types without justifying comment. docs/design-docs/index.md — index of design decisions (empty table). docs/design-docs/core-beliefs.md — encode all 14 harnessEngineering.agentFirstPrinciples from this prd.json as the repo golden principles, each as a numbered heading with a short rationale paragraph. docs/exec-plans/active/.gitkeep. docs/exec-plans/completed/.gitkeep. docs/exec-plans/tech-debt-tracker.md — empty markdown table with columns: ID, Description, Priority (high|med|low), Owner, Created. docs/product-specs/index.md — placeholder. docs/references/uv-llms.txt — brief plain-text reference: uv init, uv add <pkg>, uv add --dev <pkg>, uv sync, uv run <cmd>, uv lock, pyproject.toml [project] table format. docs/generated/.gitkeep.",
+      "acceptanceCriteria": [
+        "docs/design-docs/core-beliefs.md exists and contains all 14 golden principles",
+        "docs/QUALITY_SCORE.md has the grading table with all 7 domains",
+        "docs/exec-plans/tech-debt-tracker.md exists with correct columns",
+        "docs/ARCHITECTURE.md has the 6-layer dependency rule",
+        "docs/references/uv-llms.txt exists with uv command reference",
+        "All docs/ directories created (exec-plans/active, exec-plans/completed, design-docs, product-specs, references, generated)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S01",
+      "title": "FastAPI backend skeleton — health, CORS, lifespan, settings endpoint",
+      "phase": 1,
+      "priority": 2,
+      "featureRef": "setup",
+      "description": "Flesh out the FastAPI application. In app/main.py: add a lifespan context manager (startup: create DATA_DIR subdirectories raw/, models/, vectors/ if missing; shutdown: log shutdown). Add CORS middleware allowing origins http://localhost:5173 and http://localhost:1420 (Tauri). Add structured logging: in app/main.py configure Python logging with a JSON formatter when LOG_LEVEL is not DEBUG (use python-json-logger package — add it: `uv add python-json-logger`). Logger: logger = logging.getLogger(__name__) in every module. GET /health returns {status: ok, version: 1.0.0}. GET /settings returns current config values — mask API keys: show only first 4 chars + '***' if key is set, else empty string. Create app/config.py Settings as a singleton via functools.lru_cache: def get_settings() -> Settings. All route handlers receive settings via FastAPI Depends(get_settings). Write tests/test_health.py: async test for GET /health using httpx AsyncClient with app as ASGI transport. Test asserts status 200 and body {status: ok}.",
+      "acceptanceCriteria": [
+        "GET /health returns 200 {status: ok, version: 1.0.0}",
+        "CORS headers present on responses for localhost:5173 origin",
+        "DATA_DIR subdirectories created on startup",
+        "GET /settings returns config without exposing raw API key values",
+        "uv run pytest tests/test_health.py exits 0",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S02",
+      "title": "SQLite database — SQLAlchemy async models and FTS5 virtual table",
+      "phase": 1,
+      "priority": 3,
+      "featureRef": "setup",
+      "description": "Set up the SQLite database layer. Add: `uv add 'sqlalchemy[asyncio]' aiosqlite`. Create app/database.py: create_async_engine pointing to DATA_DIR/luminary.db, AsyncSessionLocal factory using async_sessionmaker, Base = declarative_base(), async def get_db() dependency that yields an AsyncSession. Create app/models.py: SQLAlchemy ORM models for all tables in dataModel.sqlite. Use Column(String) for UUID primary keys. Use Column(JSON) for json array fields. Key models: DocumentModel, SectionModel, ChunkModel, SummaryModel, FlashcardModel, StudySessionModel, MisconcceptionModel, NoteModel, QAHistoryModel, SettingsModel, EvalRunModel. Create app/db_init.py: async def create_all_tables(engine) that calls Base.metadata.create_all and then executes the FTS5 virtual table SQL: CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, chunk_id UNINDEXED, document_id UNINDEXED, content=chunks, content_rowid=rowid). Call create_all_tables in the lifespan startup hook in main.py. Write tests/test_database.py: create an in-memory SQLite engine, call create_all_tables, insert a DocumentModel row, retrieve it, assert fields match.",
+      "acceptanceCriteria": [
+        "All SQLAlchemy models created without error on startup",
+        "FTS5 virtual table created by db_init",
+        "pytest test inserts and retrieves a document row successfully",
+        "DATA_DIR/luminary.db created on first run",
+        "uv run pytest exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S03",
+      "title": "Document parsing — PDF, DOCX, TXT, Markdown with section detection",
+      "phase": 1,
+      "priority": 4,
+      "featureRef": "F1",
+      "description": "Implement document format parsing in app/services/parser.py. Add: `uv add pymupdf python-docx markdown-it-py chardet`. Define dataclasses in app/types.py: Section(heading: str, level: int, text: str, page_start: int, page_end: int) and ParsedDocument(title: str, format: str, pages: int, word_count: int, sections: list[Section], raw_text: str). Create DocumentParser class with method parse(file_path: Path, format: str) -> ParsedDocument. PDF (fitz): open with fitz.open(), extract text page by page, detect headings by font size > body_avg * 1.2 heuristic. DOCX (python-docx): iterate paragraphs, detect Heading 1/2/3 by paragraph.style.name. TXT: chardet for encoding detection, split on double-newline for sections. MD (markdown-it-py): parse headings (#, ##, ###) for section boundaries. Store original file to DATA_DIR/raw/{document_id}.{ext} before parsing. Create POST /documents/parse endpoint (multipart file upload, returns ParsedDocument as JSON). Create tests/test_parser.py with fixture files (minimal 2-page PDF using reportlab, small DOCX, a TXT, a MD file) and tests for each format. Add `uv add --dev reportlab` for test fixture generation.",
+      "acceptanceCriteria": [
+        "PDF parse returns sections with page numbers",
+        "DOCX parse returns heading hierarchy",
+        "TXT parse detects encoding and returns paragraph sections",
+        "MD parse detects headings as sections",
+        "Original file saved to DATA_DIR/raw/",
+        "uv run pytest tests/test_parser.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S04",
+      "title": "LangGraph ingestion workflow — parse, classify, chunk nodes + POST /ingest",
+      "phase": 1,
+      "priority": 5,
+      "featureRef": "F1",
+      "description": "Build the core LangGraph ingestion workflow in app/workflows/ingestion.py. Add: `uv add langgraph langchain-core langchain-text-splitters`. Define IngestionState as TypedDict: document_id (str), file_path (str), format (str), parsed_document (dict | None), content_type (str | None), chunks (list | None), status (str), error (str | None). Build a StateGraph with these nodes: (1) parse_node: calls DocumentParser.parse(), stores result in state. (2) classify_node: heuristics only — conversation if regex finds 'Speaker:' or timestamp patterns, paper if 'abstract' or 'methodology' heading present, book if chapter headings and word_count > 40000, code if .py/.js/.ts/.go extension, else notes. Default 'notes' when ambiguous. No LiteLLM call here — LiteLLM classification enhancement comes in a later story. (3) chunk_node: RecursiveCharacterTextSplitter per content_type — paper: chunk_size=300 overlap=45, book: chunk_size=600 overlap=120, conversation: chunk_size=450 overlap=90, notes/code: chunk_size=300 overlap=75. Stores chunks in SQLite chunks table with a new AsyncSession. (4) embed_node: stub — log 'embedding pending (S05)', update document stage to 'embedding'. (5) keyword_index_node: stub — log 'keyword index pending (S06)', update stage to 'indexing'. (6) entity_extract_node: stub — log 'entity extraction pending (S15b)', update stage to 'complete'. Graph edges: START -> parse -> classify -> chunk -> embed -> keyword_index -> entity_extract -> END. Embed and keyword_index can stay sequential for now (parallel wiring in a later story). Create app/routers/documents.py: POST /ingest (multipart form: file), save file to DATA_DIR/raw/, create DocumentModel in SQLite (stage='parsing'), launch workflow as asyncio background task via asyncio.create_task(), return {document_id, status: 'processing'}. GET /documents/{id}/status returns {stage, progress_pct, done}. progress_pct: parsing=10, classifying=25, chunking=40, embedding=70, indexing=90, complete=100. Include this router in main.py.",
+      "acceptanceCriteria": [
+        "POST /ingest returns document_id and status='processing' immediately",
+        "Meeting transcript TXT classified as conversation",
+        "Academic TXT with 'Abstract:' heading classified as paper",
+        "Long TXT (>40000 words) with Chapter headings classified as book",
+        "Chunks written to SQLite after chunk_node",
+        "GET /documents/{id}/status reflects current stage",
+        "uv run pytest tests/test_ingest.py exits 0 (test on small TXT fixture)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S05",
+      "title": "BGE-M3 embedding pipeline with LanceDB vector storage",
+      "phase": 1,
+      "priority": 6,
+      "featureRef": "F1",
+      "description": "Implement the embedding service in app/services/embedder.py. Add: `uv add sentence-transformers lancedb 'optimum[onnxruntime]' numpy`. EmbeddingService class: on first call, load BAAI/bge-m3 model — try ONNX Runtime (optimum.onnxruntime.ORTModelForFeatureExtraction) first; fall back to sentence_transformers.SentenceTransformer if ONNX export fails. Cache model in DATA_DIR/models/bge-m3/. expose encode(texts: list[str]) -> list[list[float]]: batch in groups of 32, return list of 1024-dim float arrays. LanceDBService in app/services/vector_store.py: connect to DATA_DIR/vectors/. Create table 'chunk_vectors' if not exists with schema matching dataModel.lancedb (chunk_id, document_id, content_type, section_heading, page, speaker, text, vector as fixed-size list of 1024 floats). Expose upsert_chunks(chunks: list[dict]) method. Update ingestion workflow embed_node (replacing stub in S04): encode all chunks for the document, upsert to LanceDB, update document stage. Write tests/test_embedder.py: encode 5 short strings, assert output shape is (5, 1024), assert all values are floats. Skip the test if bge-m3 model is not cached (use pytest.mark.skipif).",
+      "acceptanceCriteria": [
+        "EmbeddingService encodes texts and returns 1024-dim float arrays",
+        "LanceDB table created with correct schema",
+        "All chunks for an ingested document appear in LanceDB after embed_node",
+        "embed_node no longer a stub — replaces the S04 placeholder",
+        "uv run pytest tests/test_embedder.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S06",
+      "title": "SQLite FTS5 keyword index and hybrid retrieval with RRF",
+      "phase": 1,
+      "priority": 7,
+      "featureRef": "F3",
+      "description": "Implement keyword indexing and hybrid retrieval. Update ingestion workflow keyword_index_node (replacing stub in S04): after chunks are in SQLite, run INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) SELECT rowid, text, id, document_id FROM chunks WHERE document_id = ?. Update document stage to 'indexing'. Define ScoredChunk dataclass in app/types.py: chunk_id, document_id, text, section_heading, page, score (float), source (Literal['vector','keyword','both']). Create app/services/retriever.py with HybridRetriever class: vector_search(query: str, document_ids: list[str] | None, k: int) -> list[ScoredChunk]: embed query with EmbeddingService, call LanceDB table.search().metric('cosine').limit(k), filter by document_ids if provided. keyword_search(query: str, document_ids: list[str] | None, k: int) -> list[ScoredChunk]: run SELECT chunk_id, document_id, text, bm25(chunks_fts) AS score FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY score LIMIT ?. rrf_merge(vector_results, keyword_results, k: int = 10) -> list[ScoredChunk]: for each result list assign ranks, compute rrf_score = sum(1/(60+rank)), merge dicts keyed by chunk_id, sort descending, return top k. retrieve(query, document_ids, k) -> list[ScoredChunk]: vector_search(k=20) + keyword_search(k=20) -> rrf_merge(k=k). Write tests/test_retriever.py: test each method with mocked LanceDB and SQLite returns, test rrf_merge merges and ranks correctly.",
+      "acceptanceCriteria": [
+        "keyword_index_node replaces stub — FTS5 populated after ingestion",
+        "keyword_search returns results for a known term",
+        "vector_search returns results from LanceDB",
+        "rrf_merge combines and re-ranks correctly",
+        "Filtering by document_id scopes results",
+        "uv run pytest tests/test_retriever.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S07",
+      "title": "LiteLLM integration — Ollama, OpenAI, Anthropic, Gemini with streaming",
+      "phase": 1,
+      "priority": 8,
+      "featureRef": "F11",
+      "description": "Set up LiteLLM as the unified LLM gateway in app/services/llm.py. Add: `uv add litellm`. LLMService class: generate(prompt: str, system: str = '', model: str | None = None, stream: bool = False) -> str | AsyncGenerator[str, None]. Model defaults to settings.LITELLM_DEFAULT_MODEL. When stream=False: call litellm.acompletion(), return full response string. When stream=True: call litellm.acompletion(stream=True), return async generator yielding token strings from choices[0].delta.content. Model routing: ollama/model routes to OLLAMA_URL, openai/model requires OPENAI_API_KEY, anthropic/model requires ANTHROPIC_API_KEY, gemini/model requires GOOGLE_API_KEY. Also enhance S04's classify_node: if heuristic classification is 'notes' but document has > 5000 words, make a single LiteLLM call with a one-shot prompt to confirm or reclassify. GET /settings/llm endpoint: ping Ollama /api/tags to check availability, return {processing_mode: str, active_model: str, available_local_models: list[str], cloud_providers: [{name, available: bool}]}. processing_mode = 'local' if Ollama responds, 'cloud' if at least one API key set, 'unavailable' otherwise. Write tests/test_llm.py: mock litellm.acompletion and verify routing logic (model prefix determines base_url).",
+      "acceptanceCriteria": [
+        "GET /settings/llm returns correct mode and model list",
+        "generate(stream=True) is an async generator yielding strings",
+        "Ollama unreachable returns mode='unavailable' not a 500 error",
+        "openai/ prefix routes to OpenAI, anthropic/ to Anthropic",
+        "uv run pytest tests/test_llm.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S08",
+      "title": "Multi-granularity summarization with SSE streaming",
+      "phase": 1,
+      "priority": 9,
+      "featureRef": "F2",
+      "description": "Implement summarization in app/services/summarizer.py. Add: `uv add sse-starlette`. SummarizationService: fetch all chunks for a document from SQLite. For large documents (token count > 8000): map-reduce — summarize each section independently, then synthesize. System prompt prefix for all modes: 'Answer using only information present in the provided text. Do not introduce any facts, names, or claims not explicitly stated.' Mode-specific prompts: one_sentence: 'Summarize in a single sentence of at most 30 words.', executive: 'List the 3 to 5 most important points as bullet points.', detailed: 'Summarize each section separately, preserving the heading structure.', conversation: output JSON {timeline: [], decisions: [], action_items: [{owner, task}]}. Create POST /summarize/{document_id} route: accepts SummarizeRequest(mode: Literal['one_sentence','executive','detailed','conversation'], model: str | None). Returns StreamingResponse with content-type text/event-stream. Each SSE event: data: {\"token\": \"...\"} followed by newline. Final event: data: {\"done\": true, \"summary_id\": \"...\"}. Store completed summary in SQLite summaries table. Write tests/test_summarizer.py: mock LLMService, test each mode's prompt construction, test SSE stream collects tokens correctly.",
+      "acceptanceCriteria": [
+        "POST /summarize/{id} returns SSE stream with Content-Type: text/event-stream",
+        "one_sentence mode prompts for <= 30 words",
+        "conversation mode prompts for JSON output",
+        "Completed summaries stored in SQLite summaries table",
+        "uv run pytest tests/test_summarizer.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S09",
+      "title": "Grounded Q&A with citations, confidence, and Phoenix tracing",
+      "phase": 1,
+      "priority": 10,
+      "featureRef": "F3",
+      "description": "Implement RAG Q&A in app/services/qa.py. Add: `uv add arize-phoenix opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc`. QAService: (1) retrieve top-10 chunks via HybridRetriever. (2) Build context string with section heading and page per chunk. (3) System prompt: 'You are a grounded knowledge assistant. Answer only using the provided context. If the answer is not present, respond exactly: NOT_FOUND_IN_CONTENT. Do not speculate. After your answer, output JSON: {\"citations\":[{\"document_title\",\"section_heading\",\"page\",\"excerpt\"}],\"confidence\":\"high|medium|low\"}.' (4) Stream response via SSE same as S08. Parse citations JSON from final response. (5) If NOT_FOUND_IN_CONTENT: return {answer: null, not_found: true} without streaming tokens. (6) Store Q&A in qa_history table. Phoenix tracing: in startup hook, if PHOENIX_ENABLED=true launch Phoenix in-process (import phoenix as px; px.launch_app() in a background thread). Create a tracer in app/telemetry.py. Wrap retrieve + generate with tracer.start_as_current_span(). Span attributes: document_id, content_type, query, model_name, chunk_count. POST /qa endpoint: accepts QARequest(question: str, document_ids: list[str] | None, scope: Literal['single','all'], model: str | None). Write tests/test_qa.py: mock HybridRetriever and LLMService, assert citations parsed, assert NOT_FOUND handled.",
+      "acceptanceCriteria": [
+        "POST /qa streams answer tokens via SSE",
+        "Citations JSON parsed and included in final SSE event",
+        "NOT_FOUND_IN_CONTENT returns not_found: true without token stream",
+        "Confidence field present on every answer",
+        "Q&A written to qa_history table",
+        "Phoenix launches on port 6006 when PHOENIX_ENABLED=true",
+        "uv run pytest tests/test_qa.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S10a",
+      "title": "GET /documents, PATCH, and DELETE endpoints with derived fields",
+      "phase": 1,
+      "priority": 11,
+      "featureRef": "F12",
+      "description": "Add document management endpoints to app/routers/documents.py. GET /documents: query SQLite for all documents, for each document compute derived fields via joins: summary_one_sentence (LEFT JOIN summaries where mode='one_sentence', return content or null), flashcard_count (COUNT from flashcards), learning_status (derived: 'not_started' if no summary and flashcard_count=0, 'summarized' if summary exists, 'flashcards_generated' if flashcard_count > 0, 'studied' if any study_session row exists for this document). Return list with all these fields plus id, title, format, content_type, word_count, page_count, stage, created_at, last_accessed_at. Define DocumentListItem as a Pydantic response model. PATCH /documents/{id}: accepts PatchDocumentRequest(title: str | None, tags: list[str] | None). Updates matching fields. DELETE /documents/{id}: deletes document row (CASCADE should handle child rows — verify FK constraints are enabled: PRAGMA foreign_keys = ON in SQLite startup). Also manually delete from LanceDB: vector_store.delete(document_id). Also delete Kuzu nodes for this document (KuzuService.delete_document — stub OK if S15a not done). Returns 204. Write tests/test_documents.py: test GET returns correct learning_status values, test DELETE removes all rows.",
+      "acceptanceCriteria": [
+        "GET /documents returns list with learning_status derived correctly for each state",
+        "GET /documents returns summary_one_sentence and flashcard_count",
+        "PATCH /documents/{id} updates title successfully",
+        "DELETE /documents/{id} removes document and child rows from SQLite",
+        "DELETE also removes vectors from LanceDB",
+        "uv run pytest tests/test_documents.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S10b",
+      "title": "Library catalog UI — document grid, search, filter, sort in Learning tab",
+      "phase": 1,
+      "priority": 11.5,
+      "featureRef": "F12",
+      "description": "Build the library catalog in the Learning tab (src/pages/Learning.tsx). When no document is selected, render the catalog as the default view. Components to create (each in its own file under src/components/library/): SearchBar.tsx — uncontrolled text input that filters documents client-side by title. ViewToggle.tsx — icon button group toggling grid vs list layout, state in component. FilterBar.tsx — content_type multi-select chips (book, paper, conversation, notes), each toggleable. SortSelect.tsx — dropdown with options: newest, oldest, alphabetical, most-studied. DocumentCard.tsx (grid view): shadcn Card showing title, content_type icon (use lucide-react icons), word_count formatted, learning_status Badge (not_started=gray, summarized=blue, flashcards_generated=indigo, studied=green), created_at relative date. DocumentRow.tsx (list view): compact horizontal layout with same fields. In Learning.tsx: fetch GET /documents with TanStack Query. Show recently accessed section (last 5 by last_accessed_at desc) at the top. Render filtered+sorted DocumentCard or DocumentRow grid. On card/row click: call setActiveDocument(id) in Zustand store and update last_accessed_at via PATCH /documents/{id}. Empty state: centered illustration + 'Add your first document' CTA button. Loading skeleton while fetching.",
+      "acceptanceCriteria": [
+        "Document cards render with title, type icon, word count, and learning_status badge",
+        "Client-side search filters cards by title",
+        "content_type filter chips show/hide cards",
+        "Sort options change ordering of displayed cards",
+        "Empty state renders when no documents",
+        "Clicking a card sets it as active in Zustand",
+        "Verify in browser: open http://localhost:5173, confirm library grid renders (empty state visible), upload a document via manual API call and confirm card appears after page refresh"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S11",
+      "title": "Upload flow — file drag-and-drop and ingestion progress toast",
+      "phase": 1,
+      "priority": 12,
+      "featureRef": "F1",
+      "description": "Frontend: Add an 'Add Content' button in the library catalog. Clicking opens a shadcn Dialog. Dialog has two tabs: 'Upload File' and 'Paste Text'. Upload File tab: drag-and-drop zone using native HTML drag events (dragover, drop) plus a file picker button. Accepts .pdf, .docx, .txt, .md. Shows filename + size after selection. 'Ingest' button calls POST /ingest as multipart/form-data. Paste Text tab: shadcn Textarea (large), Label input (required), content_type selector (auto, book, paper, conversation, notes), 'Ingest' button calls POST /ingest with a text blob. After submit: close dialog, show a shadcn toast (use sonner or shadcn Toaster — install whichever shadcn provides). Toast polls GET /documents/{id}/status every 2 seconds and updates message: Parsing document... -> Classifying content... -> Chunking text... -> Generating embeddings... -> Building keyword index... -> Complete! On complete: call TanStack Query invalidateQueries for documents list so catalog refreshes. On error: show error toast with backend error_message. Backend update: ensure GET /documents/{id}/status returns {stage, progress_pct (0-100), done: bool, error_message: str | null}.",
+      "acceptanceCriteria": [
+        "File drag-and-drop accepts PDF/DOCX/TXT/MD",
+        "File picker also works",
+        "Paste text with label and content_type selector works",
+        "Progress toast cycles through stage messages",
+        "Library catalog refreshes automatically on ingestion complete",
+        "Error toast appears if ingestion fails",
+        "Verify in browser: drag a TXT file to the upload zone, submit, confirm toast appears and updates through stages"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S12",
+      "title": "Document reader UI with streaming summary panel in Learning tab",
+      "phase": 1,
+      "priority": 13,
+      "featureRef": "F2",
+      "description": "Frontend: When a document is selected (activeDocumentId set in Zustand), replace the catalog view in Learning tab with a two-panel reader layout. Left panel (60% width): document title, metadata row (type icon, word count, created date), scrollable section list. Each section item shows the section heading (bold) and a 2-line clamped text preview. Right panel (40%, sticky top): Summary panel using shadcn Tabs with 3 tabs: 'One-liner', 'Key Points', 'Detailed'. For conversation documents: add a 4th tab 'Meeting Notes'. Each tab shows: if no summary cached, a 'Generate Summary' button. On click: call POST /summarize/{id} with correct mode, consume SSE stream using fetch + ReadableStream API, append tokens to a state string shown in a pre element. Show animated spinner with 'Summarizing...' until first token. Once done: replace Generate button with a small Regenerate icon. Cache completed summary in TanStack Query. Add a Back button (left arrow) to return to catalog view (clears activeDocumentId). Loading skeleton while fetching document data from GET /documents/{id}.",
+      "acceptanceCriteria": [
+        "Selecting a document from catalog shows two-panel reader",
+        "Section list renders all sections with heading and preview text",
+        "Generate button triggers SSE streaming and tokens appear in real-time",
+        "All 3 (or 4 for conversation) summary tabs work independently",
+        "Back button returns to catalog view",
+        "Verify in browser: select a document, click Generate Summary in One-liner tab, confirm tokens stream in real-time"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S13",
+      "title": "Chat tab — streaming Q&A with citation chips and confidence badges",
+      "phase": 1,
+      "priority": 14,
+      "featureRef": "F3",
+      "description": "Frontend: Build the Chat tab (src/pages/Chat.tsx). Scope selector at top: 'This document' | 'All my content' radio toggle. If 'This document' is selected and no activeDocumentId in Zustand, show a prompt to open a document first. Message list: user messages right-aligned (slate-100 background), assistant messages left-aligned (white card). Each assistant message: stream response tokens in real-time using fetch ReadableStream on POST /qa SSE response. After streaming done: render Citations section below the message as shadcn Badge chips showing 'DocTitle > Section (p.N)'. Confidence badge: green='high', amber='medium', orange='low'. NOT_FOUND response: info-styled message 'This information was not found in the selected content'. Input area: auto-resize Textarea (Shift+Enter for newline, Enter to send), Send button, model selector dropdown (fetches GET /settings/llm to populate options). Conversation history persists in component state for the session (not persisted to backend for now). Empty state: 3 example question chips the user can click to populate the input. Handle streaming fetch errors with an error message in chat.",
+      "acceptanceCriteria": [
+        "Sending a question streams response tokens into the chat bubble",
+        "Citation chips render below each answer with document and section info",
+        "Confidence badge color matches confidence level",
+        "NOT_FOUND response shows info message without error styling",
+        "Scope selector changes document_ids sent to API",
+        "Model selector shows available models from backend",
+        "Verify in browser: type a question, confirm streaming response appears token by token with citations"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S14",
+      "title": "LLM mode indicator badge and Settings drawer",
+      "phase": 1,
+      "priority": 15,
+      "featureRef": "F11",
+      "description": "Frontend: Add a persistent LLM mode badge to the top-right of the navigation bar. Fetches GET /settings/llm on mount and every 30 seconds via TanStack Query. Shows: green dot + 'local: model-name' when Ollama active, blue dot + 'cloud: model-name' when cloud active, red dot + 'unavailable' otherwise. Clicking the badge opens a shadcn Sheet (right side drawer, 400px). Sheet sections: (1) LLM Mode — radio: Local / Cloud. Local sub-section: lists available Ollama models as radio buttons. Text input + 'Pull model' button to pull a new Ollama model (calls a new POST /settings/ollama/pull endpoint that runs ollama pull via subprocess). Cloud sub-section: tabs for OpenAI, Anthropic, Google — each has a masked password input for the API key and a Save button. (2) Storage — shows DATA_DIR path and disk usage for raw/, vectors/, models/ subdirs in MB. (3) Privacy notice: always-visible text 'In local mode, no content leaves your machine.' Backend: add PATCH /settings endpoint to upsert key-value pairs in SQLite settings table. Add POST /settings/ollama/pull: runs `ollama pull {model}` via asyncio subprocess, streams output. API keys saved to settings table plaintext (add a code comment: 'TODO: migrate to OS keychain — see tech-debt-tracker.md').",
+      "acceptanceCriteria": [
+        "Mode badge visible in nav at all times",
+        "Badge color reflects current LLM availability",
+        "Settings drawer opens on badge click",
+        "API key inputs are password type (masked)",
+        "Saving a cloud API key persists to SQLite settings",
+        "Pull model button triggers ollama pull",
+        "Verify in browser: confirm badge visible, click it, confirm drawer opens with LLM mode sections"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S_ARCH_a",
+      "title": "Layer linter, boundary validation, and CI Makefile",
+      "phase": 2,
+      "priority": 15.2,
+      "featureRef": "harness_engineering",
+      "description": "Implement mechanical architecture enforcement. (1) backend/tools/layer_linter.py: use the ast module to parse all .py files under app/. Define LAYER_ORDER = {'types': 0, 'config': 1, 'database': 1, 'models': 1, 'repo': 2, 'service': 3, 'workflow': 3, 'router': 4, 'main': 5}. For each file, determine its layer from its path (e.g. app/services/* = service layer, app/routers/* = router layer). Check each import statement: if a lower-layer module imports from a higher-layer module, emit an error with remediation text e.g. 'Layer violation in app/services/qa.py: service layer cannot import from app/routers/. Move shared logic to a types or service module.' Exit code 1 if any violations found. (2) Boundary validation checker in tools/boundary_checker.py: parse all FastAPI route functions using ast, check that all parameters annotated as request bodies use Pydantic BaseModel subclasses, not dict or Any. Emit remediation: 'Route parameter must be a Pydantic BaseModel. Replace dict with a typed schema in app/schemas/.' (3) Add ruff rules to pyproject.toml [tool.ruff.lint]: add 'PL' (pylint) and custom ignore list. Add a ruff per-file-ignores rule. (4) Update Makefile at repo root with `make ci` target that runs in sequence: cd backend && uv sync, uv run ruff check ., uv run python tools/layer_linter.py, uv run python tools/boundary_checker.py, uv run pytest, cd frontend && npm run build, npx tsc --noEmit. (5) Create .github/workflows/ci.yml that runs `make ci` on push.",
+      "acceptanceCriteria": [
+        "uv run python tools/layer_linter.py exits 0 on clean backend code",
+        "layer_linter.py detects a deliberate bad import (add a test import in a temp file, assert linter catches it, then remove it)",
+        "boundary_checker.py detects a raw dict route parameter and prints remediation",
+        "make ci runs all checks in sequence and exits 0 on clean code",
+        ".github/workflows/ci.yml exists and references `make ci`"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S_ARCH_b",
+      "title": "Doc-gardener script and QUALITY_SCORE domain grading",
+      "phase": 2,
+      "priority": 15.4,
+      "featureRef": "harness_engineering",
+      "description": "Implement the doc-gardening and quality tracking components. (1) scripts/ralph/doc_gardener.py: a Python script that checks whether docs/QUALITY_SCORE.md, docs/exec-plans/tech-debt-tracker.md, and docs/ARCHITECTURE.md have been modified in the last 10 commits (use subprocess to run `git log --oneline -10 -- <file>` and check if output is non-empty). For each file not modified in the last 10 commits, print a warning: 'STALE DOC: docs/QUALITY_SCORE.md has not been updated in the last 10 commits. Update it to reflect current implementation status.' Exit code 0 always (warnings only, not errors). This script is called by ralph at the end of each iteration (already referenced in CLAUDE.md step 11). (2) Update docs/QUALITY_SCORE.md: after completing Phase 1 stories, update the grading table to reflect actual implementation status. Mark Ingestion, Summarization, Q&A as 'implemented' with appropriate quality grades. Mark remaining domains as 'not started'. Add a 'Last Updated' header at the top of the file with today's date and the most recently completed story ID.",
+      "acceptanceCriteria": [
+        "scripts/ralph/doc_gardener.py runs without error: uv run python scripts/ralph/doc_gardener.py",
+        "doc_gardener.py prints a STALE DOC warning when a doc has not been modified recently",
+        "doc_gardener.py exits 0 (warning only, not failure)",
+        "docs/QUALITY_SCORE.md updated with 'Last Updated' header",
+        "Quality grades for Phase 1 domains are filled in (not 'not started')"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S15a",
+      "title": "Kuzu graph database — schema setup and GET /graph endpoints",
+      "phase": 2,
+      "priority": 16,
+      "featureRef": "F4",
+      "description": "Set up the Kuzu graph database layer. Add: `uv add kuzu`. Create app/services/graph.py with KuzuService class: __init__ connects to DATA_DIR/graph.kuzu. On first connect, create node tables: Entity(id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64), Document(id STRING PRIMARY KEY, title STRING, content_type STRING). Create edge tables: MENTIONED_IN(Entity->Document, count INT64), CO_OCCURS(Entity->Entity, weight FLOAT, document_id STRING), RELATED_TO(Entity->Entity, relation_label STRING, confidence FLOAT). Expose methods: upsert_entity(id, name, type) — CREATE OR REPLACE. upsert_document(id, title, content_type). add_mention(entity_id, document_id). add_co_occurrence(entity_id_a, entity_id_b, document_id). delete_document(document_id) — remove Document node and all edges. get_graph_for_document(document_id) -> dict: Cypher MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $doc_id}), return list of {id, label: name, type, size: frequency} nodes and edges. Initialize KuzuService in lifespan startup. Add GET /graph/{document_id} endpoint returning {nodes: [], edges: []}. Add GET /graph endpoint accepting ?doc_ids=id1,id2 for cross-document view. Write tests/test_graph.py: create Kuzu DB in a temp dir, upsert 2 entities, add mentions, assert GET /graph returns them.",
+      "acceptanceCriteria": [
+        "KuzuService initializes and creates schema without error",
+        "upsert_entity and add_mention work correctly",
+        "GET /graph/{document_id} returns correct nodes and edges JSON",
+        "GET /graph?doc_ids=... merges entities from multiple documents",
+        "delete_document removes nodes and edges for that document",
+        "uv run pytest tests/test_graph.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S15b",
+      "title": "GLiNER entity extraction — NER pipeline wired into ingestion workflow",
+      "phase": 2,
+      "priority": 16.5,
+      "featureRef": "F4",
+      "description": "Implement entity extraction and wire it into the ingestion workflow. Add: `uv add gliner`. Create app/services/ner.py with EntityExtractor class: load GLiNER model 'urchade/gliner_multi_pii-v1' on first use (download to DATA_DIR/models/gliner/). extract(chunks: list[dict]) -> list[dict]: batch-process chunk texts, use entity_types=['PERSON','ORGANIZATION','PLACE','CONCEPT','EVENT','TECHNOLOGY','DATE']. Each returned entity: {id (uuid), name (normalized lowercase), type, chunk_id, document_id}. Co-occurrence: for entities appearing in the same chunk, create CO_OCCURS edges in KuzuService (weight += 1 each occurrence). In ingestion workflow: replace entity_extract_node stub (from S04) with actual implementation — call EntityExtractor.extract() on all chunks, upsert entities to KuzuService, add MENTIONED_IN edges for the document, update document stage to 'complete'. Write tests/test_ner.py: extract entities from a 200-word fixture paragraph, assert at least 2 entities found, assert each entity has name and type fields.",
+      "acceptanceCriteria": [
+        "GLiNER model loads (or test is skipped if model not cached)",
+        "EntityExtractor extracts entities from sample text",
+        "entity_extract_node in ingestion workflow is no longer a stub",
+        "Entities and CO_OCCURS edges written to Kuzu after ingestion",
+        "Document stage set to 'complete' after entity extraction",
+        "uv run pytest tests/test_ner.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S16a",
+      "title": "Viz tab — basic Sigma.js knowledge graph rendering",
+      "phase": 2,
+      "priority": 17,
+      "featureRef": "F4",
+      "description": "Frontend: Set up the Viz tab with basic Sigma.js graph rendering. Install: `npm install sigma graphology @react-sigma/core graphology-layout-forceatlas2`. In src/pages/Viz.tsx: fetch graph data from GET /graph/{documentId} when activeDocumentId is set (fallback to GET /graph with all doc IDs if no active document). Convert API response to a Graphology Graph object: add nodes with x/y random initial positions, add edges. Run ForceAtlas2 layout for 100 iterations using graphology-layout-forceatlas2.syncLayout() before rendering. Render using SigmaContainer from @react-sigma/core. Node color by entity type using fixed palette: PERSON=#3b82f6, ORGANIZATION=#8b5cf6, PLACE=#10b981, CONCEPT=#f59e0b, EVENT=#ef4444, TECHNOLOGY=#06b6d4, DATE=#6b7280. Node size proportional to frequency: min=4, max=20, scale linearly. Show loading spinner while fetching. Show empty state message if no entities have been extracted yet ('Ingest a document and wait for entity extraction to complete').",
+      "acceptanceCriteria": [
+        "Sigma.js graph renders in the Viz tab",
+        "Nodes are colored by entity type using the defined palette",
+        "Node sizes vary by frequency",
+        "ForceAtlas2 layout runs — nodes are spread out not stacked",
+        "Loading and empty states render correctly",
+        "Verify in browser: open /viz tab, confirm graph renders with colored nodes (after ingesting a document with entity extraction complete)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S16b",
+      "title": "Viz tab — entity type filter, node search, click popover, edge tooltip",
+      "phase": 2,
+      "priority": 17.5,
+      "featureRef": "F4",
+      "description": "Frontend: Add interactive controls to the Viz tab (building on S16a). Controls panel (fixed left sidebar, 240px): (1) Entity type filter — one checkbox per type (PERSON, ORGANIZATION, PLACE, CONCEPT, EVENT, TECHNOLOGY, DATE), all checked by default. Unchecking a type hides those nodes and their edges by filtering the Graphology graph and re-rendering. (2) Search input — type to highlight matching nodes: set non-matching nodes to low opacity (0.1), matching nodes to full opacity, matching node labels visible. Use Sigma's camera.animate() to center on first match. (3) Zoom controls: + and - buttons calling sigma.camera.ratio. (4) Fit to screen button: sigma.camera.animatedReset(). (5) Toggle: 'This document' vs 'All documents' — refetches graph data from the appropriate endpoint. Node click: open a shadcn Popover (position near the click using Sigma's graph-to-viewport coordinates) showing entity name, type badge, frequency count, and a 'Find in document' link that navigates to Learning tab. Edge hover: show a plain tooltip with the relation label or edge type.",
+      "acceptanceCriteria": [
+        "Entity type checkboxes hide and show nodes by type",
+        "Search input fades non-matching nodes and highlights matches",
+        "Zoom and fit-to-screen buttons work",
+        "Document toggle refetches graph data",
+        "Node click shows popover with entity details",
+        "Edge hover shows a tooltip",
+        "Verify in browser: toggle an entity type checkbox, confirm nodes disappear/appear; search for an entity name, confirm highlighting works"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S17a",
+      "title": "GET /search backend — hybrid cross-document search endpoint",
+      "phase": 2,
+      "priority": 18,
+      "featureRef": "F6",
+      "description": "Backend: Add GET /search endpoint to app/routers/search.py. Query params: q (str, required), content_types (str, comma-separated, optional), limit (int, default 20). Embed the query using EmbeddingService, call HybridRetriever.retrieve() with document_ids=None (searches all documents) and the content_type filter applied by fetching matching document IDs from SQLite first. Return list of SearchResult Pydantic models: {chunk_id, document_id, document_title, content_type, section_heading, page, text_excerpt (first 200 chars of chunk text), relevance_score}. Group results by document_id in the response: return {results: [{document_id, document_title, content_type, matches: [SearchResult]}]}. Register router in main.py. Write tests/test_search.py: mock HybridRetriever, test endpoint returns grouped results, test content_type filter is applied.",
+      "acceptanceCriteria": [
+        "GET /search?q=test returns grouped results by document",
+        "content_types filter limits results to matching document types",
+        "limit param controls result count",
+        "text_excerpt is first 200 chars of chunk text",
+        "uv run pytest tests/test_search.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S17b",
+      "title": "Search UI — Cmd+K command dialog and persistent /search sidebar",
+      "phase": 2,
+      "priority": 18.5,
+      "featureRef": "F6",
+      "description": "Frontend: (1) Global Cmd+K / Ctrl+K shortcut: add a keydown listener in App.tsx (useEffect). Opens a shadcn CommandDialog. The dialog has a search input that calls GET /search as the user types (debounce 300ms via a custom useDebounce hook). Results rendered inside the Command component grouped by document: CommandGroup per document showing CommandItem rows with document title, section heading, page number, and a 150-char text excerpt. Clicking a result: close dialog, set activeDocumentId in Zustand, navigate to /learning, scroll to the matching section (use a ref or URL hash). (2) Persistent search panel in Learning tab sidebar: when no document is active, render a search input at the top of the catalog. Typing queries GET /search with debounce. Results replace the catalog grid with a search-results view grouped by document. Each result card shows document name, section, page, excerpt. content_type filter chips above results. 'No results' empty state.",
+      "acceptanceCriteria": [
+        "Cmd+K / Ctrl+K opens the command dialog",
+        "Typing in dialog searches with 300ms debounce",
+        "Results grouped by document in the dialog",
+        "Clicking a result navigates to the document in Learning tab",
+        "Learning tab sidebar search input also queries GET /search",
+        "Verify in browser: press Cmd+K, type a keyword, confirm results appear grouped by document"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S18a",
+      "title": "Backend /explain and /glossary endpoints",
+      "phase": 2,
+      "priority": 19,
+      "featureRef": "F5",
+      "description": "Backend: Create app/routers/explain.py. POST /explain: accepts ExplainRequest(text: str, document_id: str, mode: Literal['plain','eli5','analogy','formal']). Retrieve 3 context chunks surrounding the selected text via HybridRetriever (use the selected text as the query). System prompt: 'You are explaining a concept using only the context from the source document. Do not introduce information from outside this text.' Mode instructions: plain: 'Explain in simple, clear English.', eli5: 'Explain as if to a curious 10-year-old. Use a concrete everyday analogy.', analogy: 'Create a memorable analogy from everyday life that captures the core idea.', formal: 'Give the precise formal definition as stated or implied in the source material.' Stream response via SSE (same pattern as S08/S09). POST /glossary/{document_id}: query all section texts for the document (up to 8000 tokens, sample if longer). Prompt LiteLLM: 'Extract all domain-specific technical terms from this text. For each term, provide a definition based only on how it is used in the text. Output JSON array: [{\"term\": str, \"definition\": str, \"first_mention_page\": int}]. Output only JSON, no preamble.' Parse JSON response. Return the array. Write tests: mock retriever and LLM, test each explain mode prompt contains the correct instruction, test glossary returns list.",
+      "acceptanceCriteria": [
+        "POST /explain streams explanation tokens via SSE",
+        "Each mode produces a different system prompt instruction (verified in test)",
+        "POST /glossary/{id} returns JSON array of terms",
+        "Glossary prompt instructs LLM to output only JSON",
+        "uv run pytest tests/test_explain.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S18b",
+      "title": "Learning tab — text selection toolbar, explain sheet, and glossary tab",
+      "phase": 2,
+      "priority": 19.5,
+      "featureRef": "F5",
+      "description": "Frontend: Add text selection interaction to the document reader (Learning tab, S12). (1) FloatingToolbar component (src/components/FloatingToolbar.tsx): attach a mouseup listener to the section list container. On mouseup: check window.getSelection() for non-empty selection. If non-empty: use getBoundingClientRect() on the selection range to position the FloatingToolbar div (absolutely positioned, z-index 50, shadcn Card shadow). Show 3 buttons: 'Explain' (plain mode), 'ELI5' (eli5 mode), 'Analogy' (analogy mode). Clicking a button: store selected text in component state, open the ExplanationSheet. (2) ExplanationSheet (src/components/ExplanationSheet.tsx): shadcn Sheet from the right, 400px wide. Header: mode label. Body: call POST /explain via SSE fetch, stream tokens into a pre element. Loading spinner until first token arrives. Dismiss button clears the sheet. (3) Glossary tab: add a 'Glossary' tab to the document panel Tabs (alongside the summary tabs from S12). On tab click: call POST /glossary/{documentId}, show loading spinner, then render results in a searchable table (shadcn Table): Term | Definition | First Mentioned (page N). Search input above the table filters by term name client-side.",
+      "acceptanceCriteria": [
+        "Selecting text in the section list shows the floating toolbar",
+        "Toolbar disappears when selection is cleared",
+        "Each toolbar button opens the explanation sheet with the correct mode",
+        "Explanation sheet streams tokens in real-time",
+        "Glossary tab generates and shows the terms table",
+        "Glossary search filters by term name",
+        "Verify in browser: select a word in a section, confirm floating toolbar appears; click Explain, confirm sheet opens and streams"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S19a",
+      "title": "Notes backend — CRUD endpoints for notes with tags and groups",
+      "phase": 2,
+      "priority": 20,
+      "featureRef": "F10",
+      "description": "Backend: Create app/routers/notes.py with CRUD endpoints for notes. POST /notes: accepts NoteCreateRequest(document_id: str | None, chunk_id: str | None, content: str, tags: list[str] = [], group_name: str | None = None). Inserts into notes table, returns created NoteResponse. GET /notes: query params: document_id (optional), group (optional), tag (optional, filters by tag presence in the JSON tags array — use SQLite JSON_EACH). Returns list of NoteResponse sorted by updated_at desc. PUT /notes/{id}: accepts NoteUpdateRequest(content: str | None, tags: list[str] | None, group_name: str | None). Updates changed fields, sets updated_at. Returns updated NoteResponse. DELETE /notes/{id}: deletes note, returns 204. GET /notes/groups: returns distinct group_names with counts and distinct tags with counts: {groups: [{name, count}], tags: [{name, count}]}. NoteResponse schema: id, document_id, chunk_id, content, tags, group_name, created_at, updated_at. Register router in main.py. Write tests/test_notes.py: test create, read (with filter), update, delete, groups endpoint.",
+      "acceptanceCriteria": [
+        "POST /notes creates and returns a note",
+        "GET /notes with document_id filter returns only matching notes",
+        "GET /notes with tag filter returns notes containing that tag",
+        "PUT /notes/{id} updates content and tags",
+        "DELETE /notes/{id} returns 204 and removes the note",
+        "GET /notes/groups returns correct counts",
+        "uv run pytest tests/test_notes.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S19b",
+      "title": "Notes UI — inline editor in Learning tab and standalone /notes route",
+      "phase": 2,
+      "priority": 20.5,
+      "featureRef": "F10",
+      "description": "Frontend: (1) Inline notes in Learning tab (building on S12 document reader): Add a note icon button to each section item in the section list. Clicking opens an inline NoteEditor component below the section (not a modal — inline in the list). NoteEditor: shadcn Textarea with a 'Preview' toggle that renders markdown using react-markdown (`npm install react-markdown`). Tag input: text field showing typed tags as chips on comma or Enter. Group selector: shadcn Combobox populated from GET /notes/groups. Save and Cancel buttons. On save: POST /notes with document_id, chunk_id (if a chunk is linked), content, tags, group_name. Show a small note indicator icon on sections that have notes (check GET /notes?document_id={id} on document load). (2) Standalone /notes route (React Router path '/notes'): two-column layout. Left sidebar (280px): 'All Notes' root item, then groups as bold headings, tags indented under each group. Clicking filters the right panel. Right panel: grid of NoteCard components. Each NoteCard: first 100 chars of content, linked document name (if set), tags as chips, formatted date. Clicking a card opens it in edit mode (inline in the card). Markdown preview in card when not editing. Add /notes to React Router and a Notes icon in the sidebar navigation.",
+      "acceptanceCriteria": [
+        "Note icon button in section list opens inline editor",
+        "Save creates note via POST /notes",
+        "Note indicator appears on sections that have notes",
+        "Tags saved as array and rendered as chips",
+        "/notes route renders two-column layout",
+        "Left sidebar shows groups and tags from GET /notes/groups",
+        "Verify in browser: open a document, click note icon on a section, save a note, confirm indicator appears; navigate to /notes, confirm note card appears"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S20a",
+      "title": "Flashcard generation backend — CRUD, LLM generation, CSV export",
+      "phase": 3,
+      "priority": 21,
+      "featureRef": "F7",
+      "description": "Backend: Create app/services/flashcard.py and app/routers/flashcards.py. FlashcardService.generate(document_id, scope, section_heading, count): fetch chunks (all or specific section), prompt LiteLLM: 'Generate {count} question-answer flashcard pairs from the following text. Each card must be answerable only from this specific content. Output JSON array: [{\"question\": str, \"answer\": str, \"source_excerpt\": str}]'. Parse JSON response. Store each card in SQLite flashcards table with fsrs_state='new', fsrs_stability=0.0, fsrs_difficulty=0.0, due_date=now(), reps=0, lapses=0. Endpoints: POST /flashcards/generate accepts FlashcardGenerateRequest(document_id: str, scope: Literal['full','section'], section_heading: str | None, count: int = 10). Returns list of created flashcards. GET /flashcards/{document_id}: returns all flashcards for document ordered by created_at desc. PUT /flashcards/{id}: accepts FlashcardUpdateRequest(question: str | None, answer: str | None). Updates fields, sets is_user_edited=True. Returns updated card. DELETE /flashcards/{id}: returns 204. GET /flashcards/{document_id}/export/csv: returns CSV file (StreamingResponse, content-type text/csv, Content-Disposition: attachment; filename=flashcards.csv) with columns: question, answer, source_excerpt, document_title. Write tests/test_flashcards.py: mock LLMService, test generate parses JSON and creates cards, test CRUD operations.",
+      "acceptanceCriteria": [
+        "POST /flashcards/generate creates cards in SQLite with fsrs_state='new'",
+        "LLM prompt includes the count and instructs JSON output",
+        "GET /flashcards/{id} returns correct list",
+        "PUT /flashcards/{id} sets is_user_edited=True",
+        "GET /flashcards/{id}/export/csv returns valid CSV",
+        "uv run pytest tests/test_flashcards.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S20b",
+      "title": "Flashcard UI — Study tab generation, list, edit, delete, export",
+      "phase": 3,
+      "priority": 21.5,
+      "featureRef": "F7",
+      "description": "Frontend: Build the Study tab's flashcard section (src/pages/Study.tsx). Layout: Study tab has two sections — 'Flashcards' (this story) and 'Progress' (S23b). Flashcard section: (1) Generate panel: a count selector using shadcn Select (options: 5, 10, 20, 50), a scope selector ('Full document' or 'By section' — if by section, show a section dropdown), and a 'Generate Flashcards' button. On click: POST /flashcards/generate, show loading state, invalidate TanStack Query for flashcard list. (2) Flashcard list: fetch GET /flashcards/{documentId}. Each card rendered as a shadcn Card: question text visible, answer text hidden behind a 'Show Answer' toggle button (chevron). Edit icon (pencil): opens inline edit fields for question and answer, Save/Cancel buttons. DELETE icon: shadcn AlertDialog confirmation before DELETE /flashcards/{id}. (3) Bottom bar: 'Start Studying' button (links to S21b study session), CSV export button (downloads from GET /flashcards/{id}/export/csv). Show card count. Show empty state if no cards yet.",
+      "acceptanceCriteria": [
+        "Generate button with count selector calls POST /flashcards/generate",
+        "Generated cards appear in list after generation",
+        "Show/hide answer toggle works per card",
+        "Edit mode updates card via PUT /flashcards/{id}",
+        "Delete with confirmation removes card",
+        "CSV export button triggers file download",
+        "Verify in browser: generate 5 flashcards for a document, confirm cards appear in list, toggle answer visibility"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S21a",
+      "title": "FSRS spaced repetition — service and study session endpoints",
+      "phase": 3,
+      "priority": 22,
+      "featureRef": "F8",
+      "description": "Backend: Add `uv add fsrs`. Create app/services/fsrs_service.py with FSRSService class. schedule(card_id: str, rating: Literal['again','hard','good','easy']) -> FlashcardModel: load card from SQLite, map rating strings to FSRS Rating enum (again=1, hard=2, good=3, easy=4). Create an FSRS instance and Card from current card state. Call f.repeat(card, datetime.utcnow()) to get new state. Update FlashcardModel: fsrs_stability, fsrs_difficulty, due_date, fsrs_state (map FSRS State enum to strings), reps += 1, lapses += 1 if rating='again'. Save and return. Endpoints: GET /study/due: query params document_id (optional), limit (default 20). Returns flashcards where due_date <= now(), ordered by due_date asc. POST /flashcards/{id}/review: accepts ReviewRequest(rating: Literal['again','hard','good','easy']). Calls FSRSService.schedule(), returns updated card. POST /study/sessions/start: accepts StartSessionRequest(document_id: str | None, mode: str). Creates study_session row, returns session_id. POST /study/sessions/{id}/end: updates ended_at, computes cards_reviewed and cards_correct from review events in that session (add session_id FK to a simple review_events table or compute from time range). Returns session summary. Write tests/test_fsrs.py: create a card with fsrs_state='new', review with 'good', assert due_date is in the future and stability > 0.",
+      "acceptanceCriteria": [
+        "POST /flashcards/{id}/review with 'good' rating sets new due_date in the future",
+        "Repeated 'again' rating increases lapses",
+        "GET /study/due returns only cards due now or earlier",
+        "POST /study/sessions/start creates a session row",
+        "POST /study/sessions/{id}/end sets ended_at",
+        "uv run pytest tests/test_fsrs.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S21b",
+      "title": "Study card UI — flashcard flip, rating buttons, progress bar, session complete",
+      "phase": 3,
+      "priority": 22.5,
+      "featureRef": "F8",
+      "description": "Frontend: Build the study session UI in src/components/StudySession.tsx. Triggered by 'Start Studying' button in S20b. On mount: call POST /study/sessions/start, then GET /study/due?document_id={id}&limit=20 to get the session queue. Full-width card component: front side shows question text (centered, large font). Framer Motion flip animation: on 'Show Answer' button click, animate rotateY from 0 to 180 degrees (use motion.div with perspective). The back side (question + answer) is rendered at rotateY=180. Once answer is shown: display 4 rating buttons below the card — Again (red), Hard (orange), Good (green), Easy (blue). On rating click: call POST /flashcards/{id}/review with the rating, animate the card out (slide left with Framer Motion), load next card in queue. Progress bar at top: shows (total - remaining) / total as percentage. When queue is empty: show 'Session Complete' screen with stats: cards reviewed, percentage correct (again=wrong, others=correct), next review date (minimum due_date across all cards). 'Back to Study' button calls POST /study/sessions/{id}/end and returns to the Study tab flashcard list.",
+      "acceptanceCriteria": [
+        "Cards render with question on front",
+        "Framer Motion flip animation plays on 'Show Answer' click",
+        "All 4 rating buttons submit the correct rating to POST /review",
+        "Next card loads after rating, previous card animates out",
+        "Progress bar decrements correctly",
+        "Session complete screen shows reviewed count and next review date",
+        "Verify in browser: start a study session, confirm card flip animation, rate a card, confirm progress bar updates"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S22a",
+      "title": "Learning engine — gap detection, teach-back API, misconception tracking",
+      "phase": 3,
+      "priority": 23,
+      "featureRef": "study_engine",
+      "description": "Backend: Implement the learning intelligence layer. (1) Gap detection: GET /study/gaps/{document_id} — query flashcards where fsrs_stability < 2.0 AND reps > 1 (seen but fragile). Group by section_heading using a GROUP BY query. Return list of GapResult(section_heading, weak_card_count, avg_stability, sample_questions: list[str]) ordered by avg_stability asc. (2) Teach-back endpoint: POST /study/teachback accepts TeachbackRequest(flashcard_id: str, user_explanation: str). Load flashcard, retrieve its source chunk, prompt LiteLLM: 'The correct answer to the question is: {answer}. The student explained: {user_explanation}. Is the student's explanation accurate and complete? Score 0-100. Identify misconceptions. Output JSON: {\"score\": int, \"correct_points\": list[str], \"missing_points\": list[str], \"misconceptions\": list[str]}.' Parse JSON. Store result in study_sessions (or a new teachback_results table). Return the parsed JSON. (3) Misconception detection: if score < 60, auto-generate a targeted correction flashcard — prompt LiteLLM to write a new Q&A card addressing the specific misconception. Store in flashcards table. (4) Add misconceptions table row via MisconceptionModel for each detected misconception. Write tests: mock LLM, test gap query logic, test teachback parses score correctly.",
+      "acceptanceCriteria": [
+        "GET /study/gaps/{id} returns sections with weak cards sorted by avg_stability",
+        "POST /study/teachback returns score, correct_points, missing_points, misconceptions",
+        "Score < 60 triggers creation of a correction flashcard in SQLite",
+        "MisconceptionModel row created for each detected misconception",
+        "uv run pytest tests/test_learning.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S22b",
+      "title": "Study tab — Weak Areas panel and teach-back mode UI",
+      "phase": 3,
+      "priority": 23.5,
+      "featureRef": "study_engine",
+      "description": "Frontend: Add learning intelligence UI to the Study tab (building on S20b). (1) Weak Areas panel: fetch GET /study/gaps/{documentId} and render a panel below the flashcard list. Each gap item shows: section heading (bold), weak card count badge, a fragility bar (shadcn Progress component, value = avg_stability / 10 * 100, colored red when avg_stability < 2, yellow 2-5, green > 5). Clicking a gap item opens the Generate Flashcards panel (from S20b) pre-scoped to that section heading. (2) Teach-back mode: add a 'Teach-back' toggle button to each flashcard card in the study session (S21b). When toggled: instead of the flip animation, show a Textarea for the user to type their explanation. Submit button calls POST /study/teachback. Show a loading spinner while waiting for LLM evaluation. On response: render a score badge (0-100, green >= 80, amber 60-79, red < 60), a 'Correct points' section with green checkmarks, a 'Missing points' section with yellow warnings, a 'Misconceptions' section with red warnings. 'Next card' button moves on.",
+      "acceptanceCriteria": [
+        "Weak Areas panel renders sections sorted by fragility",
+        "Fragility bar color reflects avg_stability range",
+        "Clicking a weak area pre-scopes the generate panel to that section",
+        "Teach-back mode shows textarea instead of card flip",
+        "Score and feedback sections render after submission",
+        "Verify in browser: if any cards have been reviewed, confirm Weak Areas panel shows sections; toggle teach-back mode, type explanation, submit, confirm score appears"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S23a",
+      "title": "Study stats backend — retention history and progress aggregation",
+      "phase": 3,
+      "priority": 24,
+      "featureRef": "study_engine",
+      "description": "Backend: Add study statistics endpoints. GET /study/stats/{document_id}: compute and return stats for the progress dashboard. Query: total_cards (count of all flashcards for doc), cards_mastered (fsrs_state='review' AND fsrs_stability > 10), avg_retention (mean of: e^(-days_since_review / stability) for each card reviewed at least once), current_streak (consecutive days with at least one study_session ending today or yesterday, going back), total_study_time_minutes (sum of (ended_at - started_at) for all sessions for this doc). Per-section stability: for each section_heading, compute avg_stability of flashcards in that section. Return: {total_cards, cards_mastered, avg_retention, current_streak, total_study_time_minutes, per_section_stability: [{section_heading, avg_stability, card_count}], all_card_stabilities: [{card_id, stability, due_date}]}. GET /study/history: query param days (default 90). Returns [{date: YYYY-MM-DD, cards_reviewed: int, study_time_minutes: int}] for each day in the range that has at least one session. Write tests/test_study_stats.py: create fixture data (sessions, reviewed cards), call stats endpoint, assert correct aggregation.",
+      "acceptanceCriteria": [
+        "GET /study/stats/{id} returns total_cards, cards_mastered, avg_retention, current_streak",
+        "per_section_stability correctly groups flashcards by section_heading",
+        "GET /study/history?days=90 returns daily aggregation",
+        "avg_retention uses e^(-t/S) formula",
+        "uv run pytest tests/test_study_stats.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S23b",
+      "title": "Study tab progress dashboard — retention curve, heatmap, streak calendar",
+      "phase": 3,
+      "priority": 24.5,
+      "featureRef": "study_engine",
+      "description": "Frontend: Build the progress dashboard in the Study tab (src/components/ProgressDashboard.tsx). Fetch GET /study/stats/{documentId}. (1) Summary stats row: 4 shadcn Cards side by side — Cards Mastered, Average Retention (%), Current Streak (days), Study Time (hours). (2) Retention curve (Recharts LineChart): x-axis = days from now (0-30), y-axis = predicted recall %. For each card in all_card_stabilities, compute y = Math.exp(-x / stability) * 100. Show a line per document (if multiple docs). Add a horizontal ReferenceLine at y=80 (dashed, labeled 'Target 80%'). (3) Mastery heatmap: a grid where each cell = one section from per_section_stability. Cell background color mapped from red (avg_stability < 1) through yellow (2-5) to green (> 7) using a CSS linear-gradient approach. Hovering a cell shows a tooltip with section name and avg_stability. (4) Streak calendar: a 90-day grid (13 weeks x 7 days) styled like GitHub contributions. Each day cell: empty square if no sessions, light/medium/dark fill based on cards reviewed (1-5=light, 6-15=medium, 16+=dark). Fetch GET /study/history?days=90. Add `npm install recharts`.",
+      "acceptanceCriteria": [
+        "Summary stats cards render with correct values from API",
+        "Retention curve renders with a ReferenceLine at 80%",
+        "Mastery heatmap cells are colored by avg_stability",
+        "Streak calendar renders 90 days, filled days for days with sessions",
+        "Hovering a heatmap cell shows section name and stability",
+        "Verify in browser: open Study tab for a document with reviewed cards, confirm all 4 dashboard sections render"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S24a",
+      "title": "Arize Phoenix — OTel instrumentation for Q&A, summarization, and retrieval",
+      "phase": 4,
+      "priority": 25,
+      "featureRef": "monitoring",
+      "description": "Deepen Phoenix telemetry instrumentation (S09 added Phoenix launch and basic spans). Add: `uv add opentelemetry-instrumentation-fastapi`. In app/telemetry.py: create a get_tracer() singleton returning a configured OpenTelemetry tracer with OTLP exporter to Phoenix at localhost:4317. Create span decorators: trace_llm_call(operation: str) — a context manager that records model, prompt_tokens, completion_tokens, latency_ms, and error as span attributes. trace_retrieval(operation: str) — records query, retrieved_chunk_count, top_score, retrieval_latency_ms. trace_ingestion_node(node_name: str) — records document_id, content_type, node_name. Wrap all LiteLLM calls in LLMService.generate() with trace_llm_call. Wrap HybridRetriever.retrieve() with trace_retrieval. Wrap each LangGraph node with trace_ingestion_node (pass the tracer into each node function). Instrument FastAPI with OpenTelemetryMiddleware. Add auto-instrumentation for SQLAlchemy: opentelemetry-instrumentation-sqlalchemy. All spans exported to Phoenix. Verify Phoenix receives traces by checking localhost:6006 in tests.",
+      "acceptanceCriteria": [
+        "Every LLM call creates a span with model and latency_ms attributes",
+        "Every retrieval call creates a span with chunk_count and top_score",
+        "Every LangGraph node creates a span with node_name and document_id",
+        "FastAPI requests appear as root spans in Phoenix",
+        "uv run pytest tests/test_telemetry.py exits 0 (mock the OTel exporter, assert span attributes)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S24b",
+      "title": "GET /monitoring/traces endpoint and Monitoring tab traces table",
+      "phase": 4,
+      "priority": 25.5,
+      "featureRef": "monitoring",
+      "description": "Backend: Create app/routers/monitoring.py. GET /monitoring/traces: proxy to Phoenix API (GET http://localhost:6006/v1/traces or the Phoenix REST API for span data). Return the last 50 spans as a list of TraceItem(span_id, trace_id, operation_name, start_time, duration_ms, status, attributes: dict). If Phoenix is not running (PHOENIX_ENABLED=False or connection refused), return an empty list with a message field. GET /monitoring/overview: returns {llm_status: str, phoenix_running: bool, langfuse_configured: bool, total_documents: int, total_chunks: int, total_entities: int, qa_calls_today: int, avg_latency_ms: float}. Compute qa_calls_today from qa_history table (count rows where created_at >= today midnight). Compute avg_latency_ms from recent spans if available. Register router in main.py. Frontend: In src/pages/Monitoring.tsx: add a 'Traces' section. Fetch GET /monitoring/traces. Render a shadcn Table: columns — Timestamp, Operation, Document, Latency (ms), Status (success/error badge). Clicking a row opens a shadcn Drawer showing the full span attributes as a JSON code block.",
+      "acceptanceCriteria": [
+        "GET /monitoring/traces returns trace data when Phoenix is running",
+        "GET /monitoring/traces returns empty list when Phoenix is disabled (not a 500)",
+        "GET /monitoring/overview returns correct counts from SQLite",
+        "Monitoring tab renders the traces table",
+        "Clicking a trace row opens the detail drawer",
+        "Verify in browser: open /monitoring, confirm traces table renders (even if empty)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S25a",
+      "title": "Langfuse integration and golden dataset JSONL files",
+      "phase": 4,
+      "priority": 26,
+      "featureRef": "monitoring",
+      "description": "Integrate Langfuse for LLM call logging and create golden evaluation datasets. Add: `uv add langfuse`. In app/services/llm.py: if LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set, initialize LangfuseClient and a CallbackHandler. Wrap all litellm.acompletion() calls to also log to Langfuse — use langfuse.observe() decorator on LLMService.generate(), passing model, prompt (truncated to 2000 chars), completion, and latency. If Langfuse keys not set, skip silently (no error). Create docker-compose.langfuse.yml at repo root with the official Langfuse self-hosted Docker Compose configuration (PostgreSQL + Langfuse server on port 3000). Add a comment: 'Run: docker compose -f docker-compose.langfuse.yml up -d'. Create evals/golden/ directory. Create 5 JSONL files, one per content type, each with 10 synthetic representative examples: evals/golden/book.jsonl — questions about a fictional novel (character motivations, plot events), evals/golden/paper.jsonl — questions about a fictional academic paper (methodology, results, conclusions), evals/golden/conversation.jsonl — questions about a meeting transcript (decisions made, action item owners), evals/golden/notes.jsonl — questions about personal study notes (key concepts, definitions), evals/golden/code.jsonl — questions about a fictional codebase (function purposes, API contracts). Each JSONL line: {\"question\": str, \"ground_truth_answer\": str, \"document_id\": \"synthetic\"}.",
+      "acceptanceCriteria": [
+        "LangfuseClient initialized when keys are set, skipped when not set",
+        "LLM calls logged to Langfuse in tests (mock LangfuseClient, assert observe called)",
+        "docker-compose.langfuse.yml exists with PostgreSQL and Langfuse services",
+        "evals/golden/book.jsonl exists with exactly 10 JSONL lines",
+        "All 5 golden dataset files exist with 10 lines each",
+        "Each JSONL line has question, ground_truth_answer, document_id fields"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S25b",
+      "title": "RAGAS evaluation runner, eval_runs storage, and GET /monitoring/evals",
+      "phase": 4,
+      "priority": 26.5,
+      "featureRef": "monitoring",
+      "description": "Create the evaluation pipeline. Add to evals requirements (create evals/pyproject.toml with `uv init`): `uv add ragas datasets`. Create evals/run_eval.py as a CLI script using argparse: --dataset (book|paper|conversation|notes|code), --model (default ollama/mistral), --backend-url (default http://localhost:8000). Script flow: load JSONL file from evals/golden/{dataset}.jsonl. For each row: POST to {backend-url}/qa with question, document_ids=None (all content). Collect {question, answer, contexts (top retrieved chunks), ground_truth}. After all rows: call ragas.evaluate(Dataset.from_list(samples), metrics=[faithfulness, answer_relevance, context_precision, context_recall]). Also compute hit_rate_5: for each question, check if ground_truth_answer substring appears in the text of any of the top-5 retrieved chunks. Compute mrr: rank of first chunk containing ground_truth. POST results to {backend-url}/monitoring/evals/store (add this endpoint). Print results table to stdout. Backend: POST /monitoring/evals/store accepts EvalRunCreate(dataset_name, model_used, hit_rate_5, mrr, faithfulness, answer_relevance, context_precision, context_recall). Inserts into eval_runs table. GET /monitoring/evals: returns last 10 eval_runs per dataset ordered by run_at desc. Frontend (Monitoring tab): add 'Eval Runs' section after the traces table. Fetch GET /monitoring/evals. Render a shadcn Table: Dataset, Run At, HR@5, MRR, Faithfulness. Row background: red if HR@5 < 0.5, green if > 0.7.",
+      "acceptanceCriteria": [
+        "uv run python evals/run_eval.py --dataset book --model ollama/mistral executes without import errors",
+        "POST /monitoring/evals/store saves an eval_run to SQLite",
+        "GET /monitoring/evals returns run history",
+        "Monitoring tab eval table renders with correct row colors",
+        "Verify in browser: open /monitoring, confirm Eval Runs table renders (empty is OK)"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S26",
+      "title": "Monitoring tab — complete metrics dashboard with system status and model usage",
+      "phase": 4,
+      "priority": 27,
+      "featureRef": "monitoring",
+      "description": "Frontend: Complete the Monitoring tab with remaining sections (building on S24b and S25b). (1) System Status row at the top: 4 shadcn Cards — Ollama Status (green indicator if /settings/llm returns local mode, red otherwise), Phoenix Status (green if /monitoring/overview.phoenix_running=true), Langfuse Status (green if langfuse_configured=true), Active Model (model name badge). Fetch GET /monitoring/overview. (2) RAG Quality section: fetch GET /monitoring/evals. Render a Recharts BarChart grouped by dataset. Bars: HR@5, MRR, Faithfulness, Answer Relevance, Context Precision. Add ReferenceLine at HR@5=0.65 and Faithfulness=0.9 (dashed). (3) Model Usage section: aggregate qa_history.model_used from backend (add GET /monitoring/model-usage endpoint that returns [{model, call_count, avg_latency_ms}]). Render a Recharts PieChart for local vs cloud call ratio. Render a Recharts BarChart for avg latency by model. (4) Ingestion Queue: fetch GET /documents and filter where stage != 'complete'. Render a list of in-progress documents with their current stage badge. Backend: add GET /monitoring/model-usage endpoint aggregating qa_history.",
+      "acceptanceCriteria": [
+        "System status cards reflect real backend state (Ollama, Phoenix, Langfuse)",
+        "RAG quality bar chart renders with grouped bars per dataset",
+        "Model usage pie chart and latency bar chart render",
+        "Ingestion queue shows documents not yet at 'complete' stage",
+        "GET /monitoring/model-usage returns aggregated data",
+        "Verify in browser: open /monitoring, confirm all 4 sections render with appropriate loading/empty states"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S27",
+      "title": "Code repository ingestion with tree-sitter and call graph",
+      "phase": 5,
+      "priority": 28,
+      "featureRef": "F9",
+      "description": "Extend ingestion to support code repositories. Add: `uv add tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript tree-sitter-go tree-sitter-rust`. Create app/services/code_parser.py with CodeParser class: detect language from file extension (.py, .js, .ts, .go, .rs). Use tree-sitter Language and Parser to build the AST. Extract function and class definitions: for each function/class node extract name, docstring (if first child is a string literal), parameter names, start_line, end_line. Each function/class becomes its own chunk with metadata: file_path, language, function_name, class_name, start_line, end_line. Handle directory/zip upload: walk file tree, skip .git, node_modules, __pycache__, binary files (check by trying UTF-8 decode). Classify as content_type='code'. In classify_node (ingestion workflow): detect code format by checking chunk metadata for function_name field. In entity_extract_node: build call graph — scan each function body text for names that match other extracted function names, create CO_OCCURS edges in Kuzu labeled 'calls'. Add GET /graph/{document_id}?type=call_graph: filter Kuzu CO_OCCURS edges where relation_label='calls'. Frontend (Viz tab): add a 'View' toggle in the controls panel (S16b) — 'Knowledge Graph' vs 'Call Graph'. Call graph only visible for code documents. Fetches the ?type=call_graph endpoint.",
+      "acceptanceCriteria": [
+        "Python file ingested with each function extracted as a separate chunk",
+        "chunk metadata includes function_name, file_path, start_line",
+        "GET /graph/{id}?type=call_graph returns function-to-function call edges",
+        "Viz tab shows call graph toggle for code documents",
+        "uv run pytest tests/test_code_parser.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S28",
+      "title": "Enhanced library catalog — tags, bulk actions, and pagination",
+      "phase": 2,
+      "priority": 29,
+      "featureRef": "F12",
+      "description": "Enhance the library catalog built in S10b. Backend: PATCH /documents/{id}/tags accepts {tags: list[str]} and replaces the document's tag list (store tags as a JSON column in SQLite documents table — add the column via ALTER TABLE or recreate). Update GET /documents to support query params: content_type (comma-separated filter), tag (filter by tag value in JSON array), sort (newest|oldest|alphabetical|most-studied), page (int, default 1), page_size (int, default 20). Returns {items: list[DocumentListItem], total: int, page: int, page_size: int}. POST /documents/bulk-delete accepts {ids: list[str]} — deletes all listed documents and their derived data (same cascade as DELETE /documents/{id}). Frontend (Learning tab, building on S10b): tag chips below each document card (click chip to filter by that tag). Add tag editor: pencil icon on card opens a small inline input to add/remove tags. Bulk select: checkbox on each card (hidden until hover or 'Select' mode active). 'Select All' checkbox in catalog header. Bulk action bar slides in at bottom when >= 1 card selected: 'Delete selected (N)' button with shadcn AlertDialog confirmation. Pagination controls at catalog bottom: Prev / page number / Next. Recently accessed section at top shows last 5 by last_accessed_at. Show one_sentence summary as subtitle if available.",
+      "acceptanceCriteria": [
+        "Tags can be added and removed per document card",
+        "Filtering by tag shows only matching documents",
+        "Bulk select checkboxes work across the catalog",
+        "Bulk delete shows confirmation and removes documents",
+        "Pagination controls render and change the page",
+        "Verify in browser: add a tag to a document, click the tag chip, confirm filter applies"
+      ],
+      "passes": false
+    }
+  ]
+}

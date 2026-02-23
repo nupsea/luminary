@@ -1,0 +1,22 @@
+# Ralph Progress Log
+Started: Tue 24 Feb 2026 08:01:32 AEST
+---
+
+## Codebase Patterns
+- uv commands must be run from /backend directory (cd backend && uv ...)
+- pytest exit code 5 = no tests collected (acceptable at scaffold stage, real tests added per story)
+- Settings singleton via @functools.lru_cache on get_settings()
+- FastAPI app uses lifespan context manager for startup/shutdown (not deprecated on_event)
+- All route handlers use Depends(get_settings) — never import settings directly in handlers
+- uv init creates a stub backend/main.py — delete it, app entrypoint lives at backend/app/main.py
+
+---
+
+## 2026-02-24T08:30:00+10:00 - S00a - Backend monorepo scaffold — uv, Python 3.13, FastAPI app skeleton
+- Implemented: .gitignore, README.md, Makefile, evals/README.md, backend/ with uv project, app/config.py (Settings + get_settings), app/main.py (FastAPI with /health + /settings), tests/test_config.py
+- Files changed: .gitignore, README.md, Makefile, evals/README.md, backend/pyproject.toml, backend/app/__init__.py, backend/app/config.py, backend/app/main.py, backend/tests/__init__.py, backend/tests/test_config.py
+- Learnings:
+  - uv init generates backend/main.py stub — remove it; real entrypoint is backend/app/main.py
+  - pytest returns exit code 5 (not 0) when no tests collected — added test_config.py to satisfy CI
+  - ruff check passes cleanly with E/F/I/UP rules on the scaffold
+---

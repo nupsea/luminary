@@ -1,0 +1,600 @@
+{
+  "product": {
+    "name": "Luminary",
+    "tagline": "Your personal assistant for accelerated understanding and lasting knowledge",
+    "vision": "A single private assistant that turns any content — document, book, conversation, codebase — into something you understand deeply and remember permanently, in a fraction of the time it would take alone.",
+    "version": "1.0",
+    "date": "2026-02-23"
+  },
+
+  "problem": {
+    "statement": "People spend enormous time consuming content — reading long reports, sitting through meetings, studying textbooks, onboarding to codebases — but retain and understand very little of it. The gap between information available and knowledge actually acquired grows every year. There is no tool that closes this gap end-to-end: from ingestion through comprehension to lasting retention.",
+    "pain_points": [
+      {
+        "id": "P1",
+        "title": "Time cost of deep reading",
+        "description": "A 300-page book, a 90-minute meeting transcript, or a 10,000-line codebase each require hours of uninterrupted reading before any understanding emerges. Most people cannot commit that time reliably."
+      },
+      {
+        "id": "P2",
+        "title": "Poor knowledge retention",
+        "description": "Even when content is read in full, 70–80% of it is forgotten within a week without reinforcement. Passive reading produces no durable memory."
+      },
+      {
+        "id": "P3",
+        "title": "Concept opacity",
+        "description": "Dense technical writing, academic jargon, and specialised domains create comprehension barriers. Readers cannot easily ask 'explain this differently' or 'give me an analogy' without switching to another tool."
+      },
+      {
+        "id": "P4",
+        "title": "Isolated knowledge silos",
+        "description": "Content lives in separate files, apps, and formats. There is no way to see how a concept in one book connects to something in a meeting transcript or a codebase without manual cross-referencing."
+      },
+      {
+        "id": "P5",
+        "title": "Code comprehension cost",
+        "description": "Developers joining a new project or reading unfamiliar code spend days or weeks building a mental model. No tool guides this process interactively."
+      },
+      {
+        "id": "P6",
+        "title": "Meeting overload",
+        "description": "Long conversations contain decisions, action items, and context buried inside hours of dialogue. Finding specific information later requires replaying or rereading the full transcript."
+      }
+    ]
+  },
+
+  "users": [
+    {
+      "id": "U1",
+      "persona": "The Perpetual Student",
+      "description": "A graduate student, self-learner, or professional re-skilling who consumes textbooks, papers, and online courses. Wants to understand deeply and pass assessments.",
+      "primary_needs": [
+        "Extract key concepts from dense academic content",
+        "Get tested on what they have read",
+        "Build a mental model of a new domain quickly"
+      ]
+    },
+    {
+      "id": "U2",
+      "persona": "The Knowledge Worker",
+      "description": "A consultant, analyst, or manager who processes large volumes of reports, policies, research briefs, and meeting recordings as part of their job.",
+      "primary_needs": [
+        "Summarise long documents in seconds",
+        "Catch up on meetings they missed",
+        "Find specific facts across many documents quickly"
+      ]
+    },
+    {
+      "id": "U3",
+      "persona": "The Developer",
+      "description": "A software engineer onboarding to a new codebase, reviewing a pull request, or learning a new framework from its documentation and source code.",
+      "primary_needs": [
+        "Understand what a module or function does without reading every line",
+        "Trace data flow and dependency relationships",
+        "Ask questions about code behaviour in plain language"
+      ]
+    },
+    {
+      "id": "U4",
+      "persona": "The Avid Reader",
+      "description": "A person who reads non-fiction books, biographies, and essays for personal growth and wants to retain and apply what they learn, not just finish books.",
+      "primary_needs": [
+        "Remember key ideas months after reading",
+        "Connect themes across multiple books",
+        "Revisit content interactively instead of re-reading from scratch"
+      ]
+    },
+    {
+      "id": "U5",
+      "persona": "The Researcher",
+      "description": "An academic, journalist, or policy analyst synthesising information across many primary sources — papers, interviews, documents — to form original analysis.",
+      "primary_needs": [
+        "Surface relationships between concepts across sources",
+        "Track provenance — which source said what",
+        "Identify contradictions or gaps across a corpus"
+      ]
+    }
+  ],
+
+  "goals": {
+    "in_scope": [
+      "Ingest any text-based content: documents, books, conversation transcripts, and code",
+      "Provide multi-granularity summaries: one-sentence, executive, detailed, and section-by-section",
+      "Enable natural language question-answering grounded in ingested content with citations",
+      "Extract and visualise the knowledge graph: concepts, entities, and their relationships",
+      "Generate learning artefacts: flashcards and quizzes derived from content",
+      "Support spaced repetition so learned knowledge is retained over time",
+      "Enable cross-content search: find relevant passages across all ingested material",
+      "Offer concept simplification on demand: plain-language explanations and analogies",
+      "Operate entirely locally so private content never leaves the user's machine",
+      "Support multiple content types with a single unified interface"
+    ],
+    "out_of_scope": [
+      "Real-time collaboration or multi-user workspaces",
+      "Audio or video ingestion (transcripts are in scope; raw audio/video processing is not)",
+      "Web scraping or browser-based content capture",
+      "Native mobile applications",
+      "Integration with third-party productivity tools (Notion, Confluence, Slack) in v1",
+      "Automated action-taking or task execution on behalf of the user"
+    ]
+  },
+
+  "use_cases": [
+    {
+      "id": "UC1",
+      "title": "Instant document briefing",
+      "actor": "U2",
+      "narrative": "A user uploads a 150-page industry report. Within seconds they receive a structured briefing: a one-paragraph executive summary, the five key findings, and a list of named entities (companies, people, regulations) mentioned. They can then ask follow-up questions like 'What does this say about market share in Europe?' and receive a cited paragraph-level answer.",
+      "acceptance_criteria": [
+        "Summary generated in under 10 seconds for documents up to 200 pages",
+        "Key findings are accurate and do not hallucinate content not present in the document",
+        "Every factual answer includes a reference to the source chunk or page"
+      ]
+    },
+    {
+      "id": "UC2",
+      "title": "Meeting catch-up",
+      "actor": "U2",
+      "narrative": "A user pastes a 90-minute meeting transcript. The assistant identifies speakers, extracts a timeline of topics discussed, surfaces all decisions made, and lists action items with responsible owners. The user asks 'What was agreed about the Q3 budget?' and gets a direct answer with the timestamp where it was discussed.",
+      "acceptance_criteria": [
+        "Speakers identified and attributed correctly when names appear in transcript",
+        "Decisions and action items extracted as a structured list",
+        "Topic timeline covers the full conversation without hallucinating events not in the transcript",
+        "Speaker-specific queries answered correctly"
+      ]
+    },
+    {
+      "id": "UC3",
+      "title": "Book mastery and retention",
+      "actor": "U4",
+      "narrative": "A user finishes reading a non-fiction book and ingests it. The assistant surfaces the core thesis, the main arguments with supporting evidence, and a concept map of key ideas. A week later, the user opens the study mode and is shown flashcards of the book's key concepts spaced to the optimal review interval. After three sessions, their recall score on a generated quiz has improved from 40% to 85%.",
+      "acceptance_criteria": [
+        "Core thesis and main arguments accurately extracted without missing major chapters",
+        "Concept map correctly represents relationships stated or clearly implied in the text",
+        "Flashcard scheduling follows a spaced repetition algorithm (e.g. SM-2 or equivalent)",
+        "Quiz questions are grounded in the book content and cannot be answered without reading it"
+      ]
+    },
+    {
+      "id": "UC4",
+      "title": "Code onboarding",
+      "actor": "U3",
+      "narrative": "A developer uploads a Python repository. They ask 'What does this repository do?' and receive a module-level summary. They ask 'How does the authentication flow work?' and get a step-by-step explanation referencing specific files and functions. They ask 'Explain what this function does' pointing to a complex function and receive a plain-English explanation with an annotated walkthrough.",
+      "acceptance_criteria": [
+        "Module-level summaries generated for all top-level packages",
+        "Questions about data flow answered by tracing function calls through the codebase",
+        "Function explanations identify inputs, outputs, side effects, and dependencies",
+        "All answers cite the specific file and line range"
+      ]
+    },
+    {
+      "id": "UC5",
+      "title": "Concept simplification",
+      "actor": "U1",
+      "narrative": "A student reads a passage on quantum entanglement in a physics textbook and does not understand it. They ask the assistant to 'explain this concept simply' and receive an ELI5 explanation followed by an everyday analogy. They ask for the formal definition alongside the simple explanation to compare. They ask 'how does this connect to the uncertainty principle?' and receive a relationship explanation grounded in the book.",
+      "acceptance_criteria": [
+        "Simplified explanation is factually consistent with the source material",
+        "Analogy is appropriate and does not introduce misconceptions",
+        "Cross-concept relationship answers cite both concepts in the source"
+      ]
+    },
+    {
+      "id": "UC6",
+      "title": "Cross-document research synthesis",
+      "actor": "U5",
+      "narrative": "A researcher has ingested five academic papers on climate policy. They ask 'Which papers agree that carbon pricing is effective?' and see a comparison across sources. They ask 'What are the contradicting claims about renewable subsidies?' and see a side-by-side view of conflicting evidence. The knowledge graph shows which concepts are shared across papers and which are unique to one paper.",
+      "acceptance_criteria": [
+        "Cross-document queries return results from all relevant ingested sources",
+        "Contradictions surfaced when two sources make opposing claims on the same concept",
+        "Knowledge graph linkage is shown at the concept level, not just keyword level"
+      ]
+    }
+  ],
+
+  "features": [
+    {
+      "id": "F1",
+      "name": "Universal Content Ingestion",
+      "priority": "P0",
+      "description": "Accept and process any text-based content regardless of format or type.",
+      "requirements": [
+        "Support file formats: PDF, DOCX, TXT, Markdown, source code files (.py, .js, .ts, .java, .go, .rs, etc.)",
+        "Support paste-in for plain text and conversation transcripts",
+        "Auto-detect content type (book, document, conversation, code) and apply appropriate parsing strategy",
+        "Handle documents up to 1 million tokens (approx. 750,000 words)",
+        "Preserve structural information: chapters, sections, speakers, functions, classes",
+        "Show ingestion progress for large content",
+        "Allow the user to label or tag ingested content for organisation"
+      ]
+    },
+    {
+      "id": "F2",
+      "name": "Multi-Granularity Summarisation",
+      "priority": "P0",
+      "description": "Generate accurate summaries at the level of granularity the user needs.",
+      "requirements": [
+        "One-sentence summary: the single most important takeaway",
+        "Executive summary: three to five bullet points covering the main points",
+        "Detailed summary: section-by-section or chapter-by-chapter breakdown",
+        "Custom granularity: user can request a summary of a specific section or page range",
+        "For conversations: produce a structured output including timeline, decisions, and action items",
+        "For code: produce a module hierarchy with one-line purpose descriptions per module",
+        "Summaries must not hallucinate content absent from the source material"
+      ]
+    },
+    {
+      "id": "F3",
+      "name": "Grounded Question Answering",
+      "priority": "P0",
+      "description": "Answer any question about ingested content with accurate, cited responses.",
+      "requirements": [
+        "Answers grounded exclusively in ingested content — no unsourced claims",
+        "Every answer includes a citation: document title, section/chapter, and approximate location",
+        "Support follow-up questions within a conversation thread",
+        "Correctly handle questions with no answer in the content: respond 'not found in this content' rather than hallucinate",
+        "Support scoped queries: 'in this book', 'in this meeting', or 'across all my content'",
+        "Confidence indicator on answers: high (directly stated), medium (implied), or low (inferred)"
+      ]
+    },
+    {
+      "id": "F4",
+      "name": "Knowledge Graph",
+      "priority": "P1",
+      "description": "Extract and visualise the network of concepts, entities, and relationships present in content.",
+      "requirements": [
+        "Automatically extract named entities: people, places, organisations, concepts, events",
+        "Identify relationships between entities as stated or clearly implied in the content",
+        "Visualise the graph interactively: filterable by entity type, relationship type, and source document",
+        "Enable graph-based navigation: click an entity to see all mentions and related entities",
+        "Support cross-document graphs: show shared entities and concepts across multiple ingested sources",
+        "Allow the user to annotate or correct extracted relationships"
+      ]
+    },
+    {
+      "id": "F5",
+      "name": "Concept Simplification and Explanation",
+      "priority": "P1",
+      "description": "Translate complex, jargon-heavy, or domain-specific content into accessible language on demand.",
+      "requirements": [
+        "On-demand simplification for any selected passage or concept",
+        "Multiple explanation modes: plain language, ELI5 (explain like I'm 5), formal definition, and analogy",
+        "Explanations grounded in the source content — uses the author's own examples where available",
+        "Cross-concept explanation: 'how does X relate to Y?' answered within the same content",
+        "Glossary generation: automatically produce a glossary of domain-specific terms with definitions sourced from the content",
+        "Jargon detection: surface unfamiliar technical terms proactively as the user reads"
+      ]
+    },
+    {
+      "id": "F6",
+      "name": "Cross-Content Search",
+      "priority": "P1",
+      "description": "Find relevant passages across all ingested content using natural language queries.",
+      "requirements": [
+        "Search by natural language question or keyword phrase",
+        "Results ranked by relevance, not recency",
+        "Filter results by content type, date ingested, or user-defined tag",
+        "Each result shows the source, surrounding context, and relevance reason",
+        "Semantic search: 'find passages about betrayal' returns thematically relevant results even without the word 'betrayal'",
+        "Exact phrase search for verbatim lookup"
+      ]
+    },
+    {
+      "id": "F7",
+      "name": "Flashcard and Quiz Generation",
+      "priority": "P1",
+      "description": "Automatically generate learning artefacts from ingested content to support active recall.",
+      "requirements": [
+        "Generate question-answer flashcards covering key concepts, definitions, and facts",
+        "Generate multiple-choice quizzes with distractors grounded in the content",
+        "Allow the user to review, edit, or delete generated cards before studying",
+        "Cards cite their source so the user can return to the original passage",
+        "Support custom generation: 'generate 10 flashcards from Chapter 3 only'",
+        "Export flashcards to standard formats (CSV, Anki-compatible APKG)"
+      ]
+    },
+    {
+      "id": "F8",
+      "name": "Spaced Repetition Study Mode",
+      "priority": "P1",
+      "description": "Schedule flashcard review sessions using a spaced repetition algorithm to maximise long-term retention.",
+      "requirements": [
+        "Cards scheduled for review based on user performance (correct / incorrect / hard)",
+        "Daily review queue showing only due cards",
+        "Retention score per content item: percentage of cards mastered",
+        "Streak and progress tracking to support habit formation",
+        "Study history: when each card was reviewed and how many attempts it took",
+        "Prioritise cards from content the user has flagged as high-importance"
+      ]
+    },
+    {
+      "id": "F9",
+      "name": "Code Intelligence",
+      "priority": "P2",
+      "description": "Specialised understanding capabilities for source code content.",
+      "requirements": [
+        "Module and function summarisation in plain English",
+        "Call graph visualisation: which functions call which, and in what order",
+        "Data flow tracing: follow a variable or object through the codebase",
+        "Dependency mapping: what does this module depend on, what depends on it",
+        "Q&A grounded in code: 'what happens when a user logs in?' answered by tracing the relevant execution path",
+        "Docstring and comment augmentation: generate explanatory comments for uncommented functions on request",
+        "Support for polyglot repositories containing multiple languages"
+      ]
+    },
+    {
+      "id": "F10",
+      "name": "Notes and Annotations",
+      "priority": "P2",
+      "description": "Allow users to capture their own understanding, questions, and insights linked directly to source content.",
+      "requirements": [
+        "Create and edit notes attached to any passage, concept, or chapter",
+        "Notes are searchable alongside source content",
+        "Link notes to specific source chunks so context is always retrievable",
+        "Distinguish user-authored notes from assistant-generated summaries",
+        "Export notes alongside their source references in Markdown or plain text"
+      ]
+    },
+    {
+      "id": "F11",
+      "name": "Privacy and Local Operation",
+      "priority": "P0",
+      "description": "Ensure sensitive content never leaves the user's machine unless explicitly permitted.",
+      "requirements": [
+        "Default mode: all processing runs locally — no content sent to external servers",
+        "Optional cloud mode: user can opt in to cloud LLM APIs for higher quality at the cost of data leaving the device",
+        "Clear disclosure at ingestion time of which processing mode is active",
+        "No telemetry or usage tracking without explicit user consent",
+        "Content stored encrypted at rest when the user enables this option",
+        "Ability to permanently delete any ingested content and all derived data (summaries, graphs, flashcards)"
+      ]
+    },
+    {
+      "id": "F12",
+      "name": "Content Library",
+      "priority": "P1",
+      "description": "Organised view of all ingested content with metadata, progress, and learning status.",
+      "requirements": [
+        "List view of all ingested items with title, type, date added, and word/token count",
+        "Learning status per item: not started, in progress, quiz completed, mastered",
+        "Filter and sort by type, tag, recency, and learning status",
+        "Thumbnail preview or first-paragraph excerpt per item",
+        "Recently accessed section for quick return to active content",
+        "Bulk operations: delete multiple items, export all notes, regenerate summaries"
+      ]
+    }
+  ],
+
+  "non_functional_requirements": [
+    {
+      "id": "NF1",
+      "category": "Performance",
+      "requirements": [
+        "Document ingestion completes in under 60 seconds for a 100,000-word document on consumer hardware",
+        "Summary generation completes in under 10 seconds for a 50,000-word document",
+        "Question-answering responds in under 5 seconds for single-document queries",
+        "Knowledge graph renders in under 3 seconds for documents with up to 500 entities",
+        "Search across a library of 50 documents returns results in under 2 seconds"
+      ]
+    },
+    {
+      "id": "NF2",
+      "category": "Accuracy",
+      "requirements": [
+        "Summaries must not introduce facts absent from the source (hallucination rate < 2% on sampled evaluation)",
+        "Question-answering retrieval: target Hit@5 > 60% on representative ground truth benchmark",
+        "Entity extraction recall > 80% for named persons, places, and organisations in prose text",
+        "Flashcard questions answerable only by someone who has read the source (not general knowledge)"
+      ]
+    },
+    {
+      "id": "NF3",
+      "category": "Usability",
+      "requirements": [
+        "A new user can ingest their first document and ask a question within 2 minutes of installation",
+        "No configuration required to use local mode — works out of the box",
+        "All features accessible from a single-window interface with no more than two levels of navigation",
+        "Every assistant response includes a clear citation so the user can verify it",
+        "Errors explained in plain language with a suggested resolution — no stack traces surfaced to the user"
+      ]
+    },
+    {
+      "id": "NF4",
+      "category": "Privacy and Security",
+      "requirements": [
+        "In local mode, zero bytes of user content transmitted over the network",
+        "Stored content and indexes encrypted at rest when user enables encryption",
+        "No third-party analytics SDKs embedded",
+        "Clear data deletion: removing an item removes all derived artefacts — no orphaned data"
+      ]
+    },
+    {
+      "id": "NF5",
+      "category": "Portability",
+      "requirements": [
+        "Runs on macOS, Windows, and Linux without separate installation of dependencies beyond the app itself",
+        "Minimum hardware: 8 GB RAM, any CPU released after 2018 (no GPU required for local mode)",
+        "GPU acceleration optional for faster local inference if available",
+        "All user data portable: export the full library as a single archive, importable on another machine"
+      ]
+    }
+  ],
+
+  "success_metrics": [
+    {
+      "id": "M1",
+      "metric": "Time-to-first-insight",
+      "definition": "Time from document upload to a user's first answered question",
+      "target": "Under 90 seconds for a 50-page document"
+    },
+    {
+      "id": "M2",
+      "metric": "Comprehension acceleration ratio",
+      "definition": "Self-reported time to understand a document using the assistant vs. reading unassisted (user survey)",
+      "target": "3x reduction in reported comprehension time at 30-day user survey"
+    },
+    {
+      "id": "M3",
+      "metric": "Retention lift",
+      "definition": "Quiz score on content reviewed via spaced repetition vs. content read once and not reviewed",
+      "target": ">40 percentage point improvement in quiz score at 2-week interval"
+    },
+    {
+      "id": "M4",
+      "metric": "Search precision",
+      "definition": "Fraction of search queries where the correct source passage appears in the top 5 results (Hit@5)",
+      "target": ">65% Hit@5 on a representative benchmark across document, book, conversation, and code content types"
+    },
+    {
+      "id": "M5",
+      "metric": "Answer grounding rate",
+      "definition": "Fraction of Q&A responses that include a verifiable citation to the source content",
+      "target": "100% of non-speculative answers include at minimum a document and section reference"
+    },
+    {
+      "id": "M6",
+      "metric": "Hallucination rate",
+      "definition": "Fraction of factual claims in generated summaries and answers that cannot be verified in the source",
+      "target": "<2% on sampled manual evaluation"
+    },
+    {
+      "id": "M7",
+      "metric": "Daily active use",
+      "definition": "Fraction of users who interact with the assistant on at least 5 days per week after week 2",
+      "target": ">30% of users retained at weekly active after 30 days"
+    },
+    {
+      "id": "M8",
+      "metric": "Library growth",
+      "definition": "Number of distinct content items ingested per user in their first 30 days",
+      "target": "Median of 10 or more items ingested in first 30 days"
+    }
+  ],
+
+  "content_type_requirements": {
+    "document": {
+      "description": "Formal written content: reports, papers, essays, manuals, policies",
+      "ingestion": "Preserve section headings, numbered lists, tables as structured data",
+      "key_features": ["F1", "F2", "F3", "F5", "F6", "F7"],
+      "special_considerations": "Table extraction must preserve row/column relationships. Footnotes and endnotes captured and linked to inline references."
+    },
+    "book": {
+      "description": "Long-form narrative or expository content: fiction, non-fiction, textbooks",
+      "ingestion": "Chapter-level segmentation, character and concept tracking across the full text",
+      "key_features": ["F1", "F2", "F3", "F4", "F5", "F7", "F8"],
+      "special_considerations": "Character relationship arcs tracked across chapters. Themes and motifs surfaced as cross-chapter concepts. For fiction, spoilers must not appear in early-chapter summaries."
+    },
+    "conversation": {
+      "description": "Dialogue-based content: meeting transcripts, interview recordings, chat exports",
+      "ingestion": "Speaker diarisation from transcript formatting. Temporal ordering preserved.",
+      "key_features": ["F1", "F2", "F3", "F6"],
+      "special_considerations": "Action items attributed to specific speakers. Sentiment and tone optionally surfaced. Time-coded transcripts map answers back to timestamps."
+    },
+    "code": {
+      "description": "Source code files, repositories, and technical documentation",
+      "ingestion": "Language-aware parsing. Function and class boundaries detected. Docstrings extracted separately from logic.",
+      "key_features": ["F1", "F3", "F9"],
+      "special_considerations": "Natural language questions must be answered by tracing code execution, not just searching comments. Import and dependency graphs derived from code structure, not documentation."
+    }
+  },
+
+  "constraints": [
+    {
+      "id": "C1",
+      "type": "Technical",
+      "description": "Local LLM inference must produce acceptable quality on consumer hardware (8 GB RAM, CPU-only). If quality is insufficient for a feature, that feature must be clearly marked as requiring cloud mode."
+    },
+    {
+      "id": "C2",
+      "type": "Legal",
+      "description": "The application must not store or retransmit user content to any third party without explicit informed consent at the point of each such transmission."
+    },
+    {
+      "id": "C3",
+      "type": "Scope",
+      "description": "v1 is single-user and single-machine. Multi-user collaboration, shared libraries, and cloud sync are explicitly deferred."
+    },
+    {
+      "id": "C4",
+      "type": "Quality",
+      "description": "No feature ships without a defined ground truth evaluation benchmark. 'It feels better' is not an acceptable quality signal for search or summarisation changes."
+    },
+    {
+      "id": "C5",
+      "type": "UX",
+      "description": "The interface must remain usable without any knowledge of the underlying technology. Terms like 'embedding', 'BM25', 'vector store', and 'knowledge graph' must not appear in user-facing copy."
+    }
+  ],
+
+  "open_questions": [
+    {
+      "id": "Q1",
+      "question": "What is the right local LLM baseline for quality vs. hardware requirements?",
+      "context": "Models in the 7–13B parameter range run on 8 GB RAM but may not achieve acceptable summarisation or Q&A quality. A higher threshold (32B) requires 16–24 GB RAM, excluding a significant portion of the target hardware base.",
+      "decision_needed_by": "Before F2 (Summarisation) implementation begins"
+    },
+    {
+      "id": "Q2",
+      "question": "How should the product handle mixed-language content?",
+      "context": "A user may ingest a document in French, Spanish, or Japanese and ask questions in English. Should all processing happen in the document's language with English output, or should the product normalise to English at ingestion time?",
+      "decision_needed_by": "Before F1 (Ingestion) implementation begins"
+    },
+    {
+      "id": "Q3",
+      "question": "What is the maximum practical library size before performance degrades?",
+      "context": "Cross-content search (F6) and knowledge graph linkage (F4) scale with library size. Performance targets need to be validated against realistic library sizes (50, 200, 500 items) to set honest user expectations.",
+      "decision_needed_by": "Before public launch"
+    },
+    {
+      "id": "Q4",
+      "question": "Should spaced repetition state be stored locally or optionally synced to a cloud account?",
+      "context": "Study history is most valuable when accessible across devices (phone, laptop, tablet). But cloud sync conflicts with the privacy-first position. An opt-in sync with user-controlled encryption key may be the right balance.",
+      "decision_needed_by": "Before F8 (Spaced Repetition) implementation begins"
+    },
+    {
+      "id": "Q5",
+      "question": "How do we handle copyright and terms of service for commercially published books?",
+      "context": "Users will ingest commercially published books. The product should process user-owned content. Legal counsel needed to determine whether full-text search indexes and summaries constitute a derivative work under the applicable jurisdiction.",
+      "decision_needed_by": "Before public launch"
+    },
+    {
+      "id": "Q6",
+      "question": "What is the right interaction model for code: file upload, directory paste, or Git repository URL?",
+      "context": "File upload is simplest but loses repository structure. Directory paste preserves structure but is cumbersome. Git URL is elegant but requires network access, which conflicts with local-first privacy. A local directory path drag-and-drop may be the best balance.",
+      "decision_needed_by": "Before F9 (Code Intelligence) implementation begins"
+    }
+  ],
+
+  "phasing": {
+    "description": "Suggested phasing based on user value and dependency order. Implementation details are not prescribed here.",
+    "phases": [
+      {
+        "phase": 1,
+        "name": "Core Comprehension",
+        "goal": "A user can ingest any document, get a summary, and ask questions with cited answers.",
+        "features": ["F1", "F2", "F3", "F11"],
+        "success_gate": "M1, M5, M6 targets met on document and book content types"
+      },
+      {
+        "phase": 2,
+        "name": "Deep Understanding",
+        "goal": "A user can explore the structure of content, simplify concepts, and search across their library.",
+        "features": ["F4", "F5", "F6", "F12"],
+        "success_gate": "M4 target met; knowledge graph renders correctly for 95% of ingested documents"
+      },
+      {
+        "phase": 3,
+        "name": "Active Learning",
+        "goal": "A user can be tested on content they have read and track their retention over time.",
+        "features": ["F7", "F8", "F10"],
+        "success_gate": "M3 retention lift target demonstrated in a 30-day study with 20 users"
+      },
+      {
+        "phase": 4,
+        "name": "Code Intelligence",
+        "goal": "A developer can ingest a codebase and understand it through natural language interaction.",
+        "features": ["F9"],
+        "success_gate": "M4 Hit@5 target met on a code Q&A benchmark; developer user satisfaction > 4/5"
+      }
+    ]
+  }
+}
