@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pythonjsonlogger.json import JsonFormatter
 
 from app.config import Settings, get_settings
+from app.database import get_engine
+from app.db_init import create_all_tables
 
 
 def configure_logging(log_level: str = "INFO") -> None:
@@ -29,6 +31,7 @@ async def lifespan(app: FastAPI):
     data_dir = Path(settings.DATA_DIR).expanduser()
     for subdir in ("raw", "models", "vectors"):
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
+    await create_all_tables(get_engine())
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
