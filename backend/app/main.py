@@ -1,11 +1,23 @@
 import logging
+import logging.config
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pythonjsonlogger.json import JsonFormatter
 
 from app.config import Settings, get_settings
+
+
+def configure_logging(log_level: str = "INFO") -> None:
+    handler = logging.StreamHandler()
+    if log_level != "DEBUG":
+        handler.setFormatter(JsonFormatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    logging.basicConfig(level=log_level, handlers=[handler])
+
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +25,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    configure_logging(settings.LOG_LEVEL)
     data_dir = Path(settings.DATA_DIR).expanduser()
     for subdir in ("raw", "models", "vectors"):
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)

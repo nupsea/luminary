@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.132.0",
     "pydantic-settings>=2.13.1",
+    "python-json-logger>=4.0.0",
     "uvicorn[standard]>=0.41.0",
 ]
 
