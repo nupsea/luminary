@@ -1,0 +1,45 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+*.egg
+
+# Node / frontend
+node_modules/
+dist/
+.parcel-cache/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Data directories
+.lance/
+*.db
+DATA_DIR/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# uv
+uv.lock
