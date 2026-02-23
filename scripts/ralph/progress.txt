@@ -2,6 +2,17 @@
 Started: Tue 24 Feb 2026 08:01:32 AEST
 ---
 
+## 2026-02-24T10:00:00+10:00 - S05 - BGE-M3 embedding pipeline with LanceDB vector storage
+- Implemented: app/services/embedder.py (EmbeddingService — ORT first, ST fallback, lazy load, BATCH_SIZE=32), app/services/vector_store.py (LanceDBService — chunk_vectors table, upsert via merge_insert), updated embed_node in ingestion.py (replaces stub), tests/test_embedder.py (3 unit tests + 1 skipped integration test)
+- Files changed: backend/app/services/embedder.py, backend/app/services/vector_store.py, backend/app/workflows/ingestion.py, backend/tests/test_embedder.py, backend/pyproject.toml (added sentence-transformers, lancedb, optimum[onnxruntime], numpy)
+- Learnings:
+  - LanceDB 0.29.2: use list_tables().tables (not table_names()) — table_names() is deprecated
+  - pa.list_(pa.float32(), 1024) creates a fixed_size_list PyArrow type, which LanceDB accepts for vector columns
+  - merge_insert("chunk_id").when_matched_update_all().when_not_matched_insert_all().execute(rows) works for upsert in LanceDB 0.29
+  - ORTModelForFeatureExtraction.from_pretrained(export=True) + return_tensors="np" → last_hidden_state is numpy; mean pool + normalize manually
+  - Integration test skipped with pytest.mark.skipif when model not cached; unit tests (_mean_pool, _normalize, instantiation) always run
+---
+
 ## Codebase Patterns
 - uv commands must be run from /backend directory (cd backend && uv ...)
 - pytest exit code 5 = no tests collected (acceptable at scaffold stage, real tests added per story)

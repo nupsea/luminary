@@ -272,7 +272,7 @@
         "embed_node no longer a stub — replaces the S04 placeholder",
         "uv run pytest tests/test_embedder.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S06",
