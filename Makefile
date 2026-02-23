@@ -23,4 +23,6 @@ ci:
 	@echo "Running CI checks..."
 	cd backend && uv run ruff check .
 	cd backend && uv run pytest
-	@echo "CI not yet fully configured (frontend checks added in S00b)"
+	cd frontend && npx tsc --noEmit
+	cd frontend && npm run build
+	@echo "CI passed."
