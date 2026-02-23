@@ -188,7 +188,7 @@
         "docs/references/uv-llms.txt exists with uv command reference",
         "All docs/ directories created (exec-plans/active, exec-plans/completed, design-docs, product-specs, references, generated)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S01",
@@ -205,7 +205,7 @@
         "uv run pytest tests/test_health.py exits 0",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S02",
@@ -221,7 +221,7 @@
         "DATA_DIR/luminary.db created on first run",
         "uv run pytest exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S03",
@@ -238,7 +238,7 @@
         "Original file saved to DATA_DIR/raw/",
         "uv run pytest tests/test_parser.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S04",
@@ -256,7 +256,7 @@
         "GET /documents/{id}/status reflects current stage",
         "uv run pytest tests/test_ingest.py exits 0 (test on small TXT fixture)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S05",

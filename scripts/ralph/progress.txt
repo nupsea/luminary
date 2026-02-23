@@ -12,6 +12,16 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
 
 ---
 
+## 2026-02-24T09:10:00+10:00 - S04 - LangGraph ingestion workflow — parse, classify, chunk nodes + POST /ingest
+- Implemented: tests/test_ingest.py — 12 tests covering classification heuristics, chunk_node DB writes, POST /ingest response, GET status endpoint, 404 handling
+- Files changed: backend/tests/test_ingest.py
+- Learnings:
+  - Workflow nodes (ingestion.py) and router (documents.py) were already implemented; only the test file was missing
+  - To isolate DB in async tests: patch db_module._engine and db_module._session_factory with in-memory engine/factory; also monkeypatch DATA_DIR env and call get_settings.cache_clear()
+  - Background tasks created by asyncio.create_task() inside request handlers use the patched singletons correctly
+  - All async tests in the test file that use the app via ASGITransport need the test_db fixture even if they only test 4xx responses
+---
+
 ## 2026-02-24T08:30:00+10:00 - S00a - Backend monorepo scaffold — uv, Python 3.13, FastAPI app skeleton
 - Implemented: .gitignore, README.md, Makefile, evals/README.md, backend/ with uv project, app/config.py (Settings + get_settings), app/main.py (FastAPI with /health + /settings), tests/test_config.py
 - Files changed: .gitignore, README.md, Makefile, evals/README.md, backend/pyproject.toml, backend/app/__init__.py, backend/app/config.py, backend/app/main.py, backend/tests/__init__.py, backend/tests/test_config.py
