@@ -422,7 +422,7 @@
         "Model selector shows available models from backend",
         "Verify in browser: type a question, confirm streaming response appears token by token with citations"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S14",

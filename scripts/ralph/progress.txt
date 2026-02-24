@@ -1,3 +1,13 @@
+## 2026-02-24T19:00:00+10:00 - S13 - Chat tab — streaming Q&A with citation chips and confidence badges
+- Implemented: src/pages/Chat.tsx full replacement — scope selector (This document / All my content radio); model selector (fetches GET /settings/llm, populates from available_local_models + available cloud_providers); message list (user right-aligned slate-100, assistant left-aligned white card); SSE stream consumed via fetch+ReadableStream, token appended in real-time, done event parses citations+confidence; citation chips rendered as muted badge spans with document_title > section_heading (p.N); confidence Badge using green/blue/gray variants; NOT_FOUND shows blue info text; empty state with 3 example question chips; auto-resize textarea; Enter to send, Shift+Enter for newline; error message on fetch failure
+- Files changed: frontend/src/pages/Chat.tsx
+- Learnings:
+  - crypto.randomUUID() available in modern browsers for generating message IDs without a library
+  - assistantId must be captured before async function to close over the correct ID in setMessages callbacks
+  - useEffect for scrollIntoView on messages array change handles auto-scroll to bottom
+  - sendMessage is an async function called with void operator from JSX: void sendMessage(input)
+---
+
 ## 2026-02-24T18:00:00+10:00 - S12 - Document reader UI with streaming summary panel in Learning tab
 - Implemented: added preview: Mapped[str] column to SectionModel; updated chunk_node in ingestion.py to create SectionModel rows with preview (first 300 chars of section text); added GET /documents/{id} endpoint returning DocumentDetail with SectionItem list; frontend src/components/reader/types.ts (DocumentDetail, SectionItem, SummaryMode, SUMMARY_TABS, CONVERSATION_TAB); src/components/reader/DocumentReader.tsx (two-panel layout: left 60% with section list using line-clamp-2 for previews, right 40% with SummaryPanel; SummaryPanel with tab set, Generate/Regenerate buttons, SSE stream consumed via fetch+ReadableStream, animated cursor during streaming, 4th Meeting Notes tab for conversation content type); updated Learning.tsx to check activeDocumentId and show DocumentReader instead of catalog
 - Files changed: backend/app/models.py (SectionModel.preview), backend/app/workflows/ingestion.py (SectionModel storage), backend/app/routers/documents.py (DocumentDetail, SectionItem, GET /documents/{id}), frontend/src/components/reader/types.ts, DocumentReader.tsx, frontend/src/pages/Learning.tsx
