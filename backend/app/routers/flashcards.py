@@ -2,14 +2,16 @@
 
 Routes:
   POST /flashcards/generate            — LLM-generate cards for a document
+  GET  /flashcards/{document_id}/export/csv — CSV download
   GET  /flashcards/{document_id}       — list cards ordered by created_at desc
   PUT  /flashcards/{card_id}           — update question/answer, sets is_user_edited
   DELETE /flashcards/{card_id}         — delete a card (204)
-  GET  /flashcards/{document_id}/export/csv — CSV download
+  POST /flashcards/{card_id}/review    — FSRS review with rating
 """
 
 import csv
 import io
+import uuid
 from datetime import datetime
 from typing import Literal
 
@@ -20,8 +22,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DocumentModel, FlashcardModel
+from app.models import DocumentModel, FlashcardModel, ReviewEventModel
 from app.services.flashcard import FlashcardService, get_flashcard_service
+from app.services.fsrs_service import FSRSService, get_fsrs_service
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 
@@ -41,6 +44,11 @@ class FlashcardGenerateRequest(BaseModel):
 class FlashcardUpdateRequest(BaseModel):
     question: str | None = None
     answer: str | None = None
+
+
+class ReviewRequest(BaseModel):
+    rating: Literal["again", "hard", "good", "easy"]
+    session_id: str | None = None
 
 
 class FlashcardResponse(BaseModel):
@@ -196,3 +204,30 @@ async def delete_flashcard(
 
     await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
     await session.commit()
+
+
+@router.post("/{card_id}/review", response_model=FlashcardResponse)
+async def review_flashcard(
+    card_id: str,
+    req: ReviewRequest,
+    session: AsyncSession = Depends(get_db),
+    service: FSRSService = Depends(get_fsrs_service),
+) -> FlashcardResponse:
+    """Submit an FSRS review rating for a flashcard. Optionally link to a study session."""
+    try:
+        card = await service.schedule(card_id, req.rating, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if req.session_id:
+        event = ReviewEventModel(
+            id=str(uuid.uuid4()),
+            session_id=req.session_id,
+            flashcard_id=card_id,
+            rating=req.rating,
+            is_correct=req.rating != "again",
+        )
+        session.add(event)
+        await session.commit()
+
+    return _to_response(card)

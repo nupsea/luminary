@@ -23,6 +23,7 @@ from app.routers.graph import router as graph_router
 from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
 from app.routers.search import router as search_router
+from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.services.graph import get_graph_service
 from app.telemetry import setup_tracing
@@ -73,6 +74,7 @@ app.include_router(graph_router)
 app.include_router(notes_router)
 app.include_router(qa_router)
 app.include_router(search_router)
+app.include_router(study_router)
 app.include_router(summarize_router)
 
 

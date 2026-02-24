@@ -99,6 +99,17 @@ class StudySessionModel(Base):
     mode: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class ReviewEventModel(Base):
+    __tablename__ = "review_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    flashcard_id: Mapped[str] = mapped_column(String, nullable=False)
+    rating: Mapped[str] = mapped_column(String, nullable=False)  # again|hard|good|easy
+    is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class MisconceptionModel(Base):
     __tablename__ = "misconceptions"
 

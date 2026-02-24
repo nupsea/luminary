@@ -696,7 +696,7 @@
         "POST /study/sessions/{id}/end sets ended_at",
         "uv run pytest tests/test_fsrs.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S21b",
