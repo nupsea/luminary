@@ -1,3 +1,11 @@
+## 2026-02-24T13:00:00+00:00 - S17b - Search UI — Cmd+K command dialog and persistent /search sidebar
+- Implemented: (1) SearchDialog.tsx — full-screen overlay modal, Cmd+K/Ctrl+K shortcut via useEffect in AppShell (App.tsx refactored: Sidebar + Routes + SearchDialog wrapped in AppShell component with searchOpen state), 300ms debounce via useDebounce hook, results grouped by document, clicking result sets activeDocumentId + navigates to /; (2) SearchPanel in Learning.tsx — replaces catalog when search.trim() is non-empty, calls GET /search with 300ms debounce, content_type filter chips (book/paper/conversation/notes/code), grouped results with section/page/relevance%, no-results empty state; (3) hooks/useDebounce.ts — generic T debounce hook.
+- Files changed: frontend/src/components/SearchDialog.tsx (new), frontend/src/hooks/useDebounce.ts (new), frontend/src/App.tsx (AppShell with Cmd+K), frontend/src/pages/Learning.tsx (SearchPanel + search mode)
+- Learnings:
+  - ContentType union must match types.ts exactly: "book" | "paper" | "conversation" | "notes" | "code"
+  - AppShell pattern: wrap Routes + global dialogs in a child of BrowserRouter (not inside App) to use useNavigate
+  - fetchSearch returns Promise<DocumentGroup[]> from { results: [] } shape
+---
 ## 2026-02-24T12:00:00+00:00 - S17a - GET /search backend — hybrid cross-document search endpoint
 - Implemented: backend/app/routers/search.py with SearchResult/DocumentGroup/SearchResponse Pydantic models; GET /search endpoint (q, content_types, limit params); resolves content_types to document_ids via SQLite; calls HybridRetriever.retrieve(); groups ScoredChunk results by document_id; returns grouped SearchResponse. Registered search_router in main.py. Tests: tests/test_search.py with 6 tests using dependency_overrides for get_db (async generator override) and get_retriever (lambda override); covers grouped results, empty results, content_type filter, no-match filter early-return, missing query 422, result field shapes.
 - Files changed: backend/app/routers/search.py (new), backend/tests/test_search.py (new), backend/app/main.py (search_router import + include)

@@ -574,7 +574,7 @@
         "Learning tab sidebar search input also queries GET /search",
         "Verify in browser: press Cmd+K, type a keyword, confirm results appear grouped by document"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S18a",
