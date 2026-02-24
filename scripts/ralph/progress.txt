@@ -1,3 +1,13 @@
+## 2026-02-24T14:00:00+10:00 - S09 - Grounded Q&A with citations, confidence, and Phoenix tracing
+- Implemented: app/telemetry.py (setup_tracing — launches Phoenix in background thread, registers OTLPSpanExporter, get_tracer returns opentelemetry tracer), app/services/qa.py (QAService — stream_answer async generator, _build_context, _split_response, _store_qa, _fetch_doc_titles; NOT_FOUND_IN_CONTENT handling; traces retrieve+generate spans with chunk_count/model_name attributes), app/routers/qa.py (POST /qa, QARequest Pydantic model with question/document_ids/scope/model), registered qa_router + called setup_tracing in lifespan in main.py, tests/test_qa.py (16 tests: 4 _split_response unit, 2 _build_context unit, 2 prompt unit, 3 stream_answer service tests, 2 NOT_FOUND tests, 3 endpoint integration tests)
+- Files changed: backend/app/telemetry.py, backend/app/services/qa.py, backend/app/routers/qa.py, backend/app/main.py, backend/tests/test_qa.py, backend/pyproject.toml (added arize-phoenix, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-grpc)
+- Learnings:
+  - For RAG responses with embedded JSON (citations at end), collect full LLM response first, then parse citations with rfind('{"citations":'), then stream answer words as fake tokens — cleaner than detecting JSON boundary mid-stream
+  - opentelemetry tracer.start_as_current_span() is a sync context manager, works fine with await inside the with block
+  - arize-phoenix can be imported with try/except ImportError for graceful degradation when not installed
+  - OTLPSpanExporter(endpoint=..., insecure=True) avoids TLS handshake issues when Phoenix runs locally
+---
+
 ## 2026-02-24T13:00:00+10:00 - S08 - Multi-granularity summarization with SSE streaming
 - Implemented: app/services/summarizer.py (SummarizationService — stream_summary async generator, _fetch_chunks, _store_summary, _map_sections map-reduce for docs >8000 tokens), app/routers/summarize.py (POST /summarize/{document_id}, SummarizeRequest Pydantic model, StreamingResponse with text/event-stream), registered summarize_router in app/main.py, tests/test_summarizer.py (15 tests: 6 prompt construction unit tests, 5 service unit tests, 4 endpoint integration tests)
 - Files changed: backend/app/services/summarizer.py, backend/app/routers/summarize.py, backend/app/main.py, backend/tests/test_summarizer.py, backend/pyproject.toml (added sse-starlette)

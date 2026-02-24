@@ -334,7 +334,7 @@
         "Phoenix launches on port 6006 when PHOENIX_ENABLED=true",
         "uv run pytest tests/test_qa.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S10a",
