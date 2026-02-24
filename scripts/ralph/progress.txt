@@ -1,3 +1,24 @@
+## 2026-02-24T12:00:00+10:00 - S07 - LiteLLM integration — Ollama, OpenAI, Anthropic, Gemini with streaming
+- Implemented: app/services/llm.py (LLMService — generate non-stream/stream, _build_kwargs routing, _token_stream async generator, get_llm_service singleton), enhanced classify_node in ingestion.py (LLM reclassification when heuristic='notes' and word_count>5000), GET /settings/llm endpoint in main.py (Ollama ping, processing_mode logic, cloud_providers list), tests/test_llm.py (13 tests: 3 non-stream, 2 stream, 4 routing, 3 endpoint, 1 singleton)
+- Files changed: backend/app/services/llm.py, backend/app/workflows/ingestion.py, backend/app/main.py, backend/tests/test_llm.py, backend/pyproject.toml (added litellm, httpx)
+- Learnings:
+  - AsyncGenerator patches must stay active during iteration — the generator body executes lazily; if patch exits before iteration, real network calls fire
+  - litellm.acompletion patched at "litellm.acompletion" works for both stream and non-stream when called from app/services/llm.py (import litellm; litellm.acompletion)
+  - UP043 ruff rule: AsyncGenerator[str, None] → AsyncGenerator[str] (None is default send type)
+  - classify_node changed from sync def to async def to support await get_llm_service().generate()
+---
+
+## 2026-02-24T11:00:00+10:00 - S06 - SQLite FTS5 keyword index and hybrid retrieval with RRF
+- Implemented: app/services/retriever.py (HybridRetriever — vector_search, keyword_search, rrf_merge, retrieve), keyword_index_node live in ingestion.py (replaces stub), ScoredChunk dataclass added to app/types.py, tests/test_retriever.py (12 tests: 6 rrf_merge unit tests, 3 keyword_search integration tests, 1 keyword_index_node integration test, 2 vector_search mocked unit tests)
+- Files changed: backend/app/services/retriever.py, backend/app/workflows/ingestion.py, backend/app/types.py, backend/app/db_init.py, backend/app/routers/documents.py, backend/app/workflows/__init__.py, backend/tests/test_retriever.py
+- Learnings:
+  - FTS5 keyword_search: ORDER BY bm25(chunks_fts) returns NEGATIVE scores (more negative = better match) — correct, do not flip sign
+  - LanceDB vector_search: score = 1.0 - _distance (cosine distance → cosine similarity)
+  - RRF k=60 produces all-positive scores regardless of BM25 sign — safe to compare across sources
+  - vector_search is synchronous (LanceDB to_list() is blocking); keyword_search is async (SQLAlchemy async session)
+  - db_init.py FTS5 DDL: content/content_rowid columns removed — use simple fts5 schema (text, chunk_id UNINDEXED, document_id UNINDEXED) with manual INSERT SELECT
+---
+
 # Ralph Progress Log
 Started: Tue 24 Feb 2026 08:01:32 AEST
 ---

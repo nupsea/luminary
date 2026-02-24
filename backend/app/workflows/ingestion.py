@@ -108,13 +108,40 @@ def parse_node(state: IngestionState) -> IngestionState:
         return {**state, "status": "error", "error": str(exc)}
 
 
-def classify_node(state: IngestionState) -> IngestionState:
+async def classify_node(state: IngestionState) -> IngestionState:
     try:
         pd = state["parsed_document"]
         if pd is None:
             return {**state, "content_type": "notes", "status": "chunking"}
         file_ext = Path(state["file_path"]).suffix.lstrip(".")
         content_type = _classify(pd["raw_text"], pd["sections"], pd["word_count"], file_ext)
+
+        # LLM reclassification: heuristic said 'notes' but document is long — confirm
+        if content_type == "notes" and pd["word_count"] > 5000:
+            try:
+                from app.services.llm import get_llm_service
+
+                snippet = pd["raw_text"][:2000]
+                prompt = (
+                    "Classify this document as exactly one of: "
+                    "paper, book, conversation, notes, code.\n"
+                    f"Document snippet (first 2000 chars):\n{snippet}\n\n"
+                    "Reply with exactly one word from the list above."
+                )
+                llm_result = await get_llm_service().generate(prompt)
+                llm_type = str(llm_result).strip().lower().split()[0]
+                if llm_type in ("paper", "book", "conversation", "notes", "code"):
+                    content_type = llm_type
+                    logger.info(
+                        "LLM reclassified document",
+                        extra={"doc_id": state["document_id"], "content_type": content_type},
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "LLM reclassification failed, keeping heuristic result",
+                    exc_info=exc,
+                )
+
         logger.info(
             "Classified document",
             extra={"doc_id": state["document_id"], "content_type": content_type},
