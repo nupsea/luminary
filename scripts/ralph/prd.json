@@ -813,7 +813,7 @@
         "Clicking a trace row opens the detail drawer",
         "Verify in browser: open /monitoring, confirm traces table renders (even if empty)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S25a",
