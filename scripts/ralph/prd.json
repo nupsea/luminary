@@ -608,7 +608,7 @@
         "Glossary search filters by term name",
         "Verify in browser: select a word in a section, confirm floating toolbar appears; click Explain, confirm sheet opens and streams"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S19a",

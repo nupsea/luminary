@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
+import { ExplanationSheet } from "@/components/ExplanationSheet"
+import { FloatingToolbar } from "@/components/FloatingToolbar"
+import type { ExplainMode } from "@/components/FloatingToolbar"
 import type { DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 
@@ -18,15 +21,115 @@ async function fetchDocument(id: string): Promise<DocumentDetail> {
 type SummaryMap = Partial<Record<SummaryMode, string>>
 type StreamingMap = Partial<Record<SummaryMode, boolean>>
 
+// ---------------------------------------------------------------------------
+// Glossary tab
+// ---------------------------------------------------------------------------
+
+interface GlossaryTerm {
+  term: string
+  definition: string
+  first_mention_page: number
+}
+
+interface GlossaryPanelProps {
+  documentId: string
+}
+
+function GlossaryPanel({ documentId }: GlossaryPanelProps) {
+  const [terms, setTerms] = useState<GlossaryTerm[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [filter, setFilter] = useState("")
+
+  async function loadGlossary() {
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/explain/glossary/${documentId}`, { method: "POST" })
+      if (res.ok) {
+        const data = (await res.json()) as GlossaryTerm[]
+        setTerms(data)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filtered = (terms ?? []).filter((t) =>
+    t.term.toLowerCase().includes(filter.toLowerCase()),
+  )
+
+  if (terms === null) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">
+          Extract domain-specific terms from this document.
+        </p>
+        <button
+          onClick={() => void loadGlossary()}
+          disabled={loading}
+          className="flex items-center gap-1.5 self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          {loading && <Loader2 size={14} className="animate-spin" />}
+          {loading ? "Extracting..." : "Generate Glossary"}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter terms..."
+        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+      />
+      {filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {filter ? "No matching terms." : "No terms extracted."}
+        </p>
+      ) : (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border text-left text-muted-foreground">
+              <th className="pb-1.5 pr-3 font-medium">Term</th>
+              <th className="pb-1.5 pr-3 font-medium">Definition</th>
+              <th className="pb-1.5 font-medium">Page</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {filtered.map((t, i) => (
+              <tr key={i}>
+                <td className="py-1.5 pr-3 font-medium text-foreground align-top">{t.term}</td>
+                <td className="py-1.5 pr-3 text-foreground/80 align-top">{t.definition}</td>
+                <td className="py-1.5 text-muted-foreground align-top">{t.first_mention_page > 0 ? `p.${t.first_mention_page}` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Summary + Glossary panel (right side)
+// ---------------------------------------------------------------------------
+
+type PanelTab = SummaryMode | "glossary"
+
 interface SummaryPanelProps {
   documentId: string
   contentType: string
 }
 
 function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
-  const tabs: SummaryTabDef[] =
+  const summaryTabs: SummaryTabDef[] =
     contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
-  const [activeTab, setActiveTab] = useState<SummaryMode>(tabs[0].mode)
+  const allTabs = [...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })), { mode: "glossary" as PanelTab, label: "Glossary" }]
+
+  const [activeTab, setActiveTab] = useState<PanelTab>(allTabs[0].mode)
   const [summaries, setSummaries] = useState<SummaryMap>({})
   const [streaming, setStreaming] = useState<StreamingMap>({})
 
@@ -70,14 +173,14 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
     }
   }
 
-  const currentSummary = summaries[activeTab]
-  const isStreaming = streaming[activeTab] ?? false
+  const currentSummary = activeTab !== "glossary" ? summaries[activeTab as SummaryMode] : undefined
+  const isStreaming = activeTab !== "glossary" ? (streaming[activeTab as SummaryMode] ?? false) : false
 
   return (
     <div className="flex h-full flex-col">
       {/* Tabs */}
-      <div className="mb-4 flex gap-1 rounded-md bg-muted p-1">
-        {tabs.map((tab) => (
+      <div className="mb-4 flex flex-wrap gap-1 rounded-md bg-muted p-1">
+        {allTabs.map((tab) => (
           <button
             key={tab.mode}
             onClick={() => setActiveTab(tab.mode)}
@@ -95,7 +198,9 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 
       {/* Content area */}
       <div className="flex-1 overflow-auto">
-        {isStreaming && !currentSummary ? (
+        {activeTab === "glossary" ? (
+          <GlossaryPanel documentId={documentId} />
+        ) : isStreaming && !currentSummary ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />
             Summarizing...
@@ -108,7 +213,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
             </pre>
             {!isStreaming && (
               <button
-                onClick={() => void generateSummary(activeTab)}
+                onClick={() => void generateSummary(activeTab as SummaryMode)}
                 className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <RefreshCw size={12} />
@@ -120,7 +225,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">No summary generated yet.</p>
             <button
-              onClick={() => void generateSummary(activeTab)}
+              onClick={() => void generateSummary(activeTab as SummaryMode)}
               className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               Generate Summary
@@ -132,6 +237,10 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// DocumentReader
+// ---------------------------------------------------------------------------
+
 interface DocumentReaderProps {
   documentId: string
   onBack: () => void
@@ -142,6 +251,16 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
   })
+  const sectionListRef = useRef<HTMLDivElement>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [sheetText, setSheetText] = useState("")
+  const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
+
+  function handleExplain(text: string, mode: ExplainMode) {
+    setSheetText(text)
+    setSheetMode(mode)
+    setSheetOpen(true)
+  }
 
   if (isLoading) {
     return (
@@ -202,8 +321,9 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
             </div>
           </div>
 
-          {/* Section list */}
-          <div className="flex-1 overflow-auto px-6 pb-6">
+          {/* Section list — relative for FloatingToolbar positioning */}
+          <div ref={sectionListRef} className="relative flex-1 overflow-auto px-6 pb-6">
+            <FloatingToolbar containerRef={sectionListRef} onExplain={handleExplain} />
             {doc.sections.length === 0 ? (
               <p className="text-sm text-muted-foreground">No sections detected.</p>
             ) : (
@@ -233,10 +353,18 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
 
         {/* Right panel — 40%, sticky */}
         <div className="w-2/5 overflow-auto p-6">
-          <h2 className="mb-4 text-sm font-semibold text-foreground">Summary</h2>
           <SummaryPanel documentId={documentId} contentType={doc.content_type} />
         </div>
       </div>
+
+      {/* Explanation sheet */}
+      <ExplanationSheet
+        open={sheetOpen}
+        text={sheetText}
+        documentId={documentId}
+        mode={sheetMode}
+        onClose={() => setSheetOpen(false)}
+      />
     </div>
   )
 }
