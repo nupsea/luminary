@@ -730,7 +730,7 @@
         "MisconceptionModel row created for each detected misconception",
         "uv run pytest tests/test_learning.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S22b",

@@ -110,6 +110,19 @@ class ReviewEventModel(Base):
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class TeachbackResultModel(Base):
+    __tablename__ = "teachback_results"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    flashcard_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    correct_points: Mapped[list] = mapped_column(JSON, default=list)
+    missing_points: Mapped[list] = mapped_column(JSON, default=list)
+    misconceptions: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class MisconceptionModel(Base):
     __tablename__ = "misconceptions"
 
