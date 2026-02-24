@@ -679,7 +679,7 @@
         "CSV export button triggers file download",
         "Verify in browser: generate 5 flashcards for a document, confirm cards appear in list, toggle answer visibility"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S21a",

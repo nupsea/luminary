@@ -1,7 +1,509 @@
-export default function Study() {
+/**
+ * Study tab — Flashcard section (S20b) and Progress section placeholder (S23b).
+ *
+ * Flashcard section:
+ *  - Generate panel: count selector, scope (full/section), Generate button
+ *  - Flashcard list: show/hide answer, inline edit, delete with confirmation
+ *  - Bottom bar: card count, Start Studying (S21b), CSV export
+ */
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
+import {
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Loader2,
+  Pencil,
+  PlayCircle,
+  Trash2,
+  X,
+  Check,
+} from "lucide-react"
+import { toast } from "sonner"
+import { Card } from "@/components/ui/card"
+import { useAppStore } from "@/store"
+
+const API_BASE = "http://localhost:8000"
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface Flashcard {
+  id: string
+  document_id: string
+  chunk_id: string
+  question: string
+  answer: string
+  source_excerpt: string
+  is_user_edited: boolean
+  fsrs_state: string
+  reps: number
+  lapses: number
+  due_date: string | null
+  created_at: string
+}
+
+interface SectionItem {
+  id: string
+  heading: string
+  level: number
+  section_order: number
+}
+
+interface DocumentSections {
+  sections: SectionItem[]
+}
+
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
+
+async function fetchFlashcards(documentId: string): Promise<Flashcard[]> {
+  const res = await fetch(`${API_BASE}/flashcards/${documentId}`)
+  if (!res.ok) return []
+  return res.json() as Promise<Flashcard[]>
+}
+
+async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
+  const res = await fetch(`${API_BASE}/documents/${documentId}`)
+  if (!res.ok) return { sections: [] }
+  return res.json() as Promise<DocumentSections>
+}
+
+async function generateFlashcards(req: {
+  document_id: string
+  scope: "full" | "section"
+  section_heading: string | null
+  count: number
+}): Promise<Flashcard[]> {
+  const res = await fetch(`${API_BASE}/flashcards/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) throw new Error("Failed to generate flashcards")
+  return res.json() as Promise<Flashcard[]>
+}
+
+async function updateFlashcard(
+  id: string,
+  data: { question?: string; answer?: string },
+): Promise<Flashcard> {
+  const res = await fetch(`${API_BASE}/flashcards/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error("Failed to update flashcard")
+  return res.json() as Promise<Flashcard>
+}
+
+async function deleteFlashcard(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/flashcards/${id}`, { method: "DELETE" })
+  if (!res.ok) throw new Error("Failed to delete flashcard")
+}
+
+// ---------------------------------------------------------------------------
+// FlashcardCard
+// ---------------------------------------------------------------------------
+
+interface FlashcardCardProps {
+  card: Flashcard
+  onUpdate: (id: string, data: { question?: string; answer?: string }) => void
+  onDelete: (id: string) => void
+  isUpdating: boolean
+  isDeleting: boolean
+}
+
+function FlashcardCard({
+  card,
+  onUpdate,
+  onDelete,
+  isUpdating,
+  isDeleting,
+}: FlashcardCardProps) {
+  const [showAnswer, setShowAnswer] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editQuestion, setEditQuestion] = useState(card.question)
+  const [editAnswer, setEditAnswer] = useState(card.answer)
+
+  function handleEditSave() {
+    onUpdate(card.id, { question: editQuestion, answer: editAnswer })
+    setEditing(false)
+  }
+
+  function handleEditCancel() {
+    setEditQuestion(card.question)
+    setEditAnswer(card.answer)
+    setEditing(false)
+  }
+
   return (
-    <div className="flex h-full items-center justify-center">
-      <h1 className="text-2xl font-semibold text-foreground">Study</h1>
+    <Card className="flex flex-col gap-3">
+      {/* Question */}
+      <div className="flex items-start justify-between gap-2">
+        {editing ? (
+          <textarea
+            value={editQuestion}
+            onChange={(e) => setEditQuestion(e.target.value)}
+            className="flex-1 resize-none rounded border border-border bg-background p-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            rows={2}
+          />
+        ) : (
+          <p className="flex-1 text-sm font-medium text-foreground">{card.question}</p>
+        )}
+
+        {!editing && !confirmDelete && (
+          <div className="flex shrink-0 gap-1">
+            <button
+              onClick={() => setEditing(true)}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="Edit"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+              title="Delete"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Answer */}
+      {editing ? (
+        <textarea
+          value={editAnswer}
+          onChange={(e) => setEditAnswer(e.target.value)}
+          className="resize-none rounded border border-border bg-background p-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          rows={3}
+          placeholder="Answer..."
+        />
+      ) : (
+        <div>
+          <button
+            onClick={() => setShowAnswer((prev) => !prev)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            {showAnswer ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {showAnswer ? "Hide answer" : "Show answer"}
+          </button>
+          {showAnswer && (
+            <p className="mt-1 text-sm text-muted-foreground">{card.answer}</p>
+          )}
+        </div>
+      )}
+
+      {/* Edit actions */}
+      {editing && (
+        <div className="flex gap-2">
+          <button
+            onClick={handleEditSave}
+            disabled={isUpdating}
+            className="flex items-center gap-1 rounded bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            Save
+          </button>
+          <button
+            onClick={handleEditCancel}
+            className="flex items-center gap-1 rounded border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
+          >
+            <X size={12} />
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+          <span className="flex-1">Delete this flashcard?</span>
+          <button
+            onClick={() => {
+              onDelete(card.id)
+              setConfirmDelete(false)
+            }}
+            disabled={isDeleting}
+            className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {isDeleting ? <Loader2 size={10} className="animate-spin" /> : null}
+            Delete
+          </button>
+          <button
+            onClick={() => setConfirmDelete(false)}
+            className="rounded border border-red-300 px-2 py-1 hover:bg-red-100"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Footer: FSRS state badge */}
+      <div className="flex items-center gap-2 border-t border-border pt-2">
+        <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground capitalize">
+          {card.fsrs_state}
+        </span>
+        {card.is_user_edited && (
+          <span className="text-xs text-muted-foreground italic">edited</span>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {card.reps} rep{card.reps !== 1 ? "s" : ""}
+        </span>
+      </div>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// GeneratePanel
+// ---------------------------------------------------------------------------
+
+interface GeneratePanelProps {
+  documentId: string
+  sections: SectionItem[]
+  onGenerate: (req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+  }) => void
+  isGenerating: boolean
+}
+
+const COUNT_OPTIONS = [5, 10, 20, 50]
+
+function GeneratePanel({
+  documentId: _documentId,
+  sections,
+  onGenerate,
+  isGenerating,
+}: GeneratePanelProps) {
+  const [count, setCount] = useState(10)
+  const [scope, setScope] = useState<"full" | "section">("full")
+  const [sectionHeading, setSectionHeading] = useState<string | null>(null)
+
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/30 p-4">
+      {/* Count */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Count</label>
+        <select
+          value={count}
+          onChange={(e) => setCount(Number(e.target.value))}
+          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          {COUNT_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {n} cards
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Scope */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Scope</label>
+        <select
+          value={scope}
+          onChange={(e) => {
+            const v = e.target.value as "full" | "section"
+            setScope(v)
+            if (v === "full") setSectionHeading(null)
+          }}
+          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          <option value="full">Full document</option>
+          <option value="section">By section</option>
+        </select>
+      </div>
+
+      {/* Section picker */}
+      {scope === "section" && sections.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">Section</label>
+          <select
+            value={sectionHeading ?? ""}
+            onChange={(e) => setSectionHeading(e.target.value || null)}
+            className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">Select section...</option>
+            {sections.map((s) => (
+              <option key={s.id} value={s.heading}>
+                {s.heading}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <button
+        onClick={() => onGenerate({ scope, section_heading: sectionHeading, count })}
+        disabled={isGenerating || (scope === "section" && !sectionHeading)}
+        className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+      >
+        {isGenerating && <Loader2 size={14} className="animate-spin" />}
+        Generate Flashcards
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Study page
+// ---------------------------------------------------------------------------
+
+export default function Study() {
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const queryClient = useQueryClient()
+
+  // Flashcard list
+  const { data: cards = [], isLoading: cardsLoading } = useQuery<Flashcard[]>({
+    queryKey: ["flashcards", activeDocumentId],
+    queryFn: () => fetchFlashcards(activeDocumentId!),
+    enabled: !!activeDocumentId,
+  })
+
+  // Document sections (for section scope dropdown)
+  const { data: docData } = useQuery<DocumentSections>({
+    queryKey: ["document-sections", activeDocumentId],
+    queryFn: () => fetchDocumentSections(activeDocumentId!),
+    enabled: !!activeDocumentId,
+  })
+
+  const sections = docData?.sections ?? []
+
+  // Generate mutation
+  const generateMutation = useMutation({
+    mutationFn: (req: {
+      scope: "full" | "section"
+      section_heading: string | null
+      count: number
+    }) =>
+      generateFlashcards({
+        document_id: activeDocumentId!,
+        ...req,
+      }),
+    onSuccess: (newCards) => {
+      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      toast.success(`Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""}`)
+    },
+    onError: () => toast.error("Failed to generate flashcards"),
+  })
+
+  // Update mutation
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { question?: string; answer?: string } }) =>
+      updateFlashcard(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      toast.success("Flashcard updated")
+    },
+    onError: () => toast.error("Failed to update flashcard"),
+  })
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteFlashcard(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      toast.success("Flashcard deleted")
+    },
+    onError: () => toast.error("Failed to delete flashcard"),
+  })
+
+  function handleExportCsv() {
+    if (!activeDocumentId) return
+    window.open(`${API_BASE}/flashcards/${activeDocumentId}/export/csv`, "_blank")
+  }
+
+  if (!activeDocumentId) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <p className="text-sm text-muted-foreground">
+          Select a document in the Learning tab to study.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full flex-col gap-6 overflow-auto p-6">
+      {/* Flashcards section */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
+
+        <GeneratePanel
+          documentId={activeDocumentId}
+          sections={sections}
+          onGenerate={(req) => generateMutation.mutate(req)}
+          isGenerating={generateMutation.isPending}
+        />
+
+        {cardsLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={24} className="animate-spin text-muted-foreground" />
+          </div>
+        ) : cards.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              No flashcards yet. Generate some above.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {cards.map((card) => (
+              <FlashcardCard
+                key={card.id}
+                card={card}
+                onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                onDelete={(id) => deleteMutation.mutate(id)}
+                isUpdating={updateMutation.isPending}
+                isDeleting={deleteMutation.isPending}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Bottom bar */}
+        {cards.length > 0 && (
+          <div className="flex items-center gap-3 border-t border-border pt-4">
+            <span className="text-sm text-muted-foreground">
+              {cards.length} card{cards.length !== 1 ? "s" : ""}
+            </span>
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={handleExportCsv}
+                className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <Download size={14} />
+                Export CSV
+              </button>
+              <button
+                disabled
+                title="Study sessions coming in S21b"
+                className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground opacity-50 cursor-not-allowed"
+              >
+                <PlayCircle size={14} />
+                Start Studying
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Progress section — placeholder for S23b */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold text-foreground">Progress</h2>
+        <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+          Progress dashboard coming in S23b.
+        </div>
+      </section>
     </div>
   )
 }
