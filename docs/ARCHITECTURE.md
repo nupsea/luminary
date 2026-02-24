@@ -48,8 +48,9 @@ backend/
 
 frontend/
   src/
-    pages/        # One file per tab: Learning, Chat, Viz, Study, Monitoring
-    components/   # Reusable UI components
+    pages/        # One file per tab: Learning, Chat, Viz, Study, Notes, Monitoring
+    components/   # Reusable UI components (reader/, library/, FloatingToolbar, etc.)
+    hooks/        # Custom React hooks (useDebounce)
     lib/          # Utility functions (cn, etc.)
     store.ts      # Zustand global state
 
