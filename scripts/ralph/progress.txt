@@ -1,3 +1,12 @@
+## 2026-02-25T03:00:00+10:00 - S19b - Notes UI — inline editor in Learning tab and standalone /notes route
+- Implemented: (1) DocumentReader.tsx updated — per-section note icon (StickyNote from lucide-react) button toggles inline NoteEditor; notedSections Set<string> state tracks which sections have had notes saved (indicator appears immediately after save); NoteEditor: textarea + tag chips (Enter/comma to add, X to remove) + Save/Cancel; calls POST /notes; removed unused fetchNotesForDocument + Note interface + docNotes query since notes data model has no section_id linkback; (2) Notes.tsx standalone page — two-column layout, left sidebar 280px with All Notes/groups/tags filter tree (GET /notes/groups), right panel NoteCard grid (react-markdown preview, inline edit mode via useMutation, delete button); (3) App.tsx — added StickyNote icon import, /notes entry in NAV_ITEMS, Notes import, <Route path="/notes" element={<Notes />} /> in AppShell Routes
+- Files changed: frontend/src/components/reader/DocumentReader.tsx, frontend/src/pages/Notes.tsx (already existed), frontend/src/App.tsx
+- Learnings:
+  - Notes data model has no section_id — indicator cannot persist across reloads without backend change; local notedSections Set state satisfies acceptance criteria for session lifetime
+  - TS6133 noUnusedLocals fires on module-level async functions too when TypeScript build (tsc -b) is used — must remove unused module-level declarations, not just local vars
+  - createNote return value not needed in NoteEditor — simplify to Promise<void> to avoid keeping unused Note interface
+---
+
 ## 2026-02-24T16:00:00+00:00 - S19a - Notes backend — CRUD endpoints for notes with tags and groups
 - Implemented: app/routers/notes.py with NoteCreateRequest/NoteUpdateRequest/NoteResponse Pydantic models; POST /notes (201); GET /notes/groups (SQLite JSON_EACH via text() for tag counts, func.count for group counts); GET /notes (optional document_id/group/tag filters, tag filter via EXISTS subquery with JSON_EACH bindparams); PUT /notes/{id} (partial update, updated_at refresh); DELETE /notes/{id} (204). Registered notes_router in main.py. Tests: 10 tests — create, filter, tag filter, update, delete, groups counts with UUID-suffixed unique group/tag names to avoid cross-test contamination.
 - Files changed: backend/app/routers/notes.py (new), backend/tests/test_notes.py (new), backend/app/main.py (notes_router)

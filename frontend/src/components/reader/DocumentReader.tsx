@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X } from "lucide-react"
 import { useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
@@ -16,6 +16,112 @@ async function fetchDocument(id: string): Promise<DocumentDetail> {
   const res = await fetch(`${API_BASE}/documents/${id}`)
   if (!res.ok) throw new Error("Failed to fetch document")
   return res.json() as Promise<DocumentDetail>
+}
+
+// ---------------------------------------------------------------------------
+// Note API
+// ---------------------------------------------------------------------------
+
+async function createNote(data: {
+  document_id: string
+  content: string
+  tags: string[]
+  group_name: string | null
+}): Promise<void> {
+  await fetch(`${API_BASE}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// NoteEditor (inline below a section)
+// ---------------------------------------------------------------------------
+
+interface NoteEditorProps {
+  documentId: string
+  onSaved: () => void
+  onCancel: () => void
+}
+
+function NoteEditor({ documentId, onSaved, onCancel }: NoteEditorProps) {
+  const [content, setContent] = useState("")
+  const [tagInput, setTagInput] = useState("")
+  const [tags, setTags] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+
+  function addTag(input: string) {
+    const t = input.trim()
+    if (t && !tags.includes(t)) setTags((prev) => [...prev, t])
+    setTagInput("")
+  }
+
+  async function handleSave() {
+    if (!content.trim()) return
+    setSaving(true)
+    try {
+      await createNote({ document_id: documentId, content, tags, group_name: null })
+      onSaved()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 rounded-md border border-primary/40 bg-background p-2">
+      <textarea
+        autoFocus
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="Write a note..."
+        className="min-h-[72px] w-full resize-none bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+      />
+      {/* Tag input */}
+      <div className="flex flex-wrap items-center gap-1">
+        {tags.map((t) => (
+          <span
+            key={t}
+            className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+          >
+            {t}
+            <button onClick={() => setTags((prev) => prev.filter((x) => x !== t))}>
+              <X size={9} />
+            </button>
+          </span>
+        ))}
+        <input
+          value={tagInput}
+          onChange={(e) => setTagInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault()
+              addTag(tagInput)
+            }
+          }}
+          onBlur={() => { if (tagInput.trim()) addTag(tagInput) }}
+          placeholder="Add tag, press Enter"
+          className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => void handleSave()}
+          disabled={saving || !content.trim()}
+          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Check size={11} />
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 type SummaryMap = Partial<Record<SummaryMode, string>>
@@ -247,6 +353,7 @@ interface DocumentReaderProps {
 }
 
 export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
+  const qc = useQueryClient()
   const { data: doc, isLoading } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
@@ -255,6 +362,8 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
+  const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
+  const [notedSections, setNotedSections] = useState<Set<string>>(new Set())
 
   function handleExplain(text: string, mode: ExplainMode) {
     setSheetText(text)
@@ -328,24 +437,55 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
               <p className="text-sm text-muted-foreground">No sections detected.</p>
             ) : (
               <ul className="space-y-3">
-                {doc.sections.map((section) => (
-                  <li
-                    key={section.id}
-                    className="rounded-md border border-border p-3"
-                  >
-                    <p
-                      className="text-sm font-semibold text-foreground"
-                      style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
+                {doc.sections.map((section) => {
+                  const hasNote = notedSections.has(section.id)
+                  const editorOpen = openNoteEditor === section.id
+                  return (
+                    <li
+                      key={section.id}
+                      className="rounded-md border border-border p-3"
                     >
-                      {section.heading || "(Untitled section)"}
-                    </p>
-                    {section.preview && (
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {section.preview}
-                      </p>
-                    )}
-                  </li>
-                ))}
+                      <div className="flex items-start gap-1">
+                        <p
+                          className="flex-1 text-sm font-semibold text-foreground"
+                          style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
+                        >
+                          {section.heading || "(Untitled section)"}
+                        </p>
+                        {hasNote && (
+                          <span title="Has note" className="mt-0.5 shrink-0 text-primary">
+                            <StickyNote size={12} />
+                          </span>
+                        )}
+                        <button
+                          onClick={() =>
+                            setOpenNoteEditor(editorOpen ? null : section.id)
+                          }
+                          title="Add note"
+                          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+                        >
+                          <StickyNote size={12} />
+                        </button>
+                      </div>
+                      {section.preview && (
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                          {section.preview}
+                        </p>
+                      )}
+                      {editorOpen && (
+                        <NoteEditor
+                          documentId={documentId}
+                          onSaved={() => {
+                            setNotedSections((prev) => new Set([...prev, section.id]))
+                            setOpenNoteEditor(null)
+                            void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+                          }}
+                          onCancel={() => setOpenNoteEditor(null)}
+                        />
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>

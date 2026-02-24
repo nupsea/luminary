@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, Activity } from "lucide-react"
+import { BookOpen, MessageSquare, Network, BarChart2, Activity, StickyNote } from "lucide-react"
 import { useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -9,6 +9,7 @@ import { SearchDialog } from "./components/SearchDialog"
 import Chat from "./pages/Chat"
 import Learning from "./pages/Learning"
 import Monitoring from "./pages/Monitoring"
+import Notes from "./pages/Notes"
 import Study from "./pages/Study"
 import Viz from "./pages/Viz"
 
@@ -19,6 +20,7 @@ const NAV_ITEMS = [
   { to: "/chat", icon: MessageSquare, label: "Chat" },
   { to: "/viz", icon: Network, label: "Viz" },
   { to: "/study", icon: BarChart2, label: "Study" },
+  { to: "/notes", icon: StickyNote, label: "Notes" },
   { to: "/monitoring", icon: Activity, label: "Monitoring" },
 ] as const
 
@@ -76,6 +78,7 @@ function AppShell() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/viz" element={<Viz />} />
           <Route path="/study" element={<Study />} />
+          <Route path="/notes" element={<Notes />} />
           <Route path="/monitoring" element={<Monitoring />} />
         </Routes>
       </main>

@@ -644,7 +644,7 @@
         "Left sidebar shows groups and tags from GET /notes/groups",
         "Verify in browser: open a document, click note icon on a section, save a note, confirm indicator appears; navigate to /notes, confirm note card appears"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S20a",
