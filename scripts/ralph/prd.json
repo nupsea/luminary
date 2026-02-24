@@ -523,7 +523,7 @@
         "Loading and empty states render correctly",
         "Verify in browser: open /viz tab, confirm graph renders with colored nodes (after ingesting a document with entity extraction complete)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S16b",

@@ -1,3 +1,13 @@
+## 2026-02-25T01:00:00+10:00 - S16a - Viz tab — basic Sigma.js knowledge graph rendering
+- Implemented: npm install sigma graphology @react-sigma/core graphology-layout-forceatlas2; src/pages/Viz.tsx (TanStack Query fetches GET /graph/{documentId} or GET /graph when activeDocumentId is null; buildGraphologyGraph() converts API nodes to Graphology nodes with random x/y, linear size scaling 4-20, TYPE_COLORS palette, adds edges with deduplication check; forceAtlas2.assign() 100 iterations with inferSettings(); SigmaContainer renders the result; loading/error/empty states)
+- Files changed: frontend/src/pages/Viz.tsx, frontend/package.json (sigma, graphology, @react-sigma/core, graphology-layout-forceatlas2)
+- Learnings:
+  - forceAtlas2.assign(g, {iterations: 100, settings: forceAtlas2.inferSettings(g)}) works for synchronous layout (not syncLayout())
+  - Graphology deduplication: check g.hasEdge(source, target) before addEdge to avoid MultiGraph issues
+  - SigmaContainer from @react-sigma/core accepts graph prop directly; no need for custom sigma instance hook for basic rendering
+  - Bundle size warning: Sigma.js + Graphology adds ~175KB gzipped — acceptable for a WebGL graph component
+---
+
 ## 2026-02-25T00:00:00+10:00 - S15b - GLiNER entity extraction — NER pipeline wired into ingestion workflow
 - Implemented: uv add gliner; app/services/ner.py (EntityExtractor — lazy-loads GLiNER 'urchade/gliner_multi_pii-v1' to DATA_DIR/models/gliner/; extract() batches over chunks, calls model.predict_entities() with threshold=0.5, normalizes entity name to lowercase, generates deterministic UUID5 per doc+name, skips empty chunks); entity_extract_node in ingestion.py (replaces stub: calls EntityExtractor.extract(), upserts Document node to Kuzu, upserts entities + MENTIONED_IN edges, calculates CO_OCCURS edges via itertools.combinations for chunk-level co-occurrence; non-fatal exception handling); tests/test_ner.py (6 unit tests with mocked GLiNER model + 1 skipped integration test)
 - Files changed: backend/app/services/ner.py (new), backend/app/workflows/ingestion.py, backend/tests/test_ner.py (new), backend/pyproject.toml (gliner dependency)
