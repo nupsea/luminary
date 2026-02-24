@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -93,7 +93,11 @@ def test_parse_teachback_response_valid_json():
 
 def test_parse_teachback_response_strips_markdown_fences():
     """_parse_teachback_response strips ```json ... ``` fences."""
-    raw = '```json\n{"score": 80, "correct_points": [], "missing_points": [], "misconceptions": []}\n```'
+    raw = (
+        '```json\n'
+        '{"score": 80, "correct_points": [], "missing_points": [], "misconceptions": []}\n'
+        '```'
+    )
     result = _parse_teachback_response(raw)
     assert result["score"] == 80
 

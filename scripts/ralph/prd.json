@@ -763,7 +763,7 @@
         "avg_retention uses e^(-t/S) formula",
         "uv run pytest tests/test_study_stats.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S23b",

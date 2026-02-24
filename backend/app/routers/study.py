@@ -6,12 +6,15 @@ Routes:
   POST /study/sessions/{id}/end      — close a session and return summary
   GET  /study/gaps/{document_id}     — weak flashcard areas grouped by section
   POST /study/teachback              — LLM evaluation of user's teach-back explanation
+  GET  /study/stats/{document_id}    — progress stats: mastery, retention, streak
+  GET  /study/history                — daily study activity for the last N days
 """
 
 import json
 import logging
+import math
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -117,6 +120,34 @@ class TeachbackResponse(BaseModel):
     missing_points: list[str]
     misconceptions: list[str]
     correction_flashcard_id: str | None = None
+
+
+class SectionStabilityItem(BaseModel):
+    section_heading: str | None
+    avg_stability: float
+    card_count: int
+
+
+class CardStabilityItem(BaseModel):
+    card_id: str
+    stability: float
+    due_date: str | None
+
+
+class StudyStatsResponse(BaseModel):
+    total_cards: int
+    cards_mastered: int
+    avg_retention: float
+    current_streak: int
+    total_study_time_minutes: float
+    per_section_stability: list[SectionStabilityItem]
+    all_card_stabilities: list[CardStabilityItem]
+
+
+class DailyHistoryItem(BaseModel):
+    date: str  # YYYY-MM-DD
+    cards_reviewed: int
+    study_time_minutes: float
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +359,158 @@ async def teachback(
         misconceptions=misconceptions,
         correction_flashcard_id=correction_card_id,
     )
+
+
+@router.get("/stats/{document_id}", response_model=StudyStatsResponse)
+async def get_study_stats(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> StudyStatsResponse:
+    """Return progress statistics for a document."""
+    now = datetime.utcnow()
+
+    # --- All flashcards for the document ---
+    cards_result = await db.execute(
+        select(FlashcardModel).where(FlashcardModel.document_id == document_id)
+    )
+    all_cards = cards_result.scalars().all()
+    total_cards = len(all_cards)
+
+    # --- Mastered cards ---
+    cards_mastered = sum(
+        1
+        for c in all_cards
+        if c.fsrs_state == "review" and c.fsrs_stability > 10.0
+    )
+
+    # --- Average retention: e^(-t/S) for reviewed cards ---
+    retention_values: list[float] = []
+    for c in all_cards:
+        if c.last_review and c.fsrs_stability > 0:
+            days_since = (now - c.last_review).total_seconds() / 86400
+            retention_values.append(math.exp(-days_since / c.fsrs_stability))
+    avg_retention = (
+        round(sum(retention_values) / len(retention_values), 4)
+        if retention_values
+        else 0.0
+    )
+
+    # --- Study sessions for this document ---
+    sessions_result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.document_id == document_id)
+    )
+    sessions = sessions_result.scalars().all()
+
+    # --- Total study time (minutes) ---
+    total_study_time_minutes = sum(
+        (s.ended_at - s.started_at).total_seconds() / 60
+        for s in sessions
+        if s.ended_at
+    )
+
+    # --- Current streak (consecutive days with a completed session, ending today/yesterday) ---
+    completed_dates: set[date] = {
+        s.ended_at.date() for s in sessions if s.ended_at
+    }
+    streak = 0
+    check_date = now.date()
+    # Allow streak if today or yesterday has a session
+    if check_date not in completed_dates:
+        check_date = check_date - timedelta(days=1)
+    while check_date in completed_dates:
+        streak += 1
+        check_date -= timedelta(days=1)
+    current_streak = streak
+
+    # --- Per-section stability ---
+    chunk_ids = [c.chunk_id for c in all_cards]
+    per_section: list[SectionStabilityItem] = []
+    if chunk_ids:
+        chunk_stmt = (
+            select(ChunkModel, SectionModel.heading)
+            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
+            .where(ChunkModel.id.in_(chunk_ids))
+        )
+        chunk_rows = await db.execute(chunk_stmt)
+        chunk_to_heading: dict[str, str | None] = {}
+        for chunk, heading in chunk_rows:
+            chunk_to_heading[chunk.id] = heading
+
+        section_groups: dict[str | None, list[FlashcardModel]] = {}
+        for c in all_cards:
+            heading = chunk_to_heading.get(c.chunk_id)
+            section_groups.setdefault(heading, []).append(c)
+
+        for heading, group in section_groups.items():
+            avg_stab = sum(c.fsrs_stability for c in group) / len(group)
+            per_section.append(
+                SectionStabilityItem(
+                    section_heading=heading,
+                    avg_stability=round(avg_stab, 4),
+                    card_count=len(group),
+                )
+            )
+        per_section.sort(key=lambda x: x.avg_stability)
+
+    # --- All card stabilities ---
+    all_card_stabilities = [
+        CardStabilityItem(
+            card_id=c.id,
+            stability=round(c.fsrs_stability, 4),
+            due_date=c.due_date.isoformat() if c.due_date else None,
+        )
+        for c in all_cards
+    ]
+
+    return StudyStatsResponse(
+        total_cards=total_cards,
+        cards_mastered=cards_mastered,
+        avg_retention=avg_retention,
+        current_streak=current_streak,
+        total_study_time_minutes=round(total_study_time_minutes, 2),
+        per_section_stability=per_section,
+        all_card_stabilities=all_card_stabilities,
+    )
+
+
+@router.get("/history", response_model=list[DailyHistoryItem])
+async def get_study_history(
+    document_id: str | None = None,
+    days: int = 90,
+    db: AsyncSession = Depends(get_db),
+) -> list[DailyHistoryItem]:
+    """Return daily study activity for the last N days."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    stmt = select(StudySessionModel).where(
+        StudySessionModel.started_at >= cutoff,
+        StudySessionModel.ended_at.is_not(None),
+    )
+    if document_id:
+        stmt = stmt.where(StudySessionModel.document_id == document_id)
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    # Group by date
+    daily: dict[date, dict] = {}
+    for s in sessions:
+        if not s.ended_at:
+            continue
+        d = s.started_at.date()
+        if d not in daily:
+            daily[d] = {"cards_reviewed": 0, "study_time_minutes": 0.0}
+        daily[d]["cards_reviewed"] += s.cards_reviewed
+        daily[d]["study_time_minutes"] += (
+            (s.ended_at - s.started_at).total_seconds() / 60
+        )
+
+    return [
+        DailyHistoryItem(
+            date=d.isoformat(),
+            cards_reviewed=v["cards_reviewed"],
+            study_time_minutes=round(v["study_time_minutes"], 2),
+        )
+        for d, v in sorted(daily.items())
+    ]
 
 
 # ---------------------------------------------------------------------------
