@@ -316,4 +316,5 @@ async def get_document_status(document_id: str):
         "stage": stage,
         "progress_pct": progress_pct,
         "done": stage == "complete",
+        "error_message": "Ingestion failed. Please try again." if stage == "error" else None,
     }

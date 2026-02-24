@@ -1,3 +1,13 @@
+## 2026-02-24T17:00:00+10:00 - S11 - Upload flow — file drag-and-drop and ingestion progress toast
+- Implemented: src/components/library/UploadDialog.tsx (Dialog with Upload File + Paste Text tabs; drag-and-drop with dragover/dragleave/drop events; file picker; Paste text with label + content_type selector; calls POST /ingest as multipart FormData for both paths; pollStatus() uses setInterval to poll GET /documents/{id}/status every 2s, updates sonner toast loading message per stage, dismisses with success or error); installed sonner, added <Toaster /> to App.tsx; backend status endpoint updated to include error_message: str|None
+- Files changed: frontend/src/components/library/UploadDialog.tsx, frontend/src/pages/Learning.tsx (Add Content button), frontend/src/App.tsx (Toaster), backend/app/routers/documents.py (error_message in status response), frontend/package.json (sonner)
+- Learnings:
+  - sonner@2 peer-dep issue with React 19 — use --legacy-peer-deps; works fine at runtime
+  - Paste text: create a File from a Blob and post via FormData — same POST /ingest endpoint handles both
+  - pollStatus cleanup: clearInterval must be called before toast.success/toast.error to prevent racing
+  - void operator needed in JSX onClick for async handlers: onClick={() => void handleSubmit()} to satisfy noFloatingPromises-style TSC rules
+---
+
 ## 2026-02-24T16:00:00+10:00 - S10b - Library catalog UI — document grid, search, filter, sort in Learning tab
 - Implemented: src/components/ui/card.tsx (Tailwind-only Card primitive), src/components/ui/badge.tsx (Badge with gray/blue/indigo/green variants), src/components/library/types.ts (DocumentListItem, ContentType, LearningStatus, SortOption, ViewMode types), src/components/library/utils.ts (CONTENT_TYPE_ICONS, STATUS_LABELS, STATUS_VARIANTS, formatWordCount, relativeDate), src/components/library/SearchBar.tsx, ViewToggle.tsx, FilterBar.tsx, SortSelect.tsx, DocumentCard.tsx, DocumentRow.tsx; updated src/pages/Learning.tsx (TanStack Query fetch, client-side filter+sort, recently accessed section, loading skeleton with animate-pulse, empty state with CTA)
 - Files changed: frontend/src/components/ui/card.tsx, badge.tsx, frontend/src/components/library/types.ts, utils.ts, SearchBar.tsx, ViewToggle.tsx, FilterBar.tsx, SortSelect.tsx, DocumentCard.tsx, DocumentRow.tsx, frontend/src/pages/Learning.tsx

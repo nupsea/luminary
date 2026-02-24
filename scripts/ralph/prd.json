@@ -387,7 +387,7 @@
         "Error toast appears if ingestion fails",
         "Verify in browser: drag a TXT file to the upload zone, submit, confirm toast appears and updates through stages"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S12",

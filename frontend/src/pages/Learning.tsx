@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
-import { BookPlus } from "lucide-react"
+import { BookPlus, Plus } from "lucide-react"
 import { useState } from "react"
 import { FilterBar } from "@/components/library/FilterBar"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
+import { UploadDialog } from "@/components/library/UploadDialog"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { DocumentCard } from "@/components/library/DocumentCard"
 import { DocumentRow } from "@/components/library/DocumentRow"
@@ -96,6 +97,7 @@ export default function Learning() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
+  const [uploadOpen, setUploadOpen] = useState(false)
 
   const { data: documents, isLoading } = useQuery({
     queryKey: ["documents"],
@@ -123,6 +125,13 @@ export default function Learning() {
         <SearchBar value={search} onChange={setSearch} />
         <SortSelect value={sort} onChange={setSort} />
         <ViewToggle value={viewMode} onChange={setViewMode} />
+        <button
+          onClick={() => setUploadOpen(true)}
+          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Plus size={14} />
+          Add Content
+        </button>
       </div>
 
       <FilterBar selected={selectedTypes} onChange={setSelectedTypes} />
@@ -130,7 +139,7 @@ export default function Learning() {
       {isLoading ? (
         <LoadingSkeleton />
       ) : allDocs.length === 0 ? (
-        <EmptyState onAdd={() => {}} />
+        <EmptyState onAdd={() => setUploadOpen(true)} />
       ) : (
         <>
           {/* Recently accessed */}
@@ -180,6 +189,8 @@ export default function Learning() {
           </section>
         </>
       )}
+
+      <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>
   )
 }

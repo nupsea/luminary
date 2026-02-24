@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BookOpen, MessageSquare, Network, BarChart2, Activity } from "lucide-react"
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
+import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
 import Chat from "./pages/Chat"
 import Learning from "./pages/Learning"
@@ -58,6 +59,7 @@ function App() {
           </main>
         </div>
       </BrowserRouter>
+      <Toaster position="bottom-right" richColors />
     </QueryClientProvider>
   )
 }
