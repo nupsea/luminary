@@ -15,17 +15,17 @@ Read this file as a MAP. Follow the links below for deeper context.
 
 ## Your Task Loop
 
-1. Read `prd.json` (same directory as this file) — tech stack, stories, data model
-2. Read `progress.txt` — check `## Codebase Patterns` section first
-3. Check you are on branch `prd.branchName`. Create from main if missing.
+1. Read `scripts/ralph/prd.json` — tech stack, stories, data model
+2. Read `scripts/ralph/progress.txt` — check `## Codebase Patterns` section first (create file if missing)
+3. Check you are on branch matching `prd.branchName`. Create from main if missing.
 4. Pick the **lowest priority number** story where `passes: false`
 5. Implement that single story — stay focused, minimal changes
-6. Run quality checks: `make ci` (or individually: `uv run ruff check .`, `uv run pytest`, `npx tsc --noEmit`)
+6. Run quality checks. If `Makefile` exists: `make ci`. Otherwise run individually: `cd backend && uv run ruff check . && uv run pytest`, `cd frontend && npx tsc --noEmit && npm run build`
 7. If a check fails: read the error message — it contains remediation instructions. Fix, do not bypass.
 8. Commit with message: `feat: [Story ID] - [Story Title]`
-9. Set `passes: true` for the completed story in `prd.json`
-10. Append progress to `progress.txt`
-11. Run `python scripts/ralph/doc_gardener.py` — fix any stale doc warnings before stopping
+9. Set `passes: true` for the completed story in `scripts/ralph/prd.json`
+10. Append progress to `scripts/ralph/progress.txt`
+11. If `scripts/ralph/doc_gardener.py` exists: run `python scripts/ralph/doc_gardener.py` and fix any stale doc warnings. Skip this step if the file does not exist yet.
 
 ## Ten Invariants (enforced mechanically — never violate)
 

@@ -1,16 +1,21 @@
+import asyncio
 import logging
 import logging.config
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from pythonjsonlogger.json import JsonFormatter
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.database import get_engine
+from app.database import get_db, get_engine
 from app.db_init import create_all_tables
+from app.models import SettingsModel
 from app.routers.documents import router as documents_router
 from app.routers.qa import router as qa_router
 from app.routers.summarize import router as summarize_router
@@ -114,4 +119,62 @@ async def read_settings(settings: Settings = Depends(get_settings)):
         "GOOGLE_API_KEY": mask(settings.GOOGLE_API_KEY),
         "LANGFUSE_PUBLIC_KEY": mask(settings.LANGFUSE_PUBLIC_KEY),
         "LANGFUSE_SECRET_KEY": mask(settings.LANGFUSE_SECRET_KEY),
+    }
+
+
+@app.patch("/settings")
+async def patch_settings(
+    updates: dict[str, str],
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    # TODO: migrate to OS keychain — see tech-debt-tracker.md
+    for key, value in updates.items():
+        setting = SettingsModel(key=key, value=value)
+        await session.merge(setting)
+    await session.commit()
+    return {"updated": list(updates.keys())}
+
+
+class OllamaPullRequest(BaseModel):
+    model: str
+
+
+@app.post("/settings/ollama/pull")
+async def pull_ollama_model(request: OllamaPullRequest) -> StreamingResponse:
+    model = request.model.strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+
+    async def _stream():
+        proc = await asyncio.create_subprocess_exec(
+            "ollama",
+            "pull",
+            model,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+        async for line in proc.stdout:
+            yield f"data: {line.decode().rstrip()}\n\n"
+        await proc.wait()
+        yield "data: done\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@app.get("/settings/storage")
+async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
+    data_dir = Path(settings.DATA_DIR).expanduser()
+
+    def dir_size_mb(path: Path) -> float:
+        if not path.exists():
+            return 0.0
+        total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+        return round(total / (1024 * 1024), 2)
+
+    return {
+        "data_dir": str(data_dir),
+        "raw_mb": dir_size_mb(data_dir / "raw"),
+        "vectors_mb": dir_size_mb(data_dir / "vectors"),
+        "models_mb": dir_size_mb(data_dir / "models"),
     }

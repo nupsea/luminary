@@ -1,3 +1,13 @@
+## 2026-02-24T20:00:00+10:00 - S14 - LLM mode indicator badge and Settings drawer
+- Implemented: frontend/src/components/SettingsDrawer.tsx (LLMModeBadge component with colored dot indicator — green=local, blue=cloud, red=unavailable — refetches every 30s via TanStack Query, shown in sidebar bottom; SettingsDrawer right-side panel 400px — Section 1: LLM Mode with Local/Cloud radio, local sub-section lists available Ollama models + Pull model input that streams SSE output, cloud sub-section tabs OpenAI/Anthropic/Google each with masked password input + Save button that calls PATCH /settings; Section 2: Storage shows DATA_DIR + raw/vectors/models MB from GET /settings/storage; Section 3: Privacy notice); App.tsx updated to import LLMModeBadge + SettingsDrawer; backend main.py: PATCH /settings (upserts to SQLite settings table with TODO keychain comment), POST /settings/ollama/pull (asyncio subprocess streams ollama pull output as SSE), GET /settings/storage (returns data_dir + dir sizes in MB)
+- Files changed: frontend/src/components/SettingsDrawer.tsx (new), frontend/src/App.tsx, backend/app/main.py
+- Learnings:
+  - Sidebar bottom slot: use mt-auto inside flex-col to push badge to bottom of nav
+  - SSE streaming from asyncio subprocess: async for line in proc.stdout yields bytes; decode + rstrip + yield as "data: ...\n\n"
+  - PATCH /settings with dict[str, str] body: Pydantic validates the body; session.merge(SettingsModel) upserts by primary key
+  - pullScrollRef.current?.scrollTo({ top: scrollHeight }) in setTimeout(0) ensures DOM update completes before scrolling
+---
+
 ## 2026-02-24T19:00:00+10:00 - S13 - Chat tab — streaming Q&A with citation chips and confidence badges
 - Implemented: src/pages/Chat.tsx full replacement — scope selector (This document / All my content radio); model selector (fetches GET /settings/llm, populates from available_local_models + available cloud_providers); message list (user right-aligned slate-100, assistant left-aligned white card); SSE stream consumed via fetch+ReadableStream, token appended in real-time, done event parses citations+confidence; citation chips rendered as muted badge spans with document_title > section_heading (p.N); confidence Badge using green/blue/gray variants; NOT_FOUND shows blue info text; empty state with 3 example question chips; auto-resize textarea; Enter to send, Shift+Enter for newline; error message on fetch failure
 - Files changed: frontend/src/pages/Chat.tsx

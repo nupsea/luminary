@@ -440,7 +440,7 @@
         "Pull model button triggers ollama pull",
         "Verify in browser: confirm badge visible, click it, confirm drawer opens with LLM mode sections"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S_ARCH_a",

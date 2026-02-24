@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BookOpen, MessageSquare, Network, BarChart2, Activity } from "lucide-react"
+import { useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
+import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import Chat from "./pages/Chat"
 import Learning from "./pages/Learning"
 import Monitoring from "./pages/Monitoring"
@@ -20,25 +22,33 @@ const NAV_ITEMS = [
 ] as const
 
 function Sidebar() {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
   return (
-    <nav className="flex h-full w-16 flex-col items-center gap-2 bg-sidebar py-4">
-      {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={to === "/"}
-          className={({ isActive }) =>
-            cn(
-              "flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-accent",
-              isActive && "bg-accent",
-            )
-          }
-          title={label}
-        >
-          <Icon size={20} />
-        </NavLink>
-      ))}
-    </nav>
+    <>
+      <nav className="flex h-full w-16 flex-col items-center gap-2 bg-sidebar py-4">
+        {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === "/"}
+            className={({ isActive }) =>
+              cn(
+                "flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-accent",
+                isActive && "bg-accent",
+              )
+            }
+            title={label}
+          >
+            <Icon size={20} />
+          </NavLink>
+        ))}
+        <div className="mt-auto">
+          <LLMModeBadge onClick={() => setSettingsOpen(true)} />
+        </div>
+      </nav>
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    </>
   )
 }
 
