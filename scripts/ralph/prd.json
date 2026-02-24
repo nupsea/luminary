@@ -626,7 +626,7 @@
         "GET /notes/groups returns correct counts",
         "uv run pytest tests/test_notes.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S19b",

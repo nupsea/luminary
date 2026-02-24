@@ -19,6 +19,7 @@ from app.models import SettingsModel
 from app.routers.documents import router as documents_router
 from app.routers.explain import router as explain_router
 from app.routers.graph import router as graph_router
+from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
 from app.routers.search import router as search_router
 from app.routers.summarize import router as summarize_router
@@ -67,6 +68,7 @@ app.add_middleware(
 app.include_router(documents_router)
 app.include_router(explain_router)
 app.include_router(graph_router)
+app.include_router(notes_router)
 app.include_router(qa_router)
 app.include_router(search_router)
 app.include_router(summarize_router)
