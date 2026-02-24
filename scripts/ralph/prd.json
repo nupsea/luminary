@@ -796,7 +796,7 @@
         "FastAPI requests appear as root spans in Phoenix",
         "uv run pytest tests/test_telemetry.py exits 0 (mock the OTel exporter, assert span attributes)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S24b",

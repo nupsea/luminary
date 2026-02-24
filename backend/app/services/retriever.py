@@ -4,6 +4,7 @@ from typing import Literal
 from sqlalchemy import text
 
 from app.database import get_session_factory
+from app.telemetry import trace_retrieval
 from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -136,9 +137,14 @@ class HybridRetriever:
         k: int,
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF."""
-        vector_results = self.vector_search(query, document_ids, k=20)
-        keyword_results = await self.keyword_search(query, document_ids, k=20)
-        return self.rrf_merge(vector_results, keyword_results, k=k)
+        with trace_retrieval("hybrid", query=query) as span:
+            vector_results = self.vector_search(query, document_ids, k=20)
+            keyword_results = await self.keyword_search(query, document_ids, k=20)
+            results = self.rrf_merge(vector_results, keyword_results, k=k)
+            span.set_attribute("retrieval.chunk_count", len(results))
+            if results:
+                span.set_attribute("retrieval.top_score", round(results[0].score, 4))
+        return results
 
 
 _retriever: HybridRetriever | None = None

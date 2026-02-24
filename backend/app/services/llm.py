@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 import litellm
 
 from app.config import Settings, get_settings
+from app.telemetry import trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,16 @@ class LLMService:
         kwargs = self._build_kwargs(effective_model, messages, settings)
 
         if not stream:
-            response = await litellm.acompletion(**kwargs)
-            return response.choices[0].message.content or ""
+            with trace_llm_call("generate", model=effective_model) as span:
+                response = await litellm.acompletion(**kwargs)
+                content = response.choices[0].message.content or ""
+                usage = getattr(response, "usage", None)
+                if usage:
+                    span.set_attribute("llm.prompt_tokens", getattr(usage, "prompt_tokens", 0))
+                    span.set_attribute(
+                        "llm.completion_tokens", getattr(usage, "completion_tokens", 0)
+                    )
+            return content
 
         return self._token_stream(kwargs)
 

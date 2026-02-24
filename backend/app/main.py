@@ -8,6 +8,8 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from pydantic import BaseModel
 from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,8 +50,11 @@ async def lifespan(app: FastAPI):
     data_dir = Path(settings.DATA_DIR).expanduser()
     for subdir in ("raw", "models", "vectors"):
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
-    await create_all_tables(get_engine())
+    engine = get_engine()
+    await create_all_tables(engine)
     setup_tracing(settings.PHOENIX_ENABLED)
+    FastAPIInstrumentor.instrument_app(app)
+    SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
     get_graph_service()  # initialise KuzuService and create schema on startup
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
