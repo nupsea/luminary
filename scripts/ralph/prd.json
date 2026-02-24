@@ -590,7 +590,7 @@
         "Glossary prompt instructs LLM to output only JSON",
         "uv run pytest tests/test_explain.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S18b",
