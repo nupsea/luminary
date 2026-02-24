@@ -506,7 +506,7 @@
         "Document stage set to 'complete' after entity extraction",
         "uv run pytest tests/test_ner.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S16a",

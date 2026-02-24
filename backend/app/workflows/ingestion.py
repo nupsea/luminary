@@ -267,8 +267,59 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
 
 
 async def entity_extract_node(state: IngestionState) -> IngestionState:
-    logger.info("entity extraction pending (S15b)", extra={"doc_id": state["document_id"]})
-    await _update_stage(state["document_id"], "complete")
+    doc_id = state["document_id"]
+    chunks = state.get("chunks") or []
+    try:
+        from itertools import combinations  # noqa: PLC0415
+
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.models import DocumentModel  # noqa: PLC0415
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+        from app.services.ner import get_entity_extractor  # noqa: PLC0415
+
+        extractor = get_entity_extractor()
+        entities = extractor.extract(chunks)
+
+        graph = get_graph_service()
+
+        # Upsert the document node in Kuzu
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(DocumentModel.title, DocumentModel.content_type).where(
+                    DocumentModel.id == doc_id
+                )
+            )
+            row = result.first()
+            if row:
+                graph.upsert_document(doc_id, row.title or "", row.content_type or "notes")
+
+        # Upsert entities and add mentions
+        for ent in entities:
+            graph.upsert_entity(ent["id"], ent["name"], ent["type"])
+            graph.add_mention(ent["id"], doc_id)
+
+        # Co-occurrence: entities sharing the same chunk
+        chunk_entities: dict[str, list[str]] = {}
+        for ent in entities:
+            chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
+
+        for chunk_ent_ids in chunk_entities.values():
+            for eid_a, eid_b in combinations(chunk_ent_ids, 2):
+                graph.add_co_occurrence(eid_a, eid_b, doc_id)
+
+        logger.info(
+            "Entity extraction complete",
+            extra={"doc_id": doc_id, "num_entities": len(entities)},
+        )
+    except Exception as exc:
+        logger.warning(
+            "entity_extract_node failed (non-fatal, proceeding to complete)",
+            extra={"doc_id": doc_id},
+            exc_info=exc,
+        )
+
+    await _update_stage(doc_id, "complete")
     return {**state, "status": "complete"}
 
 

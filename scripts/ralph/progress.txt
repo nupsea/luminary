@@ -1,3 +1,13 @@
+## 2026-02-25T00:00:00+10:00 - S15b - GLiNER entity extraction — NER pipeline wired into ingestion workflow
+- Implemented: uv add gliner; app/services/ner.py (EntityExtractor — lazy-loads GLiNER 'urchade/gliner_multi_pii-v1' to DATA_DIR/models/gliner/; extract() batches over chunks, calls model.predict_entities() with threshold=0.5, normalizes entity name to lowercase, generates deterministic UUID5 per doc+name, skips empty chunks); entity_extract_node in ingestion.py (replaces stub: calls EntityExtractor.extract(), upserts Document node to Kuzu, upserts entities + MENTIONED_IN edges, calculates CO_OCCURS edges via itertools.combinations for chunk-level co-occurrence; non-fatal exception handling); tests/test_ner.py (6 unit tests with mocked GLiNER model + 1 skipped integration test)
+- Files changed: backend/app/services/ner.py (new), backend/app/workflows/ingestion.py, backend/tests/test_ner.py (new), backend/pyproject.toml (gliner dependency)
+- Learnings:
+  - GLiNER predict_entities() returns list of {text, label, score} dicts — use threshold=0.5 to filter low-confidence predictions
+  - uuid.uuid5(NAMESPACE_DNS, f"{doc_id}:{name}") creates deterministic entity IDs for deduplication across chunks
+  - Lazy imports inside entity_extract_node with # noqa: PLC0415 comments avoid circular imports and defer heavy imports to runtime
+  - itertools.combinations(chunk_ent_ids, 2) generates all entity pairs for co-occurrence edges
+---
+
 ## 2026-02-24T23:00:00+10:00 - S15a - Kuzu graph database — schema setup and GET /graph endpoints
 - Implemented: uv add kuzu; app/services/graph.py (KuzuService — _create_schema creates Entity/Document node tables and MENTIONED_IN/CO_OCCURS/RELATED_TO edge tables; upsert_entity checks existence and increments frequency; upsert_document; add_mention with increment; add_co_occurrence with increment; delete_document deletes MENTIONED_IN edges then Document node; get_graph_for_document returns nodes+edges; get_graph_for_documents with IN clause for multi-doc; _get_co_occurrence_edges helper); app/routers/graph.py (GET /graph/{document_id}, GET /graph?doc_ids=); app/main.py (import graph_router + get_graph_service, initialize in lifespan, include router); tests/test_graph.py (13 tests: 8 unit tests for KuzuService, 5 endpoint integration tests)
 - Files changed: backend/app/services/graph.py (new), backend/app/routers/graph.py (new), backend/app/main.py, backend/tests/test_graph.py (new), backend/pyproject.toml (kuzu dependency)
