@@ -1,3 +1,14 @@
+## 2026-02-24T15:00:00+10:00 - S10a - GET /documents, PATCH, and DELETE endpoints with derived fields
+- Implemented: GET /documents with DocumentListItem Pydantic model (correlated scalar subqueries for summary_one_sentence, flashcard_count, summary_count, study_session_count); _derive_learning_status() helper (studied > flashcards_generated > summarized > not_started); PATCH /documents/{id} with PatchDocumentRequest(title, tags); DELETE /documents/{id} manually deleting child rows from all related tables + FTS5 virtual table + LanceDB; delete_document() method on LanceDBService; tags column added to DocumentModel; PRAGMA foreign_keys = ON in db_init; tests/test_documents.py (18 tests: 4 unit tests for _derive_learning_status, 7 GET endpoint tests, 3 PATCH tests, 4 DELETE tests)
+- Files changed: backend/app/routers/documents.py, backend/app/services/vector_store.py, backend/app/models.py, backend/app/db_init.py, backend/tests/test_documents.py
+- Learnings:
+  - SQLAlchemy correlated scalar subqueries: use .correlate(ParentModel).scalar_subquery() for efficient single-query derived field computation
+  - LanceDB table.delete() takes a SQL WHERE clause string like "document_id = 'abc'" (no parameterization API available)
+  - FTS5 virtual table deletion requires raw SQL text() since it's not an ORM model: DELETE FROM chunks_fts WHERE document_id = :id
+  - SQLAlchemy delete() import: from sqlalchemy import delete (not session.delete which is for ORM objects); use delete(Model).where(...) for bulk deletes
+  - GET "" route (empty string path) on router with prefix="/documents" correctly maps to GET /documents
+---
+
 ## 2026-02-24T14:00:00+10:00 - S09 - Grounded Q&A with citations, confidence, and Phoenix tracing
 - Implemented: app/telemetry.py (setup_tracing — launches Phoenix in background thread, registers OTLPSpanExporter, get_tracer returns opentelemetry tracer), app/services/qa.py (QAService — stream_answer async generator, _build_context, _split_response, _store_qa, _fetch_doc_titles; NOT_FOUND_IN_CONTENT handling; traces retrieve+generate spans with chunk_count/model_name attributes), app/routers/qa.py (POST /qa, QARequest Pydantic model with question/document_ids/scope/model), registered qa_router + called setup_tracing in lifespan in main.py, tests/test_qa.py (16 tests: 4 _split_response unit, 2 _build_context unit, 2 prompt unit, 3 stream_answer service tests, 2 NOT_FOUND tests, 3 endpoint integration tests)
 - Files changed: backend/app/telemetry.py, backend/app/services/qa.py, backend/app/routers/qa.py, backend/app/main.py, backend/tests/test_qa.py, backend/pyproject.toml (added arize-phoenix, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-grpc)

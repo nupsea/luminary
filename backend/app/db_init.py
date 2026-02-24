@@ -34,4 +34,5 @@ async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(FTS5_DDL))
+        await conn.execute(text("PRAGMA foreign_keys = ON"))
     logger.info("Database tables and FTS5 index initialized")

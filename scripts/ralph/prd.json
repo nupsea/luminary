@@ -351,7 +351,7 @@
         "DELETE also removes vectors from LanceDB",
         "uv run pytest tests/test_documents.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S10b",

@@ -56,6 +56,12 @@ class LanceDBService:
         )
         logger.info("Upserted %d chunks to LanceDB", len(chunks))
 
+    def delete_document(self, document_id: str) -> None:
+        """Delete all vectors for the given document_id."""
+        table = self._get_table()
+        table.delete(f"document_id = '{document_id}'")
+        logger.info("Deleted vectors for document %s from LanceDB", document_id)
+
 
 _lancedb_service: LanceDBService | None = None
 

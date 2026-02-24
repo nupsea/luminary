@@ -23,6 +23,7 @@ class DocumentModel(Base):
     file_path: Mapped[str] = mapped_column(String, nullable=False)
     # parsing|chunking|embedding|complete|error
     stage: Mapped[str] = mapped_column(String, default="parsing")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
