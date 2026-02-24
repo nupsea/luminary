@@ -714,7 +714,7 @@
         "Session complete screen shows reviewed count and next review date",
         "Verify in browser: start a study session, confirm card flip animation, rate a card, confirm progress bar updates"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S22a",

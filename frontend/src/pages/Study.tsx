@@ -5,6 +5,8 @@
  *  - Generate panel: count selector, scope (full/section), Generate button
  *  - Flashcard list: show/hide answer, inline edit, delete with confirmation
  *  - Bottom bar: card count, Start Studying (S21b), CSV export
+ * Study session (S21b):
+ *  - Full-screen StudySession replaces tab content when studying
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -23,6 +25,7 @@ import {
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { useAppStore } from "@/store"
+import { StudySession } from "@/components/StudySession"
 
 const API_BASE = "http://localhost:8000"
 
@@ -361,6 +364,7 @@ function GeneratePanel({
 export default function Study() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const queryClient = useQueryClient()
+  const [studying, setStudying] = useState(false)
 
   // Flashcard list
   const { data: cards = [], isLoading: cardsLoading } = useQuery<Flashcard[]>({
@@ -420,6 +424,19 @@ export default function Study() {
   function handleExportCsv() {
     if (!activeDocumentId) return
     window.open(`${API_BASE}/flashcards/${activeDocumentId}/export/csv`, "_blank")
+  }
+
+  // Show StudySession when user clicks Start Studying
+  if (studying) {
+    return (
+      <StudySession
+        documentId={activeDocumentId}
+        onExit={() => {
+          setStudying(false)
+          void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+        }}
+      />
+    )
   }
 
   if (!activeDocumentId) {
@@ -485,9 +502,8 @@ export default function Study() {
                 Export CSV
               </button>
               <button
-                disabled
-                title="Study sessions coming in S21b"
-                className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground opacity-50 cursor-not-allowed"
+                onClick={() => setStudying(true)}
+                className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 <PlayCircle size={14} />
                 Start Studying
