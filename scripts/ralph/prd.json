@@ -780,7 +780,7 @@
         "Hovering a heatmap cell shows section name and stability",
         "Verify in browser: open Study tab for a document with reviewed cards, confirm all 4 dashboard sections render"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S24a",

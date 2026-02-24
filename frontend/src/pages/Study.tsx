@@ -26,6 +26,7 @@ import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
+import { ProgressDashboard } from "@/components/ProgressDashboard"
 
 const API_BASE = "http://localhost:8000"
 
@@ -613,12 +614,10 @@ export default function Study() {
         }}
       />
 
-      {/* Progress section — placeholder for S23b */}
-      <section className="flex flex-col gap-2">
+      {/* Progress dashboard (S23b) */}
+      <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Progress</h2>
-        <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-          Progress dashboard coming in S23b.
-        </div>
+        <ProgressDashboard documentId={activeDocumentId} />
       </section>
     </div>
   )
