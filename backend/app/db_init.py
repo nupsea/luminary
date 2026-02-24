@@ -25,9 +25,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
 USING fts5(
     text,
     chunk_id UNINDEXED,
-    document_id UNINDEXED,
-    content=chunks,
-    content_rowid=rowid
+    document_id UNINDEXED
 )
 """
 

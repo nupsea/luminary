@@ -206,8 +206,23 @@ async def embed_node(state: IngestionState) -> IngestionState:
 
 
 async def keyword_index_node(state: IngestionState) -> IngestionState:
-    logger.info("keyword index pending (S06)", extra={"doc_id": state["document_id"]})
-    await _update_stage(state["document_id"], "indexing")
+    from sqlalchemy import text
+
+    doc_id = state["document_id"]
+    try:
+        async with get_session_factory()() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
+                    "SELECT rowid, text, id, document_id FROM chunks WHERE document_id = :doc_id"
+                ),
+                {"doc_id": doc_id},
+            )
+            await session.commit()
+        logger.info("FTS5 index populated", extra={"doc_id": doc_id})
+    except Exception as exc:
+        logger.error("keyword_index_node failed", exc_info=exc)
+    await _update_stage(doc_id, "indexing")
     return {**state, "status": "extracting"}
 
 
