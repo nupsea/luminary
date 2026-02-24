@@ -1,3 +1,14 @@
+## 2026-02-24T16:00:00+10:00 - S10b - Library catalog UI — document grid, search, filter, sort in Learning tab
+- Implemented: src/components/ui/card.tsx (Tailwind-only Card primitive), src/components/ui/badge.tsx (Badge with gray/blue/indigo/green variants), src/components/library/types.ts (DocumentListItem, ContentType, LearningStatus, SortOption, ViewMode types), src/components/library/utils.ts (CONTENT_TYPE_ICONS, STATUS_LABELS, STATUS_VARIANTS, formatWordCount, relativeDate), src/components/library/SearchBar.tsx, ViewToggle.tsx, FilterBar.tsx, SortSelect.tsx, DocumentCard.tsx, DocumentRow.tsx; updated src/pages/Learning.tsx (TanStack Query fetch, client-side filter+sort, recently accessed section, loading skeleton with animate-pulse, empty state with CTA)
+- Files changed: frontend/src/components/ui/card.tsx, badge.tsx, frontend/src/components/library/types.ts, utils.ts, SearchBar.tsx, ViewToggle.tsx, FilterBar.tsx, SortSelect.tsx, DocumentCard.tsx, DocumentRow.tsx, frontend/src/pages/Learning.tsx
+- Learnings:
+  - No Radix UI in this project (shadcn init ran but no components added) — build Card/Badge as plain Tailwind components
+  - TypeScript strict mode: noUnusedLocals + noUnusedParameters enforced — every import and param must be used
+  - TanStack Query v5: queryFn must return Promise<T>; cast res.json() explicitly to avoid unknown type
+  - LEARNING_STATUS_ORDER map uses Record<string, number> to avoid indexing issues with learning_status in sort comparator
+  - applyFiltersAndSort sorts a spread copy ([...result]) to avoid mutating the original array
+---
+
 ## 2026-02-24T15:00:00+10:00 - S10a - GET /documents, PATCH, and DELETE endpoints with derived fields
 - Implemented: GET /documents with DocumentListItem Pydantic model (correlated scalar subqueries for summary_one_sentence, flashcard_count, summary_count, study_session_count); _derive_learning_status() helper (studied > flashcards_generated > summarized > not_started); PATCH /documents/{id} with PatchDocumentRequest(title, tags); DELETE /documents/{id} manually deleting child rows from all related tables + FTS5 virtual table + LanceDB; delete_document() method on LanceDBService; tags column added to DocumentModel; PRAGMA foreign_keys = ON in db_init; tests/test_documents.py (18 tests: 4 unit tests for _derive_learning_status, 7 GET endpoint tests, 3 PATCH tests, 4 DELETE tests)
 - Files changed: backend/app/routers/documents.py, backend/app/services/vector_store.py, backend/app/models.py, backend/app/db_init.py, backend/tests/test_documents.py

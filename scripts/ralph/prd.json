@@ -369,7 +369,7 @@
         "Clicking a card sets it as active in Zustand",
         "Verify in browser: open http://localhost:5173, confirm library grid renders (empty state visible), upload a document via manual API call and confirm card appears after page refresh"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S11",
