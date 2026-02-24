@@ -747,7 +747,7 @@
         "Score and feedback sections render after submission",
         "Verify in browser: if any cards have been reviewed, confirm Weak Areas panel shows sections; toggle teach-back mode, type explanation, submit, confirm score appears"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S23a",

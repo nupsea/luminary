@@ -8,7 +8,7 @@
 
 import { AnimatePresence, motion } from "framer-motion"
 import { useEffect, useState } from "react"
-import { Loader2 } from "lucide-react"
+import { Loader2, Check, AlertTriangle, X as XIcon } from "lucide-react"
 
 const API_BASE = "http://localhost:8000"
 
@@ -24,6 +24,14 @@ interface Flashcard {
 }
 
 type Rating = "again" | "hard" | "good" | "easy"
+
+interface TeachbackResult {
+  score: number
+  correct_points: string[]
+  missing_points: string[]
+  misconceptions: string[]
+  correction_flashcard_id: string | null
+}
 
 // ---------------------------------------------------------------------------
 // API
@@ -62,6 +70,129 @@ async function submitReview(
 
 async function endSession(sessionId: string): Promise<void> {
   await fetch(`${API_BASE}/study/sessions/${sessionId}/end`, { method: "POST" })
+}
+
+async function submitTeachback(
+  flashcardId: string,
+  userExplanation: string,
+): Promise<TeachbackResult> {
+  const res = await fetch(`${API_BASE}/study/teachback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ flashcard_id: flashcardId, user_explanation: userExplanation }),
+  })
+  if (!res.ok) throw new Error("Teachback request failed")
+  return res.json() as Promise<TeachbackResult>
+}
+
+// ---------------------------------------------------------------------------
+// TeachbackPanel — textarea + submit + results
+// ---------------------------------------------------------------------------
+
+interface TeachbackPanelProps {
+  card: Flashcard
+  onNext: () => void
+}
+
+function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
+  const [explanation, setExplanation] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [result, setResult] = useState<TeachbackResult | null>(null)
+
+  async function handleSubmit() {
+    if (!explanation.trim()) return
+    setIsSubmitting(true)
+    try {
+      const res = await submitTeachback(card.id, explanation)
+      setResult(res)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  function scoreBadgeClass(score: number): string {
+    if (score >= 80) return "bg-green-100 text-green-700"
+    if (score >= 60) return "bg-amber-100 text-amber-700"
+    return "bg-red-100 text-red-700"
+  }
+
+  if (result) {
+    return (
+      <div className="flex w-full max-w-2xl flex-col gap-4">
+        <p className="text-base font-medium text-foreground">{card.question}</p>
+        <div className="flex items-center gap-2">
+          <span className={`rounded-full px-3 py-1 text-sm font-bold ${scoreBadgeClass(result.score)}`}>
+            Score: {result.score}/100
+          </span>
+        </div>
+
+        {result.correct_points.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-green-700">Correct points</p>
+            {result.correct_points.map((p, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-sm text-foreground">
+                <Check size={14} className="mt-0.5 shrink-0 text-green-600" />
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.missing_points.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-amber-700">Missing points</p>
+            {result.missing_points.map((p, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-sm text-foreground">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.misconceptions.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-red-700">Misconceptions</p>
+            {result.misconceptions.map((p, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-sm text-foreground">
+                <XIcon size={14} className="mt-0.5 shrink-0 text-red-500" />
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={onNext}
+          className="self-start rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          Next card
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex w-full max-w-2xl flex-col gap-3">
+      <p className="text-base font-medium text-foreground">{card.question}</p>
+      <p className="text-xs text-muted-foreground">Explain the answer in your own words:</p>
+      <textarea
+        value={explanation}
+        onChange={(e) => setExplanation(e.target.value)}
+        placeholder="Type your explanation here..."
+        className="h-32 resize-none rounded border border-border bg-background p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        autoFocus
+      />
+      <button
+        onClick={() => void handleSubmit()}
+        disabled={isSubmitting || !explanation.trim()}
+        className="flex items-center gap-2 self-start rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+      >
+        {isSubmitting && <Loader2 size={14} className="animate-spin" />}
+        Submit
+      </button>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +349,7 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
   const [reviewed, setReviewed] = useState(0)
   const [correct, setCorrect] = useState(0)
   const [isRating, setIsRating] = useState(false)
+  const [teachbackMode, setTeachbackMode] = useState(false)
   // Track next review date as minimum due_date across remaining cards
   const [nextReviewDate, setNextReviewDate] = useState<string | null>(null)
 
@@ -281,6 +413,21 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
     }
   }
 
+  function handleTeachbackNext() {
+    const nextIndex = currentIndex + 1
+    setReviewed(reviewed + 1)
+    if (nextIndex >= queue.length) {
+      void (async () => {
+        if (sessionId) await endSession(sessionId)
+        setSessionState("complete")
+      })()
+    } else {
+      setCurrentIndex(nextIndex)
+      setShowAnswer(false)
+      setTeachbackMode(false)
+    }
+  }
+
   async function handleBackToStudy() {
     if (sessionId && sessionState !== "complete") {
       await endSession(sessionId)
@@ -330,41 +477,63 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
     <div className="flex h-full flex-col items-center gap-6 overflow-auto px-6 py-8">
       <ProgressBar done={reviewed} total={total} />
 
-      {/* Card with AnimatePresence for slide-out between cards */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={currentCard.id}
-          initial={{ x: 300, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: -300, opacity: 0 }}
-          transition={{ duration: 0.25, ease: "easeInOut" }}
-          className="w-full max-w-2xl"
-        >
-          <FlashCard card={currentCard} showAnswer={showAnswer} />
-        </motion.div>
-      </AnimatePresence>
-
-      {/* Show Answer / Rating buttons */}
-      {!showAnswer ? (
+      {/* Mode toggle */}
+      <div className="flex rounded-md border border-border text-sm">
         <button
-          onClick={() => setShowAnswer(true)}
-          className="rounded bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          onClick={() => { setTeachbackMode(false); setShowAnswer(false) }}
+          className={`rounded-l-md px-4 py-1.5 transition-colors ${!teachbackMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
         >
-          Show Answer
+          Flashcard
         </button>
+        <button
+          onClick={() => setTeachbackMode(true)}
+          className={`rounded-r-md px-4 py-1.5 transition-colors ${teachbackMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
+        >
+          Teach-back
+        </button>
+      </div>
+
+      {teachbackMode ? (
+        <TeachbackPanel card={currentCard} onNext={handleTeachbackNext} />
       ) : (
-        <div className="flex gap-3">
-          {RATINGS.map(({ label, value, className }) => (
-            <button
-              key={value}
-              onClick={() => void handleRate(value)}
-              disabled={isRating}
-              className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
+        <>
+          {/* Card with AnimatePresence for slide-out between cards */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentCard.id}
+              initial={{ x: 300, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -300, opacity: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="w-full max-w-2xl"
             >
-              {label}
+              <FlashCard card={currentCard} showAnswer={showAnswer} />
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Show Answer / Rating buttons */}
+          {!showAnswer ? (
+            <button
+              onClick={() => setShowAnswer(true)}
+              className="rounded bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Show Answer
             </button>
-          ))}
-        </div>
+          ) : (
+            <div className="flex gap-3">
+              {RATINGS.map(({ label, value, className }) => (
+                <button
+                  key={value}
+                  onClick={() => void handleRate(value)}
+                  disabled={isRating}
+                  className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Exit button */}

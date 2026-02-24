@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   ChevronDown,
   ChevronUp,
@@ -59,6 +59,13 @@ interface DocumentSections {
   sections: SectionItem[]
 }
 
+interface GapResult {
+  section_heading: string | null
+  weak_card_count: number
+  avg_stability: number
+  sample_questions: string[]
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -73,6 +80,12 @@ async function fetchDocumentSections(documentId: string): Promise<DocumentSectio
   const res = await fetch(`${API_BASE}/documents/${documentId}`)
   if (!res.ok) return { sections: [] }
   return res.json() as Promise<DocumentSections>
+}
+
+async function fetchGaps(documentId: string): Promise<GapResult[]> {
+  const res = await fetch(`${API_BASE}/study/gaps/${documentId}`)
+  if (!res.ok) return []
+  return res.json() as Promise<GapResult[]>
 }
 
 async function generateFlashcards(req: {
@@ -265,6 +278,70 @@ function FlashcardCard({
 }
 
 // ---------------------------------------------------------------------------
+// WeakAreasPanel
+// ---------------------------------------------------------------------------
+
+function fragileBarColor(avgStability: number): string {
+  if (avgStability < 2) return "bg-red-500"
+  if (avgStability <= 5) return "bg-amber-400"
+  return "bg-green-500"
+}
+
+interface WeakAreasPanelProps {
+  documentId: string
+  onSelectSection: (heading: string) => void
+}
+
+function WeakAreasPanel({ documentId, onSelectSection }: WeakAreasPanelProps) {
+  const { data: gaps = [], isLoading } = useQuery<GapResult[]>({
+    queryKey: ["gaps", documentId],
+    queryFn: () => fetchGaps(documentId),
+    staleTime: 30_000,
+  })
+
+  if (isLoading) return null
+  if (gaps.length === 0) return null
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-base font-semibold text-foreground">Weak Areas</h3>
+      <div className="flex flex-col gap-2">
+        {gaps.map((gap, i) => {
+          const pct = Math.min(100, Math.round((gap.avg_stability / 10) * 100))
+          const heading = gap.section_heading ?? "Unsectioned"
+          return (
+            <button
+              key={i}
+              onClick={() => {
+                if (gap.section_heading) onSelectSection(gap.section_heading)
+              }}
+              className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/20 p-3 text-left hover:bg-muted/40 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="flex-1 text-sm font-medium text-foreground">{heading}</span>
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                  {gap.weak_card_count} weak
+                </span>
+              </div>
+              {/* Fragility bar */}
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className={`h-full rounded-full transition-all ${fragileBarColor(gap.avg_stability)}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                avg stability: {gap.avg_stability.toFixed(2)}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // GeneratePanel
 // ---------------------------------------------------------------------------
 
@@ -277,6 +354,7 @@ interface GeneratePanelProps {
     count: number
   }) => void
   isGenerating: boolean
+  preselectedSection?: string | null
 }
 
 const COUNT_OPTIONS = [5, 10, 20, 50]
@@ -286,10 +364,19 @@ function GeneratePanel({
   sections,
   onGenerate,
   isGenerating,
+  preselectedSection,
 }: GeneratePanelProps) {
   const [count, setCount] = useState(10)
   const [scope, setScope] = useState<"full" | "section">("full")
   const [sectionHeading, setSectionHeading] = useState<string | null>(null)
+
+  // Sync scope/heading when a gap section is clicked from outside
+  useEffect(() => {
+    if (preselectedSection != null) {
+      setScope("section")
+      setSectionHeading(preselectedSection)
+    }
+  }, [preselectedSection])
 
   return (
     <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/30 p-4">
@@ -365,6 +452,8 @@ export default function Study() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const queryClient = useQueryClient()
   const [studying, setStudying] = useState(false)
+  // Track section pre-selected by clicking a gap item
+  const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
 
   // Flashcard list
   const { data: cards = [], isLoading: cardsLoading } = useQuery<Flashcard[]>({
@@ -460,6 +549,7 @@ export default function Study() {
           sections={sections}
           onGenerate={(req) => generateMutation.mutate(req)}
           isGenerating={generateMutation.isPending}
+          preselectedSection={selectedGapSection}
         />
 
         {cardsLoading ? (
@@ -512,6 +602,16 @@ export default function Study() {
           </div>
         )}
       </section>
+
+      {/* Weak Areas panel */}
+      <WeakAreasPanel
+        documentId={activeDocumentId}
+        onSelectSection={(heading) => {
+          setSelectedGapSection(heading)
+          // Scroll to top to reveal pre-scoped GeneratePanel
+          window.scrollTo({ top: 0, behavior: "smooth" })
+        }}
+      />
 
       {/* Progress section — placeholder for S23b */}
       <section className="flex flex-col gap-2">
