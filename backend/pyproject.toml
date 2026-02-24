@@ -35,7 +35,19 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "I", "UP", "PL"]
+ignore = [
+    "PLC0415",   # import-outside-toplevel: lazy-loading pattern is intentional (embedder)
+    "PLR0911",   # too-many-return-statements: acceptable for complex service methods
+    "PLR0912",   # too-many-branches: acceptable for ingestion/parsing logic
+    "PLR0913",   # too-many-arguments: FastAPI route handlers have many injected params
+    "PLR2004",   # magic-value-comparison: HTTP status codes (200, 400, etc.) are well-known
+    "PLW0603",   # global-statement: lazy singleton pattern for engine/session_factory
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PL"]
+"tools/**" = ["PL"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

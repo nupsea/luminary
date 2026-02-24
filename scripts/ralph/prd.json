@@ -456,7 +456,7 @@
         "make ci runs all checks in sequence and exits 0 on clean code",
         ".github/workflows/ci.yml exists and references `make ci`"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S_ARCH_b",

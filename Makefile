@@ -21,8 +21,11 @@ test:
 
 ci:
 	@echo "Running CI checks..."
+	cd backend && uv sync
 	cd backend && uv run ruff check .
+	cd backend && uv run python tools/layer_linter.py
+	cd backend && uv run python tools/boundary_checker.py
 	cd backend && uv run pytest
-	cd frontend && npx tsc --noEmit
 	cd frontend && npm run build
+	cd frontend && npx tsc --noEmit
 	@echo "CI passed."
