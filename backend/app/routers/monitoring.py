@@ -275,3 +275,30 @@ async def get_eval_runs(
         )
         for r in all_runs
     ]
+
+
+class ModelUsageItem(BaseModel):
+    model: str
+    call_count: int
+    avg_latency_ms: float | None
+
+
+@router.get("/model-usage", response_model=list[ModelUsageItem])
+async def get_model_usage(
+    db: AsyncSession = Depends(get_db),
+) -> list[ModelUsageItem]:
+    """Return call counts per model from QA history."""
+    result = await db.execute(
+        select(QAHistoryModel.model_used, func.count().label("call_count"))
+        .group_by(QAHistoryModel.model_used)
+        .order_by(func.count().desc())
+    )
+    rows = result.all()
+    return [
+        ModelUsageItem(
+            model=row.model_used,
+            call_count=row.call_count,
+            avg_latency_ms=None,  # QAHistoryModel has no latency column
+        )
+        for row in rows
+    ]

@@ -438,3 +438,43 @@ async def test_get_evals_caps_at_10_per_dataset(test_db):
     assert resp.status_code == 200
     code_runs = [r for r in resp.json() if r["dataset_name"] == "code"]
     assert len(code_runs) <= 10
+
+
+# ---------------------------------------------------------------------------
+# GET /monitoring/model-usage
+# ---------------------------------------------------------------------------
+
+
+async def test_model_usage_aggregates_call_counts(test_db):
+    """GET /monitoring/model-usage returns call count per model from QA history."""
+    _, factory, _ = test_db
+
+    doc = _make_document()
+    qa_rows = [
+        _make_qa(doc.id, datetime.now(tz=UTC).replace(tzinfo=None))
+        for _ in range(3)
+    ]
+    # Override model_used for two of them to create a second model
+    qa_rows[2].model_used = "openai/gpt-4o"
+    async with factory() as session:
+        session.add_all([doc, *qa_rows])
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/model-usage")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    models = {row["model"]: row["call_count"] for row in data}
+    assert models.get("ollama/llama3", 0) == 2
+    assert models.get("openai/gpt-4o", 0) == 1
+
+
+async def test_model_usage_empty_when_no_qa_history(test_db):
+    """GET /monitoring/model-usage returns [] when QA history is empty."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/model-usage")
+
+    assert resp.status_code == 200
+    assert resp.json() == []

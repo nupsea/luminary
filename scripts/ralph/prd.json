@@ -863,7 +863,7 @@
         "GET /monitoring/model-usage returns aggregated data",
         "Verify in browser: open /monitoring, confirm all 4 sections render with appropriate loading/empty states"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S27",
