@@ -13,6 +13,60 @@ logger = logging.getLogger(__name__)
 # Silence litellm's verbose success logging
 litellm.suppress_debug_info = True
 
+# ---------------------------------------------------------------------------
+# Langfuse — optional LLM call observability
+# ---------------------------------------------------------------------------
+
+_langfuse = None  # type: ignore[var-annotated]
+
+
+def _init_langfuse():
+    """Initialize Langfuse client if keys are configured; else return None."""
+    settings = get_settings()
+    if settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
+        try:
+            from langfuse import Langfuse  # noqa: PLC0415
+
+            return Langfuse(
+                public_key=settings.LANGFUSE_PUBLIC_KEY,
+                secret_key=settings.LANGFUSE_SECRET_KEY,
+            )
+        except Exception:
+            logger.warning("Failed to initialize Langfuse client; tracing disabled")
+    return None
+
+
+def get_langfuse():
+    """Return singleton Langfuse client (None if not configured)."""
+    global _langfuse  # noqa: PLW0603
+    if _langfuse is None:
+        _langfuse = _init_langfuse()
+    return _langfuse
+
+
+def _log_to_langfuse(
+    model: str,
+    prompt: str,
+    completion: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """Log a completed LLM generation to Langfuse (no-op when not configured)."""
+    client = get_langfuse()
+    if client is None:
+        return
+    try:
+        gen = client.start_generation(
+            name="llm.generate",
+            model=model,
+            input=prompt[:2000],
+            output=completion,
+            usage={"input": prompt_tokens, "output": completion_tokens},
+        )
+        gen.end()
+    except Exception:
+        logger.debug("Langfuse generation log failed", exc_info=True)
+
 
 class LLMService:
     """Single call-site for all LLM completions.
@@ -62,11 +116,14 @@ class LLMService:
                 response = await litellm.acompletion(**kwargs)
                 content = response.choices[0].message.content or ""
                 usage = getattr(response, "usage", None)
+                prompt_tokens = 0
+                completion_tokens = 0
                 if usage:
-                    span.set_attribute("llm.prompt_tokens", getattr(usage, "prompt_tokens", 0))
-                    span.set_attribute(
-                        "llm.completion_tokens", getattr(usage, "completion_tokens", 0)
-                    )
+                    prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                    completion_tokens = getattr(usage, "completion_tokens", 0)
+                    span.set_attribute("llm.prompt_tokens", prompt_tokens)
+                    span.set_attribute("llm.completion_tokens", completion_tokens)
+            _log_to_langfuse(effective_model, prompt, content, prompt_tokens, completion_tokens)
             return content
 
         return self._token_stream(kwargs)

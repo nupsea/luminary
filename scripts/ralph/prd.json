@@ -830,7 +830,7 @@
         "All 5 golden dataset files exist with 10 lines each",
         "Each JSONL line has question, ground_truth_answer, document_id fields"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S25b",
