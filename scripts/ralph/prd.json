@@ -489,7 +489,7 @@
         "delete_document removes nodes and edges for that document",
         "uv run pytest tests/test_graph.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S15b",

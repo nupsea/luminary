@@ -1,0 +1,245 @@
+"""KuzuService: Kuzu embedded graph database for entity relationship storage.
+
+Schema:
+  Nodes: Entity(id, name, type, frequency), Document(id, title, content_type)
+  Edges: MENTIONED_IN(Entity->Document, count),
+         CO_OCCURS(Entity->Entity, weight, document_id),
+         RELATED_TO(Entity->Entity, relation_label, confidence)
+"""
+
+import logging
+from pathlib import Path
+
+import kuzu
+
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+_graph_service: "KuzuService | None" = None
+
+
+def get_graph_service() -> "KuzuService":
+    global _graph_service
+    if _graph_service is None:
+        settings = get_settings()
+        _graph_service = KuzuService(settings.DATA_DIR)
+    return _graph_service
+
+
+class KuzuService:
+    def __init__(self, data_dir: str) -> None:
+        db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
+        self._db = kuzu.Database(db_path)
+        self._conn = kuzu.Connection(self._db)
+        self._create_schema()
+        logger.info("KuzuService initialized", extra={"db_path": db_path})
+
+    def _create_schema(self) -> None:
+        """Create node and edge tables if they do not exist."""
+        stmts = [
+            # Node tables
+            "CREATE NODE TABLE IF NOT EXISTS Entity("
+            "id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64)",
+            "CREATE NODE TABLE IF NOT EXISTS Document("
+            "id STRING PRIMARY KEY, title STRING, content_type STRING)",
+            # Edge tables
+            "CREATE REL TABLE IF NOT EXISTS MENTIONED_IN("
+            "FROM Entity TO Document, count INT64)",
+            "CREATE REL TABLE IF NOT EXISTS CO_OCCURS("
+            "FROM Entity TO Entity, weight FLOAT, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS RELATED_TO("
+            "FROM Entity TO Entity, relation_label STRING, confidence FLOAT)",
+        ]
+        for stmt in stmts:
+            self._conn.execute(stmt)
+
+    # -------------------------------------------------------------------------
+    # Upsert helpers
+    # -------------------------------------------------------------------------
+
+    def upsert_entity(self, entity_id: str, name: str, entity_type: str) -> None:
+        """Create or update an Entity node."""
+        # Check if entity exists
+        result = self._conn.execute(
+            "MATCH (e:Entity {id: $id}) RETURN e.frequency",
+            {"id": entity_id},
+        )
+        if result.has_next():
+            row = result.get_next()
+            freq = (row[0] or 0) + 1
+            self._conn.execute(
+                "MATCH (e:Entity {id: $id})"
+                " SET e.frequency = $freq, e.name = $name, e.type = $type",
+                {"id": entity_id, "freq": freq, "name": name, "type": entity_type},
+            )
+        else:
+            self._conn.execute(
+                "CREATE (:Entity {id: $id, name: $name, type: $type, frequency: 1})",
+                {"id": entity_id, "name": name, "type": entity_type},
+            )
+
+    def upsert_document(self, doc_id: str, title: str, content_type: str) -> None:
+        """Create or update a Document node."""
+        result = self._conn.execute(
+            "MATCH (d:Document {id: $id}) RETURN d.id",
+            {"id": doc_id},
+        )
+        if result.has_next():
+            self._conn.execute(
+                "MATCH (d:Document {id: $id}) SET d.title = $title, d.content_type = $ct",
+                {"id": doc_id, "title": title, "ct": content_type},
+            )
+        else:
+            self._conn.execute(
+                "CREATE (:Document {id: $id, title: $title, content_type: $ct})",
+                {"id": doc_id, "title": title, "ct": content_type},
+            )
+
+    def add_mention(self, entity_id: str, document_id: str) -> None:
+        """Create a MENTIONED_IN edge if it does not already exist."""
+        result = self._conn.execute(
+            "MATCH (e:Entity {id: $eid})-[r:MENTIONED_IN]->(d:Document {id: $did}) RETURN r.count",
+            {"eid": entity_id, "did": document_id},
+        )
+        if result.has_next():
+            row = result.get_next()
+            new_count = (row[0] or 0) + 1
+            self._conn.execute(
+                "MATCH (e:Entity {id: $eid})-[r:MENTIONED_IN]->(d:Document {id: $did})"
+                " SET r.count = $c",
+                {"eid": entity_id, "did": document_id, "c": new_count},
+            )
+        else:
+            self._conn.execute(
+                "MATCH (e:Entity {id: $eid}), (d:Document {id: $did})"
+                " CREATE (e)-[:MENTIONED_IN {count: 1}]->(d)",
+                {"eid": entity_id, "did": document_id},
+            )
+
+    def add_co_occurrence(
+        self, entity_id_a: str, entity_id_b: str, document_id: str
+    ) -> None:
+        """Create or increment a CO_OCCURS edge between two entities."""
+        result = self._conn.execute(
+            "MATCH (a:Entity {id: $aid})-[r:CO_OCCURS]->(b:Entity {id: $bid})"
+            " WHERE r.document_id = $did RETURN r.weight",
+            {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+        )
+        if result.has_next():
+            row = result.get_next()
+            new_weight = (row[0] or 0.0) + 1.0
+            self._conn.execute(
+                "MATCH (a:Entity {id: $aid})-[r:CO_OCCURS]->(b:Entity {id: $bid})"
+                " WHERE r.document_id = $did SET r.weight = $w",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id, "w": new_weight},
+            )
+        else:
+            self._conn.execute(
+                "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                " CREATE (a)-[:CO_OCCURS {weight: 1.0, document_id: $did}]->(b)",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+            )
+
+    # -------------------------------------------------------------------------
+    # Delete
+    # -------------------------------------------------------------------------
+
+    def delete_document(self, document_id: str) -> None:
+        """Remove a Document node and all edges connected to it."""
+        # Delete MENTIONED_IN edges to this document
+        self._conn.execute(
+            "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did}) DELETE r",
+            {"did": document_id},
+        )
+        # Delete the Document node
+        self._conn.execute(
+            "MATCH (d:Document {id: $did}) DELETE d",
+            {"did": document_id},
+        )
+        logger.info("Deleted graph nodes for document", extra={"document_id": document_id})
+
+    # -------------------------------------------------------------------------
+    # Query
+    # -------------------------------------------------------------------------
+
+    def get_graph_for_document(self, document_id: str) -> dict:
+        """Return nodes and edges for a single document."""
+        result = self._conn.execute(
+            "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
+            " RETURN e.id, e.name, e.type, e.frequency, r.count",
+            {"did": document_id},
+        )
+        nodes: list[dict] = []
+        entity_ids: set[str] = set()
+        while result.has_next():
+            row = result.get_next()
+            eid, name, etype, freq, count = row
+            nodes.append(
+                {
+                    "id": eid,
+                    "label": name,
+                    "type": etype,
+                    "size": freq or 1,
+                    "mention_count": count or 1,
+                }
+            )
+            entity_ids.add(eid)
+
+        edges = self._get_co_occurrence_edges(entity_ids, document_id)
+        return {"nodes": nodes, "edges": edges}
+
+    def get_graph_for_documents(self, document_ids: list[str]) -> dict:
+        """Return merged nodes and edges for multiple documents."""
+        if not document_ids:
+            return {"nodes": [], "edges": []}
+
+        placeholders = ", ".join(f"$id{i}" for i in range(len(document_ids)))
+        params = {f"id{i}": did for i, did in enumerate(document_ids)}
+        result = self._conn.execute(
+            f"MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document)"
+            f" WHERE d.id IN [{placeholders}]"
+            f" RETURN e.id, e.name, e.type, e.frequency, r.count",
+            params,
+        )
+        nodes_map: dict[str, dict] = {}
+        while result.has_next():
+            row = result.get_next()
+            eid, name, etype, freq, count = row
+            if eid not in nodes_map:
+                nodes_map[eid] = {
+                    "id": eid,
+                    "label": name,
+                    "type": etype,
+                    "size": freq or 1,
+                    "mention_count": count or 1,
+                }
+            else:
+                nodes_map[eid]["mention_count"] = nodes_map[eid]["mention_count"] + (count or 1)
+
+        entity_ids = set(nodes_map.keys())
+        edges: list[dict] = []
+        for doc_id in document_ids:
+            edges.extend(self._get_co_occurrence_edges(entity_ids, doc_id))
+
+        return {"nodes": list(nodes_map.values()), "edges": edges}
+
+    def _get_co_occurrence_edges(self, entity_ids: set[str], document_id: str) -> list[dict]:
+        """Return CO_OCCURS edges among the given entity IDs for a document."""
+        if not entity_ids:
+            return []
+        placeholders = ", ".join(f"$eid{i}" for i in range(len(entity_ids)))
+        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
+        params["did"] = document_id
+        result = self._conn.execute(
+            f"MATCH (a:Entity)-[r:CO_OCCURS]->(b:Entity)"
+            f" WHERE a.id IN [{placeholders}] AND b.id IN [{placeholders}]"
+            f" AND r.document_id = $did"
+            f" RETURN a.id, b.id, r.weight",
+            params,
+        )
+        edges = []
+        while result.has_next():
+            row = result.get_next()
+            edges.append({"source": row[0], "target": row[1], "weight": row[2]})
+        return edges
