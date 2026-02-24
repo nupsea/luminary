@@ -1,3 +1,12 @@
+## 2026-02-24T22:00:00+10:00 - S_ARCH_b - Doc-gardener script and QUALITY_SCORE domain grading
+- Implemented: scripts/ralph/doc_gardener.py (checks QUALITY_SCORE.md, tech-debt-tracker.md, ARCHITECTURE.md using git log HEAD~10..HEAD -- <file>; prints STALE DOC warning if file not in last 10 commits; exits 0 always); docs/QUALITY_SCORE.md (updated with Last Updated header 2026-02-24, Phase 1 domains marked: Ingestion/Summarization/Q&A = implemented/yes/partial/B; remaining domains = F)
+- Files changed: scripts/ralph/doc_gardener.py (new), docs/QUALITY_SCORE.md
+- Learnings:
+  - git log --oneline -N -- <file> returns last N commits that TOUCHED the file, NOT last N overall commits — wrong for staleness check
+  - Correct staleness check: git log --oneline HEAD~10..HEAD -- <file> returns empty if file not changed in last 10 commits
+  - Fallback to full log if HEAD~10 doesn't exist (shallow repo with fewer than 10 commits)
+---
+
 ## 2026-02-24T21:00:00+10:00 - S_ARCH_a - Layer linter, boundary validation, and CI Makefile
 - Implemented: backend/tools/layer_linter.py (AST-based layer enforcement — LAYER_ORDER dict maps types/config/database/models=0-1, repo=2, service/workflow=3, router=4, main=5; get_layer() maps filepath to layer via path segment; check_file() emits violations when source_layer < target_layer; exits 1 on violations, 0 on clean); backend/tools/boundary_checker.py (FastAPI route boundary checker — detects route decorator, builds defaults map to identify Depends() args, flags raw dict/Any annotations; exits 0 advisory-only); backend/pyproject.toml (added PL to ruff select with ignore list for PLC0415/PLR0911/PLR0912/PLR0913/PLR2004/PLW0603; per-file-ignores for tests/** and tools/**); Makefile updated (ci target adds uv sync + layer_linter + boundary_checker); .github/workflows/ci.yml (runs make ci on push/PR)
 - Files changed: backend/tools/layer_linter.py (new), backend/tools/boundary_checker.py (new), backend/tools/__init__.py (new), backend/pyproject.toml, Makefile, .github/workflows/ci.yml (new)

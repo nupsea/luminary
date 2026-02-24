@@ -472,7 +472,7 @@
         "docs/QUALITY_SCORE.md updated with 'Last Updated' header",
         "Quality grades for Phase 1 domains are filled in (not 'not started')"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S15a",
