@@ -1,4 +1,4 @@
-"""Tests for GET /monitoring/traces and GET /monitoring/overview."""
+"""Tests for GET /monitoring/traces, GET /monitoring/overview, and eval endpoints."""
 
 import uuid
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, DocumentModel, QAHistoryModel
+from app.models import ChunkModel, DocumentModel, EvalRunModel, QAHistoryModel
 
 # ---------------------------------------------------------------------------
 # Test DB fixture
@@ -301,3 +301,140 @@ async def test_overview_empty_db_returns_zeros(test_db, monkeypatch):
     assert data["total_documents"] == 0
     assert data["total_chunks"] == 0
     assert data["qa_calls_today"] == 0
+
+
+# ---------------------------------------------------------------------------
+# POST /monitoring/evals/store
+# ---------------------------------------------------------------------------
+
+
+async def test_store_eval_run_creates_row(test_db):
+    """POST /monitoring/evals/store inserts an EvalRunModel row."""
+    _, factory, _ = test_db
+
+    payload = {
+        "dataset_name": "book",
+        "model_used": "ollama/mistral",
+        "hit_rate_5": 0.7,
+        "mrr": 0.6,
+        "faithfulness": 0.85,
+        "answer_relevance": 0.9,
+        "context_precision": 0.8,
+        "context_recall": 0.75,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/monitoring/evals/store", json=payload)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["dataset_name"] == "book"
+    assert data["model_used"] == "ollama/mistral"
+    assert data["hit_rate_5"] == pytest.approx(0.7)
+    assert data["mrr"] == pytest.approx(0.6)
+    assert "id" in data
+    assert "run_at" in data
+
+    # Verify it's persisted in DB
+    async with factory() as session:
+        from sqlalchemy import select
+
+        result = await session.execute(select(EvalRunModel).where(EvalRunModel.id == data["id"]))
+        row = result.scalar_one_or_none()
+    assert row is not None
+    assert row.dataset_name == "book"
+
+
+async def test_store_eval_run_with_null_ragas_scores(test_db):
+    """POST /monitoring/evals/store accepts None for RAGAS metrics (LLM unavailable)."""
+    payload = {
+        "dataset_name": "paper",
+        "model_used": "ollama/mistral",
+        "hit_rate_5": 0.5,
+        "mrr": 0.4,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/monitoring/evals/store", json=payload)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["faithfulness"] is None
+    assert data["answer_relevance"] is None
+
+
+# ---------------------------------------------------------------------------
+# GET /monitoring/evals
+# ---------------------------------------------------------------------------
+
+
+async def test_get_evals_returns_run_history(test_db):
+    """GET /monitoring/evals returns stored eval runs."""
+    _, factory, _ = test_db
+
+    run = EvalRunModel(
+        id=str(uuid.uuid4()),
+        dataset_name="notes",
+        model_used="ollama/mistral",
+        run_at=datetime.now(tz=UTC),
+        hit_rate_5=0.8,
+        mrr=0.7,
+        faithfulness=None,
+        answer_relevance=None,
+        context_precision=None,
+        context_recall=None,
+    )
+    async with factory() as session:
+        session.add(run)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/evals")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    matching = [r for r in data if r["dataset_name"] == "notes"]
+    assert len(matching) == 1
+    assert matching[0]["hit_rate_5"] == pytest.approx(0.8)
+
+
+async def test_get_evals_empty_when_no_runs(test_db):
+    """GET /monitoring/evals returns empty list when no eval runs stored."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/evals")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_get_evals_caps_at_10_per_dataset(test_db):
+    """GET /monitoring/evals returns at most 10 rows per dataset."""
+    _, factory, _ = test_db
+
+    runs = [
+        EvalRunModel(
+            id=str(uuid.uuid4()),
+            dataset_name="code",
+            model_used="ollama/mistral",
+            run_at=datetime.now(tz=UTC),
+            hit_rate_5=float(i) / 15,
+            mrr=None,
+            faithfulness=None,
+            answer_relevance=None,
+            context_precision=None,
+            context_recall=None,
+        )
+        for i in range(15)
+    ]
+    async with factory() as session:
+        session.add_all(runs)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/evals")
+
+    assert resp.status_code == 200
+    code_runs = [r for r in resp.json() if r["dataset_name"] == "code"]
+    assert len(code_runs) <= 10

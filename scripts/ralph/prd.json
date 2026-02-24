@@ -846,7 +846,7 @@
         "Monitoring tab eval table renders with correct row colors",
         "Verify in browser: open /monitoring, confirm Eval Runs table renders (empty is OK)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S26",

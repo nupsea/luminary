@@ -6,6 +6,7 @@ Routes:
 """
 
 import logging
+import uuid
 from datetime import UTC, datetime
 
 import httpx
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import ChunkModel, DocumentModel, QAHistoryModel
+from app.models import ChunkModel, DocumentModel, EvalRunModel, QAHistoryModel
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,30 @@ class MonitoringOverview(BaseModel):
     total_chunks: int
     qa_calls_today: int
     avg_latency_ms: float | None
+
+
+class EvalRunCreate(BaseModel):
+    dataset_name: str
+    model_used: str
+    hit_rate_5: float | None = None
+    mrr: float | None = None
+    faithfulness: float | None = None
+    answer_relevance: float | None = None
+    context_precision: float | None = None
+    context_recall: float | None = None
+
+
+class EvalRunResponse(BaseModel):
+    id: str
+    dataset_name: str
+    model_used: str
+    run_at: datetime
+    hit_rate_5: float | None
+    mrr: float | None
+    faithfulness: float | None
+    answer_relevance: float | None
+    context_precision: float | None
+    context_recall: float | None
 
 
 # ---------------------------------------------------------------------------
@@ -175,3 +200,78 @@ async def get_overview(
         qa_calls_today=qa_calls_today,
         avg_latency_ms=None,  # Would require span query if Phoenix running
     )
+
+
+@router.post("/evals/store", response_model=EvalRunResponse, status_code=201)
+async def store_eval_run(
+    payload: EvalRunCreate,
+    db: AsyncSession = Depends(get_db),
+) -> EvalRunResponse:
+    """Persist a completed evaluation run to SQLite."""
+    run = EvalRunModel(
+        id=str(uuid.uuid4()),
+        dataset_name=payload.dataset_name,
+        model_used=payload.model_used,
+        run_at=datetime.now(tz=UTC),
+        hit_rate_5=payload.hit_rate_5,
+        mrr=payload.mrr,
+        faithfulness=payload.faithfulness,
+        answer_relevance=payload.answer_relevance,
+        context_precision=payload.context_precision,
+        context_recall=payload.context_recall,
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    return EvalRunResponse(
+        id=run.id,
+        dataset_name=run.dataset_name,
+        model_used=run.model_used,
+        run_at=run.run_at,
+        hit_rate_5=run.hit_rate_5,
+        mrr=run.mrr,
+        faithfulness=run.faithfulness,
+        answer_relevance=run.answer_relevance,
+        context_precision=run.context_precision,
+        context_recall=run.context_recall,
+    )
+
+
+@router.get("/evals", response_model=list[EvalRunResponse])
+async def get_eval_runs(
+    db: AsyncSession = Depends(get_db),
+) -> list[EvalRunResponse]:
+    """Return the last 10 eval runs per dataset, ordered by run_at desc."""
+    result = await db.execute(
+        select(EvalRunModel).order_by(EvalRunModel.run_at.desc()).limit(50)
+    )
+    runs = result.scalars().all()
+
+    # Keep at most 10 per dataset
+    per_dataset: dict[str, list[EvalRunModel]] = {}
+    for run in runs:
+        per_dataset.setdefault(run.dataset_name, [])
+        if len(per_dataset[run.dataset_name]) < 10:
+            per_dataset[run.dataset_name].append(run)
+
+    # Flatten, preserving desc order within each dataset
+    all_runs: list[EvalRunModel] = []
+    for dataset_runs in per_dataset.values():
+        all_runs.extend(dataset_runs)
+    all_runs.sort(key=lambda r: r.run_at, reverse=True)
+
+    return [
+        EvalRunResponse(
+            id=r.id,
+            dataset_name=r.dataset_name,
+            model_used=r.model_used,
+            run_at=r.run_at,
+            hit_rate_5=r.hit_rate_5,
+            mrr=r.mrr,
+            faithfulness=r.faithfulness,
+            answer_relevance=r.answer_relevance,
+            context_precision=r.context_precision,
+            context_recall=r.context_recall,
+        )
+        for r in all_runs
+    ]
