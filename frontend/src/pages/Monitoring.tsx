@@ -40,6 +40,19 @@ interface MonitoringOverview {
   avg_latency_ms: number | null
 }
 
+interface EvalRun {
+  id: string
+  dataset_name: string
+  model_used: string
+  run_at: string
+  hit_rate_5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  answer_relevance: number | null
+  context_precision: number | null
+  context_recall: number | null
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -54,6 +67,12 @@ async function fetchTraces(): Promise<TracesResponse> {
   const res = await fetch(`${API_BASE}/monitoring/traces`)
   if (!res.ok) return { traces: [] }
   return res.json() as Promise<TracesResponse>
+}
+
+async function fetchEvalRuns(): Promise<EvalRun[]> {
+  const res = await fetch(`${API_BASE}/monitoring/evals`)
+  if (!res.ok) return []
+  return res.json() as Promise<EvalRun[]>
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +197,7 @@ export default function Monitoring() {
   const [overview, setOverview] = useState<MonitoringOverview | null>(null)
   const [traces, setTraces] = useState<TraceItem[]>([])
   const [tracesMessage, setTracesMessage] = useState<string | null>(null)
+  const [evalRuns, setEvalRuns] = useState<EvalRun[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTrace, setSelectedTrace] = useState<TraceItem | null>(null)
 
@@ -185,11 +205,12 @@ export default function Monitoring() {
     let cancelled = false
 
     async function load() {
-      const [ov, tr] = await Promise.all([fetchOverview(), fetchTraces()])
+      const [ov, tr, evs] = await Promise.all([fetchOverview(), fetchTraces(), fetchEvalRuns()])
       if (cancelled) return
       setOverview(ov)
       setTraces(tr.traces)
       setTracesMessage(tr.message ?? null)
+      setEvalRuns(evs)
       setLoading(false)
     }
 
@@ -282,6 +303,62 @@ export default function Monitoring() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Eval Runs table */}
+      <div className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold text-foreground">Eval Runs</h2>
+
+        {evalRuns.length === 0 ? (
+          <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+            No evaluation runs yet. Run <code className="mx-1 rounded bg-secondary px-1">uv run python evals/run_eval.py --dataset book</code> to populate.
+          </div>
+        ) : (
+          <div className="overflow-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Dataset</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Run At</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">HR@5</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">MRR</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Faithfulness</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evalRuns.map((run) => {
+                  const hr5 = run.hit_rate_5
+                  const rowBg =
+                    hr5 !== null && hr5 < 0.5
+                      ? "bg-red-50 dark:bg-red-950/30"
+                      : hr5 !== null && hr5 > 0.7
+                        ? "bg-green-50 dark:bg-green-950/30"
+                        : ""
+                  return (
+                    <tr
+                      key={run.id}
+                      className={`border-b border-border last:border-0 ${rowBg}`}
+                    >
+                      <td className="px-4 py-2 font-medium text-foreground">{run.dataset_name}</td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
+                        {new Date(run.run_at).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2 text-right text-foreground">
+                        {hr5 !== null ? hr5.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-foreground">
+                        {run.mrr !== null ? run.mrr.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-foreground">
+                        {run.faithfulness !== null ? run.faithfulness.toFixed(2) : "—"}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
