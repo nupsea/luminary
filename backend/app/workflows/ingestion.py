@@ -158,11 +158,98 @@ async def classify_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
+def _chunk_code_file(
+    raw_text: str, file_path: str, doc_id: str
+) -> tuple[list[dict], list[dict]]:
+    """Parse a code file into function/class chunks using CodeParser.
+
+    Returns (chunks_for_db, definitions_with_metadata) where definitions include
+    function_name, start_line, end_line for call-graph extraction.
+    """
+    from app.services.code_parser import get_code_parser  # noqa: PLC0415
+
+    parser = get_code_parser()
+    lang = parser.detect_language(file_path) or "python"
+    definitions = parser.parse_file(raw_text, lang, file_path)
+
+    chunks: list[dict] = []
+    chunk_metas: list[dict] = []
+    for idx, defn in enumerate(definitions):
+        # Prepend metadata header to chunk text for retrieval context
+        header = (
+            f"# {defn['kind']}: {defn['name']}"
+            f" | language: {defn['language']}"
+            f" | file: {file_path}"
+            f" | lines: {defn['start_line']}-{defn['end_line']}\n"
+        )
+        text = header + defn["body_text"]
+        chunk_id = str(uuid.uuid4())
+        chunks.append({"id": chunk_id, "text": text, "index": idx})
+        chunk_metas.append(
+            {
+                "chunk_id": chunk_id,
+                "function_name": defn["name"] if defn["kind"] == "function" else None,
+                "class_name": defn["name"] if defn["kind"] == "class" else None,
+                "start_line": defn["start_line"],
+                "end_line": defn["end_line"],
+                "language": defn["language"],
+                "file_path": file_path,
+                "body_text": defn["body_text"],
+                "kind": defn["kind"],
+            }
+        )
+
+    # Fallback: if no definitions parsed, use text splitter
+    if not chunks:
+        splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=75)
+        for idx, t in enumerate(splitter.split_text(raw_text)):
+            chunk_id = str(uuid.uuid4())
+            chunks.append({"id": chunk_id, "text": t, "index": idx})
+            chunk_metas.append({})
+
+    return chunks, chunk_metas
+
+
 async def chunk_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("chunk", state):
         try:
             pd = state["parsed_document"]
             content_type = state["content_type"] or "notes"
+            doc_id = state["document_id"]
+            file_path = state["file_path"]
+
+            if content_type == "code":
+                raw_text = pd["raw_text"] if pd else ""
+                raw_chunks, code_metas = _chunk_code_file(raw_text, file_path, doc_id)
+                chunks = []
+                async with get_session_factory()() as session:
+                    for idx, (rc, meta) in enumerate(zip(raw_chunks, code_metas, strict=False)):
+                        chunk = ChunkModel(
+                            id=rc["id"],
+                            document_id=doc_id,
+                            section_id=None,
+                            text=rc["text"],
+                            token_count=len(rc["text"].split()),
+                            page_number=meta.get("start_line", 0),
+                            speaker=None,
+                            chunk_index=idx,
+                        )
+                        session.add(chunk)
+                        chunks.append(
+                            {
+                                "id": rc["id"],
+                                "text": rc["text"],
+                                "index": idx,
+                                **{k: v for k, v in meta.items() if k != "chunk_id"},
+                            }
+                        )
+                    await session.commit()
+                logger.info(
+                    "Code chunked document",
+                    extra={"doc_id": doc_id, "num_chunks": len(chunks)},
+                )
+                return {**state, "chunks": chunks, "status": "embedding"}
+
             cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
@@ -170,8 +257,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
             all_texts = (
                 [s["text"] for s in pd["sections"] if s["text"]] if pd else []
             )
-            raw_chunks = splitter.split_text("\n\n".join(all_texts))
-            doc_id = state["document_id"]
+            raw_chunks_text = splitter.split_text("\n\n".join(all_texts))
             chunks = []
             async with get_session_factory()() as session:
                 # Store sections with preview text
@@ -187,7 +273,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         preview=s.get("text", "")[:300],
                     )
                     session.add(section_model)
-                for idx, text in enumerate(raw_chunks):
+                for idx, text in enumerate(raw_chunks_text):
                     chunk_id = str(uuid.uuid4())
                     chunk = ChunkModel(
                         id=chunk_id,
@@ -276,6 +362,47 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
     return {**state, "status": "extracting"}
 
 
+def _build_call_graph(chunks: list[dict], graph, doc_id: str) -> None:
+    """Build call graph for code document: create function Entity nodes and CALLS edges."""
+    from app.services.code_parser import CodeParser  # noqa: PLC0415
+
+    # Collect function chunks (have function_name metadata)
+    fn_chunks = [c for c in chunks if c.get("function_name")]
+    if not fn_chunks:
+        return
+
+    # Upsert each function as an Entity node with type=FUNCTION
+    fn_id_map: dict[str, str] = {}  # function_name → entity id
+    for c in fn_chunks:
+        name = c["function_name"]
+        entity_id = f"fn_{doc_id}_{name}"
+        graph.upsert_entity(entity_id, name, "FUNCTION")
+        graph.add_mention(entity_id, doc_id)
+        fn_id_map[name] = entity_id
+
+    # Detect call edges via body_text substring matching
+    defs = [
+        {
+            "name": c["function_name"],
+            "kind": "function",
+            "body_text": c.get("body_text", ""),
+        }
+        for c in fn_chunks
+        if c.get("function_name")
+    ]
+    call_pairs = CodeParser.build_call_edges(defs)  # type: ignore[arg-type]
+    for caller_name, callee_name in call_pairs:
+        caller_id = fn_id_map.get(caller_name)
+        callee_id = fn_id_map.get(callee_name)
+        if caller_id and callee_id:
+            graph.add_call_edge(caller_id, callee_id, doc_id)
+
+    logger.info(
+        "Call graph built",
+        extra={"doc_id": doc_id, "functions": len(fn_chunks), "edges": len(call_pairs)},
+    )
+
+
 async def entity_extract_node(state: IngestionState) -> IngestionState:
     doc_id = state["document_id"]
     chunks = state.get("chunks") or []
@@ -323,6 +450,11 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 "Entity extraction complete",
                 extra={"doc_id": doc_id, "num_entities": len(entities)},
             )
+
+            # Build call graph for code documents
+            content_type = state.get("content_type") or ""
+            if content_type == "code":
+                _build_call_graph(chunks, graph, doc_id)
         except Exception as exc:
             logger.warning(
                 "entity_extract_node failed (non-fatal, proceeding to complete)",

@@ -408,9 +408,9 @@ async def get_study_stats(
         if s.ended_at
     )
 
-    # --- Current streak (consecutive days with a completed session, ending today/yesterday) ---
+    # --- Current streak (consecutive days with a session, ending today/yesterday) ---
     completed_dates: set[date] = {
-        s.ended_at.date() for s in sessions if s.ended_at
+        s.started_at.date() for s in sessions
     }
     streak = 0
     check_date = now.date()

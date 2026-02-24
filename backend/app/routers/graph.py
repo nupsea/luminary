@@ -12,9 +12,18 @@ router = APIRouter(prefix="/graph", tags=["graph"])
 
 
 @router.get("/{document_id}")
-async def get_graph_for_document(document_id: str) -> dict:
-    """Return nodes and edges for a single document."""
+async def get_graph_for_document(
+    document_id: str,
+    type: str = Query(default="knowledge_graph"),
+) -> dict:
+    """Return nodes and edges for a single document.
+
+    Pass ?type=call_graph to get the function call graph (code documents only).
+    Default is the knowledge entity graph.
+    """
     svc = get_graph_service()
+    if type == "call_graph":
+        return svc.get_call_graph(document_id)
     return svc.get_graph_for_document(document_id)
 
 

@@ -71,10 +71,11 @@ interface SelectedNodeInfo {
 async function fetchGraphData(
   documentId: string | null,
   scope: "document" | "all",
+  viewMode: "knowledge_graph" | "call_graph" = "knowledge_graph",
 ): Promise<GraphData> {
   const url =
     scope === "document" && documentId
-      ? `${API_BASE}/graph/${documentId}`
+      ? `${API_BASE}/graph/${documentId}?type=${viewMode}`
       : `${API_BASE}/graph?doc_ids=`
   const res = await fetch(url)
   if (!res.ok) throw new Error("Failed to fetch graph data")
@@ -229,13 +230,14 @@ export default function Viz() {
   const [activeTypes, setActiveTypes] = useState<Set<EntityType>>(new Set(ALL_ENTITY_TYPES))
   const [search, setSearch] = useState("")
   const [scope, setScope] = useState<"document" | "all">("document")
+  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
 
-  const queryKey = ["graph", scope, activeDocumentId]
+  const queryKey = ["graph", scope, activeDocumentId, viewMode]
   const { data, isLoading, isError } = useQuery({
     queryKey,
-    queryFn: () => fetchGraphData(activeDocumentId, scope),
+    queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode),
     staleTime: 30_000,
   })
 
@@ -303,6 +305,34 @@ export default function Viz() {
     <div className="flex h-full w-full overflow-hidden">
       {/* Controls sidebar */}
       <div className="w-60 flex-shrink-0 flex flex-col gap-4 border-r border-border bg-background p-4 overflow-y-auto">
+        {/* View toggle — Knowledge Graph vs Call Graph */}
+        <div>
+          <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            View
+          </p>
+          <div className="flex rounded-md border border-border overflow-hidden text-xs">
+            {(["knowledge_graph", "call_graph"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => {
+                  setViewMode(v)
+                  void queryClient.invalidateQueries({ queryKey })
+                }}
+                className={`flex-1 py-1.5 transition-colors ${
+                  viewMode === v
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {v === "knowledge_graph" ? "Knowledge" : "Call Graph"}
+              </button>
+            ))}
+          </div>
+          {viewMode === "call_graph" && (
+            <p className="mt-1 text-xs text-muted-foreground">Code documents only</p>
+          )}
+        </div>
+
         {/* Scope toggle */}
         <div>
           <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">

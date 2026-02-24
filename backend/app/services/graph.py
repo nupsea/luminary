@@ -4,7 +4,8 @@ Schema:
   Nodes: Entity(id, name, type, frequency), Document(id, title, content_type)
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
-         RELATED_TO(Entity->Entity, relation_label, confidence)
+         RELATED_TO(Entity->Entity, relation_label, confidence),
+         CALLS(Entity->Entity, document_id)  — function call graph for code documents
 """
 
 import logging
@@ -50,6 +51,8 @@ class KuzuService:
             "FROM Entity TO Entity, weight FLOAT, document_id STRING)",
             "CREATE REL TABLE IF NOT EXISTS RELATED_TO("
             "FROM Entity TO Entity, relation_label STRING, confidence FLOAT)",
+            "CREATE REL TABLE IF NOT EXISTS CALLS("
+            "FROM Entity TO Entity, document_id STRING)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)
@@ -243,3 +246,44 @@ class KuzuService:
             row = result.get_next()
             edges.append({"source": row[0], "target": row[1], "weight": row[2]})
         return edges
+
+    # -------------------------------------------------------------------------
+    # Call graph (code documents)
+    # -------------------------------------------------------------------------
+
+    def add_call_edge(self, caller_id: str, callee_id: str, document_id: str) -> None:
+        """Add a CALLS edge from caller Entity to callee Entity for a code document."""
+        # Avoid duplicate edges for the same (caller, callee, document_id)
+        result = self._conn.execute(
+            "MATCH (a:Entity {id: $cid})-[r:CALLS]->(b:Entity {id: $eid})"
+            " WHERE r.document_id = $did RETURN r",
+            {"cid": caller_id, "eid": callee_id, "did": document_id},
+        )
+        if not result.has_next():
+            self._conn.execute(
+                "MATCH (a:Entity {id: $cid}), (b:Entity {id: $eid})"
+                " CREATE (a)-[:CALLS {document_id: $did}]->(b)",
+                {"cid": caller_id, "eid": callee_id, "did": document_id},
+            )
+
+    def get_call_graph(self, document_id: str) -> dict:
+        """Return call graph nodes and edges for a code document."""
+        result = self._conn.execute(
+            "MATCH (a:Entity)-[r:CALLS]->(b:Entity)"
+            " WHERE r.document_id = $did"
+            " RETURN a.id, a.name, a.type, a.frequency, b.id, b.name, b.type, b.frequency",
+            {"did": document_id},
+        )
+        nodes_map: dict[str, dict] = {}
+        edges: list[dict] = []
+        while result.has_next():
+            row = result.get_next()
+            aid, aname, atype, afreq, bid, bname, btype, bfreq = row
+            if aid not in nodes_map:
+                nodes_map[aid] = {"id": aid, "label": aname, "type": atype or "FUNCTION",
+                                   "size": afreq or 1}
+            if bid not in nodes_map:
+                nodes_map[bid] = {"id": bid, "label": bname, "type": btype or "FUNCTION",
+                                   "size": bfreq or 1}
+            edges.append({"source": aid, "target": bid, "weight": 1.0})
+        return {"nodes": list(nodes_map.values()), "edges": edges}
