@@ -557,7 +557,7 @@
         "text_excerpt is first 200 chars of chunk text",
         "uv run pytest tests/test_search.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S17b",

@@ -1,3 +1,11 @@
+## 2026-02-24T12:00:00+00:00 - S17a - GET /search backend — hybrid cross-document search endpoint
+- Implemented: backend/app/routers/search.py with SearchResult/DocumentGroup/SearchResponse Pydantic models; GET /search endpoint (q, content_types, limit params); resolves content_types to document_ids via SQLite; calls HybridRetriever.retrieve(); groups ScoredChunk results by document_id; returns grouped SearchResponse. Registered search_router in main.py. Tests: tests/test_search.py with 6 tests using dependency_overrides for get_db (async generator override) and get_retriever (lambda override); covers grouped results, empty results, content_type filter, no-match filter early-return, missing query 422, result field shapes.
+- Files changed: backend/app/routers/search.py (new), backend/tests/test_search.py (new), backend/app/main.py (search_router import + include)
+- Learnings:
+  - FastAPI dependency_overrides for yield deps: provide async def _override(): yield value — not a lambda returning an async generator
+  - dependency_overrides[get_retriever] = lambda: retriever works for simple (non-yield) deps
+  - ruff --fix handles F401 unused imports and I001 import sorting; E501 long docstrings need manual split
+---
 ## 2026-02-25T02:00:00+10:00 - S16b - Viz tab — entity type filter, node search, click popover, edge tooltip
 - Implemented: Enhanced src/pages/Viz.tsx with full interactive controls — controls sidebar (240px): scope toggle (This doc/All docs, invalidates query), search input (uses setSettings nodeReducer to dim non-matches + camera.animate to first match), entity type checkboxes (filter rebuilds filteredGraph via useMemo); GraphController inner component (useRegisterEvents returns a fn to call with handlers: clickNode computes graphToViewport coords from graph attrs + container getBoundingClientRect, enterEdge reads edge "type" attr for tooltip, leaveEdge/clickStage clear selection); CameraControls inner component (useCamera hook: zoomIn/zoomOut/reset); node click popover (fixed position from screenX/Y); edge hover tooltip; all type-safe with SigmaNodeEventPayload/SigmaEdgeEventPayload imports
 - Files changed: frontend/src/pages/Viz.tsx
