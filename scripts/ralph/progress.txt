@@ -1,3 +1,13 @@
+## 2026-02-24T18:00:00+10:00 - S12 - Document reader UI with streaming summary panel in Learning tab
+- Implemented: added preview: Mapped[str] column to SectionModel; updated chunk_node in ingestion.py to create SectionModel rows with preview (first 300 chars of section text); added GET /documents/{id} endpoint returning DocumentDetail with SectionItem list; frontend src/components/reader/types.ts (DocumentDetail, SectionItem, SummaryMode, SUMMARY_TABS, CONVERSATION_TAB); src/components/reader/DocumentReader.tsx (two-panel layout: left 60% with section list using line-clamp-2 for previews, right 40% with SummaryPanel; SummaryPanel with tab set, Generate/Regenerate buttons, SSE stream consumed via fetch+ReadableStream, animated cursor during streaming, 4th Meeting Notes tab for conversation content type); updated Learning.tsx to check activeDocumentId and show DocumentReader instead of catalog
+- Files changed: backend/app/models.py (SectionModel.preview), backend/app/workflows/ingestion.py (SectionModel storage), backend/app/routers/documents.py (DocumentDetail, SectionItem, GET /documents/{id}), frontend/src/components/reader/types.ts, DocumentReader.tsx, frontend/src/pages/Learning.tsx
+- Learnings:
+  - SSE stream parsing: split buffer on '\n', buffer = lines.pop() to handle partial lines correctly
+  - fetchDocument queryFn type: need to return Promise<DocumentDetail> explicitly (res.json() returns Promise<unknown>)
+  - SummaryMode as key in Partial<Record<SummaryMode, string>> needs safe access with ?? '' to avoid undefined spread issues
+  - Back button clears activeDocumentId with setActiveDocument(null) — the catalog renders when activeDocumentId is null
+---
+
 ## 2026-02-24T17:00:00+10:00 - S11 - Upload flow — file drag-and-drop and ingestion progress toast
 - Implemented: src/components/library/UploadDialog.tsx (Dialog with Upload File + Paste Text tabs; drag-and-drop with dragover/dragleave/drop events; file picker; Paste text with label + content_type selector; calls POST /ingest as multipart FormData for both paths; pollStatus() uses setInterval to poll GET /documents/{id}/status every 2s, updates sonner toast loading message per stage, dismisses with success or error); installed sonner, added <Toaster /> to App.tsx; backend status endpoint updated to include error_message: str|None
 - Files changed: frontend/src/components/library/UploadDialog.tsx, frontend/src/pages/Learning.tsx (Add Content button), frontend/src/App.tsx (Toaster), backend/app/routers/documents.py (error_message in status response), frontend/package.json (sonner)

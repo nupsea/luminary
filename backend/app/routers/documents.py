@@ -61,6 +61,30 @@ class PatchDocumentRequest(BaseModel):
     tags: list[str] | None = None
 
 
+class SectionItem(BaseModel):
+    id: str
+    heading: str
+    level: int
+    page_start: int
+    page_end: int
+    section_order: int
+    preview: str
+
+
+class DocumentDetail(BaseModel):
+    id: str
+    title: str
+    format: str
+    content_type: str
+    word_count: int
+    page_count: int
+    stage: str
+    tags: list[str]
+    created_at: datetime
+    last_accessed_at: datetime
+    sections: list[SectionItem]
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -236,6 +260,50 @@ async def ingest_document(
     asyncio.create_task(run_ingestion(doc_id, str(dest), fmt))
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
+
+
+@router.get("/{document_id}", response_model=DocumentDetail)
+async def get_document(document_id: str):
+    """Return document detail with sections list."""
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        sections_result = await session.execute(
+            select(SectionModel)
+            .where(SectionModel.document_id == document_id)
+            .order_by(SectionModel.section_order)
+        )
+        sections = sections_result.scalars().all()
+
+    return DocumentDetail(
+        id=doc.id,
+        title=doc.title,
+        format=doc.format,
+        content_type=doc.content_type,
+        word_count=doc.word_count,
+        page_count=doc.page_count,
+        stage=doc.stage,
+        tags=doc.tags or [],
+        created_at=doc.created_at,
+        last_accessed_at=doc.last_accessed_at,
+        sections=[
+            SectionItem(
+                id=s.id,
+                heading=s.heading,
+                level=s.level,
+                page_start=s.page_start,
+                page_end=s.page_end,
+                section_order=s.section_order,
+                preview=s.preview,
+            )
+            for s in sections
+        ],
+    )
 
 
 @router.patch("/{document_id}")

@@ -38,6 +38,7 @@ class SectionModel(Base):
     page_start: Mapped[int] = mapped_column(Integer, default=0)
     page_end: Mapped[int] = mapped_column(Integer, default=0)
     section_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    preview: Mapped[str] = mapped_column(Text, default="")
 
 
 class ChunkModel(Base):

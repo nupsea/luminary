@@ -9,6 +9,7 @@ import { ViewToggle } from "@/components/library/ViewToggle"
 import { DocumentCard } from "@/components/library/DocumentCard"
 import { DocumentRow } from "@/components/library/DocumentRow"
 import type { ContentType, DocumentListItem, SortOption, ViewMode } from "@/components/library/types"
+import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
@@ -92,6 +93,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 export default function Learning() {
+  const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const [search, setSearch] = useState("")
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
@@ -106,6 +108,16 @@ export default function Learning() {
 
   function handleDocumentClick(id: string) {
     setActiveDocument(id)
+  }
+
+  // Show reader when a document is active
+  if (activeDocumentId) {
+    return (
+      <DocumentReader
+        documentId={activeDocumentId}
+        onBack={() => setActiveDocument(null)}
+      />
+    )
   }
 
   const allDocs = documents ?? []

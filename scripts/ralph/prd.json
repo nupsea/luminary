@@ -404,7 +404,7 @@
         "Back button returns to catalog view",
         "Verify in browser: select a document, click Generate Summary in One-liner tab, confirm tokens stream in real-time"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S13",

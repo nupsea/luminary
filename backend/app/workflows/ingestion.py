@@ -8,7 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
 
 from app.database import get_session_factory
-from app.models import ChunkModel
+from app.models import ChunkModel, SectionModel
 from app.services.parser import DocumentParser
 
 logger = logging.getLogger(__name__)
@@ -167,6 +167,19 @@ async def chunk_node(state: IngestionState) -> IngestionState:
         doc_id = state["document_id"]
         chunks = []
         async with get_session_factory()() as session:
+            # Store sections with preview text
+            for s_idx, s in enumerate(pd["sections"] if pd else []):
+                section_model = SectionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading=s.get("heading", ""),
+                    level=s.get("level", 1),
+                    page_start=s.get("page_start", 0),
+                    page_end=s.get("page_end", 0),
+                    section_order=s_idx,
+                    preview=s.get("text", "")[:300],
+                )
+                session.add(section_model)
             for idx, text in enumerate(raw_chunks):
                 chunk_id = str(uuid.uuid4())
                 chunk = ChunkModel(
