@@ -12,7 +12,9 @@ from app.config import Settings, get_settings
 from app.database import get_engine
 from app.db_init import create_all_tables
 from app.routers.documents import router as documents_router
+from app.routers.qa import router as qa_router
 from app.routers.summarize import router as summarize_router
+from app.telemetry import setup_tracing
 
 
 def configure_logging(log_level: str = "INFO") -> None:
@@ -35,6 +37,7 @@ async def lifespan(app: FastAPI):
     for subdir in ("raw", "models", "vectors"):
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
     await create_all_tables(get_engine())
+    setup_tracing(settings.PHOENIX_ENABLED)
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
@@ -52,6 +55,7 @@ app.add_middleware(
 
 
 app.include_router(documents_router)
+app.include_router(qa_router)
 app.include_router(summarize_router)
 
 
