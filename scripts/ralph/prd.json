@@ -316,7 +316,7 @@
         "Completed summaries stored in SQLite summaries table",
         "uv run pytest tests/test_summarizer.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S09",

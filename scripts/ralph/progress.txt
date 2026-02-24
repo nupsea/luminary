@@ -1,3 +1,14 @@
+## 2026-02-24T13:00:00+10:00 - S08 - Multi-granularity summarization with SSE streaming
+- Implemented: app/services/summarizer.py (SummarizationService — stream_summary async generator, _fetch_chunks, _store_summary, _map_sections map-reduce for docs >8000 tokens), app/routers/summarize.py (POST /summarize/{document_id}, SummarizeRequest Pydantic model, StreamingResponse with text/event-stream), registered summarize_router in app/main.py, tests/test_summarizer.py (15 tests: 6 prompt construction unit tests, 5 service unit tests, 4 endpoint integration tests)
+- Files changed: backend/app/services/summarizer.py, backend/app/routers/summarize.py, backend/app/main.py, backend/tests/test_summarizer.py, backend/pyproject.toml (added sse-starlette)
+- Learnings:
+  - UP043 ruff rule: AsyncGenerator[str, None] → AsyncGenerator[str] (None is default send type, same pattern as UP043 on AsyncGenerator)
+  - sse-starlette not needed for raw SSE — StreamingResponse with media_type="text/event-stream" and manually formatted "data: ...\n\n" strings works cleanly
+  - Async generator methods: call without await in the router (svc.stream_summary(...) returns AsyncGenerator directly)
+  - map-reduce pattern: non-streaming calls for map phase (section summaries), streaming for reduce phase (final output)
+  - Import sort order: constants from same module must be alphabetically ordered in the import block (GROUNDING_PREFIX before MAP_TOKEN_THRESHOLD)
+---
+
 ## 2026-02-24T12:00:00+10:00 - S07 - LiteLLM integration — Ollama, OpenAI, Anthropic, Gemini with streaming
 - Implemented: app/services/llm.py (LLMService — generate non-stream/stream, _build_kwargs routing, _token_stream async generator, get_llm_service singleton), enhanced classify_node in ingestion.py (LLM reclassification when heuristic='notes' and word_count>5000), GET /settings/llm endpoint in main.py (Ollama ping, processing_mode logic, cloud_providers list), tests/test_llm.py (13 tests: 3 non-stream, 2 stream, 4 routing, 3 endpoint, 1 singleton)
 - Files changed: backend/app/services/llm.py, backend/app/workflows/ingestion.py, backend/app/main.py, backend/tests/test_llm.py, backend/pyproject.toml (added litellm, httpx)

@@ -23,6 +23,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "sentence-transformers>=5.2.3",
     "sqlalchemy[asyncio]>=2.0.46",
+    "sse-starlette>=3.2.0",
     "uvicorn[standard]>=0.41.0",
 ]
 

@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.database import get_engine
 from app.db_init import create_all_tables
 from app.routers.documents import router as documents_router
+from app.routers.summarize import router as summarize_router
 
 
 def configure_logging(log_level: str = "INFO") -> None:
@@ -51,6 +52,7 @@ app.add_middleware(
 
 
 app.include_router(documents_router)
+app.include_router(summarize_router)
 
 
 @app.get("/health")
