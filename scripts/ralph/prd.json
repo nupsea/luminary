@@ -541,7 +541,7 @@
         "Edge hover shows a tooltip",
         "Verify in browser: toggle an entity type checkbox, confirm nodes disappear/appear; search for an entity name, confirm highlighting works"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S17a",

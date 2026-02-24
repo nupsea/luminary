@@ -1,3 +1,13 @@
+## 2026-02-25T02:00:00+10:00 - S16b - Viz tab — entity type filter, node search, click popover, edge tooltip
+- Implemented: Enhanced src/pages/Viz.tsx with full interactive controls — controls sidebar (240px): scope toggle (This doc/All docs, invalidates query), search input (uses setSettings nodeReducer to dim non-matches + camera.animate to first match), entity type checkboxes (filter rebuilds filteredGraph via useMemo); GraphController inner component (useRegisterEvents returns a fn to call with handlers: clickNode computes graphToViewport coords from graph attrs + container getBoundingClientRect, enterEdge reads edge "type" attr for tooltip, leaveEdge/clickStage clear selection); CameraControls inner component (useCamera hook: zoomIn/zoomOut/reset); node click popover (fixed position from screenX/Y); edge hover tooltip; all type-safe with SigmaNodeEventPayload/SigmaEdgeEventPayload imports
+- Files changed: frontend/src/pages/Viz.tsx
+- Learnings:
+  - useRegisterEvents() returns a registerEvents function to call inside useEffect — not used directly as JSX event prop
+  - graphToViewport() accepts {x, y} Coordinates and returns viewport pixel coordinates — must read node attrs as numbers
+  - nodeReducer prefix unused param with _ to satisfy noUnusedLocals: (_nodeKey, data) => ...
+  - SigmaNodeEventPayload / SigmaEdgeEventPayload imported from "sigma/types" — both have event.preventSigmaDefault()
+---
+
 ## 2026-02-25T01:00:00+10:00 - S16a - Viz tab — basic Sigma.js knowledge graph rendering
 - Implemented: npm install sigma graphology @react-sigma/core graphology-layout-forceatlas2; src/pages/Viz.tsx (TanStack Query fetches GET /graph/{documentId} or GET /graph when activeDocumentId is null; buildGraphologyGraph() converts API nodes to Graphology nodes with random x/y, linear size scaling 4-20, TYPE_COLORS palette, adds edges with deduplication check; forceAtlas2.assign() 100 iterations with inferSettings(); SigmaContainer renders the result; loading/error/empty states)
 - Files changed: frontend/src/pages/Viz.tsx, frontend/package.json (sigma, graphology, @react-sigma/core, graphology-layout-forceatlas2)
