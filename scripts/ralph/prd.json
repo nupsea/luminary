@@ -661,7 +661,7 @@
         "GET /flashcards/{id}/export/csv returns valid CSV",
         "uv run pytest tests/test_flashcards.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S20b",
