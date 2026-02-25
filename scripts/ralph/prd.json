@@ -1164,7 +1164,7 @@
         "All fetch errors logged at error level with endpoint and error detail",
         "Zero pages render a blank white area for loading, error, or empty state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S44",

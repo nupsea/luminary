@@ -549,3 +549,19 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - integration_http marker tests selected by default pytest run (not excluded); e2e tests excluded
   - CI: 283 passed (+3 new integration_http tests), 9 deselected, ruff clean
 ---
+
+---
+
+## 2026-02-26T02:00:00+00:00 - S43 - Frontend compliance audit — loading, error, empty states across all pages
+- Implemented targeted additions to Chat, Study, Viz, Notes pages per S43 spec
+- Chat.tsx: added logger + useQueryClient, qaError dismissable inline banner on /qa failure, skeleton for message area while llmLoading, "Upload a document" empty state when hasDocuments=false (reads from TanStack Query cache), logger.error on /qa errors, logger.info mount/load
+- Study.tsx: added logger + Skeleton import + useRef, replaced Loader2 spinner with skeleton grid (6 cards), isError: cardsError from flashcard query → inline red error banner, logger.info mount/load
+- Viz.tsx: added logger + Skeleton + useRef, noDocSelected guard → "Select a document" empty state, replaced text loading with skeleton canvas, styled error as red border/bg card with "Graph unavailable for this document", query disabled when no doc selected, logger.info mount/load/error
+- Notes.tsx: added logger + Skeleton + useRef + useEffect, isLoading/isError from notes query, skeleton grid loading state, inline error banner, updated empty state text to "No notes yet — highlights and annotations will appear here"
+- Files changed: frontend/src/pages/Chat.tsx, Study.tsx, Viz.tsx, Notes.tsx
+- Learnings:
+  - useQueryClient().getQueryData() reads from TanStack Query cache synchronously — safe to use in render without a query call
+  - Cache key ["documents", undefined, null, "newest", 1, 20] must match exactly what App.tsx prefetches
+  - Viz query: added enabled: !noDocSelected to skip graph fetch when no doc selected and scope="document"
+  - CI: 283 passed, tsc --noEmit clean, ruff clean
+---

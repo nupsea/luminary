@@ -9,9 +9,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Graph from "graphology"
 import forceAtlas2 from "graphology-layout-forceatlas2"
 import { Maximize2, Minus, Plus } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
+import { Skeleton } from "@/components/ui/skeleton"
+import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 
 const API_BASE = "http://localhost:8000"
@@ -226,6 +228,11 @@ export default function Viz() {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const mountTime = useRef(Date.now())
+
+  useEffect(() => {
+    logger.info("[Viz] mounted")
+  }, [])
 
   const [activeTypes, setActiveTypes] = useState<Set<EntityType>>(new Set(ALL_ENTITY_TYPES))
   const [search, setSearch] = useState("")
@@ -234,12 +241,28 @@ export default function Viz() {
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
 
+  const noDocSelected = scope === "document" && !activeDocumentId
+
   const queryKey = ["graph", scope, activeDocumentId, viewMode]
   const { data, isLoading, isError } = useQuery({
     queryKey,
     queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode),
     staleTime: 30_000,
+    enabled: !noDocSelected,
   })
+
+  useEffect(() => {
+    if (!isLoading && data) {
+      const elapsed = Date.now() - mountTime.current
+      logger.info("[Viz] loaded", { duration_ms: elapsed, itemCount: data.nodes.length })
+    }
+  }, [isLoading, data])
+
+  useEffect(() => {
+    if (isError) {
+      logger.error("[Viz] fetch failed", { endpoint: `/graph/${activeDocumentId ?? "all"}` })
+    }
+  }, [isError, activeDocumentId])
 
   const filteredGraph = useMemo(() => {
     if (!data) return null
@@ -275,18 +298,31 @@ export default function Viz() {
     })
   }
 
+  if (noDocSelected) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <p className="text-sm text-muted-foreground max-w-sm">
+          Select a document to explore its knowledge graph.
+        </p>
+      </div>
+    )
+  }
+
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-sm text-muted-foreground">Loading graph...</div>
+      <div className="flex h-full flex-col gap-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="flex-1 w-full rounded-lg" />
       </div>
     )
   }
 
   if (isError) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-sm text-destructive">Failed to load graph data.</div>
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Graph unavailable for this document.
+        </div>
       </div>
     )
   }

@@ -8,7 +8,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { FileText, Tag, FolderOpen, Pencil, X, Check } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { logger } from "@/lib/logger"
 import { relativeDate } from "@/components/library/utils"
 
 const API_BASE = "http://localhost:8000"
@@ -188,6 +190,11 @@ type FilterState =
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const qc = useQueryClient()
+  const mountTime = useRef(Date.now())
+
+  useEffect(() => {
+    logger.info("[Notes] mounted")
+  }, [])
 
   const { data: groups } = useQuery({
     queryKey: ["notes-groups"],
@@ -197,10 +204,17 @@ export default function NotesPage() {
   const groupParam = filter.type === "group" ? filter.name : undefined
   const tagParam = filter.type === "tag" ? filter.name : undefined
 
-  const { data: notes } = useQuery({
+  const { data: notes, isLoading: notesLoading, isError: notesError } = useQuery({
     queryKey: ["notes", groupParam, tagParam],
     queryFn: () => fetchNotes(undefined, groupParam, tagParam),
   })
+
+  useEffect(() => {
+    if (!notesLoading) {
+      const elapsed = Date.now() - mountTime.current
+      logger.info("[Notes] loaded", { duration_ms: elapsed, itemCount: notes?.length ?? 0 })
+    }
+  }, [notesLoading, notes?.length])
 
   function refetch() {
     void qc.invalidateQueries({ queryKey: ["notes"] })
@@ -268,11 +282,20 @@ export default function NotesPage() {
 
       {/* Right panel */}
       <div className="flex-1 overflow-auto p-6">
-        {noteList.length === 0 ? (
+        {notesLoading ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 w-full" />
+            ))}
+          </div>
+        ) : notesError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Failed to load notes. Please try refreshing.
+          </div>
+        ) : noteList.length === 0 ? (
           <div className="flex flex-col items-center py-20 text-center">
-            <p className="text-sm text-muted-foreground">No notes yet.</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Open a document and add notes to sections.
+            <p className="text-sm text-muted-foreground">
+              No notes yet — highlights and annotations will appear here.
             </p>
           </div>
         ) : (

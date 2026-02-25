@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ChevronDown,
   ChevronUp,
@@ -24,6 +24,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
 import { ProgressDashboard } from "@/components/ProgressDashboard"
@@ -455,13 +457,25 @@ export default function Study() {
   const [studying, setStudying] = useState(false)
   // Track section pre-selected by clicking a gap item
   const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
+  const mountTime = useRef(Date.now())
+
+  useEffect(() => {
+    logger.info("[Study] mounted")
+  }, [])
 
   // Flashcard list
-  const { data: cards = [], isLoading: cardsLoading } = useQuery<Flashcard[]>({
+  const { data: cards = [], isLoading: cardsLoading, isError: cardsError } = useQuery<Flashcard[]>({
     queryKey: ["flashcards", activeDocumentId],
     queryFn: () => fetchFlashcards(activeDocumentId!),
     enabled: !!activeDocumentId,
   })
+
+  useEffect(() => {
+    if (!cardsLoading && activeDocumentId) {
+      const elapsed = Date.now() - mountTime.current
+      logger.info("[Study] loaded", { duration_ms: elapsed, itemCount: cards.length })
+    }
+  }, [cardsLoading, activeDocumentId, cards.length])
 
   // Document sections (for section scope dropdown)
   const { data: docData } = useQuery<DocumentSections>({
@@ -554,8 +568,14 @@ export default function Study() {
         />
 
         {cardsLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={24} className="animate-spin text-muted-foreground" />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 w-full" />
+            ))}
+          </div>
+        ) : cardsError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Failed to load flashcards. Please try refreshing.
           </div>
         ) : cards.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">

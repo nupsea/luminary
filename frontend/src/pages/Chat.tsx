@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query"
-import { Send } from "lucide-react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Send, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
@@ -68,13 +69,16 @@ function buildModelOptions(settings: LLMSettings | undefined): string[] {
 
 export default function Chat() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const qc = useQueryClient()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [scope, setScope] = useState<"single" | "all">("all")
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
+  const [qaError, setQaError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const mountTime = useRef(Date.now())
 
   const { data: llmSettings, isLoading: llmLoading, isError: llmError } = useQuery({
     queryKey: ["llm-settings"],
@@ -83,8 +87,22 @@ export default function Chat() {
 
   const modelOptions = buildModelOptions(llmSettings)
 
+  // Check if any documents have been ingested (use prefetched cache if available)
+  const cachedDocs = qc.getQueryData<{ items?: unknown[] } | unknown[]>(
+    ["documents", undefined, null, "newest", 1, 20],
+  )
+  const hasDocuments = Array.isArray(cachedDocs)
+    ? cachedDocs.length > 0
+    : (cachedDocs as { items?: unknown[] } | undefined)?.items?.length !== 0
+
+  useEffect(() => {
+    logger.info("[Chat] mounted")
+  }, [])
+
   useEffect(() => {
     if (llmSettings && !model) {
+      const elapsed = Date.now() - mountTime.current
+      logger.info("[Chat] loaded", { duration_ms: elapsed })
       setModel(llmSettings.active_model)
     }
   }, [llmSettings, model])
@@ -163,13 +181,12 @@ export default function Chat() {
           }
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
+      setQaError("Could not get a response. Please try again.")
       setMessages((m) =>
-        m.map((msg) =>
-          msg.id === assistantId
-            ? { ...msg, text: "An error occurred. Please try again.", isStreaming: false }
-            : msg,
-        ),
+        m.filter((msg) => msg.id !== assistantId),
       )
       setIsStreaming(false)
     }
@@ -229,9 +246,25 @@ export default function Chat() {
         </div>
       )}
 
+      {/* QA error banner */}
+      {qaError && (
+        <div className="mx-6 mt-2 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <span className="flex-1">{qaError}</span>
+          <button onClick={() => setQaError(null)} className="hover:text-red-900" aria-label="Dismiss">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Message list */}
       <div className="flex-1 overflow-auto px-6 py-4">
-        {noDocumentSelected ? (
+        {llmLoading ? (
+          <div className="flex flex-col gap-3 py-4">
+            <Skeleton className="h-10 w-3/4 self-end" />
+            <Skeleton className="h-16 w-2/3" />
+            <Skeleton className="h-10 w-1/2 self-end" />
+          </div>
+        ) : noDocumentSelected ? (
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-muted-foreground">
               Open a document in the Learning tab to ask questions about it.
@@ -239,7 +272,13 @@ export default function Chat() {
           </div>
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
-            <p className="text-sm text-muted-foreground">Ask a question to get started.</p>
+            {hasDocuments === false ? (
+              <p className="max-w-xs text-center text-sm text-muted-foreground">
+                Upload a document in the Learning tab to start chatting about it.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Ask a question to get started.</p>
+            )}
             <div className="flex flex-wrap justify-center gap-2">
               {EXAMPLE_QUESTIONS.map((q) => (
                 <button
