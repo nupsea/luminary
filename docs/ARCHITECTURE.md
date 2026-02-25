@@ -83,3 +83,13 @@ Query text
   → RRF fusion: score = Σ 1/(k+rank_i), k=60
   → Re-rank and return top-N chunks
 ```
+
+## Current Implementation Status (as of S30, 2026-02-25)
+
+All 30 stories through S30 are complete. Phases 1–5 fully implemented:
+- Phase 1 (Core): scaffold, ingestion pipeline, hybrid retrieval, LiteLLM, summarization, Q&A, library UI
+- Phase 2 (Understanding): layer linter, doc gardener, Kuzu graph, GLiNER NER, Sigma.js Viz, search, explain, notes
+- Phase 3 (Learning): FSRS flashcards, spaced repetition, gap detection, teach-back, progress dashboard
+- Phase 4 (Monitoring): Arize Phoenix OTel, Langfuse, RAGAS evals, full Monitoring tab
+- Phase 5 (Code+Library): tree-sitter code ingestion, call graph, enhanced library catalog with tags/bulk/pagination
+- Phase 6 (S30): colorized dev log script (`make logs`)
