@@ -1146,7 +1146,7 @@
         "make test-e2e target in Makefile, documented in README",
         "uv run pytest tests/test_e2e_upload.py -m integration_http exits 0 in CI"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S43",

@@ -128,6 +128,38 @@ directory (`DATA_DIR`). Subsequent runs reuse the cache in the same temp path.
 - `time_machine.txt`: stage=complete, ≥50 chunks, ≥10 entities, ≥3 search hits for "time traveller"
 - `art_of_unix.txt`: stage=complete, ≥100 chunks, ≥15 entities, ≥3 search hits for "Unix philosophy"
 
+## E2E Upload Tests
+
+`tests/test_e2e_upload.py` contains two test flavours:
+
+**`integration_http` (included in `make ci`)**
+Uses `ASGITransport` with an in-memory SQLite database and mocked ML services
+(no Ollama or model downloads required). Tests the full HTTP upload path:
+`POST /documents/ingest` → asyncio background ingestion → `GET /documents/{id}/status`
+polling. Runs automatically as part of `make ci`.
+
+**`e2e` (excluded from `make ci`)**
+Requires a running backend and Ollama. Start both before running:
+
+```bash
+# Terminal 1 — start the backend
+make backend
+
+# Terminal 2 — start Ollama
+ollama serve
+
+# Terminal 3 — run E2E tests
+make test-e2e
+
+# Or point at a custom backend URL
+BACKEND_URL=http://my-host:8000 make test-e2e
+```
+
+**What is asserted (e2e):**
+- `test_upload_and_poll`: file reaches `stage=complete` within 120 s; `progress_pct` increases monotonically
+- `test_upload_error_surfaced`: corrupt PDF reaches `stage=error` with a non-empty `error_message`
+- `test_status_polling_contract`: `{stage, progress_pct, done, error_message}` schema validated on every poll
+
 ## Running Evaluations
 
 Start Langfuse (requires Docker):

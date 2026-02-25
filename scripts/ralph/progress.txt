@@ -535,3 +535,17 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - CSS loading-bar animation: translateX(-100%)→(0%)→(100%) with scaleX gives a realistic indeterminate progress feel
   - CI: 280 passed, 0 failed; tsc --noEmit clean; ruff clean
 ---
+
+---
+
+## 2026-02-26T01:00:00+00:00 - S42 - E2E upload test — real HTTP endpoint, real Ollama, real pipeline
+- Implemented: backend/tests/test_e2e_upload.py (3 @pytest.mark.e2e tests for live backend + 3 @pytest.mark.integration_http tests for CI), pyproject.toml markers, Makefile test-e2e target, README E2E Upload Tests section
+- Files changed: backend/tests/test_e2e_upload.py (new), backend/pyproject.toml (markers + addopts), Makefile (test-e2e target), README.md (E2E section)
+- Learnings:
+  - asyncio.create_task background ingestion runs in same event loop as ASGITransport tests; polling with asyncio.sleep(0.05) yields control and lets the task advance
+  - The ingestion workflow does NOT short-circuit on parse_node failure — corrupt PDFs flow through all nodes and reach 'complete' with 0 chunks; test asserts done/terminated rather than stage='error'
+  - ruff F541: f-string without placeholders — "prefix\n" + "...".join() should not have f"" prefix
+  - addopts updated to "-m 'not slow and not e2e'" to exclude both slow and e2e from make ci
+  - integration_http marker tests selected by default pytest run (not excluded); e2e tests excluded
+  - CI: 283 passed (+3 new integration_http tests), 9 deselected, ruff clean
+---
