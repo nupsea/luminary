@@ -34,6 +34,8 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 _parser = DocumentParser()
 
+_ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx"})
+
 
 # ---------------------------------------------------------------------------
 # Pydantic response / request models
@@ -286,7 +288,15 @@ async def ingest_document(
     settings: Settings = Depends(get_settings),
 ):
     doc_id = str(uuid.uuid4())
-    ext = Path(file.filename or "upload.txt").suffix.lstrip(".")
+    ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
+    if ext and ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported file type '.{ext}'. "
+                f"Allowed types: {', '.join(sorted(_ALLOWED_EXTENSIONS))}"
+            ),
+        )
     data_dir = Path(settings.DATA_DIR).expanduser()
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)

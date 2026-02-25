@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend lint test test-full eval logs
+.PHONY: dev ci backend frontend lint test test-full test-concurrent eval logs
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
@@ -21,6 +21,9 @@ test:
 
 test-full:
 	cd backend && uv run pytest tests/test_integration_full.py -v -m slow
+
+test-concurrent:
+	cd backend && uv run pytest tests/test_concurrent.py -v -m slow
 
 eval:
 	@echo "Running retrieval quality evals (backend must be running on :8000)..."
