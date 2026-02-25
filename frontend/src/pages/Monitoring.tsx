@@ -18,6 +18,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ReferenceLine,
@@ -77,6 +79,16 @@ interface ModelUsageItem {
   avg_latency_ms: number | null
 }
 
+interface EvalHistoryItem {
+  timestamp: string
+  dataset: string
+  model: string
+  hr5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  passed: boolean
+}
+
 interface LLMSettings {
   processing_mode: string
   active_model: string
@@ -127,6 +139,12 @@ async function fetchDocuments(): Promise<Document[]> {
   const res = await fetch(`${API_BASE}/documents`)
   if (!res.ok) return []
   return res.json() as Promise<Document[]>
+}
+
+async function fetchEvalHistory(): Promise<EvalHistoryItem[]> {
+  const res = await fetch(`${API_BASE}/monitoring/eval-history`)
+  if (!res.ok) return []
+  return res.json() as Promise<EvalHistoryItem[]>
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +259,70 @@ function EmptyState({ message }: { message: string }) {
     <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
       {message}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Eval History Sparkline — HR@5 over time per dataset
+// ---------------------------------------------------------------------------
+
+const DATASET_COLORS: Record<string, string> = {
+  book: "#6366f1",
+  paper: "#0ea5e9",
+  notes: "#22c55e",
+  conversation: "#f59e0b",
+  code: "#ec4899",
+}
+
+function buildSparklineData(history: EvalHistoryItem[]) {
+  // Group by dataset, keeping per-run data points with a sequential index
+  const datasets = Array.from(new Set(history.map((h) => h.dataset)))
+  // Build rows indexed by run position across all datasets (merged by timestamp order)
+  const allTimestamps = Array.from(new Set(history.map((h) => h.timestamp))).sort()
+  return allTimestamps.map((ts, i) => {
+    const row: Record<string, number | string> = { run: i + 1, ts }
+    for (const ds of datasets) {
+      const item = history.find((h) => h.timestamp === ts && h.dataset === ds)
+      if (item && item.hr5 !== null) {
+        row[ds] = item.hr5
+      }
+    }
+    return row
+  })
+}
+
+function EvalHistorySparkline({ history }: { history: EvalHistoryItem[] }) {
+  if (history.length === 0) {
+    return <EmptyState message="No eval history yet. Run make eval to populate." />
+  }
+  const data = buildSparklineData(history)
+  const datasets = Array.from(new Set(history.map((h) => h.dataset)))
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis dataKey="run" label={{ value: "Run", position: "insideBottomRight", offset: -4, fontSize: 10 }} tick={{ fontSize: 10 }} />
+        <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} />
+        <Tooltip
+          formatter={(v: number | string | undefined, name: string | undefined) =>
+            typeof v === "number" ? [v.toFixed(3), name ?? ""] : [(v ?? "—"), name ?? ""]
+          }
+        />
+        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+        <ReferenceLine y={0.6} stroke="#6366f1" strokeDasharray="4 4" label={{ value: "threshold 0.60", position: "insideTopRight", fontSize: 9 }} />
+        {datasets.map((ds) => (
+          <Line
+            key={ds}
+            type="monotone"
+            dataKey={ds}
+            name={ds}
+            stroke={DATASET_COLORS[ds] ?? "#94a3b8"}
+            dot={{ r: 3 }}
+            connectNulls
+          />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
   )
 }
 
@@ -368,6 +450,7 @@ export default function Monitoring() {
   const [traces, setTraces] = useState<TraceItem[]>([])
   const [tracesMessage, setTracesMessage] = useState<string | null>(null)
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([])
+  const [evalHistory, setEvalHistory] = useState<EvalHistoryItem[]>([])
   const [modelUsage, setModelUsage] = useState<ModelUsageItem[]>([])
   const [llmSettings, setLLMSettings] = useState<LLMSettings | null>(null)
   const [ingestingDocs, setIngestingDocs] = useState<Document[]>([])
@@ -378,10 +461,11 @@ export default function Monitoring() {
     let cancelled = false
 
     async function load() {
-      const [ov, tr, evs, usage, llm, docs] = await Promise.all([
+      const [ov, tr, evs, history, usage, llm, docs] = await Promise.all([
         fetchOverview(),
         fetchTraces(),
         fetchEvalRuns(),
+        fetchEvalHistory(),
         fetchModelUsage(),
         fetchLLMSettings(),
         fetchDocuments(),
@@ -391,6 +475,7 @@ export default function Monitoring() {
       setTraces(tr.traces)
       setTracesMessage(tr.message ?? null)
       setEvalRuns(evs)
+      setEvalHistory(history)
       setModelUsage(usage)
       setLLMSettings(llm)
       setIngestingDocs(docs.filter((d) => d.stage !== "complete"))
@@ -451,13 +536,20 @@ export default function Monitoring() {
         <RAGQualityChart evalRuns={evalRuns} />
       </section>
 
-      {/* 3. Model Usage */}
+      {/* 3. HR@5 Over Time */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Retrieval Quality Over Time</h2>
+        <p className="text-xs text-muted-foreground">HR@5 per dataset across eval runs. Dashed line = 0.60 threshold.</p>
+        <EvalHistorySparkline history={evalHistory} />
+      </section>
+
+      {/* 4. Model Usage */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Model Usage</h2>
         <ModelUsageSection modelUsage={modelUsage} />
       </section>
 
-      {/* 4. Ingestion Queue */}
+      {/* 5. Ingestion Queue */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Ingestion Queue</h2>
         {ingestingDocs.length === 0 ? (
@@ -481,7 +573,7 @@ export default function Monitoring() {
         )}
       </section>
 
-      {/* 5. Recent Traces */}
+      {/* 6. Recent Traces */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Recent Traces</h2>
         {tracesMessage && (
@@ -525,7 +617,7 @@ export default function Monitoring() {
         )}
       </section>
 
-      {/* 6. Eval Runs */}
+      {/* 7. Eval Runs */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Eval Runs</h2>
         {evalRuns.length === 0 ? (

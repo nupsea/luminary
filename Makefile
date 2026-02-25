@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend lint test test-full logs
+.PHONY: dev ci backend frontend lint test test-full eval logs
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
@@ -21,6 +21,11 @@ test:
 
 test-full:
 	cd backend && uv run pytest tests/test_integration_full.py -v -m slow
+
+eval:
+	@echo "Running retrieval quality evals (backend must be running on :8000)..."
+	cd evals && uv run python run_eval.py --dataset book --assert-thresholds
+	cd evals && uv run python run_eval.py --dataset paper --assert-thresholds
 
 logs:
 	bash scripts/dev-logs.sh

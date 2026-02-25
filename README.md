@@ -144,6 +144,25 @@ cd evals && uv run python run_eval.py --dataset book --backend-url http://localh
 
 View results in Langfuse at [http://localhost:3000](http://localhost:3000).
 
+### Quality Gates
+
+Run `make eval` after any change to ingestion, chunking, embedding, or retrieval to verify quality has not regressed:
+
+```bash
+# Requires: backend running on :8000 (make backend)
+make eval
+```
+
+`make eval` runs the `book` and `paper` datasets with `--assert-thresholds` and exits 1 if any metric falls below:
+
+| Metric      | Threshold |
+|-------------|-----------|
+| HR@5        | ≥ 0.60    |
+| MRR         | ≥ 0.45    |
+| Faithfulness| ≥ 0.65 (LLM scoring only, requires `--model`) |
+
+Each eval run appends a line to `evals/scores_history.jsonl`. The **Monitoring** tab reads this file via `GET /monitoring/eval-history` and renders a sparkline of HR@5 over time per dataset.
+
 ## Monitoring
 
 Visit the **Monitoring** tab in the app for:

@@ -8,6 +8,9 @@ Usage::
     # With LLM-based RAGAS scoring
     uv run python run_eval.py --dataset book --model ollama/mistral
 
+    # Assert quality gates (exits 1 if HR@5 < 0.60, MRR < 0.45, Faithfulness < 0.65)
+    uv run python run_eval.py --dataset book --assert-thresholds
+
 Documents are auto-ingested on first run and their IDs cached in
 evals/golden/manifest.json.  Re-runs skip ingestion.
 """
@@ -16,6 +19,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -30,10 +34,18 @@ from ragas.metrics import (
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
+SCORES_HISTORY_PATH = Path(__file__).parent / "scores_history.jsonl"
 VALID_DATASETS = ["book", "paper", "conversation", "notes", "code"]
 
 # Path to the repo root (two levels up from evals/)
 REPO_ROOT = Path(__file__).parent.parent
+
+# Quality gate thresholds
+THRESHOLDS = {
+    "hit_rate_5": 0.60,
+    "mrr": 0.45,
+    "faithfulness": 0.65,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +64,26 @@ def save_manifest(manifest: dict[str, str]) -> None:
     MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
     with MANIFEST_PATH.open("w") as f:
         json.dump(manifest, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Score history helpers
+# ---------------------------------------------------------------------------
+
+
+def append_history(dataset: str, model: str, metrics: dict, passed: bool) -> None:
+    """Append one eval run to scores_history.jsonl."""
+    entry = {
+        "timestamp": datetime.now(tz=UTC).isoformat(),
+        "dataset": dataset,
+        "model": model,
+        "hr5": metrics.get("hit_rate_5"),
+        "mrr": metrics.get("mrr"),
+        "faithfulness": metrics.get("faithfulness"),
+        "passed": passed,
+    }
+    with SCORES_HISTORY_PATH.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +322,15 @@ def main() -> None:
         dest="backend_url",
         help="Luminary backend URL",
     )
+    parser.add_argument(
+        "--assert-thresholds",
+        action="store_true",
+        dest="assert_thresholds",
+        help=(
+            "Exit code 1 if any metric is below threshold: "
+            "HR@5 >= 0.60, MRR >= 0.45, Faithfulness >= 0.65 (LLM only)"
+        ),
+    )
     args = parser.parse_args()
 
     rows = load_golden(args.dataset)
@@ -385,8 +426,30 @@ def main() -> None:
         **ragas_scores,
     }
 
+    # Check quality gates
+    violations: list[str] = []
+    if args.assert_thresholds:
+        if hr5 < THRESHOLDS["hit_rate_5"]:
+            violations.append(f"HR@5 {hr5:.4f} < {THRESHOLDS['hit_rate_5']}")
+        if mrr < THRESHOLDS["mrr"]:
+            violations.append(f"MRR {mrr:.4f} < {THRESHOLDS['mrr']}")
+        faith = ragas_scores.get("faithfulness")
+        if args.model and faith is not None and faith < THRESHOLDS["faithfulness"]:
+            violations.append(f"Faithfulness {faith:.4f} < {THRESHOLDS['faithfulness']}")
+
+    passed = len(violations) == 0
+
+    # Persist run to local history file
+    append_history(args.dataset, args.model or "no-llm", metrics, passed)
+
     print_table(args.dataset, args.model or "no-llm", metrics)
     store_results(args.backend_url, args.dataset, args.model or "no-llm", metrics)
+
+    if violations:
+        print("\nQUALITY GATE FAILED:", file=sys.stderr)
+        for v in violations:
+            print(f"  {v}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

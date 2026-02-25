@@ -1,13 +1,16 @@
 """Monitoring endpoints — traces proxy and overview stats.
 
 Routes:
-  GET /monitoring/traces    — last 50 spans from Phoenix (empty if Phoenix not running)
-  GET /monitoring/overview  — aggregated counts from SQLite + Phoenix status
+  GET /monitoring/traces        — last 50 spans from Phoenix (empty if Phoenix not running)
+  GET /monitoring/overview      — aggregated counts from SQLite + Phoenix status
+  GET /monitoring/eval-history  — HR@5/MRR/Faithfulness history from scores_history.jsonl
 """
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -25,6 +28,9 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
 _PHOENIX_BASE = "http://localhost:6006"
 _TRACES_TIMEOUT = 3.0  # seconds
+
+# evals/scores_history.jsonl relative to this file (repo-root/evals/)
+_SCORES_HISTORY_PATH = Path(__file__).parent.parent.parent.parent / "evals" / "scores_history.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -302,3 +308,32 @@ async def get_model_usage(
         )
         for row in rows
     ]
+
+
+class EvalHistoryItem(BaseModel):
+    timestamp: str
+    dataset: str
+    model: str
+    hr5: float | None
+    mrr: float | None
+    faithfulness: float | None
+    passed: bool
+
+
+@router.get("/eval-history", response_model=list[EvalHistoryItem])
+async def get_eval_history() -> list[EvalHistoryItem]:
+    """Return eval score history from evals/scores_history.jsonl (all runs, oldest first)."""
+    if not _SCORES_HISTORY_PATH.exists():
+        return []
+    items: list[EvalHistoryItem] = []
+    with _SCORES_HISTORY_PATH.open() as f:
+        for raw_line in f:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                row = json.loads(stripped)
+                items.append(EvalHistoryItem(**row))
+            except Exception:
+                pass
+    return items
