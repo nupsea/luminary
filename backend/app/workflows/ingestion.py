@@ -29,7 +29,8 @@ STAGE_PROGRESS: dict[str, int] = {
     "classifying": 25,
     "chunking": 40,
     "embedding": 70,
-    "indexing": 90,
+    "indexing": 80,
+    "entity_extract": 90,
     "complete": 100,
     "error": 0,
 }
@@ -79,6 +80,7 @@ async def _update_stage(document_id: str, stage: str) -> None:
 
 
 def parse_node(state: IngestionState) -> IngestionState:
+    logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
     with trace_ingestion_node("parse", state):
         try:
             fp = Path(state["file_path"])
@@ -111,6 +113,7 @@ def parse_node(state: IngestionState) -> IngestionState:
 
 
 async def classify_node(state: IngestionState) -> IngestionState:
+    logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
     with trace_ingestion_node("classify", state):
         try:
             pd = state["parsed_document"]
@@ -211,6 +214,7 @@ def _chunk_code_file(
 
 
 async def chunk_node(state: IngestionState) -> IngestionState:
+    logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
     with trace_ingestion_node("chunk", state):
         try:
             pd = state["parsed_document"]
@@ -302,6 +306,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
 
 
 async def embed_node(state: IngestionState) -> IngestionState:
+    logger.debug("node_start", extra={"node": "embed", "doc_id": state["document_id"]})
     with trace_ingestion_node("embed", state):
         try:
             doc_id = state["document_id"]
@@ -346,6 +351,7 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
     from sqlalchemy import text
 
     doc_id = state["document_id"]
+    logger.debug("node_start", extra={"node": "keyword_index", "doc_id": doc_id})
     with trace_ingestion_node("keyword_index", state):
         try:
             async with get_session_factory()() as session:
@@ -409,6 +415,8 @@ def _build_call_graph(chunks: list[dict], graph, doc_id: str) -> None:
 async def entity_extract_node(state: IngestionState) -> IngestionState:
     doc_id = state["document_id"]
     chunks = state.get("chunks") or []
+    logger.debug("node_start", extra={"node": "entity_extract", "doc_id": doc_id})
+    await _update_stage(doc_id, "entity_extract")
     with trace_ingestion_node("entity_extract", state):
         try:
             from itertools import combinations  # noqa: PLC0415

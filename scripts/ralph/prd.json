@@ -1109,7 +1109,7 @@
         "Backend logs node_start at DEBUG for every LangGraph node",
         "make logs shows each pipeline stage as it executes in real time"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S41",
