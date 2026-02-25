@@ -1015,7 +1015,7 @@
         "uv run python run_eval.py --dataset book exits 0 with HR@5 and MRR scores printed",
         "Total golden pairs across all datasets >= 120"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S36",
