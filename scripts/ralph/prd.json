@@ -928,7 +928,7 @@
         "Ctrl-C cleanly stops both processes",
         "Script works in macOS zsh without additional installs"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S31",
@@ -936,12 +936,14 @@
       "phase": 6,
       "priority": 32,
       "featureRef": "F2",
-      "description": "Ingestion fails with an ASGI exception during classify_node when LiteLLM calls Ollama (mistral). Investigate the traceback: read app/workflows/ingestion.py classify_node, app/services/llm.py (or wherever the LiteLLM call is made), and app/config.py for OLLAMA_BASE_URL and MODEL settings. Common causes: (a) classify_node calling a sync LiteLLM function inside an async context without run_in_executor, (b) Ollama not running or wrong base URL, (c) model name mismatch (e.g. 'mistral' vs 'ollama/mistral'). Fix the root cause \u2014 do NOT just catch and swallow the exception. If the issue is sync-in-async, wrap with asyncio.get_event_loop().run_in_executor(None, ...) or switch to litellm.acompletion. Add a startup health-check log line that pings the configured Ollama URL and logs a clear WARNING if unreachable, so users know early. Add or update the existing test in tests/test_ingest.py to mock the LiteLLM call and assert classify_node returns a valid content_type without hitting the network.",
+      "description": "Ingestion fails with an ASGI exception during classify_node when LiteLLM calls Ollama (mistral). Investigate the traceback: read app/workflows/ingestion.py classify_node, app/services/llm.py (or wherever the LiteLLM call is made), and app/config.py for OLLAMA_BASE_URL and MODEL settings. Common causes: (a) classify_node calling a sync LiteLLM function inside an async context without run_in_executor, (b) Ollama not running or wrong base URL, (c) model name mismatch (e.g. 'mistral' vs 'ollama/mistral'). Fix the root cause \u2014 do NOT just catch and swallow the exception. If the issue is sync-in-async, wrap with asyncio.get_event_loop().run_in_executor(None, ...) or switch to litellm.acompletion. Add a startup health-check log line that pings the configured Ollama URL and logs a clear WARNING if unreachable, so users know early. Add or update the existing test in tests/test_ingest.py to mock the LiteLLM call and assert classify_node returns a valid content_type without hitting the network. Additionally, fix a Kuzu file lock conflict that crashes the backend on startup when another process already holds the lock on the production graph.kuzu file. This happens when pytest runs while the dev backend is also running. Fix: in conftest.py (create if missing), add a session-scoped fixture that sets DATA_DIR to a pytest tmp_path so all tests use an isolated temp directory for SQLite, LanceDB, and Kuzu \u2014 never the production ~/.luminary path. Ensure the KuzuService, LanceDB, and SQLite init code all respect the DATA_DIR from settings so the fixture override is sufficient. Document in README: stop the dev backend before running pytest, or rely on the isolated fixture which makes it safe to run tests alongside a live backend.",
       "acceptanceCriteria": [
         "Uploading a PDF no longer crashes the ASGI app",
         "classify_node returns a valid content_type string",
         "If Ollama is unreachable, a WARNING log line appears at startup with the URL",
-        "uv run pytest tests/test_ingest.py exits 0 with LiteLLM mocked"
+        "uv run pytest tests/test_ingest.py exits 0 with LiteLLM mocked",
+        "uv run pytest exits 0 even while the dev backend is running (no Kuzu lock error)",
+        "conftest.py fixture overrides DATA_DIR to a temp path for all tests"
       ],
       "passes": false
     },

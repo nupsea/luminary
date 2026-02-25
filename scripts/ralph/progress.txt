@@ -1,3 +1,13 @@
+## 2026-02-25T08:00:00+00:00 - S30 - Colorized dev log script for backend and frontend
+- Implemented: scripts/dev-logs.sh (new) — starts backend (LOG_LEVEL=DEBUG) and frontend with colorized prefixed output; backend lines cyan [BACKEND], frontend lines green [FRONTEND]; uses awk with fflush() for real-time output without buffering; SIGINT/TERM forwarded to both child processes via trap _stop INT TERM; waits for clean shutdown. Makefile already had `logs: bash scripts/dev-logs.sh` target and `.PHONY: logs`. README already had the make logs Quickstart note from S29. Fixed original script's two bugs: (1) used stdbuf which is not available on macOS by default — replaced with awk fflush(); (2) ANSI codes were single-quoted shell variables that never expanded to real ESC sequences — embedded directly in awk string literals (\033[0;36m) which awk interprets correctly.
+- Files changed: scripts/dev-logs.sh, scripts/ralph/prd.json (S30 passes=True)
+- Learnings:
+  - stdbuf is GNU coreutils — not available on macOS by default; use `awk '{ print p $0; fflush() }'` for real-time line prefixing on macOS
+  - ANSI escape codes in awk: embed as \033[...m in awk string literals (BEGIN{p="..."}); do NOT pass via shell variables with single-quoted \033 (those are literal backslash-0-3-3, not ESC)
+  - set -euo pipefail in a script with background processes: remove -e to avoid abort when a background pipeline exits non-zero; keep -uo
+  - $! after a pipeline `cmd | awk ... &` captures awk's PID; killing awk closes the pipe causing cmd to get SIGPIPE and exit
+---
+
 ## 2026-02-25T07:00:00+00:00 - S29 - README overhaul — quickstart, architecture overview, test and eval guide
 - Implemented: README.md full rewrite — (1) product description (local-first, AI-powered knowledge and learning); (2) Architecture Overview with ASCII layer diagram (Types→Config→Repo→Service→Runtime→API) and tab list; (3) Tech Stack table (backend: Python 3.13, FastAPI, LangGraph, LanceDB, SQLite FTS5, Kuzu, GLiNER, LiteLLM; frontend: React 18, TypeScript 5, Vite 5, shadcn/ui, Sigma.js v3); (4) Quickstart with prerequisites (uv, Node 20+, Ollama + mistral), make backend / make frontend / make dev commands; (5) Running Tests (make test + tsc --noEmit); (6) Running Evaluations (docker-compose langfuse + cd evals && uv run python run_eval.py); (7) Monitoring (Monitoring tab + Phoenix localhost:6006 link). Also fixed pre-existing ruff E501 in backend/app/workflows/ingestion.py line 290.
 - Files changed: README.md, backend/app/workflows/ingestion.py (line-length fix), scripts/ralph/prd.json (S29 passes=True)
