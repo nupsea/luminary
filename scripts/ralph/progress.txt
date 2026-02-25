@@ -521,3 +521,17 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - shutil import was unused — ruff F401 caught it, fixed with --fix
   - All 3 perf tests pass in 53s wall clock (asyncio.gather for concurrent ingestion throughput test)
 ---
+
+---
+
+## 2026-02-26T00:00:00+00:00 - S41 - App startup pre-fetch and perceived performance
+- Implemented: GlobalLoadingBar component (useIsFetching + CSS @keyframes loading-bar animation), startup prefetch in AppShell useEffect for documents + LLM settings, hover prefetch on NavLink onMouseEnter, NavItemDef interface with prefetchKey/prefetchFn, NAV_ITEMS array with per-tab prefetch config, four prefetchDocuments/prefetchLLMSettings/prefetchDueCards/prefetchMonitoringOverview helper functions
+- Files changed: frontend/src/App.tsx (major rewrite), frontend/src/index.css (@keyframes loading-bar)
+- Learnings:
+  - GlobalLoadingBar must live inside QueryClientProvider to call useIsFetching(); placed before BrowserRouter so it covers all routes
+  - Hover prefetch skips the network call if data already cached (qc.getQueryData check); staleTime: 60_000 consistent with QueryClient defaultOptions
+  - documents prefetchKey must exactly match the key used in Learning page: ["documents", undefined, null, "newest", 1, 20]
+  - useIsFetching() returns a number (count of in-flight queries), not a boolean — guard with === 0 for hiding the bar
+  - CSS loading-bar animation: translateX(-100%)→(0%)→(100%) with scaleX gives a realistic indeterminate progress feel
+  - CI: 280 passed, 0 failed; tsc --noEmit clean; ruff clean
+---

@@ -1,4 +1,11 @@
-import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+  useIsFetching,
+  useQueryClient,
+} from "@tanstack/react-query"
+import type { QueryKey } from "@tanstack/react-query"
 import { BookOpen, MessageSquare, Network, BarChart2, Activity, StickyNote } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
@@ -16,6 +23,40 @@ import Study from "./pages/Study"
 const Viz = lazy(() => import("./pages/Viz"))
 const Monitoring = lazy(() => import("./pages/Monitoring"))
 
+const API_BASE = "http://localhost:8000"
+
+// ---------------------------------------------------------------------------
+// Prefetch helpers
+// ---------------------------------------------------------------------------
+
+async function prefetchDocuments(): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=20`)
+  if (!res.ok) throw new Error("prefetch failed")
+  return res.json()
+}
+
+async function prefetchLLMSettings(): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/settings/llm`)
+  if (!res.ok) throw new Error("prefetch failed")
+  return res.json()
+}
+
+async function prefetchDueCards(): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/study/due`)
+  if (!res.ok) throw new Error("prefetch failed")
+  return res.json()
+}
+
+async function prefetchMonitoringOverview(): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/monitoring/overview`)
+  if (!res.ok) throw new Error("prefetch failed")
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// QueryClient
+// ---------------------------------------------------------------------------
+
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
@@ -31,6 +72,78 @@ const queryClient = new QueryClient({
   },
 })
 
+// ---------------------------------------------------------------------------
+// Nav items with per-tab prefetch config
+// ---------------------------------------------------------------------------
+
+interface NavItemDef {
+  to: string
+  icon: React.ComponentType<{ size?: number; className?: string }>
+  label: string
+  prefetchKey?: QueryKey
+  prefetchFn?: () => Promise<unknown>
+}
+
+const NAV_ITEMS: NavItemDef[] = [
+  {
+    to: "/",
+    icon: BookOpen,
+    label: "Learning",
+    prefetchKey: ["documents", undefined, null, "newest", 1, 20],
+    prefetchFn: prefetchDocuments,
+  },
+  {
+    to: "/chat",
+    icon: MessageSquare,
+    label: "Chat",
+    prefetchKey: ["llm-settings"],
+    prefetchFn: prefetchLLMSettings,
+  },
+  { to: "/viz", icon: Network, label: "Viz" },
+  {
+    to: "/study",
+    icon: BarChart2,
+    label: "Study",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchDueCards,
+  },
+  { to: "/notes", icon: StickyNote, label: "Notes" },
+  {
+    to: "/monitoring",
+    icon: Activity,
+    label: "Monitoring",
+    prefetchKey: ["monitoring-overview"],
+    prefetchFn: prefetchMonitoringOverview,
+  },
+]
+
+// ---------------------------------------------------------------------------
+// Global top-of-page loading bar
+// ---------------------------------------------------------------------------
+
+function GlobalLoadingBar() {
+  const isFetching = useIsFetching()
+
+  useEffect(() => {
+    logger.debug("[Loading bar]", { fetchingCount: isFetching })
+  }, [isFetching])
+
+  if (isFetching === 0) return null
+
+  return (
+    <div className="fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-primary/20">
+      <div
+        className="h-full bg-primary"
+        style={{ animation: "loading-bar 1.2s ease-in-out infinite" }}
+      />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Page skeleton (Suspense fallback for lazy routes)
+// ---------------------------------------------------------------------------
+
 function PageSkeleton() {
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -44,22 +157,36 @@ function PageSkeleton() {
   )
 }
 
-const NAV_ITEMS = [
-  { to: "/", icon: BookOpen, label: "Learning" },
-  { to: "/chat", icon: MessageSquare, label: "Chat" },
-  { to: "/viz", icon: Network, label: "Viz" },
-  { to: "/study", icon: BarChart2, label: "Study" },
-  { to: "/notes", icon: StickyNote, label: "Notes" },
-  { to: "/monitoring", icon: Activity, label: "Monitoring" },
-] as const
+// ---------------------------------------------------------------------------
+// Sidebar with hover-prefetch
+// ---------------------------------------------------------------------------
 
 function Sidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const qc = useQueryClient()
+
+  async function handleHoverPrefetch(prefetchKey: QueryKey, prefetchFn: () => Promise<unknown>) {
+    const existing = qc.getQueryData(prefetchKey)
+    if (existing !== undefined) {
+      logger.debug("[Prefetch] hit", { key: String(prefetchKey[0]) })
+      return
+    }
+    logger.info("[Prefetch] fetching", { key: String(prefetchKey[0]) })
+    try {
+      await qc.prefetchQuery({
+        queryKey: prefetchKey,
+        queryFn: prefetchFn,
+        staleTime: 60_000,
+      })
+    } catch (e: unknown) {
+      logger.warn("[Prefetch] failed", { key: String(prefetchKey[0]), error: String(e) })
+    }
+  }
 
   return (
     <>
       <nav className="flex h-full w-16 flex-col items-center gap-2 bg-sidebar py-4">
-        {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+        {NAV_ITEMS.map(({ to, icon: Icon, label, prefetchKey, prefetchFn }) => (
           <NavLink
             key={to}
             to={to}
@@ -71,6 +198,11 @@ function Sidebar() {
               )
             }
             title={label}
+            onMouseEnter={() => {
+              if (prefetchKey && prefetchFn) {
+                void handleHoverPrefetch(prefetchKey, prefetchFn)
+              }
+            }}
           >
             <Icon size={20} />
           </NavLink>
@@ -84,8 +216,46 @@ function Sidebar() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// App shell with startup prefetch
+// ---------------------------------------------------------------------------
+
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
+  const qc = useQueryClient()
+
+  // Startup prefetch: documents list + LLM settings
+  useEffect(() => {
+    const docsKey: QueryKey = ["documents", undefined, null, "newest", 1, 20]
+    const llmKey: QueryKey = ["llm-settings"]
+
+    if (qc.getQueryData(docsKey) !== undefined) {
+      logger.debug("[Prefetch] hit", { key: "documents" })
+    } else {
+      logger.info("[Prefetch] fetching", { key: "documents" })
+      void qc.prefetchQuery({
+        queryKey: docsKey,
+        queryFn: prefetchDocuments,
+        staleTime: 60_000,
+      }).catch((e: unknown) => {
+        logger.warn("[Prefetch] failed", { key: "documents", error: String(e) })
+      })
+    }
+
+    if (qc.getQueryData(llmKey) !== undefined) {
+      logger.debug("[Prefetch] hit", { key: "llm-settings" })
+    } else {
+      logger.info("[Prefetch] fetching", { key: "llm-settings" })
+      void qc.prefetchQuery({
+        queryKey: llmKey,
+        queryFn: prefetchLLMSettings,
+        staleTime: 60_000,
+      }).catch((e: unknown) => {
+        logger.warn("[Prefetch] failed", { key: "llm-settings", error: String(e) })
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -116,9 +286,14 @@ function AppShell() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Root
+// ---------------------------------------------------------------------------
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <GlobalLoadingBar />
       <BrowserRouter>
         <AppShell />
       </BrowserRouter>

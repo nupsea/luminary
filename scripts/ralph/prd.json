@@ -1128,7 +1128,7 @@
         "Prefetch hits and misses logged at debug level",
         "Prefetch failures logged as warnings but do not surface to user"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S42",

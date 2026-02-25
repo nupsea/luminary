@@ -41,6 +41,8 @@ Read this file as a MAP. Follow the links below for deeper context.
 10. TypeScript strict mode. `tsc --noEmit` must pass. No `any` without a comment justifying it.
 11. Integration tests use real, untruncated documents. Never truncate fixtures. Never mock core domain services (embedder, NER, retrieval) in integration tests — only mock at external system boundaries (LiteLLM, HTTP). See core-beliefs.md §15.
 12. Golden evaluation datasets must be grounded in actually ingested content with verifiable context passages. `document_id: "synthetic"` is never acceptable. Quality metrics must assert thresholds, not just print scores. See core-beliefs.md §16.
+13. Every frontend story must implement three states: loading (skeleton, not spinner blocking the page), error (inline message per section — not blank), and empty (explicit empty state, not blank). `Promise.all` is banned for independent data fetches — use `Promise.allSettled` so one failure does not block the rest. Every acceptance criterion for a frontend feature must include one criterion each for the loading state, error state, and empty state.
+14. Upload and long-running operations must show inline progress (inside the triggering UI element, not only in a toast). The triggering dialog/panel stays open until the operation completes or fails. Errors surface inline with a retry option.
 
 ## Progress Report Format
 
