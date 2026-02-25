@@ -91,6 +91,10 @@ async function bulkDelete(ids: string[]): Promise<void> {
   })
 }
 
+async function deleteDocument(id: string): Promise<void> {
+  await fetch(`${API_BASE}/documents/${id}`, { method: "DELETE" })
+}
+
 function LoadingSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -296,6 +300,14 @@ export default function Learning() {
     },
   })
 
+  const deleteDocumentMutation = useMutation({
+    mutationFn: (id: string) => deleteDocument(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+    },
+  })
+
   function handleDocumentClick(id: string) {
     setActiveDocument(id)
   }
@@ -334,6 +346,10 @@ export default function Learning() {
 
   function handleConfirmBulkDelete() {
     bulkDeleteMutation.mutate([...selectedIds])
+  }
+
+  function handleDeleteDocument(id: string) {
+    deleteDocumentMutation.mutate(id)
   }
 
   // Reset page when filters change
@@ -458,6 +474,7 @@ export default function Learning() {
                           onClick={handleDocumentClick}
                           onTagClick={handleTagClick}
                           onTagsChange={handleTagsChange}
+                          onDelete={!selectMode ? handleDeleteDocument : undefined}
                           selected={selectedIds.has(doc.id)}
                           onSelect={selectMode ? handleSelect : undefined}
                         />
@@ -499,6 +516,7 @@ export default function Learning() {
                         onClick={handleDocumentClick}
                         onTagClick={handleTagClick}
                         onTagsChange={handleTagsChange}
+                        onDelete={!selectMode ? handleDeleteDocument : undefined}
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}
                       />

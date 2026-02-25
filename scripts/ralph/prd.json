@@ -979,7 +979,7 @@
         "scripts/seed_cleanup.py --confirm deletes listed documents",
         "uv run pytest tests/test_documents.py exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

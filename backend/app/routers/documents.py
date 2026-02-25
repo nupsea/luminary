@@ -397,6 +397,12 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
             get_lancedb_service().delete_document(document_id)
         except Exception:
             logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
+        try:
+            from app.services.graph import get_graph_service  # noqa: PLC0415
+
+            get_graph_service().delete_document(document_id)
+        except Exception:
+            logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
         deleted.append(document_id)
     return {"deleted": deleted, "count": len(deleted)}
 
@@ -472,8 +478,13 @@ async def delete_document(document_id: str):
     except Exception:
         logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
 
-    # Kuzu graph cleanup — stub until S15a
-    logger.info("Kuzu node cleanup pending (S15a) for document %s", document_id)
+    # Remove graph nodes and edges from Kuzu
+    try:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        get_graph_service().delete_document(document_id)
+    except Exception:
+        logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
 
     logger.info("Deleted document %s", document_id)
 

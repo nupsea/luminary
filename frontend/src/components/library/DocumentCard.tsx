@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { Check, Pencil, X } from "lucide-react"
+import { Check, Pencil, Trash2, X } from "lucide-react"
 import { useState } from "react"
 import type { DocumentListItem } from "./types"
 import {
@@ -16,6 +16,7 @@ interface DocumentCardProps {
   onClick: (id: string) => void
   onTagClick?: (tag: string) => void
   onTagsChange?: (id: string, tags: string[]) => void
+  onDelete?: (id: string) => void
   selected?: boolean
   onSelect?: (id: string, selected: boolean) => void
   selectMode?: boolean
@@ -26,6 +27,7 @@ export function DocumentCard({
   onClick,
   onTagClick,
   onTagsChange,
+  onDelete,
   selected = false,
   onSelect,
   selectMode = false,
@@ -33,6 +35,7 @@ export function DocumentCard({
   const Icon = CONTENT_TYPE_ICONS[doc.content_type]
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   function handleCardClick(e: React.MouseEvent) {
     if (selectMode && onSelect) {
@@ -83,7 +86,7 @@ export function DocumentCard({
 
   return (
     <Card
-      className={`cursor-pointer select-none transition-colors ${selected ? "border-primary bg-primary/5" : ""}`}
+      className={`group cursor-pointer select-none transition-colors ${selected ? "border-primary bg-primary/5" : ""}`}
       onClick={handleCardClick}
     >
       <div className="flex items-start justify-between gap-2">
@@ -100,9 +103,23 @@ export function DocumentCard({
           <Icon size={16} className="shrink-0 text-muted-foreground" />
           <h3 className="truncate text-sm font-semibold text-foreground">{doc.title}</h3>
         </div>
-        <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
-          {STATUS_LABELS[doc.learning_status]}
-        </Badge>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
+            {STATUS_LABELS[doc.learning_status]}
+          </Badge>
+          {onDelete && !selectMode && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmDelete(true)
+              }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              title={`Delete ${doc.title}`}
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -173,6 +190,39 @@ export function DocumentCard({
           )
         )}
       </div>
+
+      {/* Inline delete confirmation */}
+      {confirmDelete && (
+        <div
+          className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-xs text-foreground mb-2">
+            Delete <span className="font-semibold">{doc.title}</span>? This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmDelete(false)
+              }}
+              className="rounded border border-border px-2.5 py-1 text-xs hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmDelete(false)
+                onDelete?.(doc.id)
+              }}
+              className="rounded bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }

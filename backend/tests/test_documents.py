@@ -406,6 +406,27 @@ async def test_delete_document_calls_lancedb(test_db):
     mock_lancedb.delete_document.assert_called_once_with(doc_id)
 
 
+async def test_delete_document_calls_graph_service(test_db):
+    """DELETE /documents/{id} calls get_graph_service().delete_document."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        await session.commit()
+
+    mock_lancedb = MagicMock()
+    mock_graph = MagicMock()
+    with (
+        patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb),
+        patch("app.services.graph.get_graph_service", return_value=mock_graph),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.delete(f"/documents/{doc_id}")
+
+    assert resp.status_code == 204
+    mock_graph.delete_document.assert_called_once_with(doc_id)
+
+
 async def test_delete_document_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.delete("/documents/no-such-id")
