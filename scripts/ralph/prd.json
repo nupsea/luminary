@@ -1049,7 +1049,7 @@
         "uv run pytest tests/test_api_contracts.py exits 0",
         "uv run pytest tests/test_concurrent.py -m slow exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S38",
