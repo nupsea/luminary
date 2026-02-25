@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend lint test
+.PHONY: dev ci backend frontend lint test test-full logs
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
@@ -18,6 +18,12 @@ lint:
 
 test:
 	cd backend && uv run pytest
+
+test-full:
+	cd backend && uv run pytest tests/test_integration_full.py -v -m slow
+
+logs:
+	bash scripts/dev-logs.sh
 
 ci:
 	@echo "Running CI checks..."

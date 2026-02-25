@@ -99,6 +99,35 @@ cd backend && uv run pytest tests/test_integration.py -v
 make test
 ```
 
+### Full Integration Tests
+
+Full integration tests run the ingestion pipeline against complete public-domain
+documents using the **real** BAAI/bge-m3 embedding model and the **real** GLiNER
+NER model. LiteLLM classification is still mocked to avoid an Ollama dependency.
+
+These tests live in `tests/test_integration_full.py` and are marked
+`@pytest.mark.slow`. They are excluded from `make test` (fast CI path) and must
+be run explicitly:
+
+```bash
+# Full integration tests (5-10 min on first run due to model downloads)
+make test-full
+
+# Equivalent direct invocation
+cd backend && uv run pytest tests/test_integration_full.py -v -m slow
+```
+
+**Fixtures used** (committed under `tests/fixtures/full/`):
+- `time_machine.txt` — full Project Gutenberg text of *The Time Machine* (~185k chars)
+- `art_of_unix.txt`  — converted plain text of *The Art of Unix Programming* (~109k chars)
+
+On first run, BGE-M3 and GLiNER models are downloaded into the pytest temp
+directory (`DATA_DIR`). Subsequent runs reuse the cache in the same temp path.
+
+**What is asserted:**
+- `time_machine.txt`: stage=complete, ≥50 chunks, ≥10 entities, ≥3 search hits for "time traveller"
+- `art_of_unix.txt`: stage=complete, ≥100 chunks, ≥15 entities, ≥3 search hits for "Unix philosophy"
+
 ## Running Evaluations
 
 Start Langfuse (requires Docker):

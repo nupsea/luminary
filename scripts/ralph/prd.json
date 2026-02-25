@@ -980,6 +980,94 @@
         "uv run pytest tests/test_documents.py exits 0"
       ],
       "passes": true
+    },
+    {
+      "id": "S34",
+      "title": "Full-document ingestion tests with real ML services",
+      "phase": 6,
+      "priority": 35,
+      "featureRef": "F2",
+      "description": "Replace the truncated 10k-char fixtures and fully mocked ML services in test_integration.py with tests that exercise the real pipeline end-to-end. Steps: (1) Download full public-domain documents into tests/fixtures/full/: 'The Time Machine' full text from Project Gutenberg (https://www.gutenberg.org/files/35/35-0.txt, ~180k chars), and 'The Art of Unix Programming' full HTML converted to plain text \u2014 use the version at https://www.catb.org/esr/writings/taoup/html/ or a freely available plain-text mirror; commit both files under tests/fixtures/full/. (2) Add a new test file tests/test_integration_full.py marked with @pytest.mark.slow. These tests use a real temp DATA_DIR (not in-memory SQLite \u2014 use a real SQLite file in tmp_path), real LanceDB in tmp_path, real Kuzu in tmp_path. Still mock LiteLLM classify to avoid Ollama dependency in CI, but use the real EmbeddingService (BAAI/bge-m3 via ONNX Runtime) and real EntityExtractor (GLiNER). (3) Tests: test_full_ingest_fiction \u2014 ingest full Time Machine, assert stage='complete', chunk_count >= 50, entity_count >= 10, search for 'time traveller' returns >= 3 results. test_full_ingest_technical \u2014 ingest full Art of Unix, assert stage='complete', chunk_count >= 100, entity_count >= 15, search for 'Unix philosophy' returns >= 3 results. (4) Add 'make test-full' to Makefile: cd backend && uv run pytest tests/test_integration_full.py -v -m slow. (5) Document in README under a 'Full Integration Tests' section: these are slow (5-10 min), require model files to be downloaded on first run, and are not part of make test (fast CI path).",
+      "acceptanceCriteria": [
+        "tests/fixtures/full/time_machine.txt committed (full ~180k chars, not truncated)",
+        "tests/fixtures/full/art_of_unix.txt committed (full document)",
+        "test_full_ingest_fiction: stage='complete', >=50 chunks, >=10 entities, >=3 search hits",
+        "test_full_ingest_technical: stage='complete', >=100 chunks, >=15 entities, >=3 search hits",
+        "Real EmbeddingService and EntityExtractor used (not mocked)",
+        "make test-full runs and exits 0",
+        "make test (fast path) does NOT run @pytest.mark.slow tests"
+      ],
+      "passes": true
+    },
+    {
+      "id": "S35",
+      "title": "Replace synthetic golden datasets with document-grounded QA pairs",
+      "phase": 6,
+      "priority": 36,
+      "featureRef": "monitoring",
+      "description": "The current golden datasets (evals/golden/*.jsonl) are 10-entry synthetic datasets with document_id='synthetic' and fictional content about 'Elena'. They do not test retrieval against any real indexed content \u2014 they are meaningless for measuring actual system quality. Replace all five datasets with real, document-grounded QA pairs. Method: (1) For the 'book' dataset: use The Time Machine (full text from S34). Write 30 question/answer pairs where both the question and ground_truth_answer are directly answerable from passages in the text. Include the verbatim source passage as a 'context_hint' field (used to verify retrieval hit). (2) For the 'paper' dataset: use Art of Unix Programming (full text from S34). 30 pairs. (3) For the 'notes' dataset: create a 2000-word synthetic but self-consistent note document (saved to tests/fixtures/full/notes_sample.txt) on the topic of machine learning fundamentals, write 20 pairs grounded in it. (4) For the 'code' dataset: use the backend source itself (app/services/*.py) as the ingested code corpus, write 20 pairs asking about function behavior, class responsibilities, etc. (5) For the 'conversation' dataset: create a realistic 3000-word conversation transcript (saved to tests/fixtures/full/conversation_sample.txt), write 20 pairs. Each JSONL row: {question, ground_truth_answer, context_hint, document_id, source_file}. document_id must be 'TBD' \u2014 the eval runner (run_eval.py) must be updated to ingest the source_file on first run, store the real document_id, and cache it in evals/golden/manifest.json. Update run_eval.py to: ingest source document if not already in manifest, run /search for each question, check if any returned chunk contains context_hint substring (HR@5), compute MRR. Minimum totals: book 30, paper 30, notes 20, code 20, conversation 20 = 120 pairs total.",
+      "acceptanceCriteria": [
+        "All five golden/*.jsonl files replaced \u2014 zero entries with document_id='synthetic'",
+        "book.jsonl has >=30 entries grounded in The Time Machine text",
+        "paper.jsonl has >=30 entries grounded in Art of Unix Programming text",
+        "notes.jsonl, code.jsonl, conversation.jsonl each have >=20 entries with real context_hints",
+        "run_eval.py auto-ingests source documents on first run and caches IDs in manifest.json",
+        "uv run python run_eval.py --dataset book exits 0 with HR@5 and MRR scores printed",
+        "Total golden pairs across all datasets >= 120"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S36",
+      "title": "Retrieval quality gates \u2014 enforce minimum HR@5, MRR, and Faithfulness thresholds",
+      "phase": 6,
+      "priority": 37,
+      "featureRef": "monitoring",
+      "description": "Currently there are no enforced quality thresholds \u2014 the eval runner prints scores but never fails. Add quality gates that fail loudly if metrics fall below acceptable baselines. (1) In run_eval.py, add a --assert-thresholds flag. When passed, exit code 1 if any metric is below threshold. Thresholds: HR@5 >= 0.60, MRR >= 0.45, Faithfulness >= 0.65 (Faithfulness only measured if --model is provided for LLM-based scoring). (2) Add 'make eval' to the Makefile: starts the backend if not running, runs uv run python run_eval.py --dataset book --assert-thresholds (and paper). make eval is NOT part of make ci (requires Ollama + full ingestion) but is documented. (3) Add a per-dataset score history file evals/scores_history.jsonl \u2014 each eval run appends {timestamp, dataset, hr5, mrr, faithfulness, model, passed}. (4) Add a Monitoring tab section (or update existing) that reads scores_history.jsonl via a new GET /monitoring/eval-history endpoint and renders a small sparkline chart of HR@5 over time using Recharts. This gives visibility into retrieval quality regression over time. (5) Document in README: run make eval after any change to ingestion, chunking, embedding, or retrieval to verify quality has not regressed.",
+      "acceptanceCriteria": [
+        "run_eval.py --assert-thresholds exits 1 when HR@5 < 0.60",
+        "run_eval.py --assert-thresholds exits 0 when all metrics pass",
+        "evals/scores_history.jsonl appended on each eval run",
+        "GET /monitoring/eval-history returns score history as JSON array",
+        "Monitoring tab shows HR@5 sparkline chart over time",
+        "make eval target exists in Makefile and is documented in README"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S37",
+      "title": "Concurrent ingestion stability and API contract tests",
+      "phase": 6,
+      "priority": 38,
+      "featureRef": "F2",
+      "description": "Two classes of missing tests: (1) Concurrent stability \u2014 the system has never been tested with simultaneous uploads. Kuzu, LanceDB, and SQLite all have concurrency constraints. (2) API contract \u2014 endpoints are not tested for correct 4xx/5xx behavior on bad input. Add tests/test_concurrent.py: use asyncio.gather to fire 5 simultaneous POST /documents/upload requests (each with a different small text file from tests/fixtures/). Assert: all 5 documents eventually reach stage='complete' or stage='error' (not stuck in 'parsing'), no unhandled exceptions in the server, no Kuzu lock RuntimeError propagates to the client. Poll GET /documents/{id} every 500ms for up to 30s per document. Add tests/test_api_contracts.py: for every router in app/routers/, test at least: missing required fields return 422, invalid document_id returns 404 with {detail: str}, uploading a non-text/non-PDF binary file returns 400 with a clear message, GET /documents/{id} on a deleted document returns 404 not 500. Ensure all error responses conform to {detail: str} schema (not bare strings or HTML). Fix any endpoints that return 500 on predictable bad input. Add to make ci: uv run pytest tests/test_api_contracts.py (fast, mocked). tests/test_concurrent.py marked @pytest.mark.slow, excluded from make ci.",
+      "acceptanceCriteria": [
+        "test_concurrent.py: 5 simultaneous uploads all reach complete or error within 30s",
+        "No Kuzu RuntimeError lock exception surfaces to HTTP clients during concurrent uploads",
+        "test_api_contracts.py: all endpoints return 422 on missing fields, 404 on bad IDs",
+        "All error responses use {detail: str} schema \u2014 no bare 500s on bad input",
+        "uv run pytest tests/test_api_contracts.py exits 0",
+        "uv run pytest tests/test_concurrent.py -m slow exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S38",
+      "title": "Retrieval smoke test and latency baseline assertions",
+      "phase": 6,
+      "priority": 39,
+      "featureRef": "F4",
+      "description": "There are no latency or performance assertions anywhere. A regression that makes search take 30s would pass all current tests. Add a lightweight performance baseline. Add tests/test_performance.py (marked @pytest.mark.slow): (1) Ingest 10 small documents (reuse existing fixtures, copy them with different names). (2) Run 20 search queries covering all 10 documents. Assert p50 latency < 500ms, p95 latency < 2000ms for GET /search. Use time.perf_counter around each httpx call, collect all durations, compute percentiles. (3) Assert memory growth: measure RSS before and after ingesting 10 documents using psutil.Process().memory_info().rss. Assert growth < 500MB. (4) Assert ingestion throughput: 10 documents of ~10k chars each should all reach 'complete' within 120 seconds total wall-clock time (with mocked embedder to isolate pipeline speed). Add psutil to backend pyproject.toml dev dependencies. Add 'make test-perf' to Makefile. Document in README under Performance Baselines. These numbers are baselines, not hard SLAs \u2014 the goal is to detect 10x regressions, not optimize to the millisecond.",
+      "acceptanceCriteria": [
+        "tests/test_performance.py exists and is marked @pytest.mark.slow",
+        "p50 search latency < 500ms, p95 < 2000ms asserted over 20 queries",
+        "Memory growth < 500MB for 10 document ingestion",
+        "10 documents complete ingestion within 120s wall-clock (mocked embedder)",
+        "psutil added to backend dev dependencies",
+        "make test-perf target in Makefile",
+        "uv run pytest tests/test_performance.py -m slow exits 0"
+      ],
+      "passes": false
     }
   ]
 }
