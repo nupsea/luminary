@@ -83,6 +83,22 @@ Tests are safe to run alongside a live dev backend. `tests/conftest.py`
 sets `DATA_DIR` to a temporary directory for the entire test session, so
 pytest never touches `~/.luminary` and Kuzu file-lock conflicts cannot occur.
 
+### Integration Tests
+
+Integration tests run the full ingestion pipeline on real public-domain text
+fixtures (`time_machine.txt`, `art_of_unix_ch1.txt`) without downloading ML
+models. Heavy services are mocked: LiteLLM classification, BGE-M3 embeddings,
+and GLiNER entity extraction. Real SQLite FTS5, LanceDB, and Kuzu run in a
+temp directory.
+
+```bash
+# Integration tests only (slower — ~50s due to LangGraph pipeline)
+cd backend && uv run pytest tests/test_integration.py -v
+
+# Run all tests including integration
+make test
+```
+
 ## Running Evaluations
 
 Start Langfuse (requires Docker):

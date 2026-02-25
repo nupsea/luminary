@@ -961,7 +961,7 @@
         "uv run pytest tests/test_integration.py -v exits 0",
         "README documents how to run integration tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S33",

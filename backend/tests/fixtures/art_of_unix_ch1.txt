@@ -1,0 +1,201 @@
+The Art of Unix Programming
+Chapter 1: Philosophy — Philosophy Matters
+
+Culture? What Culture?
+
+This is a book about Unix programming, but in it we're going to toss around the words
+'culture', 'art', and 'philosophy' a lot. If you are not a programmer, or you are a
+programmer who has had little contact with the Unix world, this may seem strange. But
+Unix has a culture; it has a distinctive art of programming; and it carries with it a
+powerful design philosophy. Understanding these traditions will help you build better
+software, even if you're developing for a non-Unix platform.
+
+Every branch of engineering and design has technical cultures. In most kinds of
+engineering, the unwritten traditions of the field are passed on only by personal
+apprenticeship to skilled practitioners, and through the example of good work. But
+Unix has unusually strong, distinctive, and yet informal cultural traditions. Because
+so much of Unix is open source, you can read the codes and reuse the tools in ways
+that strengthen and spread the culture.
+
+The Durability of Unix
+
+Unix was born in 1969 and has been in continuous production use ever since. That's
+long past the end of the life cycle of most proprietary operating systems. Unix
+survived its original owner (AT&T) being broken up, being bought out, being sued
+repeatedly, having its source code leaked, and having its trademarks fought over in
+court — all while being increasingly copied and cloned by open-source competitors.
+Today Unix is still the premier operating system for serious computation, scientific
+research, the Internet backbone, large-scale servers, and a multitude of embedded
+systems. Learning to program in the Unix way is likely to be useful for the rest of
+your career.
+
+The Unix Philosophy: A Brief Survey
+
+The Unix philosophy is not a formal design method. It wasn't handed down from the
+high fastnesses of theoretical computer science as a way to produce theoretically
+correct software. Nor was it invented by some master programmer who then required all
+others to follow it. No, the Unix philosophy is bottom-up, not top-down. It is
+pragmatic and grounded in experience. It is not a set of abstract principles that
+programmers are supposed to piously follow; rather, it consists of engineering
+habits, preferences, and accumulated folk knowledge about what works and what doesn't
+in software development.
+
+Doug McIlroy's summary of the Unix philosophy is perhaps the most famous:
+
+  Write programs that do one thing and do it well.
+  Write programs to work together.
+  Write programs to handle text streams, because that is a universal interface.
+
+These rules were written by Doug McIlroy in 1978 and still capture the spirit of
+Unix software design. They suggest a culture of tools, of small composable programs,
+of pipelines, of simplicity and modularity.
+
+Rule of Modularity: Write simple parts connected by clean interfaces.
+
+The most important rule, the one that underlies all the others, is the Rule of
+Modularity: Write simple parts connected by clean interfaces. This rule recommends
+building complex systems from small, simple modules. It recommends using clean
+interfaces between these modules so they can be understood independently. And it
+recommends writing simple code, not just simple modules, because simplicity is a
+virtue in itself.
+
+Rule of Clarity: Clarity is better than cleverness.
+
+Because maintenance is so important and so expensive, write programs as if the most
+important communication they do is not to the computer that executes them but to the
+human beings who will read and maintain the source code in the future (including
+yourself). Code that cannot be easily understood by future developers is not
+maintainable. Code that is not maintainable is a burden, not an asset.
+
+The Rule of Composition: Design programs to be connected to other programs.
+
+It's hard to avoid programming overcomplicated monoliths if none of your programs can
+talk to each other. Unix encourages developers to write programs that can be
+connected together in pipelines and networks. This suggests using ASCII text as a
+universal interface format. Data in textual form is easy to inspect, filter, and
+transform. Tools that speak the same textual language can be combined in countless
+ways.
+
+Rule of Separation: Separate policy from mechanism; separate interfaces from engines.
+
+In designing interfaces, it is usually good practice to separate the interface from
+the engine. An interface presents a simplified, abstracted view of the underlying
+engine. It hides the complexities of the engine from the user. It provides a stable
+external contract even when the internals change. This is the principle of
+information hiding, and it is central to good software design.
+
+Rule of Simplicity: Design for simplicity; add complexity only where you must.
+
+Many pressures encourage complexity in software. Marketing wants more features. Users
+want more capability. Engineers want to exercise their skills. Managers want to show
+progress. All of these forces push toward bigger, more complex systems. But
+complexity is the enemy of reliability, maintainability, and security. Simpler
+systems are easier to understand, easier to test, and easier to fix when something
+goes wrong.
+
+Rule of Parsimony: Write a big program only when nothing else will do.
+
+Rule of Transparency: Design for visibility to make inspection and debugging easier.
+
+A software system is transparent when you can look at it and immediately understand
+what it is doing and why. Transparency is the first step toward debuggability.
+Opaque software is software that hides what it does and why. It is difficult to
+understand, difficult to debug, and difficult to modify. Transparency is closely
+related to simplicity, but it is not the same thing. A simple program may still be
+opaque if its internals are hidden. A transparent program is one whose workings are
+visible and clear.
+
+Rule of Robustness: Robustness is the child of transparency and simplicity.
+
+Software is robust when it behaves well even in unexpected situations. Robustness
+requires that the software be designed to handle errors gracefully. It requires that
+the software be designed to degrade gracefully when resources are limited. It
+requires that the software recover from failures when possible. Robustness is not
+achieved by adding lots of error-handling code. It is achieved by designing software
+that is inherently simple and transparent, so that the common case is always handled
+correctly.
+
+Rule of Representation: Fold knowledge into data so program logic can be stupid and
+robust.
+
+Data is more tractable than program logic. It follows that where you see a choice
+between complexity in data structures and complexity in code, choose to make the data
+structures more elaborate. Complex data structures are easy to inspect and reason
+about. Complex code is not. This principle is sometimes called the "smart data,
+dumb code" principle.
+
+Rule of Least Surprise: In interface design, always do the least surprising thing.
+
+The most important rule of interface design is that you should do the least surprising
+thing. Users come to new software with expectations formed by their experience with
+other software. If your software violates those expectations, the users will be
+confused and frustrated. They will make mistakes. They will not be able to use your
+software effectively. Doing the least surprising thing means conforming to existing
+conventions when they exist, and choosing the most natural and intuitive behavior
+when they do not.
+
+Rule of Silence: When a program has nothing surprising to say, it should say nothing.
+
+Well-behaved Unix programs do their jobs quietly. They do not chatter unnecessarily.
+They do not print progress messages unless the user has asked for them. They do not
+print warnings unless there is a real problem. They do not print informational messages
+unless the user needs that information. This principle of silence is closely related
+to the principle of least surprise. Users do not want to be surprised by unexpected
+output, even if that output is informative.
+
+Rule of Repair: Repair what you can — but when you must fail, fail noisily and as
+soon as possible.
+
+Software should try to recover from errors when it can, but when it cannot, it should
+fail quickly and clearly. A program that silently corrupts data is far worse than a
+program that loudly announces failure and stops. Silent failures are the hardest to
+debug because there is no error message to guide the developer to the source of the
+problem. Loud failures are easy to debug because the error message points directly
+to the problem.
+
+Rule of Economy: Programmer time is expensive; conserve it in preference to machine
+time.
+
+In the early days of Unix, computer time was expensive and programmer time was cheap.
+Today the situation is reversed. Machine cycles are essentially free. Programmer time
+is expensive. This means that it is better to write software that is easy to
+understand and maintain, even if that software is slightly less efficient in its use
+of machine resources. The cost of programmer time to understand and fix complex
+software far exceeds the cost of machine time to run slightly inefficient simple
+software.
+
+Rule of Generation: Avoid hand-hacking; write programs to write programs when you
+can.
+
+One of the most powerful ideas in Unix programming is the use of programs to generate
+other programs. Compilers, interpreters, code generators, preprocessors — all of
+these are programs that write programs. Using these tools can dramatically reduce
+the amount of code that humans must write and maintain. Generated code is less prone
+to errors than hand-written code. It is easier to change the generator than to
+change all the instances of generated code scattered through a large codebase.
+
+Rule of Optimization: Prototype before polishing. Get it working before you optimize
+it.
+
+The most common mistake in performance optimization is to optimize before profiling.
+Developers who optimize before profiling often optimize the wrong things. They spend
+time making minor optimizations to code that is not on the critical path. Meanwhile
+the actual bottlenecks remain. The correct approach is to write a working prototype
+first, then profile it to find the real bottlenecks, then optimize only those
+bottlenecks.
+
+Rule of Diversity: Distrust all claims for one true way.
+
+Unix culture is suspicious of monocultures. The Unix philosophy encourages
+diversity of approaches. Different problems call for different solutions. Different
+users have different needs. A healthy software ecosystem contains many tools, each
+good at a particular job, rather than one monolithic tool that tries to do everything.
+This diversity makes the system more resilient and more adaptable.
+
+Rule of Extensibility: Design for the future, because it will be here sooner than you
+think.
+
+Good software design anticipates the need for change. It provides hooks for extension.
+It separates the stable core from the variable periphery. It makes it easy to add
+new features without breaking existing functionality. Extensible software has a
+longer useful life than software that is designed for a fixed set of requirements.
