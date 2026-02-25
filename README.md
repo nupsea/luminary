@@ -163,6 +163,30 @@ make eval
 
 Each eval run appends a line to `evals/scores_history.jsonl`. The **Monitoring** tab reads this file via `GET /monitoring/eval-history` and renders a sparkline of HR@5 over time per dataset.
 
+## Performance Baselines
+
+Performance regression tests live in `tests/test_performance.py` and are marked
+`@pytest.mark.slow`. They use mocked embedder and NER services so no ML models
+are required.
+
+```bash
+# Run performance tests
+make test-perf
+
+# Equivalent direct invocation
+cd backend && uv run pytest tests/test_performance.py -v -m slow
+```
+
+**What is asserted** (regression guards, not hard SLAs):
+
+| Test                               | Assertion                                    |
+|------------------------------------|----------------------------------------------|
+| `test_search_latency_p50_p95`      | p50 < 500ms, p95 < 2000ms over 20 queries    |
+| `test_ingestion_throughput_...`    | 10 documents complete within 120s            |
+| `test_memory_growth_under_500mb`   | RSS growth < 500MB while ingesting 10 docs   |
+
+The goal is to catch 10x regressions (e.g. search taking 30s instead of 300ms).
+
 ## Monitoring
 
 Visit the **Monitoring** tab in the app for:

@@ -486,3 +486,16 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - pytest returns exit code 5 (not 0) when no tests collected — added test_config.py to satisfy CI
   - ruff check passes cleanly with E/F/I/UP rules on the scaffold
 ---
+
+---
+
+## 2026-02-25T00:00:00+00:00 - S38 - Retrieval smoke test and latency baseline assertions
+- Implemented: backend/tests/test_performance.py — 3 slow tests covering p50/p95 search latency, ingestion throughput, and memory growth; Makefile test-perf target; README Performance Baselines section
+- Files changed: backend/tests/test_performance.py (new), backend/pyproject.toml (psutil dev dep), Makefile (test-perf target), README.md (Performance Baselines section)
+- Learnings:
+  - Reused perf_db fixture pattern from test_concurrent.py: file-based SQLite + mock ML services (module-level singleton injection)
+  - psutil.Process().memory_info().rss measures current process RSS in bytes; 500MB growth budget is conservative for 10 mocked-ingestion docs
+  - p50/p95 assertions over 20 queries with mocked retriever run well under baselines (p50 ~5ms, p95 ~20ms on dev machine)
+  - shutil import was unused — ruff F401 caught it, fixed with --fix
+  - All 3 perf tests pass in 53s wall clock (asyncio.gather for concurrent ingestion throughput test)
+---

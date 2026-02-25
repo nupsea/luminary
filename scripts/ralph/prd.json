@@ -1067,7 +1067,7 @@
         "make test-perf target in Makefile",
         "uv run pytest tests/test_performance.py -m slow exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }
