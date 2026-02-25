@@ -238,6 +238,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         chunks.append(
                             {
                                 "id": rc["id"],
+                                "document_id": doc_id,
                                 "text": rc["text"],
                                 "index": idx,
                                 **{k: v for k, v in meta.items() if k != "chunk_id"},
@@ -286,7 +287,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         chunk_index=idx,
                     )
                     session.add(chunk)
-                    chunks.append({"id": chunk_id, "text": text, "index": idx})
+                    chunks.append(
+                        {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
+                    )
                 await session.commit()
             logger.info(
                 "Chunked document",

@@ -897,6 +897,87 @@
         "Verify in browser: add a tag to a document, click the tag chip, confirm filter applies"
       ],
       "passes": true
+    },
+    {
+      "id": "S29",
+      "title": "README overhaul \u2014 quickstart, architecture overview, test and eval guide",
+      "phase": 6,
+      "priority": 30,
+      "featureRef": "setup",
+      "description": "Rewrite README.md at the repo root to reflect the current state of the product. Sections required: (1) What is Luminary \u2014 2-3 sentence product description covering local-first, AI-powered knowledge and learning. (2) Architecture Overview \u2014 one ASCII diagram showing the five layers (Types \u2192 Config \u2192 Repo \u2192 Service \u2192 Runtime \u2192 API) and the five navigation tabs (Learning | Chat | Viz | Study | Monitoring). (3) Tech Stack \u2014 concise table: backend (Python 3.13, FastAPI, LangGraph, LanceDB, SQLite FTS5, Kuzu, GLiNER, LiteLLM), frontend (React 18, TypeScript 5, Vite, shadcn/ui, Sigma.js v3). (4) Quickstart \u2014 prerequisites (uv, Node 20+, Ollama with mistral pulled), then: git clone, make backend in one terminal, make frontend in another, open http://localhost:5173. (5) Running Tests \u2014 make test for backend pytest, cd frontend && npx tsc --noEmit for TS typecheck. (6) Running Evaluations \u2014 start Langfuse via docker compose -f docker-compose.langfuse.yml up -d, then cd evals && uv run python run_evals.py, link to Langfuse UI at http://localhost:3000. (7) Monitoring \u2014 visit the Monitoring tab in the app; link to Arize Phoenix at http://localhost:6006. Do not invent features that do not exist. Read docs/ARCHITECTURE.md and docs/FRONTEND.md before writing.",
+      "acceptanceCriteria": [
+        "README renders cleanly on GitHub with no broken links",
+        "Quickstart section lists all prerequisites including ollama pull mistral",
+        "Architecture ASCII diagram present and accurate to layer order",
+        "Test and eval commands are copy-pasteable and correct",
+        "No placeholder text or TODO sections remain"
+      ],
+      "passes": true
+    },
+    {
+      "id": "S30",
+      "title": "Colorized dev log script for backend and frontend",
+      "phase": 6,
+      "priority": 31,
+      "featureRef": "setup",
+      "description": "Add a make logs target and a supporting shell script scripts/dev-logs.sh that runs both backend and frontend in a single terminal with color-coded, prefixed output for easy debugging. Requirements: (1) Backend lines prefixed with a cyan [BACKEND] label; frontend lines prefixed with a green [FRONTEND] label. (2) Backend log level forced to DEBUG via LOG_LEVEL=DEBUG env var so all ingestion pipeline stages are visible. (3) Use stdbuf -oL to disable output buffering so lines appear in real time. (4) The script must forward SIGINT (Ctrl-C) to both child processes and wait for clean shutdown. (5) Add make logs to the Makefile that calls bash scripts/dev-logs.sh. (6) Add a note in the Quickstart section of the README pointing to make logs as the recommended way to watch ingestion. Use ANSI escape codes directly \u2014 no external dependencies beyond bash and standard macOS/Linux tools. Test on macOS zsh.",
+      "acceptanceCriteria": [
+        "make logs starts both backend and frontend",
+        "Backend lines are cyan-prefixed, frontend lines are green-prefixed",
+        "LOG_LEVEL=DEBUG produces per-node ingestion log lines",
+        "Ctrl-C cleanly stops both processes",
+        "Script works in macOS zsh without additional installs"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S31",
+      "title": "Fix LiteLLM/Ollama classify_node error crashing document ingestion",
+      "phase": 6,
+      "priority": 32,
+      "featureRef": "F2",
+      "description": "Ingestion fails with an ASGI exception during classify_node when LiteLLM calls Ollama (mistral). Investigate the traceback: read app/workflows/ingestion.py classify_node, app/services/llm.py (or wherever the LiteLLM call is made), and app/config.py for OLLAMA_BASE_URL and MODEL settings. Common causes: (a) classify_node calling a sync LiteLLM function inside an async context without run_in_executor, (b) Ollama not running or wrong base URL, (c) model name mismatch (e.g. 'mistral' vs 'ollama/mistral'). Fix the root cause \u2014 do NOT just catch and swallow the exception. If the issue is sync-in-async, wrap with asyncio.get_event_loop().run_in_executor(None, ...) or switch to litellm.acompletion. Add a startup health-check log line that pings the configured Ollama URL and logs a clear WARNING if unreachable, so users know early. Add or update the existing test in tests/test_ingest.py to mock the LiteLLM call and assert classify_node returns a valid content_type without hitting the network.",
+      "acceptanceCriteria": [
+        "Uploading a PDF no longer crashes the ASGI app",
+        "classify_node returns a valid content_type string",
+        "If Ollama is unreachable, a WARNING log line appears at startup with the URL",
+        "uv run pytest tests/test_ingest.py exits 0 with LiteLLM mocked"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S32",
+      "title": "Integration tests using Project Gutenberg and an open technical book",
+      "phase": 6,
+      "priority": 33,
+      "featureRef": "F2",
+      "description": "Add end-to-end integration tests that ingest real documents and assert the full pipeline produces usable output. Test fixtures: (1) A short public-domain text from Project Gutenberg \u2014 use 'The Time Machine' by H.G. Wells, plain text, saved to tests/fixtures/time_machine.txt (first 10000 chars to keep CI fast). (2) A freely available technical text \u2014 use the first chapter of 'The Art of Unix Programming' by ESR, saved as tests/fixtures/art_of_unix_ch1.txt (first 10000 chars). Tests in tests/test_integration.py: (a) test_ingest_fiction \u2014 ingest time_machine.txt, assert document reaches 'complete' stage, assert >= 5 chunks in DB, assert >= 1 entity extracted. (b) test_ingest_technical \u2014 same assertions for the technical text. (c) test_search_after_ingest \u2014 after ingesting, call GET /search?q=time+machine and assert >= 1 result returned. Use pytest-asyncio with real in-memory SQLite and a temp LanceDB dir. Mock LiteLLM classify calls to return 'book'/'paper'. Document how to run integration tests in README separately from unit tests.",
+      "acceptanceCriteria": [
+        "tests/fixtures/time_machine.txt and art_of_unix_ch1.txt committed (truncated to 10k chars)",
+        "test_ingest_fiction and test_ingest_technical pass with mocked LLM",
+        "test_search_after_ingest returns >= 1 result",
+        "uv run pytest tests/test_integration.py -v exits 0",
+        "README documents how to run integration tests"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S33",
+      "title": "Delete document UI, cascade cleanup, and seed data removal script",
+      "phase": 6,
+      "priority": 34,
+      "featureRef": "F12",
+      "description": "Two related problems: (1) No way to delete a single document from the UI \u2014 stuck or partial uploads have no escape hatch. (2) Old test seed data present in the database. Fix both. Backend: verify DELETE /documents/{id} exists and cascades \u2014 must delete rows from chunks, sections, LanceDB embeddings, FTS5 index, and Kuzu graph nodes. If missing or incomplete, implement fully. Add scripts/seed_cleanup.py that connects to the SQLite DB, lists all documents, and deletes any whose title contains 'test', 'sample', 'seed', 'fixture', or 'untitled' (case-insensitive) \u2014 prints each deletion with id and title, requires --confirm flag to actually delete (dry-run by default). Frontend (Learning tab, document card): add a trash icon button (shadcn Button variant=ghost, size=icon) in the top-right corner of each DocumentCard. On click, show a shadcn AlertDialog: 'Delete [title]? This cannot be undone.' Confirm calls DELETE /documents/{id}, invalidates the TanStack Query cache for the documents list, and shows a toast. Works for documents in any stage including error or parsing.",
+      "acceptanceCriteria": [
+        "Trash icon visible on document card on hover",
+        "AlertDialog confirmation required before deletion",
+        "After confirm, document disappears from catalog without page reload",
+        "DELETE /documents/{id} removes data from SQLite, LanceDB, FTS5, and Kuzu",
+        "scripts/seed_cleanup.py --dry-run lists test documents without deleting",
+        "scripts/seed_cleanup.py --confirm deletes listed documents",
+        "uv run pytest tests/test_documents.py exits 0"
+      ],
+      "passes": false
     }
   ]
 }
