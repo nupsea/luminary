@@ -1,6 +1,6 @@
 export type ContentType = "book" | "paper" | "conversation" | "notes" | "code"
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
-export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied"
+export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed"
 export type ViewMode = "grid" | "list"
 
 export interface DocumentListItem {
@@ -17,4 +17,11 @@ export interface DocumentListItem {
   summary_one_sentence: string | null
   flashcard_count: number
   learning_status: LearningStatus
+}
+
+export interface DocumentListResponse {
+  items: DocumentListItem[]
+  total: number
+  page: number
+  page_size: number
 }

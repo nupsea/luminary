@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 
@@ -54,6 +54,21 @@ class DocumentListItem(BaseModel):
     summary_one_sentence: str | None
     flashcard_count: int
     learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
+
+
+class DocumentListResponse(BaseModel):
+    items: list[DocumentListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+class PatchTagsRequest(BaseModel):
+    tags: list[str]
 
 
 class PatchDocumentRequest(BaseModel):
@@ -130,9 +145,22 @@ def _derive_learning_status(
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=list[DocumentListItem])
-async def list_documents():
-    """Return all documents with derived fields (summary, flashcard_count, learning_status)."""
+_LEARNING_STATUS_ORDER = {
+    "studied": 3, "flashcards_generated": 2, "summarized": 1, "not_started": 0
+}
+
+
+@router.get("", response_model=DocumentListResponse)
+async def list_documents(
+    content_type: str | None = Query(default=None, description="Comma-separated content types"),
+    tag: str | None = Query(default=None, description="Filter by tag value"),
+    sort: Literal["newest", "oldest", "alphabetical", "most-studied", "last_accessed"] = Query(
+        default="newest"
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> DocumentListResponse:
+    """Return paginated documents with optional filtering and sorting."""
     async with get_session_factory()() as session:
         # Correlated scalar subqueries for derived fields
         summary_one_sentence_sq = (
@@ -170,20 +198,20 @@ async def list_documents():
             flashcard_count_sq.label("flashcard_count"),
             summary_count_sq.label("summary_count"),
             study_session_count_sq.label("study_session_count"),
-        ).order_by(DocumentModel.created_at.desc())
+        )
 
         result = await session.execute(stmt)
         rows = result.all()
 
-    items = []
+    # Build items
+    all_items: list[DocumentListItem] = []
     for row in rows:
         doc = row[0]
         summary_one_sentence = row[1]
         flashcard_count = row[2] or 0
         summary_count = row[3] or 0
         study_session_count = row[4] or 0
-
-        items.append(
+        all_items.append(
             DocumentListItem(
                 id=doc.id,
                 title=doc.title,
@@ -202,7 +230,33 @@ async def list_documents():
                 ),
             )
         )
-    return items
+
+    # Filter by content_type
+    if content_type:
+        allowed = {t.strip() for t in content_type.split(",") if t.strip()}
+        all_items = [i for i in all_items if i.content_type in allowed]
+
+    # Filter by tag
+    if tag:
+        all_items = [i for i in all_items if tag in i.tags]
+
+    # Sort
+    if sort == "newest":
+        all_items.sort(key=lambda i: i.created_at, reverse=True)
+    elif sort == "oldest":
+        all_items.sort(key=lambda i: i.created_at)
+    elif sort == "alphabetical":
+        all_items.sort(key=lambda i: i.title.lower())
+    elif sort == "most-studied":
+        all_items.sort(key=lambda i: _LEARNING_STATUS_ORDER.get(i.learning_status, 0), reverse=True)
+    elif sort == "last_accessed":
+        all_items.sort(key=lambda i: i.last_accessed_at, reverse=True)
+
+    total = len(all_items)
+    start = (page - 1) * page_size
+    page_items = all_items[start : start + page_size]
+
+    return DocumentListResponse(items=page_items, total=total, page=page, page_size=page_size)
 
 
 @router.post("/parse")
@@ -306,6 +360,47 @@ async def get_document(document_id: str):
     )
 
 
+@router.post("/bulk-delete", status_code=200)
+async def bulk_delete_documents(body: BulkDeleteRequest):
+    """Delete multiple documents and their derived data by ID list."""
+    deleted = []
+    for document_id in body.ids:
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(DocumentModel).where(DocumentModel.id == document_id)
+            )
+            doc = result.scalar_one_or_none()
+            if doc is None:
+                continue
+            await session.execute(
+                text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
+                {"doc_id": document_id},
+            )
+            for model in (
+                ChunkModel,
+                SectionModel,
+                SummaryModel,
+                FlashcardModel,
+                MisconceptionModel,
+                NoteModel,
+                QAHistoryModel,
+            ):
+                await session.execute(
+                    delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
+                )
+            await session.execute(
+                delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
+            )
+            await session.delete(doc)
+            await session.commit()
+        try:
+            get_lancedb_service().delete_document(document_id)
+        except Exception:
+            logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
+        deleted.append(document_id)
+    return {"deleted": deleted, "count": len(deleted)}
+
+
 @router.patch("/{document_id}")
 async def patch_document(document_id: str, body: PatchDocumentRequest):
     async with get_session_factory()() as session:
@@ -321,6 +416,21 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             doc.tags = body.tags
         await session.commit()
     return {"document_id": document_id, "updated": True}
+
+
+@router.patch("/{document_id}/tags")
+async def patch_document_tags(document_id: str, body: PatchTagsRequest):
+    """Replace the tag list for a document."""
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc.tags = body.tags
+        await session.commit()
+    return {"document_id": document_id, "tags": body.tags}
 
 
 @router.delete("/{document_id}", status_code=204)

@@ -102,7 +102,10 @@ async def test_list_documents_empty(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert data["page"] == 1
 
 
 async def test_list_documents_returns_basic_fields(test_db):
@@ -115,9 +118,9 @@ async def test_list_documents_returns_basic_fields(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
     assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 1
-    item = body[0]
+    data = resp.json()
+    assert data["total"] == 1
+    item = data["items"][0]
     assert item["id"] == doc_id
     assert item["title"] == "My Paper"
     assert item["content_type"] == "paper"
@@ -136,7 +139,7 @@ async def test_list_documents_learning_status_not_started(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
-    assert resp.json()[0]["learning_status"] == "not_started"
+    assert resp.json()["items"][0]["learning_status"] == "not_started"
 
 
 async def test_list_documents_learning_status_summarized(test_db):
@@ -156,7 +159,7 @@ async def test_list_documents_learning_status_summarized(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
-    assert resp.json()[0]["learning_status"] == "summarized"
+    assert resp.json()["items"][0]["learning_status"] == "summarized"
 
 
 async def test_list_documents_learning_status_flashcards_generated(test_db):
@@ -178,7 +181,7 @@ async def test_list_documents_learning_status_flashcards_generated(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
-    item = resp.json()[0]
+    item = resp.json()["items"][0]
     assert item["learning_status"] == "flashcards_generated"
     assert item["flashcard_count"] == 1
 
@@ -199,7 +202,7 @@ async def test_list_documents_learning_status_studied(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
-    assert resp.json()[0]["learning_status"] == "studied"
+    assert resp.json()["items"][0]["learning_status"] == "studied"
 
 
 async def test_list_documents_summary_one_sentence_populated(test_db):
@@ -219,7 +222,64 @@ async def test_list_documents_summary_one_sentence_populated(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
-    assert resp.json()[0]["summary_one_sentence"] == "Short summary."
+    assert resp.json()["items"][0]["summary_one_sentence"] == "Short summary."
+
+
+async def test_list_documents_filter_by_content_type(test_db):
+    """content_type query param filters to matching documents only."""
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add(_make_doc(content_type="book"))
+        session.add(_make_doc(content_type="paper"))
+        session.add(_make_doc(content_type="notes"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents?content_type=book,paper")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    types = {item["content_type"] for item in data["items"]}
+    assert types == {"book", "paper"}
+
+
+async def test_list_documents_filter_by_tag(test_db):
+    """tag query param filters to documents with that tag."""
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add(_make_doc(tags=["ai", "ml"]))
+        session.add(_make_doc(tags=["history"]))
+        session.add(_make_doc(tags=[]))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents?tag=ai")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert "ai" in data["items"][0]["tags"]
+
+
+async def test_list_documents_pagination(test_db):
+    """page and page_size params return the correct slice."""
+    _, factory, _ = test_db
+    async with factory() as session:
+        for i in range(5):
+            session.add(_make_doc(title=f"Doc {i}"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents?page=1&page_size=2")
+    data = resp.json()
+    assert data["total"] == 5
+    assert data["page"] == 1
+    assert data["page_size"] == 2
+    assert len(data["items"]) == 2
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp2 = await client.get("/documents?page=3&page_size=2")
+    data2 = resp2.json()
+    assert len(data2["items"]) == 1  # 5 docs, page 3 of size 2 → 1 item
 
 
 # ---------------------------------------------------------------------------
@@ -349,4 +409,86 @@ async def test_delete_document_calls_lancedb(test_db):
 async def test_delete_document_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.delete("/documents/no-such-id")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /documents/bulk-delete endpoint tests
+# ---------------------------------------------------------------------------
+
+
+async def test_bulk_delete_removes_docs(test_db):
+    """POST /documents/bulk-delete removes all listed documents."""
+    _, factory, _ = test_db
+    id1 = str(uuid.uuid4())
+    id2 = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(id1))
+        session.add(_make_doc(id2))
+        await session.commit()
+
+    mock_lancedb = MagicMock()
+    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/documents/bulk-delete", json={"ids": [id1, id2]})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 2
+    assert set(data["deleted"]) == {id1, id2}
+
+    async with factory() as session:
+        doc1 = await session.get(DocumentModel, id1)
+        doc2 = await session.get(DocumentModel, id2)
+    assert doc1 is None
+    assert doc2 is None
+
+
+async def test_bulk_delete_skips_missing(test_db):
+    """POST /documents/bulk-delete silently skips IDs that don't exist."""
+    _, factory, _ = test_db
+    real_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(real_id))
+        await session.commit()
+
+    mock_lancedb = MagicMock()
+    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/documents/bulk-delete", json={"ids": [real_id, "nonexistent-id"]}
+            )
+
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# PATCH /documents/{id}/tags endpoint tests
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_tags_endpoint(test_db):
+    """PATCH /documents/{id}/tags replaces the tag list."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id, tags=["old"]))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(f"/documents/{doc_id}/tags", json={"tags": ["new", "tags"]})
+    assert resp.status_code == 200
+    assert resp.json()["tags"] == ["new", "tags"]
+
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+    assert doc is not None
+    assert doc.tags == ["new", "tags"]
+
+
+async def test_patch_tags_endpoint_404(test_db):
+    """PATCH /documents/{id}/tags returns 404 for unknown document."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch("/documents/no-such-id/tags", json={"tags": ["x"]})
     assert resp.status_code == 404

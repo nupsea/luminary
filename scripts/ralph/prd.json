@@ -879,7 +879,7 @@
         "Viz tab shows call graph toggle for code documents",
         "uv run pytest tests/test_code_parser.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S28",
@@ -896,7 +896,7 @@
         "Pagination controls render and change the page",
         "Verify in browser: add a tag to a document, click the tag chip, confirm filter applies"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

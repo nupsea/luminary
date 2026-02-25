@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query"
-import { BookPlus, FileText, Plus } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { BookPlus, FileText, Plus, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { FilterBar } from "@/components/library/FilterBar"
 import { SearchBar } from "@/components/library/SearchBar"
@@ -8,12 +8,19 @@ import { UploadDialog } from "@/components/library/UploadDialog"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { DocumentCard } from "@/components/library/DocumentCard"
 import { DocumentRow } from "@/components/library/DocumentRow"
-import type { ContentType, DocumentListItem, SortOption, ViewMode } from "@/components/library/types"
+import type {
+  ContentType,
+  DocumentListItem,
+  DocumentListResponse,
+  SortOption,
+  ViewMode,
+} from "@/components/library/types"
 import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
+const PAGE_SIZE = 20
 
 interface SearchMatch {
   chunk_id: string
@@ -42,47 +49,46 @@ async function fetchSearch(q: string, contentTypes: string): Promise<DocumentGro
   return data.results
 }
 
-async function fetchDocuments(): Promise<DocumentListItem[]> {
-  const res = await fetch(`${API_BASE}/documents`)
-  if (!res.ok) throw new Error("Failed to fetch documents")
-  return res.json() as Promise<DocumentListItem[]>
-}
-
-const LEARNING_STATUS_ORDER: Record<string, number> = {
-  studied: 3,
-  flashcards_generated: 2,
-  summarized: 1,
-  not_started: 0,
-}
-
-function applyFiltersAndSort(
-  docs: DocumentListItem[],
-  types: Set<ContentType>,
-  sort: SortOption,
-): DocumentListItem[] {
-  let result = docs
-
-  if (types.size > 0) {
-    result = result.filter((d) => types.has(d.content_type))
-  }
-
-  result = [...result].sort((a, b) => {
-    switch (sort) {
-      case "newest":
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      case "oldest":
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      case "alphabetical":
-        return a.title.localeCompare(b.title)
-      case "most-studied":
-        return (
-          (LEARNING_STATUS_ORDER[b.learning_status] ?? 0) -
-          (LEARNING_STATUS_ORDER[a.learning_status] ?? 0)
-        )
-    }
+async function fetchDocuments(params: {
+  content_type?: string
+  tag?: string
+  sort: SortOption
+  page: number
+  page_size: number
+}): Promise<DocumentListResponse> {
+  const p = new URLSearchParams({
+    sort: params.sort,
+    page: String(params.page),
+    page_size: String(params.page_size),
   })
+  if (params.content_type) p.set("content_type", params.content_type)
+  if (params.tag) p.set("tag", params.tag)
+  const res = await fetch(`${API_BASE}/documents?${p.toString()}`)
+  if (!res.ok) throw new Error("Failed to fetch documents")
+  return res.json() as Promise<DocumentListResponse>
+}
 
-  return result
+async function fetchRecentlyAccessed(): Promise<DocumentListItem[]> {
+  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page_size=5`)
+  if (!res.ok) return []
+  const data = (await res.json()) as DocumentListResponse
+  return data.items
+}
+
+async function patchTags(id: string, tags: string[]): Promise<void> {
+  await fetch(`${API_BASE}/documents/${id}/tags`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  })
+}
+
+async function bulkDelete(ids: string[]): Promise<void> {
+  await fetch(`${API_BASE}/documents/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  })
 }
 
 function LoadingSkeleton() {
@@ -240,19 +246,105 @@ function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const queryClient = useQueryClient()
+
   const [search, setSearch] = useState("")
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
+  const [page, setPage] = useState(1)
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectMode, setSelectMode] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
-  const { data: documents, isLoading } = useQuery({
-    queryKey: ["documents"],
-    queryFn: fetchDocuments,
+  const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
+
+  const { data: pageData, isLoading } = useQuery({
+    queryKey: ["documents", content_type, tagFilter, sort, page, PAGE_SIZE],
+    queryFn: () =>
+      fetchDocuments({
+        content_type,
+        tag: tagFilter ?? undefined,
+        sort,
+        page,
+        page_size: PAGE_SIZE,
+      }),
+  })
+
+  const { data: recentItems } = useQuery({
+    queryKey: ["documents-recent"],
+    queryFn: fetchRecentlyAccessed,
+  })
+
+  const tagsMutation = useMutation({
+    mutationFn: ({ id, tags }: { id: string; tags: string[] }) => patchTags(id, tags),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+    },
+  })
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => bulkDelete(ids),
+    onSuccess: () => {
+      setSelectedIds(new Set())
+      setSelectMode(false)
+      setBulkConfirm(false)
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+    },
   })
 
   function handleDocumentClick(id: string) {
     setActiveDocument(id)
+  }
+
+  function handleTagClick(tag: string) {
+    setTagFilter(tag)
+    setPage(1)
+  }
+
+  function handleTagsChange(id: string, tags: string[]) {
+    tagsMutation.mutate({ id, tags })
+  }
+
+  function handleSelect(id: string, sel: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (sel) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  function handleSelectAll() {
+    const ids = pageData?.items.map((d) => d.id) ?? []
+    setSelectedIds(new Set(ids))
+  }
+
+  function handleDeselectAll() {
+    setSelectedIds(new Set())
+  }
+
+  function handleBulkDelete() {
+    if (selectedIds.size === 0) return
+    setBulkConfirm(true)
+  }
+
+  function handleConfirmBulkDelete() {
+    bulkDeleteMutation.mutate([...selectedIds])
+  }
+
+  // Reset page when filters change
+  function handleTypesChange(types: Set<ContentType>) {
+    setSelectedTypes(types)
+    setPage(1)
+  }
+
+  function handleSortChange(s: SortOption) {
+    setSort(s)
+    setPage(1)
   }
 
   if (activeDocumentId) {
@@ -264,16 +356,9 @@ export default function Learning() {
     )
   }
 
-  const allDocs = documents ?? []
-  const filtered = applyFiltersAndSort(allDocs, selectedTypes, sort)
-
-  const recentlyAccessed = [...allDocs]
-    .sort(
-      (a, b) =>
-        new Date(b.last_accessed_at).getTime() - new Date(a.last_accessed_at).getTime(),
-    )
-    .slice(0, 5)
-
+  const items = pageData?.items ?? []
+  const total = pageData?.total ?? 0
+  const totalPages = Math.ceil(total / PAGE_SIZE)
   const searchActive = search.trim().length > 0
 
   return (
@@ -282,10 +367,23 @@ export default function Learning() {
         <SearchBar value={search} onChange={setSearch} />
         {!searchActive && (
           <>
-            <SortSelect value={sort} onChange={setSort} />
+            <SortSelect value={sort} onChange={handleSortChange} />
             <ViewToggle value={viewMode} onChange={setViewMode} />
           </>
         )}
+        <button
+          onClick={() => {
+            setSelectMode((v) => !v)
+            setSelectedIds(new Set())
+          }}
+          className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+            selectMode
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border bg-background text-foreground hover:bg-accent"
+          }`}
+        >
+          Select
+        </button>
         <button
           onClick={() => setUploadOpen(true)}
           className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -295,32 +393,79 @@ export default function Learning() {
         </button>
       </div>
 
+      {/* Active filters */}
+      {tagFilter && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Filtered by tag:</span>
+          <button
+            onClick={() => {
+              setTagFilter(null)
+              setPage(1)
+            }}
+            className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
+          >
+            {tagFilter}
+            <span className="ml-0.5">×</span>
+          </button>
+        </div>
+      )}
+
       {searchActive ? (
         <SearchPanel query={search} onDocumentClick={handleDocumentClick} />
       ) : (
         <>
-          <FilterBar selected={selectedTypes} onChange={setSelectedTypes} />
+          <FilterBar selected={selectedTypes} onChange={handleTypesChange} />
 
           {isLoading ? (
             <LoadingSkeleton />
-          ) : allDocs.length === 0 ? (
+          ) : total === 0 && !tagFilter && selectedTypes.size === 0 ? (
             <EmptyState onAdd={() => setUploadOpen(true)} />
           ) : (
             <>
-              {recentlyAccessed.length > 0 && selectedTypes.size === 0 && (
+              {/* Bulk select header */}
+              {selectMode && (
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">
+                    {selectedIds.size} selected
+                  </span>
+                  <button
+                    onClick={handleSelectAll}
+                    className="text-primary hover:text-primary/80 text-xs"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    onClick={handleDeselectAll}
+                    className="text-muted-foreground hover:text-foreground text-xs"
+                  >
+                    Deselect all
+                  </button>
+                </div>
+              )}
+
+              {/* Recently accessed — hide when filters active */}
+              {recentItems && recentItems.length > 0 && selectedTypes.size === 0 && !tagFilter && page === 1 && (
                 <section>
                   <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Recently accessed
                   </h2>
                   {viewMode === "grid" ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                      {recentlyAccessed.map((doc) => (
-                        <DocumentCard key={doc.id} doc={doc} onClick={handleDocumentClick} />
+                      {recentItems.map((doc) => (
+                        <DocumentCard
+                          key={doc.id}
+                          doc={doc}
+                          onClick={handleDocumentClick}
+                          onTagClick={handleTagClick}
+                          onTagsChange={handleTagsChange}
+                          selected={selectedIds.has(doc.id)}
+                          onSelect={selectMode ? handleSelect : undefined}
+                        />
                       ))}
                     </div>
                   ) : (
                     <div className="flex flex-col gap-2">
-                      {recentlyAccessed.map((doc) => (
+                      {recentItems.map((doc) => (
                         <DocumentRow key={doc.id} doc={doc} onClick={handleDocumentClick} />
                       ))}
                     </div>
@@ -330,29 +475,111 @@ export default function Learning() {
 
               <section>
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {selectedTypes.size > 0 ? "Results" : "All documents"}
+                  {tagFilter
+                    ? `Tagged: ${tagFilter}`
+                    : selectedTypes.size > 0
+                    ? "Results"
+                    : "All documents"}
+                  {total > 0 && (
+                    <span className="ml-2 font-normal normal-case text-muted-foreground/60">
+                      ({total})
+                    </span>
+                  )}
                 </h2>
-                {filtered.length === 0 ? (
+                {items.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">
                     No documents match your filters.
                   </p>
                 ) : viewMode === "grid" ? (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {filtered.map((doc) => (
-                      <DocumentCard key={doc.id} doc={doc} onClick={handleDocumentClick} />
+                    {items.map((doc) => (
+                      <DocumentCard
+                        key={doc.id}
+                        doc={doc}
+                        onClick={handleDocumentClick}
+                        onTagClick={handleTagClick}
+                        onTagsChange={handleTagsChange}
+                        selected={selectedIds.has(doc.id)}
+                        onSelect={selectMode ? handleSelect : undefined}
+                      />
                     ))}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {filtered.map((doc) => (
+                    {items.map((doc) => (
                       <DocumentRow key={doc.id} doc={doc} onClick={handleDocumentClick} />
                     ))}
                   </div>
                 )}
               </section>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <button
+                    disabled={page === 1}
+                    onClick={() => setPage((p) => p - 1)}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-40 hover:bg-accent"
+                  >
+                    Prev
+                  </button>
+                  <span className="text-sm text-muted-foreground">
+                    {page} / {totalPages}
+                  </span>
+                  <button
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-40 hover:bg-accent"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </>
           )}
         </>
+      )}
+
+      {/* Bulk action bar */}
+      {selectMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-3 shadow-lg">
+          <span className="text-sm font-medium">{selectedIds.size} selected</span>
+          <button
+            onClick={handleBulkDelete}
+            className="flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+          >
+            <Trash2 size={13} />
+            Delete ({selectedIds.size})
+          </button>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation */}
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-80 rounded-xl border border-border bg-card p-6 shadow-xl">
+            <h3 className="mb-2 text-base font-semibold">Delete {selectedIds.size} document{selectedIds.size !== 1 ? "s" : ""}?</h3>
+            <p className="mb-5 text-sm text-muted-foreground">
+              This action cannot be undone. All related data (chunks, flashcards, summaries) will
+              be permanently deleted.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setBulkConfirm(false)}
+                className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmBulkDelete}
+                disabled={bulkDeleteMutation.isPending}
+                className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60"
+              >
+                {bulkDeleteMutation.isPending ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} />
