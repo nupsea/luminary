@@ -113,3 +113,19 @@ Well-known, composable, API-stable libraries are easier for agents to reason abo
 Minimal blocking merge gates. Short-lived PRs. Corrections are cheap; waiting is expensive. Agent-to-agent review loops replace synchronous human review for routine changes.
 
 **Rationale**: In an agent-assisted workflow, the bottleneck is human review latency. Minimizing blocking gates and shortening PR lifetimes maximizes throughput without sacrificing correctness — corrections can always be made in follow-up commits.
+
+---
+
+## 15. Tests Must Use Real Artifacts at Real Scale
+
+Integration tests must ingest full, untruncated documents — not truncated fixtures. Golden datasets for evaluation must be grounded in actually ingested content with verifiable `context_hint` passages; synthetic or fictional data with `document_id: "synthetic"` is never acceptable. Mocking is permitted only at external system boundaries (e.g. LiteLLM to avoid Ollama in CI); core domain services (EmbeddingService, EntityExtractor, chunking, retrieval) must not be mocked in integration tests. Slow tests (`@pytest.mark.slow`) run against real ML services; fast tests (`make test`) mock only at the boundary.
+
+**Rationale**: Tests that mock the thing being tested prove nothing. A passing test suite built on synthetic data and mocked ML services gives false confidence and masks real failures. The cost of slow tests is latency; the cost of fake tests is undetected regressions in production.
+
+---
+
+## 16. Quality Metrics Are CI Gates, Not Reports
+
+Retrieval quality metrics (HR@5, MRR, Faithfulness) must have enforced minimum thresholds that cause `make eval` to exit non-zero when violated. Scores that are merely printed without asserting a threshold are not quality gates — they are noise. Thresholds must be defined in code, score history must be committed to the repo, and any PR that regresses a metric below its threshold must be explicitly justified before merge.
+
+**Rationale**: A metric that cannot fail is not a metric — it is a vanity number. Enforced thresholds are the only mechanism that keeps quality visible and creates accountability for regressions. Without them, retrieval quality silently degrades across iterations.

@@ -39,6 +39,8 @@ Read this file as a MAP. Follow the links below for deeper context.
 8. Docs are the system of record. If you learn something reusable, encode it in `docs/`.
 9. Tests required. Every new service or endpoint must have at least one pytest test.
 10. TypeScript strict mode. `tsc --noEmit` must pass. No `any` without a comment justifying it.
+11. Integration tests use real, untruncated documents. Never truncate fixtures. Never mock core domain services (embedder, NER, retrieval) in integration tests — only mock at external system boundaries (LiteLLM, HTTP). See core-beliefs.md §15.
+12. Golden evaluation datasets must be grounded in actually ingested content with verifiable context passages. `document_id: "synthetic"` is never acceptable. Quality metrics must assert thresholds, not just print scores. See core-beliefs.md §16.
 
 ## Progress Report Format
 
