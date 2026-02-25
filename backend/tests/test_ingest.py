@@ -239,6 +239,89 @@ async def test_status_endpoint_404_for_unknown(test_db):
     assert response.status_code == 404
 
 
+async def test_classify_node_mocked_llm_returns_valid_type(test_db, monkeypatch):
+    """classify_node should return LLM-reclassified type when LLM is available."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import litellm
+
+    import app.services.llm as llm_module
+    from app.workflows.ingestion import classify_node
+
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "paper"
+    mock_response.usage = None
+    monkeypatch.setattr(litellm, "acompletion", AsyncMock(return_value=mock_response))
+    llm_module._llm_service = None  # force re-creation against mock
+
+    state: IngestionState = {
+        "document_id": "test-llm-ok",
+        "file_path": "/tmp/large.txt",
+        "format": "txt",
+        "parsed_document": {
+            "title": "Large Notes",
+            "format": "txt",
+            "pages": 1,
+            "word_count": 6000,  # > 5000 → triggers LLM reclassification
+            "sections": [],
+            "raw_text": "word " * 6000,
+        },
+        "content_type": None,
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+
+    result = await classify_node(state)
+
+    assert result["status"] == "chunking"
+    assert result["content_type"] in ("paper", "book", "conversation", "notes", "code")
+    assert result["error"] is None
+
+
+async def test_classify_node_llm_unavailable_falls_back_to_heuristic(test_db, monkeypatch):
+    """classify_node must not crash when Ollama is unreachable; falls back to heuristic."""
+    from unittest.mock import AsyncMock
+
+    import litellm
+
+    import app.services.llm as llm_module
+    from app.workflows.ingestion import classify_node
+
+    monkeypatch.setattr(
+        litellm,
+        "acompletion",
+        AsyncMock(side_effect=ConnectionError("Ollama unreachable")),
+    )
+    llm_module._llm_service = None  # force re-creation against mock
+
+    state: IngestionState = {
+        "document_id": "test-llm-down",
+        "file_path": "/tmp/large.txt",
+        "format": "txt",
+        "parsed_document": {
+            "title": "Large Generic Document",
+            "format": "txt",
+            "pages": 1,
+            "word_count": 6000,  # > 5000 → LLM reclassification attempted but fails
+            "sections": [],
+            "raw_text": "word " * 6000,
+        },
+        "content_type": None,
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+
+    result = await classify_node(state)
+
+    # Heuristic fallback: generic text with no special markers → "notes"
+    assert result["status"] == "chunking"
+    assert result["content_type"] == "notes"
+    assert result["error"] is None
+
+
 async def test_ingest_small_txt_classified_as_notes(test_db, tmp_path):
     """Small plain-text file with no special markers is classified as 'notes'."""
     txt_file = tmp_path / "notes.txt"

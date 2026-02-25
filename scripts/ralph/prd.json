@@ -945,7 +945,7 @@
         "uv run pytest exits 0 even while the dev backend is running (no Kuzu lock error)",
         "conftest.py fixture overrides DATA_DIR to a temp path for all tests"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S32",

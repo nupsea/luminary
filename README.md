@@ -58,6 +58,14 @@ Or start both together:
 make dev
 ```
 
+For colorized, per-process log output with DEBUG-level ingestion tracing (recommended for development):
+
+```bash
+make logs
+```
+
+Backend lines appear in cyan `[BACKEND]`, frontend lines in green `[FRONTEND]`. Press Ctrl-C to stop both.
+
 ## Running Tests
 
 ```bash
@@ -70,6 +78,10 @@ cd frontend && npx tsc --noEmit
 # All CI checks (lint + tests + build)
 make ci
 ```
+
+Tests are safe to run alongside a live dev backend. `tests/conftest.py`
+sets `DATA_DIR` to a temporary directory for the entire test session, so
+pytest never touches `~/.luminary` and Kuzu file-lock conflicts cannot occur.
 
 ## Running Evaluations
 

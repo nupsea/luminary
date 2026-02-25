@@ -57,6 +57,27 @@ async def lifespan(app: FastAPI):
     FastAPIInstrumentor.instrument_app(app)
     SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
     get_graph_service()  # initialise KuzuService and create schema on startup
+
+    # Ollama startup health-check — warn early if the local LLM is unreachable.
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
+            if resp.status_code == 200:
+                logger.info("Ollama reachable at startup", extra={"url": settings.OLLAMA_URL})
+            else:
+                logger.warning(
+                    "Ollama returned non-200 at startup; LLM features may be degraded. "
+                    "URL: %s  status: %s",
+                    settings.OLLAMA_URL,
+                    resp.status_code,
+                )
+    except Exception:
+        logger.warning(
+            "Ollama unreachable at startup — LLM features will be degraded. "
+            "Ensure Ollama is running at: %s",
+            settings.OLLAMA_URL,
+        )
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
