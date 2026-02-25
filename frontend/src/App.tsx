@@ -1,19 +1,48 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BookOpen, MessageSquare, Network, BarChart2, Activity, StickyNote } from "lucide-react"
-import { useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
+import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { SearchDialog } from "./components/SearchDialog"
+import { Skeleton } from "./components/ui/skeleton"
 import Chat from "./pages/Chat"
 import Learning from "./pages/Learning"
-import Monitoring from "./pages/Monitoring"
 import Notes from "./pages/Notes"
 import Study from "./pages/Study"
-import Viz from "./pages/Viz"
 
-const queryClient = new QueryClient()
+const Viz = lazy(() => import("./pages/Viz"))
+const Monitoring = lazy(() => import("./pages/Monitoring"))
+
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      logger.error("[Query]", String(query.queryKey), error instanceof Error ? error.message : String(error))
+    },
+  }),
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+})
+
+function PageSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 p-6">
+      <Skeleton className="h-8 w-48" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 w-full" />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const NAV_ITEMS = [
   { to: "/", icon: BookOpen, label: "Learning" },
@@ -76,10 +105,10 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<Learning />} />
           <Route path="/chat" element={<Chat />} />
-          <Route path="/viz" element={<Viz />} />
+          <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Study />} />
           <Route path="/notes" element={<Notes />} />
-          <Route path="/monitoring" element={<Monitoring />} />
+          <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Monitoring /></Suspense>} />
         </Routes>
       </main>
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />

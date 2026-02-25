@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Send } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
@@ -75,7 +76,7 @@ export default function Chat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const { data: llmSettings } = useQuery({
+  const { data: llmSettings, isLoading: llmLoading, isError: llmError } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: fetchLLMSettings,
   })
@@ -204,7 +205,9 @@ export default function Chat() {
         </div>
 
         {/* Model selector */}
-        {modelOptions.length > 0 && (
+        {llmLoading ? (
+          <Skeleton className="h-8 w-36" />
+        ) : modelOptions.length > 0 ? (
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
@@ -216,8 +219,15 @@ export default function Chat() {
               </option>
             ))}
           </select>
-        )}
+        ) : null}
       </div>
+
+      {/* LLM settings unavailable warning */}
+      {llmError && (
+        <div className="mx-6 mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          LLM settings unavailable — using defaults
+        </div>
+      )}
 
       {/* Message list */}
       <div className="flex-1 overflow-auto px-6 py-4">

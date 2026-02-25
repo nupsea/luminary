@@ -4,14 +4,17 @@
  * Sections:
  *   1. System Status — Ollama, Phoenix, Langfuse, Active Model
  *   2. RAG Quality — grouped BarChart per dataset (HR@5, MRR, Faithfulness, AR, CP)
- *   3. Model Usage — PieChart (local vs cloud) + BarChart (latency by model)
- *   4. Ingestion Queue — in-progress documents
- *   5. Recent Traces — last 50 Phoenix spans
- *   6. Eval Runs — table with HR@5 row coloring
+ *   3. Retrieval Quality Over Time — HR@5 sparkline per dataset
+ *   4. Model Usage — PieChart (local vs cloud) + BarChart (latency by model)
+ *   5. Ingestion Queue — in-progress documents
+ *   6. Recent Traces — last 50 Phoenix spans
+ *   7. Eval Runs — table with HR@5 row coloring
+ *
+ * Each section fetches independently: if one endpoint fails the rest render normally.
  */
 
 import { useEffect, useState } from "react"
-import { Loader2, X as XIcon } from "lucide-react"
+import { X as XIcon } from "lucide-react"
 import {
   Bar,
   BarChart,
@@ -28,6 +31,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { Skeleton } from "@/components/ui/skeleton"
+import { logger } from "@/lib/logger"
 
 const API_BASE = "http://localhost:8000"
 
@@ -102,48 +107,65 @@ interface Document {
 }
 
 // ---------------------------------------------------------------------------
-// API
+// Per-section state
 // ---------------------------------------------------------------------------
 
-async function fetchOverview(): Promise<MonitoringOverview | null> {
+interface SectionState<T> {
+  loading: boolean
+  data: T
+  error: boolean
+}
+
+function initSection<T>(data: T): SectionState<T> {
+  return { loading: true, data, error: false }
+}
+
+// ---------------------------------------------------------------------------
+// API — throw on non-ok so catch handlers set error: true
+// ---------------------------------------------------------------------------
+
+async function fetchOverview(): Promise<MonitoringOverview> {
   const res = await fetch(`${API_BASE}/monitoring/overview`)
-  if (!res.ok) return null
+  if (!res.ok) throw new Error("overview failed")
   return res.json() as Promise<MonitoringOverview>
 }
 
 async function fetchTraces(): Promise<TracesResponse> {
   const res = await fetch(`${API_BASE}/monitoring/traces`)
-  if (!res.ok) return { traces: [] }
+  if (!res.ok) throw new Error("traces failed")
   return res.json() as Promise<TracesResponse>
 }
 
 async function fetchEvalRuns(): Promise<EvalRun[]> {
   const res = await fetch(`${API_BASE}/monitoring/evals`)
-  if (!res.ok) return []
+  if (!res.ok) throw new Error("evals failed")
   return res.json() as Promise<EvalRun[]>
 }
 
 async function fetchModelUsage(): Promise<ModelUsageItem[]> {
   const res = await fetch(`${API_BASE}/monitoring/model-usage`)
-  if (!res.ok) return []
+  if (!res.ok) throw new Error("model-usage failed")
   return res.json() as Promise<ModelUsageItem[]>
 }
 
-async function fetchLLMSettings(): Promise<LLMSettings | null> {
+async function fetchLLMSettings(): Promise<LLMSettings> {
   const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) return null
+  if (!res.ok) throw new Error("llm-settings failed")
   return res.json() as Promise<LLMSettings>
 }
 
 async function fetchDocuments(): Promise<Document[]> {
   const res = await fetch(`${API_BASE}/documents`)
-  if (!res.ok) return []
-  return res.json() as Promise<Document[]>
+  if (!res.ok) throw new Error("documents failed")
+  const data = (await res.json()) as { items?: Document[] } | Document[]
+  // handle both paginated and legacy list responses
+  if (Array.isArray(data)) return data
+  return (data as { items?: Document[] }).items ?? []
 }
 
 async function fetchEvalHistory(): Promise<EvalHistoryItem[]> {
   const res = await fetch(`${API_BASE}/monitoring/eval-history`)
-  if (!res.ok) return []
+  if (!res.ok) throw new Error("eval-history failed")
   return res.json() as Promise<EvalHistoryItem[]>
 }
 
@@ -251,13 +273,41 @@ function TraceDetailPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Empty state
+// Empty / Error states
 // ---------------------------------------------------------------------------
 
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
       {message}
+    </div>
+  )
+}
+
+function SectionErrorCard({ name }: { name: string }) {
+  return (
+    <div className="flex h-24 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-sm text-red-600">
+      Could not load {name}
+    </div>
+  )
+}
+
+function SectionSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="flex flex-col gap-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <Skeleton key={i} className="h-12 w-full" />
+      ))}
+    </div>
+  )
+}
+
+function MetricCardSkeleton() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={i} className="h-16 w-full rounded-lg" />
+      ))}
     </div>
   )
 }
@@ -275,9 +325,7 @@ const DATASET_COLORS: Record<string, string> = {
 }
 
 function buildSparklineData(history: EvalHistoryItem[]) {
-  // Group by dataset, keeping per-run data points with a sequential index
   const datasets = Array.from(new Set(history.map((h) => h.dataset)))
-  // Build rows indexed by run position across all datasets (merged by timestamp order)
   const allTimestamps = Array.from(new Set(history.map((h) => h.timestamp))).sort()
   return allTimestamps.map((ts, i) => {
     const row: Record<string, number | string> = { run: i + 1, ts }
@@ -339,7 +387,6 @@ const METRIC_BARS = [
 ]
 
 function buildRagChartData(evalRuns: EvalRun[]) {
-  // Latest run per dataset
   const byDataset: Record<string, EvalRun> = {}
   for (const run of evalRuns) {
     if (!byDataset[run.dataset_name]) {
@@ -446,58 +493,98 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
 // ---------------------------------------------------------------------------
 
 export default function Monitoring() {
-  const [overview, setOverview] = useState<MonitoringOverview | null>(null)
-  const [traces, setTraces] = useState<TraceItem[]>([])
-  const [tracesMessage, setTracesMessage] = useState<string | null>(null)
-  const [evalRuns, setEvalRuns] = useState<EvalRun[]>([])
-  const [evalHistory, setEvalHistory] = useState<EvalHistoryItem[]>([])
-  const [modelUsage, setModelUsage] = useState<ModelUsageItem[]>([])
-  const [llmSettings, setLLMSettings] = useState<LLMSettings | null>(null)
-  const [ingestingDocs, setIngestingDocs] = useState<Document[]>([])
-  const [loading, setLoading] = useState(true)
+  const [overviewState, setOverviewState] = useState<SectionState<MonitoringOverview | null>>(
+    initSection(null),
+  )
+  const [tracesState, setTracesState] = useState<SectionState<TracesResponse>>(
+    initSection({ traces: [] }),
+  )
+  const [evalRunsState, setEvalRunsState] = useState<SectionState<EvalRun[]>>(initSection([]))
+  const [evalHistState, setEvalHistState] = useState<SectionState<EvalHistoryItem[]>>(
+    initSection([]),
+  )
+  const [modelUsageState, setModelUsageState] = useState<SectionState<ModelUsageItem[]>>(
+    initSection([]),
+  )
+  const [llmState, setLlmState] = useState<SectionState<LLMSettings | null>>(initSection(null))
+  const [docsState, setDocsState] = useState<SectionState<Document[]>>(initSection([]))
+
   const [selectedTrace, setSelectedTrace] = useState<TraceItem | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
-    async function load() {
-      const [ov, tr, evs, history, usage, llm, docs] = await Promise.all([
-        fetchOverview(),
-        fetchTraces(),
-        fetchEvalRuns(),
-        fetchEvalHistory(),
-        fetchModelUsage(),
-        fetchLLMSettings(),
-        fetchDocuments(),
-      ])
-      if (cancelled) return
-      setOverview(ov)
-      setTraces(tr.traces)
-      setTracesMessage(tr.message ?? null)
-      setEvalRuns(evs)
-      setEvalHistory(history)
-      setModelUsage(usage)
-      setLLMSettings(llm)
-      setIngestingDocs(docs.filter((d) => d.stage !== "complete"))
-      setLoading(false)
-    }
+    fetchOverview()
+      .then((d) => {
+        if (!cancelled) setOverviewState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "System Status", e)
+        if (!cancelled) setOverviewState({ loading: false, data: null, error: true })
+      })
 
-    void load()
+    fetchTraces()
+      .then((d) => {
+        if (!cancelled) setTracesState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "Recent Traces", e)
+        if (!cancelled) setTracesState({ loading: false, data: { traces: [] }, error: true })
+      })
+
+    fetchEvalRuns()
+      .then((d) => {
+        if (!cancelled) setEvalRunsState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "Eval Runs", e)
+        if (!cancelled) setEvalRunsState({ loading: false, data: [], error: true })
+      })
+
+    fetchEvalHistory()
+      .then((d) => {
+        if (!cancelled) setEvalHistState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "Eval History", e)
+        if (!cancelled) setEvalHistState({ loading: false, data: [], error: true })
+      })
+
+    fetchModelUsage()
+      .then((d) => {
+        if (!cancelled) setModelUsageState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "Model Usage", e)
+        if (!cancelled) setModelUsageState({ loading: false, data: [], error: true })
+      })
+
+    fetchLLMSettings()
+      .then((d) => {
+        if (!cancelled) setLlmState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "LLM Settings", e)
+        if (!cancelled) setLlmState({ loading: false, data: null, error: true })
+      })
+
+    fetchDocuments()
+      .then((d) => {
+        if (!cancelled) setDocsState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] section failed", "Ingestion Queue", e)
+        if (!cancelled) setDocsState({ loading: false, data: [], error: true })
+      })
+
     return () => {
       cancelled = true
     }
   }, [])
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 size={24} className="animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  const ollamaOnline = llmSettings?.processing_mode === "local"
-  const activeModel = llmSettings?.active_model ?? overview?.llm_status ?? "—"
+  const ollamaOnline = llmState.data?.processing_mode === "local"
+  const activeModel = llmState.data?.active_model ?? overviewState.data?.llm_status ?? "—"
+  const ingestingDocs = docsState.data.filter((d) => d.stage !== "complete")
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8">
@@ -506,53 +593,83 @@ export default function Monitoring() {
       {/* 1. System Status */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">System Status</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatusIndicator ok={ollamaOnline} label="Ollama" />
-          <StatusIndicator ok={overview?.phoenix_running ?? false} label="Phoenix" />
-          <StatusIndicator ok={overview?.langfuse_configured ?? false} label="Langfuse" />
-          <ModelBadge model={activeModel} />
-        </div>
-        {overview && (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3">
-              <span className="text-lg font-bold text-foreground">{overview.total_documents}</span>
-              <span className="text-xs text-muted-foreground">Documents</span>
+        {overviewState.loading || llmState.loading ? (
+          <MetricCardSkeleton />
+        ) : overviewState.error && llmState.error ? (
+          <SectionErrorCard name="System Status" />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatusIndicator ok={ollamaOnline} label="Ollama" />
+              <StatusIndicator ok={overviewState.data?.phoenix_running ?? false} label="Phoenix" />
+              <StatusIndicator ok={overviewState.data?.langfuse_configured ?? false} label="Langfuse" />
+              <ModelBadge model={activeModel} />
             </div>
-            <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3">
-              <span className="text-lg font-bold text-foreground">{overview.total_chunks}</span>
-              <span className="text-xs text-muted-foreground">Chunks</span>
-            </div>
-            <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3">
-              <span className="text-lg font-bold text-foreground">{overview.qa_calls_today}</span>
-              <span className="text-xs text-muted-foreground">QA calls today</span>
-            </div>
-          </div>
+            {overviewState.data && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3">
+                  <span className="text-lg font-bold text-foreground">{overviewState.data.total_documents}</span>
+                  <span className="text-xs text-muted-foreground">Documents</span>
+                </div>
+                <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3">
+                  <span className="text-lg font-bold text-foreground">{overviewState.data.total_chunks}</span>
+                  <span className="text-xs text-muted-foreground">Chunks</span>
+                </div>
+                <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3">
+                  <span className="text-lg font-bold text-foreground">{overviewState.data.qa_calls_today}</span>
+                  <span className="text-xs text-muted-foreground">QA calls today</span>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
 
       {/* 2. RAG Quality */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">RAG Quality</h2>
-        <RAGQualityChart evalRuns={evalRuns} />
+        {evalRunsState.loading ? (
+          <SectionSkeleton rows={4} />
+        ) : evalRunsState.error ? (
+          <SectionErrorCard name="RAG Quality" />
+        ) : (
+          <RAGQualityChart evalRuns={evalRunsState.data} />
+        )}
       </section>
 
       {/* 3. HR@5 Over Time */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Retrieval Quality Over Time</h2>
         <p className="text-xs text-muted-foreground">HR@5 per dataset across eval runs. Dashed line = 0.60 threshold.</p>
-        <EvalHistorySparkline history={evalHistory} />
+        {evalHistState.loading ? (
+          <SectionSkeleton rows={3} />
+        ) : evalHistState.error ? (
+          <SectionErrorCard name="Retrieval Quality Over Time" />
+        ) : (
+          <EvalHistorySparkline history={evalHistState.data} />
+        )}
       </section>
 
       {/* 4. Model Usage */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Model Usage</h2>
-        <ModelUsageSection modelUsage={modelUsage} />
+        {modelUsageState.loading ? (
+          <SectionSkeleton rows={3} />
+        ) : modelUsageState.error ? (
+          <SectionErrorCard name="Model Usage" />
+        ) : (
+          <ModelUsageSection modelUsage={modelUsageState.data} />
+        )}
       </section>
 
       {/* 5. Ingestion Queue */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Ingestion Queue</h2>
-        {ingestingDocs.length === 0 ? (
+        {docsState.loading ? (
+          <SectionSkeleton rows={2} />
+        ) : docsState.error ? (
+          <SectionErrorCard name="Ingestion Queue" />
+        ) : ingestingDocs.length === 0 ? (
           <EmptyState message="No documents currently ingesting." />
         ) : (
           <div className="flex flex-col gap-1 rounded-lg border border-border">
@@ -576,51 +693,63 @@ export default function Monitoring() {
       {/* 6. Recent Traces */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Recent Traces</h2>
-        {tracesMessage && (
-          <p className="text-sm text-muted-foreground">{tracesMessage}</p>
-        )}
-        {traces.length === 0 ? (
-          <EmptyState message="No traces available." />
+        {tracesState.loading ? (
+          <SectionSkeleton rows={5} />
+        ) : tracesState.error ? (
+          <SectionErrorCard name="Recent Traces" />
         ) : (
-          <div className="overflow-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Timestamp</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Operation</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Duration</th>
-                  <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {traces.map((t) => (
-                  <tr
-                    key={t.span_id || `${t.trace_id}-${t.start_time}`}
-                    onClick={() => setSelectedTrace(t)}
-                    className="cursor-pointer border-b border-border last:border-0 hover:bg-accent"
-                  >
-                    <td className="px-4 py-2 text-xs text-muted-foreground">
-                      {t.start_time ? new Date(t.start_time).toLocaleTimeString() : "—"}
-                    </td>
-                    <td className="px-4 py-2 font-medium text-foreground">{t.operation_name}</td>
-                    <td className="px-4 py-2 text-right text-muted-foreground">
-                      {t.duration_ms.toFixed(1)} ms
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      <StatusBadge status={t.status} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {tracesState.data.message && (
+              <p className="text-sm text-muted-foreground">{tracesState.data.message}</p>
+            )}
+            {tracesState.data.traces.length === 0 ? (
+              <EmptyState message="No traces available." />
+            ) : (
+              <div className="overflow-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/50">
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Timestamp</th>
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Operation</th>
+                      <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Duration</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tracesState.data.traces.map((t) => (
+                      <tr
+                        key={t.span_id || `${t.trace_id}-${t.start_time}`}
+                        onClick={() => setSelectedTrace(t)}
+                        className="cursor-pointer border-b border-border last:border-0 hover:bg-accent"
+                      >
+                        <td className="px-4 py-2 text-xs text-muted-foreground">
+                          {t.start_time ? new Date(t.start_time).toLocaleTimeString() : "—"}
+                        </td>
+                        <td className="px-4 py-2 font-medium text-foreground">{t.operation_name}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">
+                          {t.duration_ms.toFixed(1)} ms
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <StatusBadge status={t.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </section>
 
       {/* 7. Eval Runs */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Eval Runs</h2>
-        {evalRuns.length === 0 ? (
+        {evalRunsState.loading ? (
+          <SectionSkeleton rows={4} />
+        ) : evalRunsState.error ? (
+          <SectionErrorCard name="Eval Runs" />
+        ) : evalRunsState.data.length === 0 ? (
           <EmptyState message="No evaluation runs yet. Run evals/run_eval.py to populate." />
         ) : (
           <div className="overflow-auto rounded-lg border border-border">
@@ -635,7 +764,7 @@ export default function Monitoring() {
                 </tr>
               </thead>
               <tbody>
-                {evalRuns.map((run) => {
+                {evalRunsState.data.map((run) => {
                   const hr5 = run.hit_rate_5
                   const rowBg =
                     hr5 !== null && hr5 < 0.5

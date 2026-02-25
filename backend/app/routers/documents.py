@@ -306,6 +306,16 @@ async def ingest_document(
         shutil.copyfileobj(file.file, f)
 
     fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
+    size_bytes = dest.stat().st_size
+    logger.info(
+        "File received",
+        extra={
+            "filename": file.filename or "upload",
+            "size_bytes": size_bytes,
+            "format": fmt,
+            "doc_id": doc_id,
+        },
+    )
 
     async with get_session_factory()() as session:
         doc = DocumentModel(
@@ -510,6 +520,7 @@ async def get_document_status(document_id: str):
         raise HTTPException(status_code=404, detail="Document not found")
     stage = doc.stage
     progress_pct = STAGE_PROGRESS.get(stage, 0)
+    logger.debug("Status polled", extra={"document_id": document_id, "stage": stage})
     return {
         "document_id": document_id,
         "stage": stage,

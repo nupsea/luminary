@@ -1068,6 +1068,121 @@
         "uv run pytest tests/test_performance.py -m slow exits 0"
       ],
       "passes": true
+    },
+    {
+      "id": "S39",
+      "title": "Frontend resilience \u2014 skeleton states, error isolation, and QueryClient tuning",
+      "phase": 6,
+      "priority": 40,
+      "featureRef": "F11",
+      "description": "Three related frontend reliability problems: (1) QueryClient has zero configuration \u2014 staleTime defaults to 0ms so every tab switch re-fetches all data; refetchOnWindowFocus defaults to true so every alt-tab fires all queries. Fix: configure QueryClient in App.tsx with defaultOptions: { queries: { staleTime: 60_000, refetchOnWindowFocus: false, retry: 1 } }. Stable data (documents list, settings) should use staleTime: 300_000. (2) Monitoring tab uses Promise.all over 7 endpoints \u2014 if any single endpoint fails (e.g. /monitoring/eval-history not yet populated), setLoading(false) is never called and the page spins forever. Fix: replace Promise.all with Promise.allSettled. Each dashboard section (Eval Runs, Traces, Model Usage, Eval History, System Status) independently renders. A section whose fetch failed shows an inline 'Could not load [section name]' error card \u2014 the rest of the dashboard renders normally. (3) All pages currently show a full-page spinner (Loader2 center) while loading. Replace with skeleton placeholders that match the shape of the actual content: document cards in Learning, message bubbles in Chat, metric cards in Monitoring. Use shadcn Skeleton component. Skeletons render immediately; real content swaps in. (4) React.lazy + Suspense for the Viz page (imports Sigma.js, ~500kb) and Monitoring page so they do not block initial app bundle parse. Suspense fallback is a skeleton, not a spinner. (5) Chat: if /settings/llm fetch fails, show an inline warning banner 'LLM settings unavailable \u2014 using defaults' rather than silently breaking. Logging: in the frontend, add a lightweight logger utility at src/lib/logger.ts that wraps console.debug/info/warn/error and prefixes messages with [Luminary] and a timestamp. Log all TanStack Query errors in a global onError handler in QueryClient config: logger.error('[Query]', queryKey, error). Log when Monitoring sections fail individually: logger.warn('[Monitoring] section failed', sectionName, error). On the backend, add structured log lines to the documents router: log file receipt at INFO level with filename, size_bytes, and format on every POST /documents/ingest call. Log status poll requests at DEBUG level with document_id and current stage.",
+      "acceptanceCriteria": [
+        "QueryClient configured: staleTime=60s, refetchOnWindowFocus=false, retry=1",
+        "Navigating between tabs does NOT trigger network requests if data is < 60s old",
+        "Monitoring renders partial data when one endpoint fails \u2014 no infinite spinner",
+        "Each Monitoring section shows inline error card independently if its fetch fails",
+        "Learning, Chat, Monitoring all show skeleton placeholders while loading",
+        "Viz and Monitoring pages are React.lazy \u2014 not in initial bundle",
+        "Chat shows inline warning banner if LLM settings fetch fails",
+        "Frontend logger utility exists at src/lib/logger.ts",
+        "All TanStack Query errors logged via global onError handler",
+        "Backend logs file receipt (filename, size, format) on every upload POST"
+      ],
+      "passes": true
+    },
+    {
+      "id": "S40",
+      "title": "Upload UX \u2014 inline progress bar, keep dialog open, inline error with retry",
+      "phase": 6,
+      "priority": 41,
+      "featureRef": "F1",
+      "description": "Current upload flow: dialog closes immediately on submit, progress shown only in a small bottom-right toast that is easy to miss, errors are not always visible, and there is no indication of how far along the pipeline is. Fix the UploadDialog component: (1) Dialog stays open after submit \u2014 do not call onClose() until the user explicitly closes it or the upload succeeds. Show a progress section inside the dialog with: a shadcn Progress bar (0-100%), the current stage label ('Parsing document...', 'Generating embeddings...' etc.), and a rough time estimate based on file size (heuristic: ~5s per MB for embedding stage, show 'About Xs remaining'). (2) If ingestion fails (error_message from status endpoint, or network error during poll), show the error inline inside the dialog in a destructive Alert component. Add a 'Try again' button that re-submits the same file without closing the dialog. (3) The STAGE_PROGRESS map in ingestion.py already emits progress_pct per stage \u2014 use these values directly to drive the progress bar. Add a missing stage: 'entity_extract' at 85% between indexing (90% is wrong \u2014 fix: indexing=80, entity_extract=90, complete=100). (4) When upload completes successfully, show a green checkmark inside the dialog, the document title, and a 'View in library' button that navigates to Learning tab and closes the dialog. Keep the success state visible for 3 seconds then auto-close. (5) Retain the toast as a secondary notification for users who navigate away \u2014 but the primary UX is the inline dialog progress. Logging: add structured frontend logging for the upload lifecycle using the logger utility from S39. Log at each stage transition: logger.info('[Upload] stage', { stage, progress_pct, doc_id, filename }). Log errors with full error detail: logger.error('[Upload] failed', { stage, error_message, doc_id }). Log timing: record Date.now() at upload start and at each stage; log elapsed_ms at completion. On the backend, add a structured log line in run_ingestion() at the start of each LangGraph node (parse, classify, chunk, embed, keyword_index, entity_extract) at DEBUG level: logger.debug('node_start', extra={'node': name, 'doc_id': doc_id}). This makes `make logs` (S30, LOG_LEVEL=DEBUG) show every stage transition in real time.",
+      "acceptanceCriteria": [
+        "Dialog stays open throughout upload and ingestion pipeline",
+        "Progress bar inside dialog updates through all stages (0-100%)",
+        "Stage label text matches current pipeline stage",
+        "Time estimate shown and updates as stages complete",
+        "Error shown inline in dialog with 'Try again' button \u2014 not only in toast",
+        "Success state shows checkmark, document title, and 'View in library' button",
+        "STAGE_PROGRESS map corrected: indexing=80, entity_extract=90, complete=100",
+        "Frontend logs stage transitions with elapsed_ms timing",
+        "Backend logs node_start at DEBUG for every LangGraph node",
+        "make logs shows each pipeline stage as it executes in real time"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S41",
+      "title": "App startup pre-fetch and perceived performance",
+      "phase": 6,
+      "priority": 42,
+      "featureRef": "F11",
+      "description": "The app feels slow because every page fetches its data after the component mounts, causing a visible delay after navigation. Fix with pre-fetching: (1) On app startup (in App.tsx useEffect or QueryClientProvider), prefetch the documents list (GET /documents) and LLM settings (GET /settings/llm) using queryClient.prefetchQuery. These are needed by both Learning and Chat \u2014 having them ready means zero loading state for the two most-used pages. (2) On NavLink hover (onMouseEnter), prefetch the data for that tab's primary query. Learning \u2192 prefetch /documents. Chat \u2192 prefetch /settings/llm. Study \u2192 prefetch /study/due-cards. Monitoring \u2192 prefetch /monitoring/overview. Use queryClient.prefetchQuery with the same queryKey and queryFn used in the page. (3) Add a global loading indicator: a 2px progress bar at the very top of the viewport (like GitHub's blue bar) that appears when any query is in-flight. Use useIsFetching() from TanStack Query to drive it. Use a shadcn Progress or a simple CSS animation. This replaces the jarring full-page spinners as the primary loading signal. (4) Ensure the Learning page renders the document grid shell (header, filter bar, empty grid with skeletons) immediately on mount \u2014 do not conditionally render the entire page behind isLoading. Only the document cards themselves show skeletons. Logging: log prefetch outcomes using the logger utility from S39. logger.debug('[Prefetch] hit', { key }) when a query is already cached and prefetch is skipped. logger.info('[Prefetch] fetching', { key }) when a prefetch fires. logger.warn('[Prefetch] failed', { key, error }) if a prefetch errors (non-fatal, do not surface to user). Log the global top-of-page loading bar start/end: logger.debug('[Loading bar]', { fetchingCount }) on each isFetching change.",
+      "acceptanceCriteria": [
+        "documents list and LLM settings are prefetched on app mount",
+        "Navigating to Learning or Chat shows no loading state if prefetch completed",
+        "Hovering a nav item prefetches that tab's primary data",
+        "Global top-of-page progress bar visible during any in-flight query",
+        "Learning page shell renders immediately \u2014 only card content shows skeletons",
+        "Time-to-interactive for Learning tab < 500ms on second visit (data cached)",
+        "Prefetch hits and misses logged at debug level",
+        "Prefetch failures logged as warnings but do not surface to user"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S42",
+      "title": "E2E upload test \u2014 real HTTP endpoint, real Ollama, real pipeline",
+      "phase": 6,
+      "priority": 43,
+      "featureRef": "F2",
+      "description": "The integration tests call run_ingestion() directly and mock LiteLLM, embedder, and NER. They test the pipeline in isolation but never exercise the real upload path: POST /documents/ingest (multipart file upload) \u2192 asyncio background task \u2192 real Ollama classify \u2192 real embedder \u2192 GET /documents/{id}/status polling. A passing test suite gives zero confidence that the actual upload flow works. Add tests/test_e2e_upload.py marked @pytest.mark.e2e (excluded from make ci, requires running backend + Ollama). Tests: (1) test_upload_and_poll \u2014 POST a real PDF/txt file to /documents/ingest via httpx.AsyncClient pointing at http://localhost:8000 (real server, not ASGITransport). Poll GET /documents/{id}/status every 2s for up to 120s. Assert document reaches stage='complete'. Assert progress_pct increases monotonically across polls. Assert at least 5 chunks in DB via GET /documents/{id}. (2) test_upload_error_surfaced \u2014 POST a deliberately corrupt file (random bytes with .pdf ext). Assert the document reaches stage='error' within 30s. Assert error_message is non-empty. Assert GET /documents/{id}/status returns error_message (not null). (3) test_status_polling_contract \u2014 after upload, assert GET /documents/{id}/status returns the exact schema: {stage: str, progress_pct: int, done: bool, error_message: str|null}. Assert progress_pct is between 0 and 100. Assert done=True when stage='complete'. Add 'make test-e2e' to Makefile: requires BACKEND_URL env var (default http://localhost:8000). Document in README: start backend and Ollama first, then run make test-e2e. Also add a lighter @pytest.mark.integration_http variant that uses ASGITransport (real app, real DB, but no external Ollama \u2014 mock only litellm.acompletion at module level) and IS included in make ci. This closes the gap between unit tests and full E2E.",
+      "acceptanceCriteria": [
+        "test_upload_and_poll: file POSTed via HTTP, stage reaches 'complete' within 120s",
+        "progress_pct increases monotonically during polling",
+        "test_upload_error_surfaced: corrupt file reaches stage='error' with non-empty error_message",
+        "test_status_polling_contract: status response schema validated on every poll",
+        "integration_http variant (ASGITransport, mocked Ollama) runs in make ci",
+        "make test-e2e target in Makefile, documented in README",
+        "uv run pytest tests/test_e2e_upload.py -m integration_http exits 0 in CI"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S43",
+      "title": "Frontend compliance audit \u2014 loading, error, empty states across all pages",
+      "phase": 6,
+      "priority": 44,
+      "featureRef": "F11",
+      "description": "Audit every frontend page and component against invariants 13 and 14 in CLAUDE.md. Do NOT rewrite pages \u2014 make targeted additions only. For each page listed below, read the existing implementation and add only what is missing: (1) Learning (Learning.tsx + UploadDialog): already addressed by S39/S40 \u2014 skip. (2) Chat (Chat.tsx): add skeleton for message history area while llmSettings loads. If /qa returns non-200, show inline error banner in the chat panel (not just 'An error occurred' text in a bubble \u2014 use a dismissable Alert). Empty state: if no documents are ingested, show a prompt 'Upload a document in the Learning tab to start chatting about it'. Log all /qa errors via logger.error from S39. (3) Study (Study.tsx): add skeleton for due-cards list. If fetch fails, show inline error. Empty state: 'No cards due \u2014 come back later or add more documents'. (4) Viz (Viz.tsx): Sigma.js graph load is async \u2014 show a skeleton canvas placeholder while graph data loads. If GET /graph/{id} fails, show 'Graph unavailable for this document'. Empty state when no document selected: 'Select a document to explore its knowledge graph'. (5) Notes (Notes.tsx): skeleton for notes list. Error state if fetch fails. Empty state: 'No notes yet \u2014 highlights and annotations will appear here'. (6) All pages: import and use the logger utility from S39 (src/lib/logger.ts). Log component mount and first data load completion: logger.info('[PageName] loaded', { duration_ms, itemCount }). Log any fetch error: logger.error('[PageName] fetch failed', { endpoint, error }). Acceptance rule: every page must have a non-blank state for loading, error, and empty \u2014 none of these three states may render a blank white area.",
+      "acceptanceCriteria": [
+        "Chat: skeleton while loading, inline Alert on /qa error, empty state when no docs ingested",
+        "Study: skeleton for due-cards, inline error, empty state when no cards due",
+        "Viz: skeleton canvas placeholder, inline error on graph fetch failure, empty state when no doc selected",
+        "Notes: skeleton, inline error, empty state",
+        "All pages use logger utility \u2014 mount and load completion logged at info level",
+        "All fetch errors logged at error level with endpoint and error detail",
+        "Zero pages render a blank white area for loading, error, or empty state"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S44",
+      "title": "Backend structured logging audit \u2014 consistent log coverage across all services",
+      "phase": 6,
+      "priority": 45,
+      "featureRef": "setup",
+      "description": "Audit backend structured logging against invariant 6 (structured logging only, no print()) and the new logging requirements from S39/S40. Specifically: (1) Every FastAPI router must log at INFO on every mutating request (POST, PATCH, DELETE) with: endpoint name, relevant IDs, and outcome (created/updated/deleted). GET endpoints log at DEBUG only. (2) Every service __init__ must log at INFO when the service is initialised: logger.info('ServiceName initialised', extra={...config}). (3) Every background task (asyncio.create_task) must log at INFO when it starts and when it completes or fails: logger.info('task_start')/logger.info('task_complete')/logger.error('task_failed', exc_info=True). (4) Run grep -rn 'print(' app/ and fix any remaining print() calls to use logger. (5) Ensure all log calls use the extra={} dict for structured fields \u2014 no f-string interpolation into the message string (breaks JSON log parsing). Fix any logger.info(f'... {var}') patterns to logger.info('...', extra={'var': var}). (6) Add a test in tests/test_logging.py: capture log output during a POST /documents/ingest call and assert the INFO log line for file receipt is present with filename and size_bytes fields.",
+      "acceptanceCriteria": [
+        "grep -rn 'print(' backend/app/ returns zero results",
+        "grep -rn 'logger\\.' backend/app/ shows INFO log on every POST/PATCH/DELETE handler",
+        "All background tasks log task_start, task_complete, or task_failed",
+        "No f-string interpolation in logger calls \u2014 all dynamic values in extra={} dict",
+        "All service __init__ methods log initialisation at INFO",
+        "tests/test_logging.py asserts file receipt log line on POST /documents/ingest",
+        "uv run pytest tests/test_logging.py exits 0"
+      ],
+      "passes": false
     }
   ]
 }
