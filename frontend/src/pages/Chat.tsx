@@ -163,6 +163,19 @@ export default function Chat() {
               )
             }
 
+            // SSE error event — end streaming, remove placeholder, show banner
+            if (typeof payload["error"] === "string") {
+              const errorCode = payload["error"] as string
+              const errorMsg =
+                errorCode === "llm_unavailable"
+                  ? "Ollama is not running. Start it with: ollama serve"
+                  : (payload["message"] as string | undefined) ?? "An error occurred."
+              setIsStreaming(false)
+              setMessages((m) => m.filter((msg) => msg.id !== assistantId))
+              setQaError(errorMsg)
+              break
+            }
+
             if (payload["done"] === true) {
               const not_found = payload["not_found"] === true
               const citations = (payload["citations"] as Citation[] | undefined) ?? []
@@ -246,11 +259,11 @@ export default function Chat() {
         </div>
       )}
 
-      {/* QA error banner */}
+      {/* QA error banner — inline amber alert */}
       {qaError && (
-        <div className="mx-6 mt-2 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="mx-6 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <span className="flex-1">{qaError}</span>
-          <button onClick={() => setQaError(null)} className="hover:text-red-900" aria-label="Dismiss">
+          <button onClick={() => setQaError(null)} className="hover:text-amber-900" aria-label="Dismiss">
             <X size={14} />
           </button>
         </div>

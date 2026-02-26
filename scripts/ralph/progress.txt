@@ -616,3 +616,14 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - caplog.set_level applies for entire test function; caplog.at_level is a context manager for a block
   - CI: 291 passed, 1 pre-existing flaky test (test_http_corrupt_upload_terminates passes in isolation), 9 deselected, ruff clean
 ---
+
+## S48 — Fix Chat Q&A — 2026-02-26
+- Added no-context guard in qa.py stream_answer(): if retriever returns 0 chunks, yields {error: "no_context", done: true} and returns before calling LLM
+- Wrapped LLM generate call in try/except: on any exception yields {error: "llm_unavailable", done: true} and returns
+- Fixed vector_search() in retriever.py: wraps table.search() in try/except, returns [] on any LanceDB error; checks total rows first
+- Chat.tsx: added SSE error event handling — setIsStreaming(false), remove placeholder message, show qaError banner
+- Chat.tsx: error banner changed from red to amber styling (consistent with LLM settings warning)
+- Added 3 new tests: test_qa_no_context, test_qa_ollama_offline, test_qa_with_mock_llm
+- Fixed test_endpoint_not_found_response: updated assertion from not_found=True to error='no_context' (no-context guard fires before LLM when retriever returns [])
+- CI: 302 passed, 13 deselected (slow), ruff clean, tsc clean
+---

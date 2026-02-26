@@ -1274,7 +1274,7 @@
         "test_qa_with_mock_llm: asserts >= 1 token event, done=true with citations length >= 1",
         "tsc --noEmit passes after frontend changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S49",

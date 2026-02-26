@@ -357,6 +357,7 @@ async def test_endpoint_returns_sse_content_type(test_db):
 
 @pytest.mark.asyncio
 async def test_endpoint_not_found_response(test_db):
+    """Retriever returns [] → no-context guard fires before LLM; endpoint returns error event."""
     _engine, factory, tmp_path = test_db
 
     mock_retriever = MagicMock()
@@ -376,7 +377,9 @@ async def test_endpoint_not_found_response(test_db):
     events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
     assert len(events) == 1
     payload = json.loads(events[0][len("data: "):])
-    assert payload["not_found"] is True
+    # no-context guard fires before LLM is called when retriever returns []
+    assert payload["error"] == "no_context"
+    assert payload["done"] is True
 
 
 @pytest.mark.asyncio
@@ -407,3 +410,109 @@ async def test_endpoint_all_scope_passes_none_doc_ids(test_db):
 
     # scope=all overrides document_ids → passes None to retriever
     assert captured_doc_ids[0] is None
+
+
+# ---------------------------------------------------------------------------
+# QAService.stream_answer — error flows (S48)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_qa_no_context(test_db):
+    """Retriever returns 0 chunks → exactly 1 SSE event with error='no_context'."""
+    _engine, factory, tmp_path = test_db
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[])
+
+    mock_llm = MagicMock()
+
+    with (
+        patch("app.services.qa.get_retriever", return_value=mock_retriever),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer("anything", ["nonexistent-doc-id"], "single", None)
+        ]
+
+    data_lines = [e for e in events if e.startswith("data: ")]
+    assert len(data_lines) == 1
+    payload = json.loads(data_lines[0][len("data: "):])
+    assert payload["error"] == "no_context"
+    assert payload["done"] is True
+
+
+@pytest.mark.asyncio
+async def test_qa_ollama_offline(test_db):
+    """LLM generate raises → exactly 1 SSE event with error='llm_unavailable'."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(side_effect=Exception("connection refused"))
+
+    with (
+        patch("app.services.qa.get_retriever", return_value=mock_retriever),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer("What is this about?", [doc_id], "single", None)
+        ]
+
+    data_lines = [e for e in events if e.startswith("data: ")]
+    assert len(data_lines) == 1
+    payload = json.loads(data_lines[0][len("data: "):])
+    assert payload["error"] == "llm_unavailable"
+    assert payload["done"] is True
+
+
+@pytest.mark.asyncio
+async def test_qa_with_mock_llm(test_db):
+    """Happy-path: mock LLM returns answer + citations → token events + done event."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "Time Machine")
+
+    citations = [
+        {
+            "document_title": "Time Machine",
+            "section_heading": "Chapter 1",
+            "page": 3,
+            "excerpt": "...",
+        }
+    ]
+    llm_response = "The Time Traveller invented a machine." + json.dumps(
+        {"citations": citations, "confidence": "high"}
+    )
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(
+        return_value=[_make_chunk(doc_id, text="time machine text")]
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
+
+    with (
+        patch("app.services.qa.get_retriever", return_value=mock_retriever),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer(
+                "What is the time machine?", [doc_id], "single", None
+            )
+        ]
+
+    token_events = [e for e in events if '"token"' in e]
+    assert len(token_events) >= 1
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload["done"] is True
+    assert len(done_payload["citations"]) >= 1

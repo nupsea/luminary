@@ -134,6 +134,16 @@ class QAService:
             chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
             span.set_attribute("chunk_count", len(chunks))
 
+        # No-context guard: retrieval returned 0 chunks (stores empty or doc not ingested).
+        if not chunks:
+            logger.warning("stream_answer: no chunks retrieved", extra={"question": question})
+            yield (
+                'data: {"error": "no_context", '
+                '"message": "No relevant content found. '
+                'Make sure a document has been ingested.", "done": true}\n\n'
+            )
+            return
+
         # Build context string
         all_doc_ids = list({c.document_id for c in chunks})
         doc_titles = await self._fetch_doc_titles(all_doc_ids)
@@ -146,12 +156,25 @@ class QAService:
             span.set_attribute("query", question)
             span.set_attribute("document_id", document_ids[0] if document_ids else "all")
             span.set_attribute("chunk_count", len(chunks))
-            token_gen = await llm.generate(
-                prompt, system=QA_SYSTEM_PROMPT, model=model, stream=True
-            )
-            collected: list[str] = []
-            async for token in token_gen:
-                collected.append(token)
+            try:
+                token_gen = await llm.generate(
+                    prompt, system=QA_SYSTEM_PROMPT, model=model, stream=True
+                )
+                collected: list[str] = []
+                async for token in token_gen:
+                    collected.append(token)
+            except Exception as exc:
+                logger.warning(
+                    "stream_answer: LLM call failed",
+                    extra={"model": effective_model},
+                    exc_info=exc,
+                )
+                yield (
+                    'data: {"error": "llm_unavailable", '
+                    '"message": "Ollama is not running or unreachable. '
+                    'Start it with: ollama serve", "done": true}\n\n'
+                )
+                return
 
         full_text = "".join(collected)
 

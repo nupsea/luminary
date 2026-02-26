@@ -19,33 +19,54 @@ class HybridRetriever:
         document_ids: list[str] | None,
         k: int,
     ) -> list[ScoredChunk]:
-        """Embed query and search LanceDB; optionally filter by document_ids."""
-        from app.services.embedder import get_embedding_service
-        from app.services.vector_store import get_lancedb_service
+        """Embed query and search LanceDB; optionally filter by document_ids.
 
-        vector = get_embedding_service().encode([query])[0]
-        table = get_lancedb_service()._get_table()
-        search = table.search(vector).metric("cosine").limit(k)
-        if document_ids:
-            id_list = ", ".join(f"'{did}'" for did in document_ids)
-            search = search.where(f"document_id IN ({id_list})", prefilter=True)
-        rows = search.to_list()
+        Returns [] (not raises) when LanceDB table is empty or unavailable so that
+        hybrid retrieval can fall back to keyword-only results gracefully.
+        """
+        try:
+            from app.services.embedder import get_embedding_service
+            from app.services.vector_store import get_lancedb_service
 
-        results: list[ScoredChunk] = []
-        for row in rows:
-            distance = float(row.get("_distance", 0.0))
-            results.append(
-                ScoredChunk(
-                    chunk_id=row["chunk_id"],
-                    document_id=row["document_id"],
-                    text=row["text"],
-                    section_heading=row.get("section_heading", ""),
-                    page=int(row.get("page", 0)),
-                    score=1.0 - distance,
-                    source="vector",
+            svc = get_lancedb_service()
+            # Check if any vectors exist before running a search.
+            if svc.count_for_document(document_ids[0] if document_ids else "") == 0:
+                # Table may be empty or doc not yet indexed; check total row count.
+                try:
+                    table = svc._get_table()
+                    total = table.count_rows()
+                except Exception:
+                    total = 0
+                if total == 0:
+                    logger.debug("vector_search: LanceDB table empty, returning []")
+                    return []
+
+            vector = get_embedding_service().encode([query])[0]
+            table = svc._get_table()
+            search = table.search(vector).metric("cosine").limit(k)
+            if document_ids:
+                id_list = ", ".join(f"'{did}'" for did in document_ids)
+                search = search.where(f"document_id IN ({id_list})", prefilter=True)
+            rows = search.to_list()
+
+            results: list[ScoredChunk] = []
+            for row in rows:
+                distance = float(row.get("_distance", 0.0))
+                results.append(
+                    ScoredChunk(
+                        chunk_id=row["chunk_id"],
+                        document_id=row["document_id"],
+                        text=row["text"],
+                        section_heading=row.get("section_heading", ""),
+                        page=int(row.get("page", 0)),
+                        score=1.0 - distance,
+                        source="vector",
+                    )
                 )
-            )
-        return results
+            return results
+        except Exception as exc:
+            logger.warning("vector_search failed, returning []", exc_info=exc)
+            return []
 
     async def keyword_search(
         self,
