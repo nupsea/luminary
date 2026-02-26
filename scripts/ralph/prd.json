@@ -1294,7 +1294,7 @@
         "Every edge in graph response has: source (str), target (str), weight (number)",
         "tsc --noEmit passes after frontend changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S50",
