@@ -1318,7 +1318,7 @@
         "test_note_not_found: 404 for PATCH and DELETE on nonexistent id",
         "tsc --noEmit passes after frontend changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S51",

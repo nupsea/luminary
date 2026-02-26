@@ -168,13 +168,9 @@ async def list_notes(
     return [_to_response(n) for n in notes]
 
 
-@router.put("/{note_id}", response_model=NoteResponse)
-async def update_note(
-    note_id: str,
-    req: NoteUpdateRequest,
-    session: AsyncSession = Depends(get_db),
+async def _apply_note_update(
+    note_id: str, req: NoteUpdateRequest, session: AsyncSession
 ) -> NoteResponse:
-    """Update a note's content, tags, or group."""
     result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
     note = result.scalar_one_or_none()
     if note is None:
@@ -192,6 +188,26 @@ async def update_note(
     await session.refresh(note)
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(note)
+
+
+@router.put("/{note_id}", response_model=NoteResponse)
+async def update_note(
+    note_id: str,
+    req: NoteUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+) -> NoteResponse:
+    """Update a note's content, tags, or group."""
+    return await _apply_note_update(note_id, req, session)
+
+
+@router.patch("/{note_id}", response_model=NoteResponse)
+async def patch_note(
+    note_id: str,
+    req: NoteUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+) -> NoteResponse:
+    """Partially update a note's content, tags, or group."""
+    return await _apply_note_update(note_id, req, session)
 
 
 @router.delete("/{note_id}", status_code=204)
