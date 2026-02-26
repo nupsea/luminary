@@ -229,6 +229,10 @@ async def store_eval_run(
     db.add(run)
     await db.commit()
     await db.refresh(run)
+    logger.info(
+        "Stored eval run",
+        extra={"id": run.id, "dataset_name": payload.dataset_name},
+    )
     return EvalRunResponse(
         id=run.id,
         dataset_name=run.dataset_name,

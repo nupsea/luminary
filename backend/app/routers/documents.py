@@ -310,7 +310,7 @@ async def ingest_document(
     logger.info(
         "File received",
         extra={
-            "filename": file.filename or "upload",
+            "upload_filename": file.filename or "upload",
             "size_bytes": size_bytes,
             "format": fmt,
             "doc_id": doc_id,
@@ -424,6 +424,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
         except Exception:
             logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
         deleted.append(document_id)
+    logger.info("Bulk deleted documents", extra={"count": len(deleted)})
     return {"deleted": deleted, "count": len(deleted)}
 
 
@@ -441,6 +442,7 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         if body.tags is not None:
             doc.tags = body.tags
         await session.commit()
+    logger.info("Patched document", extra={"document_id": document_id})
     return {"document_id": document_id, "updated": True}
 
 
@@ -456,6 +458,10 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
             raise HTTPException(status_code=404, detail="Document not found")
         doc.tags = body.tags
         await session.commit()
+    logger.info(
+        "Patched document tags",
+        extra={"document_id": document_id, "tag_count": len(body.tags)},
+    )
     return {"document_id": document_id, "tags": body.tags}
 
 

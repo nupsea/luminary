@@ -244,6 +244,10 @@ async def start_session(
     session.add(sess)
     await session.commit()
     await session.refresh(sess)
+    logger.info(
+        "Study session started",
+        extra={"session_id": sess.id, "document_id": req.document_id},
+    )
     return SessionResponse.model_validate(sess)
 
 
@@ -274,6 +278,14 @@ async def end_session(
     await db.commit()
     await db.refresh(sess)
 
+    logger.info(
+        "Study session ended",
+        extra={
+            "session_id": session_id,
+            "cards_reviewed": cards_reviewed,
+            "cards_correct": cards_correct,
+        },
+    )
     return SessionSummary(
         session_id=sess.id,
         cards_reviewed=cards_reviewed,

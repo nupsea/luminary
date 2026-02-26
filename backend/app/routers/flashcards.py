@@ -11,6 +11,7 @@ Routes:
 
 import csv
 import io
+import logging
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -25,6 +26,8 @@ from app.database import get_db
 from app.models import DocumentModel, FlashcardModel, ReviewEventModel
 from app.services.flashcard import FlashcardService, get_flashcard_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 
@@ -113,6 +116,10 @@ async def generate_flashcards(
         count=req.count,
         session=session,
     )
+    logger.info(
+        "Generated flashcards",
+        extra={"document_id": req.document_id, "count": len(cards)},
+    )
     return [_to_response(c) for c in cards]
 
 
@@ -186,6 +193,7 @@ async def update_flashcard(
 
     await session.commit()
     await session.refresh(card)
+    logger.info("Updated flashcard", extra={"card_id": card_id})
     return _to_response(card)
 
 
@@ -204,6 +212,7 @@ async def delete_flashcard(
 
     await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
     await session.commit()
+    logger.info("Deleted flashcard", extra={"card_id": card_id})
 
 
 @router.post("/{card_id}/review", response_model=FlashcardResponse)
@@ -230,4 +239,5 @@ async def review_flashcard(
         session.add(event)
         await session.commit()
 
+    logger.info("Reviewed flashcard", extra={"card_id": card_id, "rating": req.rating})
     return _to_response(card)

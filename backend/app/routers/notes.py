@@ -3,6 +3,7 @@
 Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes/groups.
 """
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -13,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import NoteModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -106,6 +109,7 @@ async def create_note(
     session.add(note)
     await session.commit()
     await session.refresh(note)
+    logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note)
 
 
@@ -186,6 +190,7 @@ async def update_note(
 
     await session.commit()
     await session.refresh(note)
+    logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(note)
 
 
@@ -202,3 +207,4 @@ async def delete_note(
 
     await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
     await session.commit()
+    logger.info("Deleted note", extra={"note_id": note_id})

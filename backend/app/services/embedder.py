@@ -30,6 +30,7 @@ class EmbeddingService:
         self._backend: str | None = None
         self._model: Any = None
         self._tokenizer: Any = None
+        logger.info("EmbeddingService created")
 
     def _load_model(self) -> None:
         if self._backend is not None:

@@ -39,6 +39,7 @@ class EntityExtractor:
     def __init__(self, data_dir: str) -> None:
         self._model_dir = Path(data_dir).expanduser() / "models" / "gliner"
         self._model_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("EntityExtractor created", extra={"model_dir": str(self._model_dir)})
 
     def _load_model(self):
         """Lazy-load GLiNER model, caching to DATA_DIR/models/gliner/."""

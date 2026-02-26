@@ -23,6 +23,10 @@ class ExplainRequest(BaseModel):
 @router.post("")
 async def explain_text(req: ExplainRequest) -> StreamingResponse:
     """Stream an explanation of the selected text using surrounding document context."""
+    logger.info(
+        "Explain request",
+        extra={"document_id": req.document_id, "mode": req.mode, "text_len": len(req.text)},
+    )
     svc = get_explain_service()
     return StreamingResponse(
         svc.stream_explain(req.text, req.document_id, req.mode),
@@ -34,4 +38,6 @@ async def explain_text(req: ExplainRequest) -> StreamingResponse:
 async def extract_glossary(document_id: str) -> list[dict]:
     """Extract domain-specific terms from a document and return as a JSON list."""
     svc = get_explain_service()
-    return await svc.extract_glossary(document_id)
+    result = await svc.extract_glossary(document_id)
+    logger.info("Glossary extracted", extra={"document_id": document_id, "count": len(result)})
+    return result

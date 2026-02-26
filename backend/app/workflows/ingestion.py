@@ -509,9 +509,18 @@ async def run_ingestion(document_id: str, file_path: str, format: str) -> None:
         "status": "parsing",
         "error": None,
     }
+    logger.info(
+        "Ingestion task started",
+        extra={"document_id": document_id, "format": format},
+    )
     await _update_stage(document_id, "parsing")
     try:
         await ingestion_graph.ainvoke(initial_state)
+        logger.info("Ingestion task complete", extra={"document_id": document_id})
     except Exception as exc:
-        logger.error("Ingestion workflow failed", exc_info=exc)
+        logger.error(
+            "Ingestion task failed",
+            extra={"document_id": document_id},
+            exc_info=exc,
+        )
         await _update_stage(document_id, "error")
