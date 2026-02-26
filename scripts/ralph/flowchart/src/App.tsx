@@ -22,9 +22,10 @@ interface Story {
   description: string
   acceptanceCriteria: string[]
   passes: boolean
+  type?: string
 }
 
-type StoryStatus = 'done' | 'active' | 'pending'
+type StoryStatus = 'done' | 'active' | 'gate' | 'pending'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ const PHASE_NAMES: Record<number, string> = {
   4: 'Phase 4 — Monitoring',
   5: 'Phase 5 — Code & Polish',
   6: 'Phase 6 — Bugfixes & Hardening',
+  7: 'Phase 7 — Book Learning Vertical',
 }
 
 const PHASE_COLORS: Record<number, { bg: string; border: string; label: string }> = {
@@ -44,7 +46,10 @@ const PHASE_COLORS: Record<number, { bg: string; border: string; label: string }
   4: { bg: '#f0fdf4', border: '#bbf7d0', label: '#15803d' },
   5: { bg: '#fafafa', border: '#e5e5e5', label: '#404040' },
   6: { bg: '#fdf2f8', border: '#f0abfc', label: '#a21caf' },
+  7: { bg: '#fff8f1', border: '#fdba74', label: '#c2410c' },
 }
+
+const DEFAULT_PHASE_COLOR = { bg: '#f8fafc', border: '#cbd5e1', label: '#475569' }
 
 const STATUS_STYLES: Record<StoryStatus, {
   bg: string; border: string; idColor: string
@@ -57,6 +62,10 @@ const STATUS_STYLES: Record<StoryStatus, {
   active: {
     bg: '#eff6ff', border: '#60a5fa', idColor: '#1d4ed8',
     titleColor: '#1e3a8a', badge: '▶ Active', badgeBg: '#dbeafe', badgeColor: '#1d4ed8',
+  },
+  gate: {
+    bg: '#fefce8', border: '#fbbf24', idColor: '#92400e',
+    titleColor: '#78350f', badge: '⛔ Gate', badgeBg: '#fef3c7', badgeColor: '#92400e',
   },
   pending: {
     bg: '#f9fafb', border: '#e5e7eb', idColor: '#9ca3af',
@@ -133,13 +142,14 @@ function buildNodes(stories: Story[]): Node[] {
     const cols = Math.min(ps.length, STORIES_PER_ROW)
     const bgW = cols * (NODE_W + H_GAP) - H_GAP + PADDING * 2
     const bgH = LABEL_H + rows * (NODE_H + V_GAP) - V_GAP + PADDING * 2
-    const pc = PHASE_COLORS[phase]
+    const pc = PHASE_COLORS[phase] ?? DEFAULT_PHASE_COLOR
+    const phaseName = PHASE_NAMES[phase] ?? `Phase ${phase}`
 
     nodes.push({
       id: `bg-${phase}`,
       type: 'phaseBg',
       position: { x: 0, y },
-      data: { label: PHASE_NAMES[phase], bg: pc.bg, border: pc.border, labelColor: pc.label, w: bgW, h: bgH },
+      data: { label: phaseName, bg: pc.bg, border: pc.border, labelColor: pc.label, w: bgW, h: bgH },
       selectable: false,
       draggable: false,
       zIndex: 0,
@@ -148,7 +158,14 @@ function buildNodes(stories: Story[]): Node[] {
     ps.forEach((story, i) => {
       const col = i % STORIES_PER_ROW
       const row = Math.floor(i / STORIES_PER_ROW)
-      const status: StoryStatus = story.passes ? 'done' : story.id === activeId ? 'active' : 'pending'
+      const isGate = story.type === 'demo-review'
+      const status: StoryStatus = story.passes
+        ? 'done'
+        : isGate
+          ? 'gate'
+          : story.id === activeId
+            ? 'active'
+            : 'pending'
       nodes.push({
         id: story.id,
         type: 'story',
@@ -269,6 +286,7 @@ export default function App() {
           <div className="legend">
             <span className="leg leg-done">✓ Done</span>
             <span className="leg leg-active">▶ Active</span>
+            <span className="leg leg-gate">⛔ Gate</span>
             <span className="leg leg-pending">Pending</span>
           </div>
           {updatedAt && (
@@ -301,7 +319,7 @@ export default function App() {
             nodeColor={node => {
               if (node.type !== 'story') return 'transparent'
               const st = (node.data as { status: StoryStatus }).status
-              return st === 'done' ? '#4ade80' : st === 'active' ? '#60a5fa' : '#e5e7eb'
+              return st === 'done' ? '#4ade80' : st === 'active' ? '#60a5fa' : st === 'gate' ? '#fbbf24' : '#e5e7eb'
             }}
             style={{ border: '1px solid #e5e7eb', borderRadius: 8 }}
           />

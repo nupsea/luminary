@@ -94,6 +94,7 @@ body {
 
 .leg-done    { background: #dcfce7; color: #15803d; }
 .leg-active  { background: #dbeafe; color: #1d4ed8; }
+.leg-gate    { background: #fef3c7; color: #92400e; }
 .leg-pending { background: #f3f4f6; color: #6b7280; }
 
 .updated {

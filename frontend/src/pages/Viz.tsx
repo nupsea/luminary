@@ -8,7 +8,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Graph from "graphology"
 import forceAtlas2 from "graphology-layout-forceatlas2"
-import { Maximize2, Minus, Plus } from "lucide-react"
+import { Maximize2, Minus, Network, Plus } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
@@ -244,7 +244,7 @@ export default function Viz() {
   const noDocSelected = scope === "document" && !activeDocumentId
 
   const queryKey = ["graph", scope, activeDocumentId, viewMode]
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey,
     queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode),
     staleTime: 30_000,
@@ -320,8 +320,14 @@ export default function Viz() {
   if (isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Graph unavailable for this document.
+        <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
+          <p className="font-medium">Failed to load knowledge graph</p>
+          <button
+            onClick={() => void refetch()}
+            className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       </div>
     )
@@ -330,8 +336,10 @@ export default function Viz() {
   if (!data || data.nodes.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <Network size={32} className="text-muted-foreground/50" />
+        <p className="text-base font-medium text-foreground">No knowledge graph yet</p>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Ingest a document and wait for entity extraction to complete to see the knowledge graph.
+          Select a document above and ingest it first to see entity relationships.
         </p>
       </div>
     )
