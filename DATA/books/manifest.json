@@ -1,0 +1,65 @@
+[
+  {
+    "name": "The Time Machine",
+    "filepath": "DATA/books/time_machine.txt",
+    "gutenberg_id": 35,
+    "word_count_min": 30000,
+    "ingest_time_budget_seconds": 600,
+    "thresholds": {
+      "chunk_count_min": 100,
+      "fts_count_min": 100,
+      "vector_count_min": 50,
+      "entity_count_min": 20,
+      "edge_count_min": 10
+    },
+    "known_entities": ["Time Traveller", "Eloi", "Morlocks", "Weena"],
+    "known_keywords": ["Eloi", "Morlocks", "Weena"],
+    "known_co_occurrences": [["Weena", "Eloi"]],
+    "semantic_queries": [
+      {"query": "Who are the Eloi?", "expected_keyword": "Eloi"},
+      {"query": "What is the Time Machine?", "expected_keyword": "time"}
+    ]
+  },
+  {
+    "name": "Alice in Wonderland",
+    "filepath": "DATA/books/alice_in_wonderland.txt",
+    "gutenberg_id": 11,
+    "word_count_min": 25000,
+    "ingest_time_budget_seconds": 480,
+    "thresholds": {
+      "chunk_count_min": 60,
+      "fts_count_min": 60,
+      "vector_count_min": 40,
+      "entity_count_min": 15,
+      "edge_count_min": 5
+    },
+    "known_entities": ["Alice", "Queen", "Rabbit", "Hatter", "Cheshire"],
+    "known_keywords": ["Alice", "Wonderland", "Cheshire", "Hatter", "rabbit"],
+    "known_co_occurrences": [["Alice", "Queen"], ["Alice", "Rabbit"]],
+    "semantic_queries": [
+      {"query": "Who is the Queen of Hearts?", "expected_keyword": "Queen"},
+      {"query": "What does Alice find in Wonderland?", "expected_keyword": "Alice"}
+    ]
+  },
+  {
+    "name": "The Odyssey",
+    "filepath": "DATA/books/the_odyssey.txt",
+    "gutenberg_id": 1727,
+    "word_count_min": 100000,
+    "ingest_time_budget_seconds": 1800,
+    "thresholds": {
+      "chunk_count_min": 400,
+      "fts_count_min": 400,
+      "vector_count_min": 200,
+      "entity_count_min": 60,
+      "edge_count_min": 40
+    },
+    "known_entities": ["Odysseus", "Telemachus", "Penelope", "Athena", "Poseidon"],
+    "known_keywords": ["Odysseus", "Telemachus", "Penelope", "Cyclops", "Ithaca"],
+    "known_co_occurrences": [["Odysseus", "Telemachus"], ["Odysseus", "Penelope"]],
+    "semantic_queries": [
+      {"query": "Who is Odysseus?", "expected_keyword": "Odysseus"},
+      {"query": "What happened to Telemachus?", "expected_keyword": "Telemachus"}
+    ]
+  }
+]

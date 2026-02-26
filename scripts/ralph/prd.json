@@ -1203,7 +1203,7 @@
         "backend/tests/test_corpus_fixtures.py: 3 file-existence+word-count tests pass; manifest schema validated",
         "No book is truncated \u2014 word count verified by test, not assumed"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S46",
