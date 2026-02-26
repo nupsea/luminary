@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
+import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"

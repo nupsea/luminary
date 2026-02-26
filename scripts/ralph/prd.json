@@ -1365,7 +1365,7 @@
         "Makefile test-books-all target runs all 3 test files together with --timeout=2400",
         "make ci passes (default suite, no slow tests)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S53",
