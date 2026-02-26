@@ -1182,7 +1182,7 @@
         "tests/test_logging.py asserts file receipt log line on POST /documents/ingest",
         "uv run pytest tests/test_logging.py exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

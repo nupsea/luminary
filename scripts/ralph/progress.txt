@@ -565,3 +565,25 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - Viz query: added enabled: !noDocSelected to skip graph fetch when no doc selected and scope="document"
   - CI: 283 passed, tsc --noEmit clean, ruff clean
 ---
+
+---
+
+## 2026-02-26T10:00:00+00:00 - S44 - Backend structured logging audit — consistent log coverage across all services
+- Added INFO-level structured logging to all mutating endpoints across routers: flashcards, documents, notes, study, explain, monitoring
+- flashcards.py: added import logging + logger, INFO logs for generate, update, delete, review endpoints
+- documents.py: fixed LogRecord attribute collision bug (extra={"filename":...} → extra={"upload_filename":...}) which caused KeyError in Python 3.13; added INFO logs for bulk_delete, patch, patch_tags
+- notes.py: added import logging + logger, INFO logs for create, update, delete note endpoints
+- study.py: added INFO logs for start_session (with session_id, document_id) and end_session (with cards_reviewed, cards_correct)
+- explain.py: added INFO log for explain_text (before streaming), restructured extract_glossary to capture result then log count
+- monitoring.py: added INFO log for store_eval_run
+- embedder.py: added INFO init log "EmbeddingService created"
+- ner.py: added INFO init log "EntityExtractor created" with model_dir in extra
+- ingestion.py: added task_start/complete/failed logs to run_ingestion; wraps ainvoke in try/except with logger.error on failure
+- Created tests/test_logging.py: 9 caplog-based tests using module-scoped TestClient fixture (avoids Phoenix lifecycle failures); uses caplog.at_level + caplog.set_level to capture INFO records
+- Learnings:
+  - Python 3.13 raises KeyError when extra={} dict uses a reserved LogRecord attribute name (filename, levelname, pathname, etc.) — always use unique keys
+  - asyncio.create_task background tasks run after request returns; caplog cannot capture their logs in the same context manager block — test synchronous log points instead
+  - Module-scoped TestClient fixture prevents Phoenix thread pool shutdown errors when running multiple logging tests sequentially
+  - caplog.set_level applies for entire test function; caplog.at_level is a context manager for a block
+  - CI: 291 passed, 1 pre-existing flaky test (test_http_corrupt_upload_terminates passes in isolation), 9 deselected, ruff clean
+---
