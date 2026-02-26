@@ -122,8 +122,13 @@ async def classify_node(state: IngestionState) -> IngestionState:
             file_ext = Path(state["file_path"]).suffix.lstrip(".")
             content_type = _classify(pd["raw_text"], pd["sections"], pd["word_count"], file_ext)
 
-            # LLM reclassification: heuristic said 'notes' but document is long — confirm
-            if content_type == "notes" and pd["word_count"] > 5000:
+            # LLM reclassification: heuristic result is uncertain for large documents.
+            # 'notes' on a long doc may be book/paper; 'conversation' on a very long doc
+            # (>20k words) is likely misclassified — epics/plays have speaker patterns too.
+            needs_llm = (content_type == "notes" and pd["word_count"] > 5000) or (
+                content_type == "conversation" and pd["word_count"] > 20000
+            )
+            if needs_llm:
                 try:
                     from app.services.llm import get_llm_service
 
@@ -146,9 +151,11 @@ async def classify_node(state: IngestionState) -> IngestionState:
                             },
                         )
                 except Exception as exc:
+                    # Expected when Ollama is offline — log the one-line cause only,
+                    # not the full traceback (ConnectionRefusedError is not a bug).
                     logger.warning(
-                        "LLM reclassification failed, keeping heuristic result",
-                        exc_info=exc,
+                        "LLM reclassification failed, keeping heuristic result: %s",
+                        type(exc).__name__,
                     )
 
             logger.info(
@@ -306,6 +313,8 @@ async def chunk_node(state: IngestionState) -> IngestionState:
 
 
 async def embed_node(state: IngestionState) -> IngestionState:
+    import asyncio
+
     logger.debug("node_start", extra={"node": "embed", "doc_id": state["document_id"]})
     with trace_ingestion_node("embed", state):
         try:
@@ -322,7 +331,18 @@ async def embed_node(state: IngestionState) -> IngestionState:
             content_type = state.get("content_type") or "notes"
             texts = [c["text"] for c in chunks]
             embedder = get_embedding_service()
-            embeddings = embedder.encode(texts)
+
+            # Update stage BEFORE encoding so UI reflects current work immediately
+            await _update_stage(doc_id, "embedding")
+            logger.info(
+                "Embedding started",
+                extra={"doc_id": doc_id, "num_chunks": len(chunks)},
+            )
+
+            # Run CPU-bound encoding in a thread pool so the event loop stays free
+            # for status poll requests during the (potentially long) embedding pass.
+            loop = asyncio.get_event_loop()
+            embeddings = await loop.run_in_executor(None, embedder.encode, texts)
 
             lancedb_rows = [
                 {
@@ -339,7 +359,6 @@ async def embed_node(state: IngestionState) -> IngestionState:
             ]
             get_lancedb_service().upsert_chunks(lancedb_rows)
 
-            await _update_stage(doc_id, "embedding")
             logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
             return {**state, "status": "indexing"}
         except Exception as exc:
@@ -428,7 +447,24 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             from app.services.ner import get_entity_extractor  # noqa: PLC0415
 
             extractor = get_entity_extractor()
-            entities = extractor.extract(chunks)
+            # Cap NER at 500 chunks — sufficient for graph coverage, avoids multi-hour
+            # runs on large documents (e.g. 2000+ chunk books).
+            # Sample evenly across the document to get representative entities.
+            import asyncio as _asyncio
+            NER_CHUNK_LIMIT = 500
+            if len(chunks) > NER_CHUNK_LIMIT:
+                step = len(chunks) // NER_CHUNK_LIMIT
+                ner_chunks = chunks[::step][:NER_CHUNK_LIMIT]
+                logger.info(
+                    "NER sampling %d of %d chunks",
+                    len(ner_chunks), len(chunks),
+                    extra={"doc_id": doc_id},
+                )
+            else:
+                ner_chunks = chunks
+            # CPU-bound — run in thread pool to keep event loop free for status polls
+            loop = _asyncio.get_event_loop()
+            entities = await loop.run_in_executor(None, extractor.extract, ner_chunks)
 
             graph = get_graph_service()
 

@@ -9,7 +9,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "BAAI/bge-m3"
-BATCH_SIZE = 32
+BATCH_SIZE = 64  # larger batches = fewer round-trips = faster on CPU
 
 
 def _mean_pool(token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
@@ -42,12 +42,32 @@ class EmbeddingService:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
 
-            logger.info("Loading BGE-M3 via ONNX Runtime (export=True)")
-            self._model = ORTModelForFeatureExtraction.from_pretrained(
-                MODEL_NAME,
-                cache_dir=str(cache_dir),
-                export=True,
+            # Saved ONNX lives in a dedicated subdirectory so we can check existence
+            # independently of the HuggingFace blob cache.
+            onnx_dir = cache_dir / "onnx"
+            onnx_file = onnx_dir / "model.onnx"
+            needs_export = not onnx_file.exists()
+            logger.info(
+                "Loading BGE-M3 via ONNX Runtime",
+                extra={"export": needs_export, "onnx_dir": str(onnx_dir)},
             )
+            if needs_export:
+                # First run: export from HuggingFace weights and save to onnx_dir
+                model = ORTModelForFeatureExtraction.from_pretrained(
+                    MODEL_NAME,
+                    cache_dir=str(cache_dir),
+                    export=True,
+                )
+                onnx_dir.mkdir(parents=True, exist_ok=True)
+                model.save_pretrained(str(onnx_dir))
+                logger.info("BGE-M3 ONNX exported and saved", extra={"onnx_dir": str(onnx_dir)})
+                self._model = model
+            else:
+                # Subsequent runs: load directly from saved ONNX (fast, no re-export)
+                self._model = ORTModelForFeatureExtraction.from_pretrained(
+                    str(onnx_dir),
+                    export=False,
+                )
             self._tokenizer = AutoTokenizer.from_pretrained(
                 MODEL_NAME, cache_dir=str(cache_dir)
             )
@@ -67,13 +87,20 @@ class EmbeddingService:
         """Encode texts into 1024-dim float embeddings in batches of BATCH_SIZE."""
         self._load_model()
         results: list[list[float]] = []
-        for i in range(0, len(texts), BATCH_SIZE):
+        total = len(texts)
+        for i in range(0, total, BATCH_SIZE):
             batch = texts[i : i + BATCH_SIZE]
             if self._backend == "ort":
                 batch_emb = self._encode_ort(batch)
             else:
                 batch_emb = self._encode_st(batch)
             results.extend(batch_emb)
+            done = min(i + BATCH_SIZE, total)
+            if done % (BATCH_SIZE * 5) == 0 or done == total:
+                logger.debug(
+                    "Embedding progress",
+                    extra={"done": done, "total": total, "pct": round(done / total * 100)},
+                )
         return results
 
     def _encode_ort(self, texts: list[str]) -> list[list[float]]:

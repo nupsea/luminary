@@ -129,3 +129,19 @@ Integration tests must ingest full, untruncated documents — not truncated fixt
 Retrieval quality metrics (HR@5, MRR, Faithfulness) must have enforced minimum thresholds that cause `make eval` to exit non-zero when violated. Scores that are merely printed without asserting a threshold are not quality gates — they are noise. Thresholds must be defined in code, score history must be committed to the repo, and any PR that regresses a metric below its threshold must be explicitly justified before merge.
 
 **Rationale**: A metric that cannot fail is not a metric — it is a vanity number. Enforced thresholds are the only mechanism that keeps quality visible and creates accountability for regressions. Without them, retrieval quality silently degrades across iterations.
+
+---
+
+## 17. Feature Completeness Requires Observable Output in the Running App
+
+A story is not complete when its tests pass. A story is complete when a human can open the running application and observe the feature producing correct output. Backend endpoints existing does not mean the feature is working — the UI must render the data, the pipeline must be wired end-to-end, and every state (loading, error, empty, populated) must be visible. Demo review gates (stories with `type: "demo-review"`) encode this as a hard checkpoint that cannot be bypassed by an agent.
+
+**Rationale**: Agents write tests that confirm their own implementation. Tests that mock the UI layer can pass while the actual browser experience is broken. The only reliable check is a human running the full application against real data. Periodic demo review gates create structured moments for this verification before the codebase moves forward.
+
+---
+
+## 18. Offline Degradation Is Explicit, Not Silent
+
+Every feature that depends on an external service (Ollama, OpenAI, Anthropic) must handle the offline case with a user-visible, actionable message. Backend: return HTTP 503 (not 500) for service unavailability; include the exact start command in the error detail. Frontend: check the HTTP status code and render an inline message naming the service and the command to start it. Silent failures — blank screens, empty lists, spinning indicators that never resolve, generic "something went wrong" toasts — are bugs, not graceful degradation. The user must always know what is wrong and what to do about it.
+
+**Rationale**: Local-first applications frequently run without all services available. Ollama in particular is commonly offline during development. An application that silently fails when Ollama is down is unusable and undebugable. Explicit, actionable error messages are the difference between a tool that works for a developer and one that is abandoned in frustration.

@@ -26,6 +26,9 @@ def isolated_data_dir(tmp_path_factory):
     """
     data_dir = str(tmp_path_factory.mktemp("luminary_test_data"))
     os.environ["DATA_DIR"] = data_dir
+    # Disable Phoenix tracing so tests do not try to bind port 4317/6006.
+    # This prevents conflicts when a live dev backend is running concurrently.
+    os.environ["PHOENIX_ENABLED"] = "false"
 
     # Clear the settings LRU cache so get_settings() picks up the new env var.
     from app.config import get_settings
@@ -48,6 +51,7 @@ def isolated_data_dir(tmp_path_factory):
     # Teardown: remove the env var and clear the settings cache so the next
     # process (or interactive session) is not affected.
     os.environ.pop("DATA_DIR", None)
+    os.environ.pop("PHOENIX_ENABLED", None)
     from app.config import get_settings as _gs
 
     _gs.cache_clear()

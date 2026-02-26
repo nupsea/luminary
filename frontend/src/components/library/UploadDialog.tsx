@@ -63,12 +63,14 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [mode, setMode] = useState<Mode>("idle")
   const [progress, setProgress] = useState(0)
   const [stageLabel, setStageLabel] = useState("")
+  const [currentStage, setCurrentStage] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [docTitle, setDocTitle] = useState("")
   const [fileSizeMB, setFileSizeMB] = useState(0)
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const uploadStartRef = useRef<number>(0)
 
   function clearPolling() {
     if (pollIntervalRef.current) {
@@ -104,6 +106,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setMode("idle")
     setProgress(0)
     setStageLabel("")
+    setCurrentStage("")
     setErrorMessage("")
     setDocTitle("")
     setFileSizeMB(0)
@@ -132,12 +135,26 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     if (file && isAccepted(file)) setSelectedFile(file)
   }
 
-  // Time estimate: ~5s/MB for embedding + fixed overhead
+  // Time estimate — stage-aware.
+  // Embedding and entity extraction are CPU-bound and can run for many minutes
+  // on large documents. A fixed countdown is misleading for those stages.
+  // Fast early stages (parse, classify, chunk) get a rough countdown.
+  const SLOW_STAGES = new Set(["embedding", "entity_extract"])
+
   function timeEstimate(): string {
     if (progress >= 95 || mode !== "processing") return ""
-    const totalSec = Math.max(10, Math.ceil(fileSizeMB * 5) + 10)
-    const remaining = Math.ceil(totalSec * (1 - progress / 100))
-    if (remaining <= 0) return ""
+    if (SLOW_STAGES.has(currentStage)) {
+      // Don't show a lying countdown — acknowledge the wait qualitatively.
+      return fileSizeMB > 0.3
+        ? "Large documents can take several minutes here"
+        : "Processing..."
+    }
+    // For fast early stages give a rough elapsed-based countdown.
+    const totalSec = Math.max(20, 15 + Math.ceil(fileSizeMB * 60))
+    const elapsed = Math.ceil((Date.now() - uploadStartRef.current) / 1000)
+    const remaining = Math.max(0, totalSec - elapsed)
+    if (remaining <= 0) return "Almost done..."
+    if (remaining > 120) return `About ${Math.ceil(remaining / 60)} min remaining`
     return `About ${remaining}s remaining`
   }
 
@@ -168,6 +185,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           })
           setProgress(data.progress_pct)
           setStageLabel(label)
+          setCurrentStage(data.stage)
           setMode("processing")
 
           if (data.done) {
@@ -200,6 +218,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function doSubmit(file: File, title: string) {
     const startTime = Date.now()
+    uploadStartRef.current = startTime
     const sizeMB = file.size / (1024 * 1024)
     setFileSizeMB(sizeMB)
     setMode("uploading")
