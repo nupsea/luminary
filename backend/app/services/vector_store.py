@@ -56,6 +56,14 @@ class LanceDBService:
         )
         logger.info("Upserted %d chunks to LanceDB", len(chunks))
 
+    def count_for_document(self, document_id: str) -> int:
+        """Return the number of vector rows stored for the given document_id."""
+        try:
+            table = self._get_table()
+            return table.count_rows(f"document_id = '{document_id}'")
+        except Exception:
+            return 0
+
     def delete_document(self, document_id: str) -> None:
         """Delete all vectors for the given document_id."""
         table = self._get_table()

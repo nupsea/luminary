@@ -1231,7 +1231,7 @@
         "All threshold values read from manifest.json \u2014 no hardcoded numbers in test files",
         "make test passes (fast tests only); make test-full still passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S47",

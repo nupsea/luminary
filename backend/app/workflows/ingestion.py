@@ -437,6 +437,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "entity_extract", "doc_id": doc_id})
     await _update_stage(doc_id, "entity_extract")
     with trace_ingestion_node("entity_extract", state):
+        entity_count = 0
         try:
             from itertools import combinations  # noqa: PLC0415
 
@@ -465,6 +466,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # CPU-bound — run in thread pool to keep event loop free for status polls
             loop = _asyncio.get_event_loop()
             entities = await loop.run_in_executor(None, extractor.extract, ner_chunks)
+            entity_count = len(entities)
 
             graph = get_graph_service()
 
@@ -479,24 +481,26 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 if row:
                     graph.upsert_document(doc_id, row.title or "", row.content_type or "notes")
 
-            # Upsert entities and add mentions
-            for ent in entities:
-                graph.upsert_entity(ent["id"], ent["name"], ent["type"])
-                graph.add_mention(ent["id"], doc_id)
+            # Upsert entities and add mentions; re-raise on Kuzu failure when
+            # entities were successfully extracted (data loss must not be silent).
+            try:
+                for ent in entities:
+                    graph.upsert_entity(ent["id"], ent["name"], ent["type"])
+                    graph.add_mention(ent["id"], doc_id)
 
-            # Co-occurrence: entities sharing the same chunk
-            chunk_entities: dict[str, list[str]] = {}
-            for ent in entities:
-                chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
+                # Co-occurrence: entities sharing the same chunk
+                chunk_entities: dict[str, list[str]] = {}
+                for ent in entities:
+                    chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
 
-            for chunk_ent_ids in chunk_entities.values():
-                for eid_a, eid_b in combinations(chunk_ent_ids, 2):
-                    graph.add_co_occurrence(eid_a, eid_b, doc_id)
-
-            logger.info(
-                "Entity extraction complete",
-                extra={"doc_id": doc_id, "num_entities": len(entities)},
-            )
+                for chunk_ent_ids in chunk_entities.values():
+                    for eid_a, eid_b in combinations(chunk_ent_ids, 2):
+                        graph.add_co_occurrence(eid_a, eid_b, doc_id)
+            except Exception:
+                if entity_count > 0:
+                    # Entities were extracted but Kuzu write failed — re-raise so the
+                    # outer except captures it and the root cause is visible in logs.
+                    raise
 
             # Build call graph for code documents
             content_type = state.get("content_type") or ""
@@ -505,8 +509,13 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
         except Exception as exc:
             logger.warning(
                 "entity_extract_node failed (non-fatal, proceeding to complete)",
-                extra={"doc_id": doc_id},
+                extra={"doc_id": doc_id, "entity_count": entity_count},
                 exc_info=exc,
+            )
+        finally:
+            logger.info(
+                "entity_extract_node finished",
+                extra={"doc_id": doc_id, "entity_count": entity_count},
             )
 
         await _update_stage(doc_id, "complete")

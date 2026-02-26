@@ -162,6 +162,31 @@ class KuzuService:
         )
         logger.info("Deleted graph nodes for document", extra={"document_id": document_id})
 
+    def count_for_document(self, document_id: str) -> tuple[int, int]:
+        """Return (entity_count, edge_count) for the given document.
+
+        entity_count — distinct Entity nodes that MENTIONED_IN this document.
+        edge_count   — CO_OCCURS edges recorded for this document.
+        """
+        try:
+            e_result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                " RETURN count(*)",
+                {"did": document_id},
+            )
+            entity_count = e_result.get_next()[0] if e_result.has_next() else 0
+
+            co_result = self._conn.execute(
+                "MATCH ()-[r:CO_OCCURS {document_id: $did}]->()"
+                " RETURN count(*)",
+                {"did": document_id},
+            )
+            edge_count = co_result.get_next()[0] if co_result.has_next() else 0
+        except Exception:
+            entity_count = 0
+            edge_count = 0
+        return int(entity_count), int(edge_count)
+
     # -------------------------------------------------------------------------
     # Query
     # -------------------------------------------------------------------------

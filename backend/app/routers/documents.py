@@ -88,6 +88,14 @@ class SectionItem(BaseModel):
     preview: str
 
 
+class DocumentDiagnostics(BaseModel):
+    chunk_count: int
+    fts_count: int
+    entity_count: int
+    edge_count: int
+    vector_count: int
+
+
 class DocumentDetail(BaseModel):
     id: str
     title: str
@@ -534,3 +542,56 @@ async def get_document_status(document_id: str):
         "done": stage == "complete",
         "error_message": "Ingestion failed. Please try again." if stage == "error" else None,
     }
+
+
+@router.get("/{document_id}/diagnostics", response_model=DocumentDiagnostics)
+async def get_document_diagnostics(document_id: str):
+    """Return per-store counts for the given document.
+
+    Returns 404 if the document does not exist in SQLite.
+    All other counts are 0 if the store is unavailable or empty.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # SQLite chunk count
+        chunk_result = await session.execute(
+            select(func.count(ChunkModel.id)).where(ChunkModel.document_id == document_id)
+        )
+        chunk_count = chunk_result.scalar_one() or 0
+
+        # FTS5 count
+        fts_result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"
+            ),
+            {"did": document_id},
+        )
+        fts_count = fts_result.scalar_one() or 0
+
+    # LanceDB vector count (0 if store unavailable)
+    try:
+        vector_count = get_lancedb_service().count_for_document(document_id)
+    except Exception:
+        vector_count = 0
+
+    # Kuzu entity and edge counts (0 if graph unavailable)
+    try:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        entity_count, edge_count = get_graph_service().count_for_document(document_id)
+    except Exception:
+        entity_count = 0
+        edge_count = 0
+
+    return DocumentDiagnostics(
+        chunk_count=chunk_count,
+        fts_count=fts_count,
+        entity_count=entity_count,
+        edge_count=edge_count,
+        vector_count=vector_count,
+    )
