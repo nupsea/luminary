@@ -1341,7 +1341,7 @@
         "test_503_on_generate: HTTP 503 with correct detail message",
         "tsc --noEmit passes after frontend changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S52",

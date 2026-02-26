@@ -12,15 +12,16 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import {
+  Check,
   ChevronDown,
   ChevronUp,
+  Copy,
   Download,
   Loader2,
   Pencil,
   PlayCircle,
   Trash2,
   X,
-  Check,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
@@ -91,6 +92,14 @@ async function fetchGaps(documentId: string): Promise<GapResult[]> {
   return res.json() as Promise<GapResult[]>
 }
 
+class GenerateError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function generateFlashcards(req: {
   document_id: string
   scope: "full" | "section"
@@ -102,7 +111,7 @@ async function generateFlashcards(req: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
   })
-  if (!res.ok) throw new Error("Failed to generate flashcards")
+  if (!res.ok) throw new GenerateError(res.status, "Failed to generate flashcards")
   return res.json() as Promise<Flashcard[]>
 }
 
@@ -451,12 +460,15 @@ function GeneratePanel({
 // Study page
 // ---------------------------------------------------------------------------
 
+type GenerateErrorKind = "ollama_offline" | "server_error" | null
+
 export default function Study() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const queryClient = useQueryClient()
   const [studying, setStudying] = useState(false)
   // Track section pre-selected by clicking a gap item
   const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
+  const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
   const mountTime = useRef(Date.now())
 
   useEffect(() => {
@@ -498,10 +510,18 @@ export default function Study() {
         ...req,
       }),
     onSuccess: (newCards) => {
+      setGenerateErrorKind(null)
       void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
       toast.success(`Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""}`)
     },
-    onError: () => toast.error("Failed to generate flashcards"),
+    onError: (err: unknown) => {
+      const status = err instanceof GenerateError ? err.status : 0
+      if (status === 503) {
+        setGenerateErrorKind("ollama_offline")
+      } else {
+        setGenerateErrorKind("server_error")
+      }
+    },
   })
 
   // Update mutation
@@ -562,10 +582,33 @@ export default function Study() {
         <GeneratePanel
           documentId={activeDocumentId}
           sections={sections}
-          onGenerate={(req) => generateMutation.mutate(req)}
+          onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
           isGenerating={generateMutation.isPending}
           preselectedSection={selectedGapSection}
         />
+
+        {/* Inline generate error banners */}
+        {generateErrorKind === "ollama_offline" && (
+          <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span className="flex-1">
+              Ollama is not running. To generate flashcards, run:{" "}
+              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
+            </span>
+            <button
+              onClick={() => void navigator.clipboard.writeText("ollama serve")}
+              className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+              title="Copy command"
+            >
+              <Copy size={11} />
+              Copy
+            </button>
+          </div>
+        )}
+        {generateErrorKind === "server_error" && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Flashcard generation failed. Please try again.
+          </div>
+        )}
 
         {cardsLoading ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

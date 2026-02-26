@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -32,6 +32,7 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.routers.flashcards import FlashcardResponse, _to_response
+from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,33 @@ class DailyHistoryItem(BaseModel):
     date: str  # YYYY-MM-DD
     cards_reviewed: int
     study_time_minutes: float
+
+
+class SessionCardResponse(BaseModel):
+    card_id: str
+    question: str
+    answer: str
+    cards_remaining: int
+
+
+class SessionStartResponse(BaseModel):
+    card_id: str
+    question: str
+    answer: str
+    cards_remaining: int
+
+
+class SessionReviewRequest(BaseModel):
+    card_id: str
+    rating: int  # 1=again 2=hard 3=good 4=easy
+
+
+class SessionReviewResponse(BaseModel):
+    done: bool
+    next_card: SessionCardResponse | None = None
+
+
+_RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
 
 
 # ---------------------------------------------------------------------------
@@ -590,3 +618,72 @@ async def _generate_correction_flashcard(
     return new_id
 
 
+# ---------------------------------------------------------------------------
+# Lightweight session API (stateless start + review)
+# ---------------------------------------------------------------------------
+
+async def _get_due_for_session(
+    document_id: str, session: AsyncSession
+) -> list[FlashcardModel]:
+    """Return all due-or-new flashcards for a document, ordered by due_date."""
+    now = datetime.utcnow()
+    stmt = (
+        select(FlashcardModel)
+        .where(
+            FlashcardModel.document_id == document_id,
+            or_(FlashcardModel.due_date <= now, FlashcardModel.due_date.is_(None)),
+        )
+        .order_by(FlashcardModel.due_date.asc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.post("/session/{document_id}/start", response_model=SessionStartResponse)
+async def session_start(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> SessionStartResponse:
+    """Return the first due/new flashcard for a document and the total remaining count."""
+    cards = await _get_due_for_session(document_id, session)
+    if not cards:
+        raise HTTPException(status_code=404, detail="No flashcards due for this document")
+    first = cards[0]
+    return SessionStartResponse(
+        card_id=first.id,
+        question=first.question,
+        answer=first.answer,
+        cards_remaining=len(cards),
+    )
+
+
+@router.post("/session/{document_id}/review", response_model=SessionReviewResponse)
+async def session_review(
+    document_id: str,
+    req: SessionReviewRequest,
+    session: AsyncSession = Depends(get_db),
+) -> SessionReviewResponse:
+    """Apply FSRS rating to a card, then return the next due card or done=true."""
+    if req.rating not in _RATING_INT_MAP:
+        raise HTTPException(status_code=422, detail="rating must be 1–4")
+    rating_str = _RATING_INT_MAP[req.rating]
+
+    fsrs_svc = get_fsrs_service()
+    try:
+        await fsrs_svc.schedule(req.card_id, rating_str, session)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    remaining = await _get_due_for_session(document_id, session)
+    if not remaining:
+        return SessionReviewResponse(done=True)
+    first = remaining[0]
+    return SessionReviewResponse(
+        done=False,
+        next_card=SessionCardResponse(
+            card_id=first.id,
+            question=first.question,
+            answer=first.answer,
+            cards_remaining=len(remaining),
+        ),
+    )

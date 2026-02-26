@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
+import litellm
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -109,13 +110,23 @@ async def generate_flashcards(
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> list[FlashcardResponse]:
     """Generate flashcards for a document using LLM."""
-    cards = await service.generate(
-        document_id=req.document_id,
-        scope=req.scope,
-        section_heading=req.section_heading,
-        count=req.count,
-        session=session,
-    )
+    try:
+        cards = await service.generate(
+            document_id=req.document_id,
+            scope=req.scope,
+            section_heading=req.section_heading,
+            count=req.count,
+            session=session,
+        )
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is not running. Start it with: ollama serve",
+        ) from exc
     logger.info(
         "Generated flashcards",
         extra={"document_id": req.document_id, "count": len(cards)},
