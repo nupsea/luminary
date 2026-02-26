@@ -9,6 +9,7 @@ import { FloatingToolbar } from "@/components/FloatingToolbar"
 import type { ExplainMode } from "@/components/FloatingToolbar"
 import type { DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
+import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 
 const API_BASE = "http://localhost:8000"
 
@@ -427,6 +428,9 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
               <span>{formatWordCount(doc.word_count)}</span>
               <span>·</span>
               <span>{relativeDate(doc.created_at)}</span>
+            </div>
+            <div className="mt-3">
+              <IngestionHealthPanel documentId={documentId} stage={doc.stage} />
             </div>
           </div>
 

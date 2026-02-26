@@ -1252,7 +1252,7 @@
         "DiagnosticsResponse interface with 5 typed number fields \u2014 no any types",
         "tsc --noEmit passes after this change"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S48",
