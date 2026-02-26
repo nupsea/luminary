@@ -477,6 +477,25 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     return {**state, "status": "complete"}
 
 
+async def error_finalize_node(state: IngestionState) -> IngestionState:
+    """Terminal node reached when any upstream node sets status='error'."""
+    await _update_stage(state["document_id"], "error")
+    logger.error(
+        "Ingestion failed at node",
+        extra={"document_id": state["document_id"], "error": state.get("error")},
+    )
+    return state
+
+
+def _route_on_status(next_node: str):
+    """Return a router that goes to error_finalize if status=='error', else next_node."""
+
+    def _router(state: IngestionState) -> str:
+        return "error_finalize" if state.get("status") == "error" else next_node
+
+    return _router
+
+
 def _build_graph():
     builder: StateGraph = StateGraph(IngestionState)
     builder.add_node("parse", parse_node)
@@ -485,13 +504,15 @@ def _build_graph():
     builder.add_node("embed", embed_node)
     builder.add_node("keyword_index", keyword_index_node)
     builder.add_node("entity_extract", entity_extract_node)
+    builder.add_node("error_finalize", error_finalize_node)
     builder.add_edge(START, "parse")
-    builder.add_edge("parse", "classify")
-    builder.add_edge("classify", "chunk")
-    builder.add_edge("chunk", "embed")
+    builder.add_conditional_edges("parse", _route_on_status("classify"))
+    builder.add_conditional_edges("classify", _route_on_status("chunk"))
+    builder.add_conditional_edges("chunk", _route_on_status("embed"))
     builder.add_edge("embed", "keyword_index")
     builder.add_edge("keyword_index", "entity_extract")
     builder.add_edge("entity_extract", END)
+    builder.add_edge("error_finalize", END)
     return builder.compile()
 
 
