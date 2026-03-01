@@ -28,9 +28,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
 from opentelemetry import trace
 from opentelemetry.trace import Span
-from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +84,8 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
 
     try:
         import phoenix as px
-        from phoenix.otel import register
         from openinference.instrumentation.litellm import LiteLLMInstrumentor
+        from phoenix.otel import register
 
         # Store Phoenix data in the app's data directory so traces persist
         # across backend restarts (not lost in a temp dir).
@@ -193,6 +193,7 @@ def trace_retrieval(
         span.set_attribute("retrieval.operation", operation)
         if query:
             span.set_attribute(_INPUT_VAL, query[:500])
+            span.set_attribute("retrieval.query", query[:500])
         t0 = time.perf_counter()
         try:
             yield span
@@ -254,7 +255,14 @@ def trace_llm_call(
     by the LiteLLMInstrumentor. This wrapper provides a parent CHAIN span so the
     call appears nested under the right operation in Phoenix.
     """
+    t0 = time.perf_counter()
     with trace_chain(f"llm.{operation}") as span:
         if model:
             span.set_attribute("llm.model", model)
-        yield span
+        span.set_attribute("llm.operation", operation)
+        try:
+            yield span
+        finally:
+            span.set_attribute(
+                "llm.latency_ms", round((time.perf_counter() - t0) * 1000, 1)
+            )

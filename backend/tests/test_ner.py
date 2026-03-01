@@ -43,9 +43,12 @@ def test_entity_types_list():
 def test_extract_returns_list_with_mock(extractor: EntityExtractor):
     """extract() returns entity dicts with required fields."""
     mock_model = MagicMock()
-    mock_model.predict_entities.return_value = [
-        {"text": "Albert Einstein", "label": "PERSON"},
-        {"text": "Germany", "label": "PLACE"},
+    # batch_predict_entities returns list[list[dict]] — one list per input text
+    mock_model.batch_predict_entities.return_value = [
+        [
+            {"text": "Albert Einstein", "label": "PERSON"},
+            {"text": "Germany", "label": "PLACE"},
+        ]
     ]
     extractor._model = mock_model
 
@@ -63,8 +66,8 @@ def test_extract_returns_list_with_mock(extractor: EntityExtractor):
 
 def test_extract_normalizes_name_to_lowercase(extractor: EntityExtractor):
     mock_model = MagicMock()
-    mock_model.predict_entities.return_value = [
-        {"text": "Albert Einstein", "label": "PERSON"},
+    mock_model.batch_predict_entities.return_value = [
+        [{"text": "Albert Einstein", "label": "PERSON"}]
     ]
     extractor._model = mock_model
 
@@ -77,17 +80,13 @@ def test_extract_normalizes_name_to_lowercase(extractor: EntityExtractor):
 def test_extract_generates_deterministic_id(extractor: EntityExtractor):
     """Same entity name + document_id produces the same UUID."""
     mock_model = MagicMock()
-    mock_model.predict_entities.return_value = [
-        {"text": "Curie", "label": "PERSON"},
+    mock_model.batch_predict_entities.return_value = [
+        [{"text": "Curie", "label": "PERSON"}]
     ]
     extractor._model = mock_model
 
     chunks = [_make_chunk("Text", chunk_id="c1", doc_id="d1")]
     result1 = extractor.extract(chunks)
-
-    extractor._model.predict_entities.return_value = [
-        {"text": "Curie", "label": "PERSON"},
-    ]
     result2 = extractor.extract(chunks)
 
     assert result1[0]["id"] == result2[0]["id"]
@@ -95,20 +94,20 @@ def test_extract_generates_deterministic_id(extractor: EntityExtractor):
 
 def test_extract_skips_empty_chunks(extractor: EntityExtractor):
     mock_model = MagicMock()
-    mock_model.predict_entities.return_value = []
+    mock_model.batch_predict_entities.return_value = []
     extractor._model = mock_model
 
     chunks = [_make_chunk("   ")]
     result = extractor.extract(chunks)
 
     assert result == []
-    mock_model.predict_entities.assert_not_called()
+    mock_model.batch_predict_entities.assert_not_called()
 
 
 def test_extract_assigns_chunk_and_doc_ids(extractor: EntityExtractor):
     mock_model = MagicMock()
-    mock_model.predict_entities.return_value = [
-        {"text": "Berlin", "label": "PLACE"},
+    mock_model.batch_predict_entities.return_value = [
+        [{"text": "Berlin", "label": "PLACE"}]
     ]
     extractor._model = mock_model
 

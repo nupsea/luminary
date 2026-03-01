@@ -136,7 +136,10 @@ class SummarizationService:
         # Return cached intermediate text if already computed for this document
         cached_map = await self._fetch_cached(document_id, "_map_reduce")
         if cached_map is not None:
-            logger.debug("Map-reduce: using cached intermediate text", extra={"document_id": document_id})
+            logger.debug(
+                "Map-reduce: using cached intermediate text",
+                extra={"document_id": document_id},
+            )
             return cached_map.content
 
         # Build section groups; fall back to flat batches when unsectioned
@@ -207,7 +210,8 @@ class SummarizationService:
                 )
                 # Send full content in a single event — no word-by-word drip
                 yield f'data: {json.dumps({"token": cached.content})}\n\n'
-                yield f'data: {json.dumps({"done": True, "summary_id": cached.id, "cached": True})}\n\n'
+                done_evt = {"done": True, "summary_id": cached.id, "cached": True}
+                yield f"data: {json.dumps(done_evt)}\n\n"
                 return
 
             # No cached version — run LLM generation
@@ -225,7 +229,8 @@ class SummarizationService:
 
             summary_text = "".join(collected)
             summary_id = await self._store_summary(document_id, mode, summary_text)
-            yield f'data: {json.dumps({"done": True, "summary_id": summary_id, "cached": False})}\n\n'
+            done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+            yield f"data: {json.dumps(done_evt)}\n\n"
 
         except Exception as exc:
             logger.warning(
@@ -233,7 +238,12 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
-            yield f'data: {json.dumps({"error": "llm_unavailable", "message": "Ollama is not running. Start it with: ollama serve", "done": True})}\n\n'
+            err_evt = {
+                "error": "llm_unavailable",
+                "message": "Ollama is not running. Start it with: ollama serve",
+                "done": True,
+            }
+            yield f"data: {json.dumps(err_evt)}\n\n"
 
     async def pregenerate(self, document_id: str, model: str | None = None) -> None:
         """Pre-generate and store summaries for PREGENERATE_MODES.

@@ -255,7 +255,7 @@ async def test_llm_settings_local_when_ollama_up(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["processing_mode"] == "local"
-    assert "llama3:latest" in data["available_local_models"]
+    assert "ollama/llama3:latest" in data["available_local_models"]
     assert "active_model" in data
     assert "cloud_providers" in data
     get_settings.cache_clear()

@@ -13,7 +13,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
-from app.telemetry import get_tracer, trace_chain, trace_retrieval
+from app.telemetry import trace_chain, trace_retrieval
 from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -153,7 +153,10 @@ class QAService:
 
                 # No-context guard
                 if not chunks:
-                    logger.warning("stream_answer: no chunks retrieved", extra={"question": question})
+                    logger.warning(
+                        "stream_answer: no chunks retrieved",
+                        extra={"question": question},
+                    )
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "no_context")
                     yield (
@@ -234,7 +237,8 @@ class QAService:
 
         except Exception as exc:
             logger.error("stream_answer: unhandled error", exc_info=exc)
-            yield f'data: {json.dumps({"error": "internal", "message": str(exc), "done": True})}\n\n'
+            payload = {"error": "internal", "message": str(exc), "done": True}
+            yield f"data: {json.dumps(payload)}\n\n"
 
 
 _qa_service: QAService | None = None

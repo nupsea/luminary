@@ -59,7 +59,7 @@ class _MockEmbeddingService:
 class _MockEntityExtractor:
     """Returns exactly one synthetic entity per non-empty document."""
 
-    def extract(self, chunks: list[dict]) -> list[dict]:
+    def extract(self, chunks: list[dict], content_type: str = "unknown") -> list[dict]:
         if not chunks:
             return []
         doc_id = chunks[0]["document_id"]
