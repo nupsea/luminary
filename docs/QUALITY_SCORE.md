@@ -1,13 +1,13 @@
 # Quality Score — Luminary
 
-Last Updated: 2026-02-25 — most recently completed story: S30
+Last Updated: 2026-03-01 — most recently completed: end-to-end storybook hardening
 
 Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (partial), D (minimal), F (not started).
 
 | Domain          | Implemented | Tested       | Documented   | Quality Grade |
 |-----------------|-------------|--------------|--------------|---------------|
-| Ingestion       | yes         | yes          | partial      | B             |
-| Summarization   | yes         | yes          | partial      | B             |
+| Ingestion       | yes         | yes          | yes          | A             |
+| Summarization   | yes         | yes          | yes          | A             |
 | Q&A             | yes         | yes          | partial      | B             |
 | Knowledge Graph | yes         | yes          | partial      | B             |
 | Explain / Notes | yes         | yes          | partial      | B             |
@@ -22,9 +22,9 @@ Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (par
 
 ### Phases 1–5 + S30 completion summary (as of S30)
 
-**Ingestion (B)**: LangGraph pipeline fully wired — parse, classify, chunk, embed (BGE-M3 + LanceDB), keyword index (SQLite FTS5), NER via GLiNER with Kuzu graph entity extraction. Code ingestion added (S27) with tree-sitter call graph extraction. Library catalog enhanced with tags, bulk actions, and pagination (S28).
+**Ingestion (A)**: LangGraph pipeline fully wired — parse, classify, chunk, embed (BGE-M3 + LanceDB), keyword index (SQLite FTS5), NER via GLiNER with Kuzu graph entity extraction. Code ingestion added (S27) with tree-sitter call graph extraction. Library catalog enhanced with tags, bulk actions, and pagination (S28). NER upgraded to `batch_predict_entities` (4–6× speedup on CPU). Summarize node decoupled as fire-and-forget background task with strong asyncio task reference to prevent GC mid-run. SHA-256 dedup on upload with backfill of missing summaries on re-upload.
 
-**Summarization (B)**: Multi-granularity SSE streaming. Four modes. Frontend: DocumentReader with streaming summary panel.
+**Summarization (A)**: Cache-first, ingestion-time pre-generation. `one_sentence`, `executive`, `detailed` pre-generated as background task after ingestion. Map-reduce intermediate stored as `_map_reduce` pseudo-mode — shared across all modes and subsequent on-demand requests. `GET /summarize/{id}/cached` returns all stored summaries on document open (instant, no LLM). `POST /summarize/{id}` is cache-first; cache hit returns full content as a single SSE event. `conversation` mode still on-demand but skips map step if `_map_reduce` cached.
 
 **Q&A (B)**: Hybrid RAG (RRF vector + keyword) via HybridRetriever. Chat tab with streaming, citations, confidence. Phoenix tracing wired.
 

@@ -14,13 +14,13 @@ Navigation tabs:  Learning | Chat | Viz | Study | Monitoring
 
 Backend domains:
 
-| Domain     | Responsibility                                        |
-|------------|------------------------------------------------------|
-| Ingestion  | Parse, chunk, embed, NER, graph extraction            |
-| Retrieval  | Hybrid RRF: vector + FTS5 BM25 + Kuzu graph           |
-| LLM        | Summarization, Q&A, explanation via LiteLLM           |
-| Learning   | Flashcard generation, FSRS scheduling, gap detection  |
-| Monitoring | Phoenix tracing, Langfuse evals, RAG quality metrics  |
+| Domain     | Responsibility                                                            |
+|------------|---------------------------------------------------------------------------|
+| Ingestion  | Parse, chunk, embed, NER (batched GLiNER), graph extraction, summarize    |
+| Retrieval  | Hybrid RRF: vector + FTS5 BM25 + Kuzu graph                               |
+| LLM        | Cache-first summarization, Q&A, explanation via LiteLLM                   |
+| Learning   | Flashcard generation, FSRS scheduling, gap detection                      |
+| Monitoring | Phoenix tracing, Langfuse evals, RAG quality metrics                      |
 
 ## Tech Stack
 
@@ -35,26 +35,38 @@ Backend domains:
 
 - [uv](https://docs.astral.sh/uv/) — Python package manager
 - Node 20+
-- [Ollama](https://ollama.com/) with `mistral` pulled: `ollama pull mistral`
+- [Ollama](https://ollama.com/) — local LLM server required for Chat and Summarization
+
+```bash
+# Install Ollama (macOS)
+brew install ollama
+
+# Pull the required model
+ollama pull mistral
+```
 
 **Start the app**
 
 ```bash
 git clone <repo-url>
 
-# Terminal 1 — backend
+# Terminal 1 — Ollama (must be running before the backend starts)
+ollama serve
+
+# Terminal 2 — backend
 make backend
 
-# Terminal 2 — frontend
+# Terminal 3 — frontend
 make frontend
 
 # Open in browser
 open http://localhost:5173
 ```
 
-Or start both together:
+Or start backend + frontend together (Ollama must already be running):
 
 ```bash
+ollama serve &   # if not already running
 make dev
 ```
 

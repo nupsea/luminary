@@ -21,6 +21,9 @@ class DocumentModel(Base):
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     file_path: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 hex digest of the original file — used for upload deduplication.
+    # Nullable so rows created before this column was added are not affected.
+    file_hash: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     # parsing|chunking|embedding|complete|error
     stage: Mapped[str] = mapped_column(String, default="parsing")
     tags: Mapped[list] = mapped_column(JSON, default=list)

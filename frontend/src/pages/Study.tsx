@@ -31,6 +31,22 @@ import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
 import { ProgressDashboard } from "@/components/ProgressDashboard"
 
+// ---------------------------------------------------------------------------
+// Document list for the in-tab picker
+// ---------------------------------------------------------------------------
+
+interface DocListItem {
+  id: string
+  title: string
+}
+
+async function fetchDocList(): Promise<DocListItem[]> {
+  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { items: DocListItem[] }
+  return data.items ?? []
+}
+
 const API_BASE = "http://localhost:8000"
 
 // ---------------------------------------------------------------------------
@@ -464,12 +480,20 @@ type GenerateErrorKind = "ollama_offline" | "server_error" | null
 
 export default function Study() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const queryClient = useQueryClient()
   const [studying, setStudying] = useState(false)
   // Track section pre-selected by clicking a gap item
   const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
   const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
   const mountTime = useRef(Date.now())
+
+  // Document list for the in-tab picker
+  const { data: docList = [] } = useQuery<DocListItem[]>({
+    queryKey: ["study-doc-list"],
+    queryFn: fetchDocList,
+    staleTime: 30_000,
+  })
 
   useEffect(() => {
     logger.info("[Study] mounted")
@@ -563,18 +587,29 @@ export default function Study() {
     )
   }
 
-  if (!activeDocumentId) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <p className="text-sm text-muted-foreground">
-          Select a document in the Learning tab to study.
-        </p>
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-6">
+      {/* Document selector */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium text-muted-foreground shrink-0">Document</label>
+        <select
+          value={activeDocumentId ?? ""}
+          onChange={(e) => setActiveDocument(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-xs"
+        >
+          <option value="">Select a document…</option>
+          {docList.map((doc) => (
+            <option key={doc.id} value={doc.id}>{doc.title}</option>
+          ))}
+        </select>
+      </div>
+
+      {!activeDocumentId ? (
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-muted-foreground">Select a document above to get started.</p>
+        </div>
+      ) : (
+      <>
       {/* Flashcards section */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
@@ -682,6 +717,8 @@ export default function Study() {
         <h2 className="text-lg font-semibold text-foreground">Progress</h2>
         <ProgressDashboard documentId={activeDocumentId} />
       </section>
+      </>
+      )}
     </div>
   )
 }

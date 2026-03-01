@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -12,7 +13,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
-from app.telemetry import get_tracer
+from app.telemetry import get_tracer, trace_chain, trace_retrieval
 from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -45,15 +46,20 @@ def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     """Extract (answer_text, citations, confidence) from the full LLM response.
 
-    The LLM appends ``{"citations": [...], "confidence": "..."}`` after the prose answer.
-    Finds the last occurrence of the citations JSON marker and parses from there.
+    The LLM appends a JSON block like ``{ "citations": [...], "confidence": "..." }``
+    after the prose answer, sometimes preceded by a literal "JSON:" label.
+    Uses a regex to locate the opening brace of that block regardless of spacing.
     """
-    marker = '{"citations":'
-    idx = full_text.rfind(marker)
-    if idx == -1:
+    # Match the last occurrence of a JSON object that starts with a "citations" key,
+    # tolerating any whitespace between { and "citations".
+    pattern = re.compile(r'\{\s*"citations"\s*:', re.DOTALL)
+    matches = list(pattern.finditer(full_text))
+    if not matches:
         return full_text.strip(), [], "low"
 
-    answer = full_text[:idx].strip()
+    idx = matches[-1].start()
+    # Strip the trailing "JSON:" label the LLM sometimes emits before the block
+    answer = re.sub(r"[Jj][Ss][Oo][Nn]\s*:\s*$", "", full_text[:idx]).strip()
     json_text = full_text[idx:]
     try:
         parsed = json.loads(json_text)
@@ -119,88 +125,116 @@ class QAService:
         Yields ``data: {"token": "..."}\\n\\n`` for each answer word.
         Yields a final ``data: {"done": true, ...}\\n\\n`` event with citations.
         On NOT_FOUND: yields ``data: {"done": true, "not_found": true}\\n\\n``.
+
+        All exceptions are caught and yielded as SSE error events so the HTTP
+        stream is never silently dropped (which causes a generic frontend error).
         """
-        settings = get_settings()
-        effective_model = model or settings.LITELLM_DEFAULT_MODEL
-        tracer = get_tracer()
-        retriever = get_retriever()
-        llm = get_llm_service()
+        try:
+            settings = get_settings()
+            effective_model = model or settings.LITELLM_DEFAULT_MODEL
+            retriever = get_retriever()
+            llm = get_llm_service()
 
-        # Retrieve top-10 chunks with tracing
-        with tracer.start_as_current_span("retrieve") as span:
-            effective_doc_ids = document_ids if scope == "single" else None
-            span.set_attribute("query", question)
-            span.set_attribute("scope", scope)
-            chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
-            span.set_attribute("chunk_count", len(chunks))
+            # Top-level CHAIN span for the entire Q&A journey
+            with trace_chain("qa.answer", input_value=question) as root_span:
+                root_span.set_attribute("qa.scope", scope)
+                root_span.set_attribute("qa.model", effective_model)
+                if document_ids:
+                    root_span.set_attribute("qa.document_ids", ", ".join(document_ids))
 
-        # No-context guard: retrieval returned 0 chunks (stores empty or doc not ingested).
-        if not chunks:
-            logger.warning("stream_answer: no chunks retrieved", extra={"question": question})
-            yield (
-                'data: {"error": "no_context", '
-                '"message": "No relevant content found. '
-                'Make sure a document has been ingested.", "done": true}\n\n'
+                # Hybrid retrieval — RETRIEVER span
+                with trace_retrieval("hybrid", query=question) as ret_span:
+                    effective_doc_ids = document_ids if scope == "single" else None
+                    ret_span.set_attribute("retrieval.scope", scope)
+                    chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
+                    ret_span.set_attribute("retrieval.chunk_count", len(chunks))
+                    if chunks:
+                        ret_span.set_attribute("retrieval.top_score", round(chunks[0].score, 4))
+
+                # No-context guard
+                if not chunks:
+                    logger.warning("stream_answer: no chunks retrieved", extra={"question": question})
+                    root_span.set_attribute("error", True)
+                    root_span.set_attribute("error.message", "no_context")
+                    yield (
+                        'data: {"error": "no_context", '
+                        '"message": "No relevant content found. '
+                        'Make sure a document has been ingested.", "done": true}\n\n'
+                    )
+                    return
+
+                # Build context string
+                all_doc_ids = list({c.document_id for c in chunks})
+                doc_titles = await self._fetch_doc_titles(all_doc_ids)
+                context = _build_context(chunks, doc_titles)
+                prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
+
+                # LLM generation — LiteLLM is auto-instrumented so the LLM child
+                # span appears automatically; this block just handles error routing.
+                try:
+                    token_gen = await llm.generate(
+                        prompt, system=QA_SYSTEM_PROMPT, model=model, stream=True
+                    )
+                    collected: list[str] = []
+                    async for token in token_gen:
+                        collected.append(token)
+                except Exception as exc:
+                    logger.warning(
+                        "stream_answer: LLM call failed",
+                        extra={"model": effective_model},
+                        exc_info=exc,
+                    )
+                    root_span.set_attribute("error", True)
+                    root_span.set_attribute("error.message", "llm_unavailable")
+                    yield (
+                        'data: {"error": "llm_unavailable", '
+                        '"message": "Ollama is not running or unreachable. '
+                        'Start it with: ollama serve", "done": true}\n\n'
+                    )
+                    return
+
+                full_text = "".join(collected)
+
+                # NOT_FOUND check
+                if NOT_FOUND_SENTINEL in full_text:
+                    await self._store_qa(question, None, [], "low", None, scope, effective_model)
+                    root_span.set_attribute("qa.not_found", True)
+                    yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                    return
+
+                # Parse citations JSON from the end of the response
+                answer_text, citations, confidence = _split_response(full_text)
+
+                # Record the answer on the root span for Phoenix to show Q→A
+                root_span.set_attribute("output.value", answer_text[:2000])
+                root_span.set_attribute("qa.confidence", confidence)
+                root_span.set_attribute("qa.citation_count", len(citations))
+
+            # Stream answer as token events (word granularity)
+            # NOTE: streaming happens outside the trace_chain block intentionally —
+            # the span is closed once we have the full answer (before streaming starts).
+            for word in answer_text.split():
+                yield f'data: {json.dumps({"token": word + " "})}\n\n'
+
+            # Persist Q&A history
+            first_doc_id = document_ids[0] if document_ids else None
+            qa_id = await self._store_qa(
+                question, answer_text, citations, confidence, first_doc_id, scope, effective_model
             )
-            return
 
-        # Build context string
-        all_doc_ids = list({c.document_id for c in chunks})
-        doc_titles = await self._fetch_doc_titles(all_doc_ids)
-        context = _build_context(chunks, doc_titles)
-        prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
+            # Final SSE event with citations and metadata
+            final = {
+                "done": True,
+                "answer": answer_text,
+                "citations": citations,
+                "confidence": confidence,
+                "qa_id": qa_id,
+            }
+            yield f"data: {json.dumps(final)}\n\n"
 
-        # Generate with tracing — collect full response to parse citations
-        with tracer.start_as_current_span("generate") as span:
-            span.set_attribute("model_name", effective_model)
-            span.set_attribute("query", question)
-            span.set_attribute("document_id", document_ids[0] if document_ids else "all")
-            span.set_attribute("chunk_count", len(chunks))
-            try:
-                token_gen = await llm.generate(
-                    prompt, system=QA_SYSTEM_PROMPT, model=model, stream=True
-                )
-                collected: list[str] = []
-                async for token in token_gen:
-                    collected.append(token)
-            except Exception as exc:
-                logger.warning(
-                    "stream_answer: LLM call failed",
-                    extra={"model": effective_model},
-                    exc_info=exc,
-                )
-                yield (
-                    'data: {"error": "llm_unavailable", '
-                    '"message": "Ollama is not running or unreachable. '
-                    'Start it with: ollama serve", "done": true}\n\n'
-                )
-                return
-
-        full_text = "".join(collected)
-
-        # NOT_FOUND check — return without streaming any tokens
-        if NOT_FOUND_SENTINEL in full_text:
-            await self._store_qa(question, None, [], "low", None, scope, effective_model)
-            yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
-            return
-
-        # Parse citations JSON from the end of the response
-        answer_text, citations, confidence = _split_response(full_text)
-
-        # Stream answer as token events (word granularity)
-        for word in answer_text.split():
-            yield f'data: {json.dumps({"token": word + " "})}\n\n'
-
-        # Persist Q&A history
-        first_doc_id = document_ids[0] if document_ids else None
-        qa_id = await self._store_qa(
-            question, answer_text, citations, confidence, first_doc_id, scope, effective_model
-        )
-
-        # Final SSE event with citations and metadata
-        final = {"done": True, "answer": answer_text, "citations": citations,
-                 "confidence": confidence, "qa_id": qa_id}
-        yield f"data: {json.dumps(final)}\n\n"
+        except Exception as exc:
+            logger.error("stream_answer: unhandled error", exc_info=exc)
+            yield f'data: {json.dumps({"error": "internal", "message": str(exc), "done": True})}\n\n'
 
 
 _qa_service: QAService | None = None

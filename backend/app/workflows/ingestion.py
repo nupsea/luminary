@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import uuid
@@ -10,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from app.database import get_session_factory
 from app.models import ChunkModel, SectionModel
 from app.services.parser import DocumentParser
-from app.telemetry import trace_ingestion_node
+from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
 
@@ -465,7 +466,10 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 ner_chunks = chunks
             # CPU-bound — run in thread pool to keep event loop free for status polls
             loop = _asyncio.get_event_loop()
-            entities = await loop.run_in_executor(None, extractor.extract, ner_chunks)
+            content_type = state.get("content_type") or "unknown"
+            entities = await loop.run_in_executor(
+                None, extractor.extract, ner_chunks, content_type
+            )
             entity_count = len(entities)
 
             graph = get_graph_service()
@@ -522,6 +526,40 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     return {**state, "status": "complete"}
 
 
+# Strong references to background tasks — prevents GC before they complete.
+# asyncio only holds weak refs to tasks; without this they can be collected mid-run.
+_background_tasks: set[asyncio.Task] = set()
+
+
+async def _run_pregenerate(doc_id: str) -> None:
+    """Background task: pre-generate summaries after ingestion completes."""
+    try:
+        from app.services.summarizer import get_summarization_service  # noqa: PLC0415
+        svc = get_summarization_service()
+        await svc.pregenerate(doc_id)
+        logger.info("background summarize: done", extra={"doc_id": doc_id})
+    except Exception as exc:
+        logger.warning(
+            "background summarize: failed (non-fatal)",
+            extra={"doc_id": doc_id},
+            exc_info=exc,
+        )
+
+
+async def summarize_node(state: IngestionState) -> IngestionState:
+    """Fire off summary pre-generation as a background task and return immediately.
+
+    The document is already marked complete by entity_extract_node.  Summaries
+    generate asynchronously so ingestion does not block on LLM calls.
+    """
+    doc_id = state["document_id"]
+    task = asyncio.create_task(_run_pregenerate(doc_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    logger.info("summarize_node: background task scheduled", extra={"doc_id": doc_id})
+    return state
+
+
 async def error_finalize_node(state: IngestionState) -> IngestionState:
     """Terminal node reached when any upstream node sets status='error'."""
     await _update_stage(state["document_id"], "error")
@@ -549,6 +587,7 @@ def _build_graph():
     builder.add_node("embed", embed_node)
     builder.add_node("keyword_index", keyword_index_node)
     builder.add_node("entity_extract", entity_extract_node)
+    builder.add_node("summarize", summarize_node)
     builder.add_node("error_finalize", error_finalize_node)
     builder.add_edge(START, "parse")
     builder.add_conditional_edges("parse", _route_on_status("classify"))
@@ -556,7 +595,8 @@ def _build_graph():
     builder.add_conditional_edges("chunk", _route_on_status("embed"))
     builder.add_edge("embed", "keyword_index")
     builder.add_edge("keyword_index", "entity_extract")
-    builder.add_edge("entity_extract", END)
+    builder.add_edge("entity_extract", "summarize")
+    builder.add_edge("summarize", END)
     builder.add_edge("error_finalize", END)
     return builder.compile()
 
@@ -580,13 +620,22 @@ async def run_ingestion(document_id: str, file_path: str, format: str) -> None:
         extra={"document_id": document_id, "format": format},
     )
     await _update_stage(document_id, "parsing")
-    try:
-        await ingestion_graph.ainvoke(initial_state)
-        logger.info("Ingestion task complete", extra={"document_id": document_id})
-    except Exception as exc:
-        logger.error(
-            "Ingestion task failed",
-            extra={"document_id": document_id},
-            exc_info=exc,
-        )
-        await _update_stage(document_id, "error")
+    with trace_chain(
+        "ingestion.workflow",
+        input_value=f"doc={document_id} format={format}",
+    ) as root_span:
+        root_span.set_attribute("ingestion.document_id", document_id)
+        root_span.set_attribute("ingestion.format", format)
+        try:
+            await ingestion_graph.ainvoke(initial_state)
+            root_span.set_attribute("output.value", "complete")
+            logger.info("Ingestion task complete", extra={"document_id": document_id})
+        except Exception as exc:
+            root_span.set_attribute("error", True)
+            root_span.set_attribute("error.message", str(exc))
+            logger.error(
+                "Ingestion task failed",
+                extra={"document_id": document_id},
+                exc_info=exc,
+            )
+            await _update_stage(document_id, "error")

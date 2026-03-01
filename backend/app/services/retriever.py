@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Literal
 
 from sqlalchemy import text
@@ -10,6 +11,22 @@ from app.types import ScoredChunk
 logger = logging.getLogger(__name__)
 
 RRF_K = 60
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Sanitize a natural-language query for safe use in an FTS5 MATCH expression.
+
+    FTS5 interprets punctuation (?, *, ^, (, ), ", +) and bare keywords
+    AND/OR/NOT as query operators, causing syntax errors on ordinary questions.
+    Strip everything except word characters and spaces, then remove FTS5 boolean
+    operators so the query is treated as a plain term search.
+    """
+    # Remove all characters that are not word chars or whitespace
+    cleaned = re.sub(r"[^\w\s]", " ", query)
+    # Remove bare AND / OR / NOT (FTS5 boolean operators, case-insensitive)
+    cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", cleaned, flags=re.IGNORECASE)
+    # Collapse runs of whitespace
+    return " ".join(cleaned.split())
 
 
 class HybridRetriever:
@@ -75,6 +92,12 @@ class HybridRetriever:
         k: int,
     ) -> list[ScoredChunk]:
         """BM25 search via SQLite FTS5; optionally filter by document_ids."""
+        safe_query = _sanitize_fts_query(query)
+        if not safe_query:
+            # Query was entirely punctuation/operators — skip FTS and return empty
+            logger.debug("keyword_search: query sanitized to empty string, skipping FTS")
+            return []
+
         if document_ids:
             id_list = ", ".join(f"'{did}'" for did in document_ids)
             sql = text(
@@ -92,7 +115,7 @@ class HybridRetriever:
             )
 
         async with get_session_factory()() as session:
-            result = await session.execute(sql, {"query": query, "k": k})
+            result = await session.execute(sql, {"query": safe_query, "k": k})
             rows = result.fetchall()
 
         return [

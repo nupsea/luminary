@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
@@ -239,8 +239,54 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>(allTabs[0].mode)
   const [summaries, setSummaries] = useState<SummaryMap>({})
   const [streaming, setStreaming] = useState<StreamingMap>({})
+  const [summaryError, setSummaryError] = useState<string | null>(null)
+  const [cacheLoading, setCacheLoading] = useState(true)
+
+  // Load pre-generated summaries from DB on mount — no LLM call needed
+  useEffect(() => {
+    let cancelled = false
+    async function loadCached() {
+      try {
+        const res = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as {
+          summaries: Record<string, { id: string; content: string }>
+        }
+        if (cancelled) return
+        const loaded: SummaryMap = {}
+        for (const [mode, s] of Object.entries(data.summaries)) {
+          loaded[mode as SummaryMode] = s.content
+        }
+        setSummaries(loaded)
+      } catch {
+        // cache unavailable — user can still generate manually
+      } finally {
+        if (!cancelled) setCacheLoading(false)
+      }
+    }
+    void loadCached()
+    return () => { cancelled = true }
+  }, [documentId])
 
   async function generateSummary(mode: SummaryMode) {
+    setSummaryError(null)
+
+    // Check cache first — pregenerate may have finished since mount
+    try {
+      const cacheRes = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
+      if (cacheRes.ok) {
+        const cacheData = (await cacheRes.json()) as {
+          summaries: Record<string, { id: string; content: string }>
+        }
+        if (cacheData.summaries[mode]) {
+          setSummaries((s) => ({ ...s, [mode]: cacheData.summaries[mode].content }))
+          return
+        }
+      }
+    } catch {
+      // cache check failed — fall through to streaming
+    }
+
     setStreaming((s) => ({ ...s, [mode]: true }))
     setSummaries((s) => ({ ...s, [mode]: "" }))
     try {
@@ -266,6 +312,9 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
               if (typeof payload["token"] === "string") {
                 setSummaries((s) => ({ ...s, [mode]: (s[mode] ?? "") + payload["token"] }))
               }
+              if (payload["error"] === "llm_unavailable") {
+                setSummaryError(typeof payload["message"] === "string" ? payload["message"] : "Ollama is not running. Start it with: ollama serve")
+              }
               if (payload["done"] === true) {
                 setStreaming((s) => ({ ...s, [mode]: false }))
               }
@@ -277,6 +326,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
       }
     } catch {
       setStreaming((s) => ({ ...s, [mode]: false }))
+      setSummaryError("Ollama is not running. Start it with: ollama serve")
     }
   }
 
@@ -305,8 +355,18 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 
       {/* Content area */}
       <div className="flex-1 overflow-auto">
+        {summaryError && (
+          <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {summaryError}
+          </div>
+        )}
         {activeTab === "glossary" ? (
           <GlossaryPanel documentId={documentId} />
+        ) : cacheLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 size={14} className="animate-spin" />
+            Loading...
+          </div>
         ) : isStreaming && !currentSummary ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />
@@ -330,7 +390,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">No summary generated yet.</p>
+            <p className="text-sm text-muted-foreground">No summary yet.</p>
             <button
               onClick={() => void generateSummary(activeTab as SummaryMode)}
               className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"

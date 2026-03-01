@@ -1,12 +1,25 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Send, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import ReactMarkdown from "react-markdown"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
+
+interface DocListItem {
+  id: string
+  title: string
+}
+
+async function fetchDocList(): Promise<DocListItem[]> {
+  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { items: DocListItem[] }
+  return data.items ?? []
+}
 
 interface Citation {
   document_title: string
@@ -73,6 +86,8 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [scope, setScope] = useState<"single" | "all">("all")
+  // selectedDocId: explicit in-tab selection; falls back to global activeDocumentId
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
   const [qaError, setQaError] = useState<string | null>(null)
@@ -80,9 +95,25 @@ export default function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const mountTime = useRef(Date.now())
 
+  // Document list for the "This document" picker
+  const { data: docList } = useQuery({
+    queryKey: ["chat-doc-list"],
+    queryFn: fetchDocList,
+    staleTime: 30_000,
+  })
+
+  // Pre-populate from global store when user arrives from Learning tab
+  useEffect(() => {
+    if (activeDocumentId) {
+      setSelectedDocId((prev) => prev ?? activeDocumentId)
+    }
+  }, [activeDocumentId])
+
   const { data: llmSettings, isLoading: llmLoading, isError: llmError } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: fetchLLMSettings,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   })
 
   const modelOptions = buildModelOptions(llmSettings)
@@ -130,7 +161,8 @@ export default function Chat() {
     setIsStreaming(true)
 
     try {
-      const documentIds = scope === "single" && activeDocumentId ? [activeDocumentId] : null
+      const effectiveDocId = selectedDocId ?? activeDocumentId
+      const documentIds = scope === "single" && effectiveDocId ? [effectiveDocId] : null
       const res = await fetch(`${API_BASE}/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -166,10 +198,13 @@ export default function Chat() {
             // SSE error event — end streaming, remove placeholder, show banner
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
+              const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
               const errorMsg =
                 errorCode === "llm_unavailable"
                   ? "Ollama is not running. Start it with: ollama serve"
-                  : (payload["message"] as string | undefined) ?? "An error occurred."
+                  : errorCode === "no_context"
+                  ? "No relevant content found. Make sure at least one document has been ingested."
+                  : fallbackMsg
               setIsStreaming(false)
               setMessages((m) => m.filter((msg) => msg.id !== assistantId))
               setQaError(errorMsg)
@@ -197,10 +232,12 @@ export default function Chat() {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
-      setQaError("Could not get a response. Please try again.")
-      setMessages((m) =>
-        m.filter((msg) => msg.id !== assistantId),
+      setQaError(
+        errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")
+          ? "Cannot reach the server. Is the backend running on port 8000?"
+          : `Could not get a response: ${errMsg}`
       )
+      setMessages((m) => m.filter((msg) => msg.id !== assistantId))
       setIsStreaming(false)
     }
   }
@@ -212,7 +249,8 @@ export default function Chat() {
     }
   }
 
-  const noDocumentSelected = scope === "single" && !activeDocumentId
+  const effectiveDocId = selectedDocId ?? activeDocumentId
+  const noDocumentSelected = scope === "single" && !effectiveDocId
 
   return (
     <div className="flex h-full flex-col">
@@ -233,6 +271,20 @@ export default function Chat() {
             All my content
           </button>
         </div>
+
+        {/* Document picker — only visible in "This document" scope */}
+        {scope === "single" && (
+          <select
+            value={effectiveDocId ?? ""}
+            onChange={(e) => setSelectedDocId(e.target.value || null)}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[220px]"
+          >
+            <option value="">Select a document…</option>
+            {(docList ?? []).map((doc) => (
+              <option key={doc.id} value={doc.id}>{doc.title}</option>
+            ))}
+          </select>
+        )}
 
         {/* Model selector */}
         {llmLoading ? (
@@ -322,11 +374,20 @@ export default function Chat() {
                     <p className="text-sm text-blue-600">
                       This information was not found in the selected content.
                     </p>
+                  ) : msg.role === "user" ? (
+                    <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
                   ) : (
-                    <p className="whitespace-pre-wrap text-sm">
-                      {msg.text}
+                    <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
+                      [&_ol]:text-sm [&_ol]:my-1 [&_ol]:pl-5 [&_ol]:list-decimal
+                      [&_ul]:text-sm [&_ul]:my-1 [&_ul]:pl-5 [&_ul]:list-disc
+                      [&_li]:my-0.5
+                      [&_strong]:font-semibold
+                      [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
+                      [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
+                      [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
+                      <ReactMarkdown>{msg.text}</ReactMarkdown>
                       {msg.isStreaming && <span className="animate-pulse">▍</span>}
-                    </p>
+                    </div>
                   )}
 
                   {/* Citations and confidence — shown after streaming completes */}

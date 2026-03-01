@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import shutil
 import uuid
@@ -295,7 +296,6 @@ async def ingest_document(
     file: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
 ):
-    doc_id = str(uuid.uuid4())
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
     if ext and ext not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -305,27 +305,92 @@ async def ingest_document(
                 f"Allowed types: {', '.join(sorted(_ALLOWED_EXTENSIONS))}"
             ),
         )
-    data_dir = Path(settings.DATA_DIR).expanduser()
-    raw_dir = data_dir / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    dest = raw_dir / f"{doc_id}.{ext}"
 
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # Read file content into memory so we can hash it and write it to disk.
+    content = await file.read()
+    file_hash = hashlib.sha256(content).hexdigest()
 
     fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
-    size_bytes = dest.stat().st_size
-    logger.info(
-        "File received",
-        extra={
-            "upload_filename": file.filename or "upload",
-            "size_bytes": size_bytes,
-            "format": fmt,
-            "doc_id": doc_id,
-        },
-    )
 
     async with get_session_factory()() as session:
+        # Deduplication: look for an existing document with the same file hash.
+        existing = (
+            await session.execute(
+                select(DocumentModel).where(DocumentModel.file_hash == file_hash)
+            )
+        ).scalar_one_or_none()
+
+        if existing is not None:
+            if existing.stage == "complete":
+                # Identical file already fully ingested — return it as-is.
+                # But backfill any missing pre-generated summaries in the background
+                # (handles docs ingested before summarization was added, or where the
+                # background task was GC'd before completing all modes).
+                from app.services.summarizer import PREGENERATE_MODES, get_summarization_service  # noqa: PLC0415
+                async with get_session_factory()() as _s:
+                    existing_modes = set(
+                        row[0] for row in (await _s.execute(
+                            select(SummaryModel.mode).where(SummaryModel.document_id == existing.id)
+                        )).all()
+                    )
+                missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
+                if missing:
+                    from app.workflows.ingestion import _background_tasks, _run_pregenerate  # noqa: PLC0415
+                    task = asyncio.create_task(_run_pregenerate(existing.id))
+                    _background_tasks.add(task)
+                    task.add_done_callback(_background_tasks.discard)
+                    logger.info(
+                        "Backfilling missing summaries for complete doc",
+                        extra={"doc_id": existing.id, "missing_modes": missing},
+                    )
+                else:
+                    logger.info(
+                        "Duplicate upload detected (stage=complete), returning existing doc",
+                        extra={"doc_id": existing.id, "file_hash": file_hash},
+                    )
+                return {"document_id": existing.id, "status": "processing"}
+
+            if existing.stage == "error":
+                # Previous attempt failed — reset stage and retry ingestion on
+                # the same document record so no duplicate row is created.
+                existing.stage = "parsing"
+                await session.commit()
+                asyncio.create_task(
+                    run_ingestion(existing.id, existing.file_path, existing.format)
+                )
+                logger.info(
+                    "Retrying failed ingestion on existing doc",
+                    extra={"doc_id": existing.id, "file_hash": file_hash},
+                )
+                return {"document_id": existing.id, "status": "processing"}
+
+            # Stage is in-progress (parsing/chunking/embedding) — already running.
+            logger.info(
+                "Duplicate upload detected (stage=%s), returning in-progress doc",
+                existing.stage,
+                extra={"doc_id": existing.id},
+            )
+            return {"document_id": existing.id, "status": "processing"}
+
+        # New file — write to disk and create a fresh document record.
+        doc_id = str(uuid.uuid4())
+        data_dir = Path(settings.DATA_DIR).expanduser()
+        raw_dir = data_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir / f"{doc_id}.{ext}"
+
+        dest.write_bytes(content)
+
+        logger.info(
+            "File received",
+            extra={
+                "upload_filename": file.filename or "upload",
+                "size_bytes": len(content),
+                "format": fmt,
+                "doc_id": doc_id,
+            },
+        )
+
         doc = DocumentModel(
             id=doc_id,
             title=Path(file.filename or "upload").stem,
@@ -334,6 +399,7 @@ async def ingest_document(
             word_count=0,
             page_count=0,
             file_path=str(dest),
+            file_hash=file_hash,
             stage="parsing",
         )
         session.add(doc)

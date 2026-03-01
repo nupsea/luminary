@@ -9,7 +9,6 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from pydantic import BaseModel
 from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,9 +52,11 @@ async def lifespan(app: FastAPI):
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
     engine = get_engine()
     await create_all_tables(engine)
-    setup_tracing(settings.PHOENIX_ENABLED)
+    setup_tracing(settings.PHOENIX_ENABLED, data_dir=str(data_dir))
     FastAPIInstrumentor.instrument_app(app)
-    SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+    # SQLAlchemyInstrumentor is intentionally omitted — it instruments all
+    # SQLAlchemy engines globally, including Phoenix's own phoenix.db, creating
+    # a trace-feedback loop (Phoenix traces → phoenix.db write → new trace → …).
     get_graph_service()  # initialise KuzuService and create schema on startup
 
     # Ollama startup health-check — warn early if the local LLM is unreachable.
@@ -121,7 +122,10 @@ async def read_llm_settings(settings: Settings = Depends(get_settings)):
             resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
                 data = resp.json()
-                available_local_models = [m["name"] for m in data.get("models", [])]
+                # Prefix with "ollama/" so LiteLLM can route the call correctly.
+                available_local_models = [
+                    f"ollama/{m['name']}" for m in data.get("models", [])
+                ]
                 processing_mode = "local"
     except Exception:
         pass

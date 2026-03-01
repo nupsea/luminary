@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -11,22 +12,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.services.llm import get_llm_service
+from app.telemetry import trace_chain
 
 logger = logging.getLogger(__name__)
 
 FLASHCARD_SYSTEM = (
     "You are a flashcard generator. "
-    "Output only valid JSON, no preamble, no markdown code fences."
+    "You MUST output ONLY a valid JSON array. "
+    "Do NOT write any explanation, summary, preamble, or prose. "
+    "Do NOT use markdown code fences. "
+    "Start your response with [ and end with ]."
 )
 
 FLASHCARD_USER_TMPL = (
-    "Generate {count} question-answer flashcard pairs from the following text. "
-    "Each card must be answerable only from this specific content. "
-    'Output JSON array: [{{"question": str, "answer": str, "source_excerpt": str}}]. '
-    "Output only JSON.\n\nText:\n{text}"
+    "Generate {count} question-answer flashcard pairs from the text below.\n"
+    "Rules:\n"
+    "- Each card must be answerable only from the provided text.\n"
+    "- Output ONLY a JSON array, nothing else.\n"
+    "- Format: "
+    '[{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n\n'
+    "Text:\n{text}\n\n"
+    "JSON array:"
 )
 
-_CHUNK_CHAR_LIMIT = 32_000
+# Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)
+_CHUNK_CHAR_LIMIT = 5_000
 
 
 async def _fetch_chunks(
@@ -80,18 +90,42 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
 
 
 def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
-    """Strip markdown fences and parse JSON array from LLM response."""
+    """Extract a JSON array from the LLM response.
+
+    Handles:
+    - Clean JSON array responses
+    - Responses wrapped in markdown code fences
+    - Responses with preamble prose before the array
+    - Responses with trailing text after the array
+    """
     raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1]
-        raw = raw.rsplit("```", 1)[0]
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            return data
-        logger.warning("LLM returned non-list JSON for doc %s", document_id)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
+
+    # Strip markdown code fences
+    raw = re.sub(r"^```[^\n]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+    raw = raw.strip()
+
+    # If it already looks like a clean array, try parsing directly
+    if raw.startswith("["):
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Fall back: find the first '[' and last ']' and parse that slice
+    start = raw.find("[")
+    end = raw.rfind("]")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(raw[start : end + 1])
+            if isinstance(data, list):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
     return []
 
 
@@ -119,8 +153,20 @@ class FlashcardService:
             return []
 
         prompt = FLASHCARD_USER_TMPL.format(count=count, text=combined_text)
-        raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
-        cards_data = _parse_llm_response(raw, document_id)
+
+        with trace_chain(
+            "flashcard.generate",
+            input_value=f"doc={document_id} scope={scope} count={count}",
+        ) as span:
+            span.set_attribute("flashcard.document_id", document_id)
+            span.set_attribute("flashcard.scope", scope)
+            span.set_attribute("flashcard.requested_count", count)
+            if section_heading:
+                span.set_attribute("flashcard.section_heading", section_heading)
+
+            raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
+            cards_data = _parse_llm_response(raw, document_id)
+            span.set_attribute("flashcard.generated_count", len(cards_data))
 
         now = datetime.utcnow()
         flashcards: list[FlashcardModel] = []

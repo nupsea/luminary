@@ -35,4 +35,15 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
+
+        # Additive migrations — safe to run on existing databases.
+        # SQLite ignores "duplicate column" errors so we wrap each in its own try.
+        for ddl in [
+            "ALTER TABLE documents ADD COLUMN file_hash TEXT",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # column already exists
+
     logger.info("Database tables and FTS5 index initialized")

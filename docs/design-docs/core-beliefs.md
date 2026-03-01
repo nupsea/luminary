@@ -145,3 +145,42 @@ A story is not complete when its tests pass. A story is complete when a human ca
 Every feature that depends on an external service (Ollama, OpenAI, Anthropic) must handle the offline case with a user-visible, actionable message. Backend: return HTTP 503 (not 500) for service unavailability; include the exact start command in the error detail. Frontend: check the HTTP status code and render an inline message naming the service and the command to start it. Silent failures — blank screens, empty lists, spinning indicators that never resolve, generic "something went wrong" toasts — are bugs, not graceful degradation. The user must always know what is wrong and what to do about it.
 
 **Rationale**: Local-first applications frequently run without all services available. Ollama in particular is commonly offline during development. An application that silently fails when Ollama is down is unusable and undebugable. Explicit, actionable error messages are the difference between a tool that works for a developer and one that is abandoned in frustration.
+
+---
+
+## 19. asyncio Background Tasks Must Hold Strong References
+
+Python's event loop holds only **weak references** to tasks created with `asyncio.create_task()`. A task without an external strong reference can be garbage-collected mid-execution — producing partial results that are silent and hard to diagnose (e.g., the first loop iteration stores data but subsequent iterations are never run). Always store task references in a module-level set and register a done-callback to clean up:
+
+```python
+_background_tasks: set[asyncio.Task] = set()
+
+task = asyncio.create_task(some_coroutine())
+_background_tasks.add(task)
+task.add_done_callback(_background_tasks.discard)
+```
+
+**Rationale**: Background tasks for expensive post-processing (e.g. pre-generating summaries after ingestion) are the canonical use case. A task that gets GC'd after storing only the first result and silently dropping the rest creates a class of partial-write bugs that have no stack trace and no error log — they are invisible until you query the database and notice missing rows.
+
+---
+
+## 20. Cache Expensive Intermediate Computations in the Domain Store
+
+Multi-step LLM pipelines that produce an intermediate reduced representation (map-reduce passes, section summaries, retrieval-augmented contexts) must store that intermediate in the same domain store as the final output, using a pseudo-key (e.g. `mode="_map_reduce"` in the summaries table). This converts N×(map_cost + final_cost) into 1×map_cost + N×final_cost across all consumers — whether those are multiple modes in a single run or separate on-demand requests from the UI.
+
+Do not recompute the same intermediate twice if the inputs haven't changed. The domain store is the cache.
+
+**Rationale**: For large documents, map-reduce requires dozens of sequential LLM calls. Running this step once per summary mode (4 modes = 4× the LLM budget) wastes resources and user time. Caching the intermediate in the DB means the second mode is nearly free, and any future on-demand request for a new mode also skips the expensive map step entirely.
+
+---
+
+## 21. Batch ML Inference Calls — Never Loop Per-Item
+
+CPU-bound ML models (GLiNER NER, embedding models) expose batch APIs that execute a single forward pass over multiple inputs. Always use the batch API:
+
+- NER: `model.batch_predict_entities(texts, labels)` not `for t in texts: model.predict_entities(t, labels)`
+- Embeddings: `embedder.encode(texts)` not `for t in texts: embedder.encode([t])`
+
+A per-item loop scales linearly with document size. A batch call of N items typically takes 2–4× the time of a single call — not N×. The speedup on CPU is 4–8×. Every per-item loop on a CPU-bound model is a performance bug.
+
+**Rationale**: NER on a 600-chunk document ran in ~12 minutes per-item vs ~3 minutes with batching. This is not a micro-optimisation — it is the difference between a usable ingestion pipeline and one that makes the laptop fan audible for every uploaded book.

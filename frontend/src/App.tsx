@@ -271,7 +271,7 @@ function AppShell() {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 h-full overflow-auto">
         <Routes>
           <Route path="/" element={<Learning />} />
           <Route path="/chat" element={<Chat />} />

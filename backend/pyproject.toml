@@ -20,6 +20,7 @@ dependencies = [
     "litellm>=1.81.14",
     "markdown-it-py>=4.0.0",
     "numpy>=2.4.2",
+    "openinference-instrumentation-litellm>=0.1.29",
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
     "opentelemetry-instrumentation-fastapi>=0.60b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",

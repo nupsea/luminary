@@ -1,22 +1,58 @@
-import {
-  SigmaContainer,
-  useCamera,
-  useRegisterEvents,
-  useSetSettings,
-  useSigma,
-} from "@react-sigma/core"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Graph from "graphology"
 import forceAtlas2 from "graphology-layout-forceatlas2"
 import { Maximize2, Minus, Network, Plus } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { Component, useEffect, useMemo, useRef, useState } from "react"
+import type { ErrorInfo, ReactNode } from "react"
+import Sigma from "sigma"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
+import { useNavigate } from "react-router-dom"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 
+// ---------------------------------------------------------------------------
+// Error boundary
+// ---------------------------------------------------------------------------
+
+class VizErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { error: null }
+  }
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    logger.error("[Viz] render error", { error: String(error), componentStack: info.componentStack ?? "" })
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full items-center justify-center p-6">
+          <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 max-w-sm">
+            <p className="font-medium">Graph rendering error</p>
+            <p className="text-xs font-mono break-all">{this.state.error}</p>
+            <button
+              onClick={() => this.setState({ error: null })}
+              className="self-start rounded border border-red-300 bg-white px-3 py-1 text-xs hover:bg-red-50"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const API_BASE = "http://localhost:8000"
+const SIDEBAR_W = 240
 
 const ALL_ENTITY_TYPES = [
   "PERSON",
@@ -42,6 +78,10 @@ const TYPE_COLORS: Record<EntityType, string> = {
 
 const DEFAULT_COLOR = "#94a3b8"
 const DIM_COLOR = "rgba(200,200,200,0.15)"
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface GraphNode {
   id: string
@@ -70,10 +110,19 @@ interface SelectedNodeInfo {
   screenY: number
 }
 
+interface DocListItem {
+  id: string
+  title: string
+}
+
+// ---------------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------------
+
 async function fetchGraphData(
   documentId: string | null,
   scope: "document" | "all",
-  viewMode: "knowledge_graph" | "call_graph" = "knowledge_graph",
+  viewMode: "knowledge_graph" | "call_graph",
 ): Promise<GraphData> {
   const url =
     scope === "document" && documentId
@@ -83,6 +132,17 @@ async function fetchGraphData(
   if (!res.ok) throw new Error("Failed to fetch graph data")
   return res.json() as Promise<GraphData>
 }
+
+async function fetchDocList(): Promise<DocListItem[]> {
+  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { items: DocListItem[] }
+  return data.items ?? []
+}
+
+// ---------------------------------------------------------------------------
+// Graph builder
+// ---------------------------------------------------------------------------
 
 function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   const g = new Graph()
@@ -95,7 +155,7 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   nodes.forEach((node) => {
     g.addNode(node.id, {
       label: node.label,
-      type: node.type,
+      entityType: node.type,
       frequency: node.size,
       x: Math.random() * 200 - 100,
       y: Math.random() * 200 - 100,
@@ -122,106 +182,9 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   return g
 }
 
-// ---- Inner component: event handler (must be inside SigmaContainer) ----
-
-interface GraphControllerProps {
-  search: string
-  onNodeClick: (nodeId: string, screenX: number, screenY: number) => void
-  onEdgeHover: (label: string | null) => void
-}
-
-function GraphController({ search, onNodeClick, onEdgeHover }: GraphControllerProps) {
-  const sigma = useSigma()
-  const setSettings = useSetSettings()
-  const registerEvents = useRegisterEvents()
-
-  useEffect(() => {
-    if (!search) {
-      setSettings({ nodeReducer: null, edgeReducer: null })
-      return
-    }
-    const q = search.toLowerCase()
-    setSettings({
-      nodeReducer: (_nodeKey, data) => {
-        const label = (data.label as string) ?? ""
-        if (label.toLowerCase().includes(q)) return data
-        return { ...data, color: DIM_COLOR, label: "" }
-      },
-      edgeReducer: (_edgeKey, data) => ({ ...data, color: DIM_COLOR }),
-    })
-
-    // Pan camera to first matching node
-    const graph = sigma.getGraph()
-    const firstMatch = graph.nodes().find((n) => {
-      const lbl = (graph.getNodeAttribute(n, "label") as string) ?? ""
-      return lbl.toLowerCase().includes(q)
-    })
-    if (firstMatch) {
-      const x = graph.getNodeAttribute(firstMatch, "x") as number
-      const y = graph.getNodeAttribute(firstMatch, "y") as number
-      sigma.getCamera().animate({ x, y, ratio: 0.5 }, { duration: 500 })
-    }
-  }, [search, sigma, setSettings])
-
-  useEffect(() => {
-    registerEvents({
-      clickNode: (payload: SigmaNodeEventPayload) => {
-        const { node, event } = payload
-        const pos = sigma.graphToViewport({
-          x: sigma.getGraph().getNodeAttribute(node, "x") as number,
-          y: sigma.getGraph().getNodeAttribute(node, "y") as number,
-        })
-        const rect = sigma.getContainer().getBoundingClientRect()
-        onNodeClick(node, rect.left + pos.x, rect.top + pos.y)
-        event.preventSigmaDefault()
-      },
-      enterEdge: (payload: SigmaEdgeEventPayload) => {
-        const { edge } = payload
-        const edgeType =
-          (sigma.getGraph().getEdgeAttribute(edge, "type") as string | undefined) ?? "CO_OCCURS"
-        onEdgeHover(edgeType)
-      },
-      leaveEdge: () => onEdgeHover(null),
-      clickStage: () => onNodeClick("", -1, -1),
-    })
-  }, [registerEvents, sigma, onNodeClick, onEdgeHover])
-
-  return null
-}
-
-// ---- Camera controls (must be inside SigmaContainer) ----
-
-function CameraControls() {
-  const { zoomIn, zoomOut, reset } = useCamera({ duration: 300, factor: 1.5 })
-
-  return (
-    <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
-      <button
-        onClick={() => zoomIn()}
-        className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
-        title="Zoom in"
-      >
-        <Plus size={14} />
-      </button>
-      <button
-        onClick={() => zoomOut()}
-        className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
-        title="Zoom out"
-      >
-        <Minus size={14} />
-      </button>
-      <button
-        onClick={() => reset()}
-        className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
-        title="Fit to screen"
-      >
-        <Maximize2 size={14} />
-      </button>
-    </div>
-  )
-}
-
-// ---- Main Viz page ----
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
 
 export default function Viz() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
@@ -230,9 +193,10 @@ export default function Viz() {
   const queryClient = useQueryClient()
   const mountTime = useRef(Date.now())
 
-  useEffect(() => {
-    logger.info("[Viz] mounted")
-  }, [])
+  // Raw sigma instance — NOT stored in React state to avoid re-render loops
+  const sigmaRef = useRef<Sigma | null>(null)
+  // The div that sigma renders into
+  const canvasRef = useRef<HTMLDivElement>(null)
 
   const [activeTypes, setActiveTypes] = useState<Set<EntityType>>(new Set(ALL_ENTITY_TYPES))
   const [search, setSearch] = useState("")
@@ -240,6 +204,13 @@ export default function Viz() {
   const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
+
+  // Document list for the picker
+  const { data: docList } = useQuery({
+    queryKey: ["viz-doc-list"],
+    queryFn: fetchDocList,
+    staleTime: 30_000,
+  })
 
   const noDocSelected = scope === "document" && !activeDocumentId
 
@@ -253,17 +224,14 @@ export default function Viz() {
 
   useEffect(() => {
     if (!isLoading && data) {
-      const elapsed = Date.now() - mountTime.current
-      logger.info("[Viz] loaded", { duration_ms: elapsed, itemCount: data.nodes.length })
+      logger.info("[Viz] loaded", {
+        duration_ms: Date.now() - mountTime.current,
+        nodes: data.nodes.length,
+      })
     }
   }, [isLoading, data])
 
-  useEffect(() => {
-    if (isError) {
-      logger.error("[Viz] fetch failed", { endpoint: `/graph/${activeDocumentId ?? "all"}` })
-    }
-  }, [isError, activeDocumentId])
-
+  // Build filtered graphology graph from API data + active entity types
   const filteredGraph = useMemo(() => {
     if (!data) return null
     const visibleNodes = data.nodes.filter((n) => activeTypes.has(n.type as EntityType))
@@ -274,19 +242,124 @@ export default function Viz() {
     return buildGraph(visibleNodes, visibleEdges)
   }, [data, activeTypes])
 
-  const handleNodeClick = (nodeId: string, screenX: number, screenY: number) => {
-    if (!nodeId || !filteredGraph) {
-      setSelectedNode(null)
+  // ---------------------------------------------------------------------------
+  // Core effect: mount/update raw Sigma instance when filteredGraph changes
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    // Destroy previous instance first
+    if (sigmaRef.current) {
+      sigmaRef.current.kill()
+      sigmaRef.current = null
+    }
+
+    const el = canvasRef.current
+    if (!el || !filteredGraph || filteredGraph.order === 0) return
+
+    const s = new Sigma(filteredGraph, el, {
+      renderEdgeLabels: false,
+      defaultEdgeColor: "#e2e8f0",
+      labelSize: 12,
+      labelWeight: "normal",
+    })
+
+    // Node click → popover
+    s.on("clickNode", (payload: SigmaNodeEventPayload) => {
+      const { node, event } = payload
+      const pos = s.graphToViewport({
+        x: filteredGraph.getNodeAttribute(node, "x") as number,
+        y: filteredGraph.getNodeAttribute(node, "y") as number,
+      })
+      const rect = el.getBoundingClientRect()
+      setSelectedNode({
+        id: node,
+        label: filteredGraph.getNodeAttribute(node, "label") as string,
+        type: filteredGraph.getNodeAttribute(node, "entityType") as string,
+        frequency: filteredGraph.getNodeAttribute(node, "frequency") as number,
+        screenX: rect.left + pos.x,
+        screenY: rect.top + pos.y,
+      })
+      event.preventSigmaDefault()
+    })
+
+    // Edge hover → tooltip
+    s.on("enterEdge", (payload: SigmaEdgeEventPayload) => {
+      const edgeType =
+        (filteredGraph.getEdgeAttribute(payload.edge, "type") as string | undefined) ?? "CO_OCCURS"
+      setEdgeTooltip(edgeType)
+    })
+    s.on("leaveEdge", () => setEdgeTooltip(null))
+
+    // Click blank area → deselect node
+    s.on("clickStage", () => setSelectedNode(null))
+
+    sigmaRef.current = s
+
+    return () => {
+      s.kill()
+      sigmaRef.current = null
+    }
+  }, [filteredGraph])
+
+  // ---------------------------------------------------------------------------
+  // Search effect: update sigma reducers without rebuilding the instance
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const s = sigmaRef.current
+    if (!s) return
+
+    if (!search) {
+      s.setSetting("nodeReducer", null)
+      s.setSetting("edgeReducer", null)
       return
     }
-    setSelectedNode({
-      id: nodeId,
-      label: filteredGraph.getNodeAttribute(nodeId, "label") as string,
-      type: filteredGraph.getNodeAttribute(nodeId, "type") as string,
-      frequency: filteredGraph.getNodeAttribute(nodeId, "frequency") as number,
-      screenX,
-      screenY,
+
+    const q = search.toLowerCase()
+    s.setSetting("nodeReducer", (_node: string, d: Record<string, unknown>) => {
+      const label = (d.label as string) ?? ""
+      if (label.toLowerCase().includes(q)) return d
+      return { ...d, color: DIM_COLOR, label: "" }
     })
+    s.setSetting("edgeReducer", (_edge: string, d: Record<string, unknown>) => ({
+      ...d,
+      color: DIM_COLOR,
+    }))
+
+    // Pan to first matching node
+    const graph = s.getGraph()
+    const firstMatch = graph.nodes().find((n) => {
+      const lbl = (graph.getNodeAttribute(n, "label") as string) ?? ""
+      return lbl.toLowerCase().includes(q)
+    })
+    if (firstMatch) {
+      s.getCamera().animate(
+        {
+          x: graph.getNodeAttribute(firstMatch, "x") as number,
+          y: graph.getNodeAttribute(firstMatch, "y") as number,
+          ratio: 0.5,
+        },
+        { duration: 500 },
+      )
+    }
+  }, [search, filteredGraph]) // re-apply after sigma rebuilds
+
+  // ---------------------------------------------------------------------------
+  // Camera controls
+  // ---------------------------------------------------------------------------
+  const zoomIn = () => {
+    const s = sigmaRef.current
+    if (!s) return
+    s.getCamera().animate({ ratio: s.getCamera().ratio / 1.5 }, { duration: 300 })
+  }
+  const zoomOut = () => {
+    const s = sigmaRef.current
+    if (!s) return
+    s.getCamera().animate({ ratio: s.getCamera().ratio * 1.5 }, { duration: 300 })
+  }
+  const resetCamera = () => {
+    sigmaRef.current?.getCamera().animate(
+      { x: 0.5, y: 0.5, ratio: 1, angle: 0 },
+      { duration: 300 },
+    )
   }
 
   const toggleType = (type: EntityType) => {
@@ -298,212 +371,273 @@ export default function Viz() {
     })
   }
 
-  if (noDocSelected) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <p className="text-sm text-muted-foreground max-w-sm">
-          Select a document to explore its knowledge graph.
-        </p>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex h-full flex-col gap-4 p-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="flex-1 w-full rounded-lg" />
-      </div>
-    )
-  }
-
-  if (isError) {
-    return (
-      <div className="flex h-full items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
-          <p className="font-medium">Failed to load knowledge graph</p>
-          <button
-            onClick={() => void refetch()}
-            className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  if (!data || data.nodes.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <Network size={32} className="text-muted-foreground/50" />
-        <p className="text-base font-medium text-foreground">No knowledge graph yet</p>
-        <p className="text-sm text-muted-foreground max-w-sm">
-          Select a document above and ingest it first to see entity relationships.
-        </p>
-      </div>
-    )
-  }
+  // ---------------------------------------------------------------------------
+  // Render helpers
+  // ---------------------------------------------------------------------------
+  const showEmpty =
+    !noDocSelected && !isLoading && !isError && (!data || data.nodes.length === 0)
+  const showAllHidden =
+    filteredGraph !== null && filteredGraph.order === 0 && !!data && data.nodes.length > 0
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      {/* Controls sidebar */}
-      <div className="w-60 flex-shrink-0 flex flex-col gap-4 border-r border-border bg-background p-4 overflow-y-auto">
-        {/* View toggle — Knowledge Graph vs Call Graph */}
-        <div>
-          <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            View
-          </p>
-          <div className="flex rounded-md border border-border overflow-hidden text-xs">
-            {(["knowledge_graph", "call_graph"] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => {
-                  setViewMode(v)
-                  void queryClient.invalidateQueries({ queryKey })
-                }}
-                className={`flex-1 py-1.5 transition-colors ${
-                  viewMode === v
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                {v === "knowledge_graph" ? "Knowledge" : "Call Graph"}
-              </button>
-            ))}
+    <VizErrorBoundary>
+      {/*
+        Absolute layout so heights are always definite:
+          - outer div: position relative, fills 100% of <main> height
+          - sidebar: absolute left column (SIDEBAR_W px wide)
+          - graph area: absolute, fills the rest
+        This avoids flex cross-axis height propagation issues entirely.
+      */}
+      <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden" }}>
+
+        {/* ---- Controls sidebar ---- */}
+        <div
+          className="flex flex-col gap-4 border-r border-border bg-background p-4 overflow-y-auto"
+          style={{ position: "absolute", left: 0, top: 0, width: SIDEBAR_W, bottom: 0 }}
+        >
+          {/* Document picker */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Document
+            </p>
+            <select
+              value={activeDocumentId ?? ""}
+              onChange={(e) => setActiveDocument(e.target.value || null)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">Select a document…</option>
+              {(docList ?? []).map((doc) => (
+                <option key={doc.id} value={doc.id}>{doc.title}</option>
+              ))}
+            </select>
           </div>
-          {viewMode === "call_graph" && (
-            <p className="mt-1 text-xs text-muted-foreground">Code documents only</p>
+
+          {/* View toggle */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              View
+            </p>
+            <div className="flex rounded-md border border-border overflow-hidden text-xs">
+              {(["knowledge_graph", "call_graph"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    setViewMode(v)
+                    void queryClient.invalidateQueries({ queryKey })
+                  }}
+                  className={`flex-1 py-1.5 transition-colors ${
+                    viewMode === v
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {v === "knowledge_graph" ? "Knowledge" : "Call Graph"}
+                </button>
+              ))}
+            </div>
+            {viewMode === "call_graph" && (
+              <p className="mt-1 text-xs text-muted-foreground">Code documents only</p>
+            )}
+          </div>
+
+          {/* Scope toggle */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Scope
+            </p>
+            <div className="flex rounded-md border border-border overflow-hidden text-xs">
+              {(["document", "all"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    setScope(s)
+                    void queryClient.invalidateQueries({ queryKey })
+                  }}
+                  className={`flex-1 py-1.5 capitalize transition-colors ${
+                    scope === s
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {s === "document" ? "This doc" : "All docs"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Search */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Search
+            </p>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Find entity..."
+              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+
+          {/* Entity type filter */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Entity types
+            </p>
+            <div className="space-y-1.5">
+              {ALL_ENTITY_TYPES.map((type) => (
+                <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={activeTypes.has(type)}
+                    onChange={() => toggleType(type)}
+                    className="accent-primary"
+                  />
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: TYPE_COLORS[type] }}
+                  />
+                  <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ---- Graph area ---- */}
+        <div
+          style={{ position: "absolute", left: SIDEBAR_W, top: 0, right: 0, bottom: 0 }}
+        >
+          {/* State overlays — all use absolute fill so they sit in the same space */}
+
+          {noDocSelected && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
+              <Network size={40} className="text-muted-foreground/40" />
+              <p className="text-base font-semibold text-foreground">No document selected</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Choose a document from the dropdown on the left to explore its knowledge graph.
+              </p>
+            </div>
+          )}
+
+          {!noDocSelected && isLoading && (
+            <div className="absolute inset-0 flex flex-col gap-4 p-6">
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="flex-1 w-full rounded-lg" />
+            </div>
+          )}
+
+          {!noDocSelected && !isLoading && isError && (
+            <div className="absolute inset-0 flex items-center justify-center p-6">
+              <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
+                <p className="font-medium">Failed to load knowledge graph</p>
+                <button
+                  onClick={() => void refetch()}
+                  className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showEmpty && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
+              <Network size={40} className="text-muted-foreground/40" />
+              <p className="text-base font-semibold text-foreground">No knowledge graph yet</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Ingest a document first — entities and relationships will appear here.
+              </p>
+            </div>
+          )}
+
+          {showAllHidden && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
+              <Network size={40} className="text-muted-foreground/40" />
+              <p className="text-base font-semibold text-foreground">All entity types hidden</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                {data!.nodes.length} {data!.nodes.length === 1 ? "entity" : "entities"} found —
+                enable at least one entity type in the filter to see the graph.
+              </p>
+            </div>
+          )}
+
+          {/* The actual sigma canvas div — always rendered so canvasRef is always populated.
+              Sigma mounts into this div via useEffect above. */}
+          <div
+            ref={canvasRef}
+            style={{ width: "100%", height: "100%" }}
+          />
+
+          {/* Camera controls */}
+          {filteredGraph && filteredGraph.order > 0 && (
+            <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+              <button
+                onClick={zoomIn}
+                className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
+                title="Zoom in"
+              >
+                <Plus size={14} />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
+                title="Zoom out"
+              >
+                <Minus size={14} />
+              </button>
+              <button
+                onClick={resetCamera}
+                className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
+                title="Fit to screen"
+              >
+                <Maximize2 size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* Node click popover */}
+          {selectedNode && (
+            <div
+              className="fixed z-50 rounded-lg border border-border bg-background shadow-lg p-3 min-w-[180px]"
+              style={{ left: selectedNode.screenX + 8, top: selectedNode.screenY - 60 }}
+            >
+              <div className="flex items-center gap-2 mb-1.5">
+                <span
+                  className="inline-block h-2 w-2 rounded-full flex-shrink-0"
+                  style={{
+                    backgroundColor: TYPE_COLORS[selectedNode.type as EntityType] ?? DEFAULT_COLOR,
+                  }}
+                />
+                <span className="text-xs text-muted-foreground font-medium">{selectedNode.type}</span>
+              </div>
+              <p className="text-sm font-semibold text-foreground capitalize mb-1">
+                {selectedNode.label}
+              </p>
+              <p className="text-xs text-muted-foreground mb-2">
+                Mentions: {selectedNode.frequency}
+              </p>
+              <button
+                onClick={() => {
+                  setSelectedNode(null)
+                  setActiveDocument(null)
+                  navigate("/")
+                }}
+                className="text-xs text-primary underline hover:no-underline"
+              >
+                Find in document
+              </button>
+            </div>
+          )}
+
+          {/* Edge hover tooltip */}
+          {edgeTooltip && (
+            <div className="absolute bottom-16 right-4 rounded bg-foreground px-2 py-1 text-xs text-background z-10">
+              {edgeTooltip}
+            </div>
           )}
         </div>
-
-        {/* Scope toggle */}
-        <div>
-          <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Scope
-          </p>
-          <div className="flex rounded-md border border-border overflow-hidden text-xs">
-            {(["document", "all"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => {
-                  setScope(s)
-                  void queryClient.invalidateQueries({ queryKey })
-                }}
-                className={`flex-1 py-1.5 capitalize transition-colors ${
-                  scope === s
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                {s === "document" ? "This doc" : "All docs"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Search */}
-        <div>
-          <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Search
-          </p>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Find entity..."
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-
-        {/* Entity type filter */}
-        <div>
-          <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Entity types
-          </p>
-          <div className="space-y-1.5">
-            {ALL_ENTITY_TYPES.map((type) => (
-              <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={activeTypes.has(type)}
-                  onChange={() => toggleType(type)}
-                  className="accent-primary"
-                />
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: TYPE_COLORS[type] }}
-                />
-                <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
-              </label>
-            ))}
-          </div>
-        </div>
       </div>
-
-      {/* Graph area */}
-      <div className="relative flex-1 overflow-hidden">
-        {filteredGraph && (
-          <SigmaContainer
-            graph={filteredGraph}
-            style={{ height: "100%", width: "100%" }}
-            settings={{
-              renderEdgeLabels: false,
-              defaultEdgeColor: "#e2e8f0",
-              labelSize: 12,
-              labelWeight: "normal",
-            }}
-          >
-            <GraphController
-              search={search}
-              onNodeClick={handleNodeClick}
-              onEdgeHover={setEdgeTooltip}
-            />
-            <CameraControls />
-          </SigmaContainer>
-        )}
-
-        {/* Node click popover */}
-        {selectedNode && (
-          <div
-            className="fixed z-50 rounded-lg border border-border bg-background shadow-lg p-3 min-w-[180px]"
-            style={{ left: selectedNode.screenX + 8, top: selectedNode.screenY - 60 }}
-          >
-            <div className="flex items-center gap-2 mb-1.5">
-              <span
-                className="inline-block h-2 w-2 rounded-full flex-shrink-0"
-                style={{
-                  backgroundColor: TYPE_COLORS[selectedNode.type as EntityType] ?? DEFAULT_COLOR,
-                }}
-              />
-              <span className="text-xs text-muted-foreground font-medium">{selectedNode.type}</span>
-            </div>
-            <p className="text-sm font-semibold text-foreground capitalize mb-1">
-              {selectedNode.label}
-            </p>
-            <p className="text-xs text-muted-foreground mb-2">
-              Mentions: {selectedNode.frequency}
-            </p>
-            <button
-              onClick={() => {
-                setSelectedNode(null)
-                setActiveDocument(null)
-                navigate("/")
-              }}
-              className="text-xs text-primary underline hover:no-underline"
-            >
-              Find in document
-            </button>
-          </div>
-        )}
-
-        {/* Edge hover tooltip */}
-        {edgeTooltip && (
-          <div className="absolute bottom-16 right-4 rounded bg-foreground px-2 py-1 text-xs text-background z-10">
-            {edgeTooltip}
-          </div>
-        )}
-      </div>
-    </div>
+    </VizErrorBoundary>
   )
 }
