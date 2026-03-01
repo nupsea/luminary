@@ -326,7 +326,9 @@ async def ingest_document(
                 # But backfill any missing pre-generated summaries in the background
                 # (handles docs ingested before summarization was added, or where the
                 # background task was GC'd before completing all modes).
-                from app.services.summarizer import PREGENERATE_MODES, get_summarization_service  # noqa: PLC0415
+                from app.services.summarizer import (  # noqa: PLC0415
+                    PREGENERATE_MODES,
+                )
                 async with get_session_factory()() as _s:
                     existing_modes = set(
                         row[0] for row in (await _s.execute(
@@ -335,7 +337,10 @@ async def ingest_document(
                     )
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
-                    from app.workflows.ingestion import _background_tasks, _run_pregenerate  # noqa: PLC0415
+                    from app.workflows.ingestion import (  # noqa: PLC0415
+                        _background_tasks,
+                        _run_pregenerate,
+                    )
                     task = asyncio.create_task(_run_pregenerate(existing.id))
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
