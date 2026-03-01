@@ -25,9 +25,11 @@ QA_SYSTEM_PROMPT = (
     "Answer only using the provided context. "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
-    'After your answer, output JSON: '
+    "Write your prose answer first. "
+    "Then on a new line output ONLY this JSON (no prose inside the JSON, "
+    "do not repeat the answer): "
     '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}.'
+    '"confidence":"high|medium|low"}'
 )
 
 
@@ -46,30 +48,50 @@ def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     """Extract (answer_text, citations, confidence) from the full LLM response.
 
-    The LLM appends a JSON block like ``{ "citations": [...], "confidence": "..." }``
-    after the prose answer, sometimes preceded by a literal "JSON:" label.
-    Uses a regex to locate the opening brace of that block regardless of spacing.
+    Handles two LLM output styles:
+      Style A (preferred): [prose] {"citations": [...], "confidence": "..."}
+      Style B (mistral fallback): [prose] {"answer": "...", "citations": [...], "confidence": "..."}
+
+    In Style B the answer is extracted from the JSON's "answer" key so the
+    prose text field never contains raw JSON.
     """
-    # Match the last occurrence of a JSON object that starts with a "citations" key,
-    # tolerating any whitespace between { and "citations".
-    pattern = re.compile(r'\{\s*"citations"\s*:', re.DOTALL)
-    matches = list(pattern.finditer(full_text))
-    if not matches:
+    # Search for the last JSON block that opens with "citations" (Style A) or
+    # "answer" (Style B).  Try "citations" first; fall back to "answer".
+    for key_pattern in (r'\{\s*"citations"\s*:', r'\{\s*"answer"\s*:'):
+        matches = list(re.finditer(key_pattern, full_text, re.DOTALL))
+        if matches:
+            idx = matches[-1].start()
+            break
+    else:
         return full_text.strip(), [], "low"
 
-    idx = matches[-1].start()
-    # Strip the trailing "JSON:" label the LLM sometimes emits before the block
-    answer = re.sub(r"[Jj][Ss][Oo][Nn]\s*:\s*$", "", full_text[:idx]).strip()
     json_text = full_text[idx:]
+    parsed: dict = {}
     try:
         parsed = json.loads(json_text)
-        citations: list[dict] = parsed.get("citations", [])
-        confidence: str = parsed.get("confidence", "low")
     except json.JSONDecodeError:
-        citations = []
-        confidence = "low"
+        # Bracket extraction: trim to the last closing brace
+        end = json_text.rfind("}")
+        if end != -1:
+            try:
+                parsed = json.loads(json_text[: end + 1])
+            except json.JSONDecodeError:
+                pass
 
-    return answer, citations, confidence
+    citations: list[dict] = parsed.get("citations", [])
+    confidence: str = parsed.get("confidence", "low")
+
+    # Style B: answer is inside the JSON — use it directly
+    if "answer" in parsed and isinstance(parsed["answer"], str):
+        answer = parsed["answer"].strip()
+        return answer, citations, confidence
+
+    # Style A: answer is the prose before the JSON block
+    prose = full_text[:idx]
+    # Strip trailing "JSON:" / "Here is a JSON response:" labels the LLM emits
+    prose = re.sub(r"\s*[Hh]ere\s+is\s+(a\s+)?[Jj][Ss][Oo][Nn].*?:\s*$", "", prose)
+    prose = re.sub(r"[Jj][Ss][Oo][Nn]\s*:\s*$", "", prose)
+    return prose.strip(), citations, confidence
 
 
 class QAService:
