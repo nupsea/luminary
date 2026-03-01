@@ -333,3 +333,79 @@ def test_vector_search_filters_by_document_id(monkeypatch):
     mock_search.where.assert_called_once()
     where_arg = mock_search.where.call_args[0][0]
     assert "doc_abc" in where_arg
+
+
+# ---------------------------------------------------------------------------
+# _diversify unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_diversify_no_op_when_already_diverse():
+    """_diversify returns top-k unchanged when candidates span many sections."""
+    from app.services.retriever import _diversify
+
+    chunks = [
+        ScoredChunk(f"c{i}", "d", f"t{i}", f"Section {i}", 0, 1.0 - i * 0.1, "vector")
+        for i in range(10)
+    ]
+    # 10 different headings → concentration = 0.1 ≤ 0.6 → no reorder
+    result = _diversify(chunks, k=5)
+    assert len(result) == 5
+    assert result[0].chunk_id == "c0"
+
+
+def test_diversify_round_robin_when_clustered():
+    """_diversify reorders when >60% of top-k chunks share the same section."""
+    from app.services.retriever import _diversify
+
+    chunks = [
+        ScoredChunk(f"a{i}", "d", f"text a{i}", "Chapter 18", 0, 1.0 - i * 0.05, "vector")
+        for i in range(8)
+    ] + [
+        ScoredChunk(f"b{i}", "d", f"text b{i}", "Chapter 1", 0, 0.3 - i * 0.05, "vector")
+        for i in range(2)
+    ]
+    # Without diversity, top-5 are all Chapter 18 (concentration = 1.0)
+    result = _diversify(chunks, k=5)
+
+    headings = [c.section_heading for c in result]
+    assert "Chapter 18" in headings
+    assert "Chapter 1" in headings
+    assert len(result) == 5
+
+
+def test_diversify_fewer_candidates_than_k():
+    """_diversify returns all candidates when fewer than k."""
+    from app.services.retriever import _diversify
+
+    chunks = [
+        ScoredChunk(f"c{i}", "d", f"t{i}", "Section A", 0, 0.5, "vector")
+        for i in range(3)
+    ]
+    result = _diversify(chunks, k=10)
+    assert len(result) == 3
+
+
+def test_diversify_round_robin_visits_sections_by_relevance():
+    """_diversify picks from more-relevant sections first in round-robin."""
+    from app.services.retriever import _diversify
+
+    # Section B has higher scores than Section A
+    chunks = [
+        ScoredChunk("b0", "d", "text b0", "Section B", 0, 0.9, "vector"),
+        ScoredChunk("b1", "d", "text b1", "Section B", 0, 0.8, "vector"),
+        ScoredChunk("b2", "d", "text b2", "Section B", 0, 0.7, "vector"),
+        ScoredChunk("b3", "d", "text b3", "Section B", 0, 0.6, "vector"),
+        ScoredChunk("b4", "d", "text b4", "Section B", 0, 0.55, "vector"),
+        ScoredChunk("a0", "d", "text a0", "Section A", 0, 0.5, "vector"),
+        ScoredChunk("a1", "d", "text a1", "Section A", 0, 0.4, "vector"),
+    ]
+    # Top-5 all from Section B → concentration = 1.0 → diversity kicks in
+    result = _diversify(chunks, k=4)
+
+    assert len(result) == 4
+    # Section B (most relevant) leads each round
+    assert result[0].chunk_id == "b0"
+    assert result[1].chunk_id == "a0"
+    assert result[2].chunk_id == "b1"
+    assert result[3].chunk_id == "a1"

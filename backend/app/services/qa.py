@@ -25,9 +25,7 @@ QA_SYSTEM_PROMPT = (
     "Answer only using the provided context. "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
-    "Write your prose answer first. "
-    "Then on a new line output ONLY this JSON (no prose inside the JSON, "
-    "do not repeat the answer): "
+    "Write your answer as prose. Then on a new line write this JSON: "
     '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
     '"confidence":"high|medium|low"}'
 )
@@ -46,31 +44,31 @@ def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str
 
 
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
-    """Extract (answer_text, citations, confidence) from the full LLM response.
+    """Extract (answer_text, citations, confidence) from the LLM response.
 
-    Handles two LLM output styles:
-      Style A (preferred): [prose] {"citations": [...], "confidence": "..."}
-      Style B (mistral fallback): [prose] {"answer": "...", "citations": [...], "confidence": "..."}
-
-    In Style B the answer is extracted from the JSON's "answer" key so the
-    prose text field never contains raw JSON.
+    The LLM is instructed to write prose then append a JSON citations block.
+    Two output styles are handled:
+      Style A: [prose]\\n{"citations": [...], "confidence": "..."}
+      Style B: {"answer": "...", "citations": [...], "confidence": "..."}
+               (some models embed the answer inside the JSON)
     """
-    # Search for the last JSON block that opens with "citations" (Style A) or
-    # "answer" (Style B).  Try "citations" first; fall back to "answer".
-    for key_pattern in (r'\{\s*"citations"\s*:', r'\{\s*"answer"\s*:'):
-        matches = list(re.finditer(key_pattern, full_text, re.DOTALL))
+    # Find the last JSON block containing our citations payload.
+    json_start = -1
+    for pattern in (r'\{\s*"citations"\s*:', r'\{\s*"answer"\s*:'):
+        matches = list(re.finditer(pattern, full_text, re.DOTALL))
         if matches:
-            idx = matches[-1].start()
+            json_start = matches[-1].start()
             break
-    else:
+
+    if json_start == -1:
         return full_text.strip(), [], "low"
 
-    json_text = full_text[idx:]
+    # Parse the JSON block, tolerating truncation.
     parsed: dict = {}
+    json_text = full_text[json_start:]
     try:
         parsed = json.loads(json_text)
     except json.JSONDecodeError:
-        # Bracket extraction: trim to the last closing brace
         end = json_text.rfind("}")
         if end != -1:
             try:
@@ -81,17 +79,19 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     citations: list[dict] = parsed.get("citations", [])
     confidence: str = parsed.get("confidence", "low")
 
-    # Style B: answer is inside the JSON — use it directly
+    # Style B: answer is embedded in the JSON.
     if "answer" in parsed and isinstance(parsed["answer"], str):
-        answer = parsed["answer"].strip()
-        return answer, citations, confidence
+        return parsed["answer"].strip(), citations, confidence
 
-    # Style A: answer is the prose before the JSON block
-    prose = full_text[:idx]
-    # Strip trailing "JSON:" / "Here is a JSON response:" labels the LLM emits
-    prose = re.sub(r"\s*[Hh]ere\s+is\s+(a\s+)?[Jj][Ss][Oo][Nn].*?:\s*$", "", prose)
-    prose = re.sub(r"[Jj][Ss][Oo][Nn]\s*:\s*$", "", prose)
-    return prose.strip(), citations, confidence
+    # Style A: prose precedes the JSON block.
+    prose = full_text[:json_start].strip()
+    # Strip any trailing lines that are format labels, not answer content.
+    # LLMs sometimes echo instruction fragments (e.g. "JSON:", "Here is the JSON:",
+    # "ONLY JSON (no prose ...):") — these always contain the word "json".
+    lines = prose.split("\n")
+    while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
+        lines.pop()
+    return "\n".join(lines).strip(), citations, confidence
 
 
 class QAService:

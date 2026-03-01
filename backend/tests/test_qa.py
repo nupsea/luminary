@@ -125,6 +125,61 @@ def test_split_response_malformed_json_returns_empty_citations():
     assert confidence == "low"
 
 
+def test_split_response_strips_json_label_line():
+    """LLM echoes 'JSON:' label before the JSON block — should be stripped."""
+    citations = [{"document_title": "Bio", "section_heading": "Cells", "page": 1, "excerpt": "..."}]
+    full_text = "The cell is the basic unit of life.\nJSON:\n" + json.dumps(
+        {"citations": citations, "confidence": "high"}
+    )
+    answer, _, _ = _split_response(full_text)
+    assert answer == "The cell is the basic unit of life."
+
+
+def test_split_response_strips_instruction_echo():
+    """LLM echoes the system prompt fragment as a label — should be stripped."""
+    citations: list[dict] = []
+    # Simulate mistral echoing the old system prompt instruction text
+    full_text = (
+        "ONLY JSON (no prose inside the JSON, do not repeat the answer):\n"
+        + json.dumps({"citations": citations, "confidence": "medium"})
+    )
+    answer, _, _ = _split_response(full_text)
+    assert answer == ""
+
+
+def test_split_response_strips_here_is_json_label():
+    """'Here is a JSON response:' label is stripped."""
+    citations: list[dict] = []
+    full_text = "Alice explores Wonderland.\nHere is a JSON response:\n" + json.dumps(
+        {"citations": citations, "confidence": "high"}
+    )
+    answer, _, _ = _split_response(full_text)
+    assert answer == "Alice explores Wonderland."
+
+
+def test_split_response_style_b_answer_in_json():
+    """Style B: LLM puts answer inside the JSON object."""
+    citations = [{"document_title": "Gita", "section_heading": "Ch1", "page": 1, "excerpt": "..."}]
+    full_text = json.dumps(
+        {"answer": "Arjuna questions his duty.", "citations": citations, "confidence": "medium"}
+    )
+    answer, parsed_citations, confidence = _split_response(full_text)
+    assert answer == "Arjuna questions his duty."
+    assert len(parsed_citations) == 1
+    assert confidence == "medium"
+
+
+def test_split_response_prose_with_colon_not_stripped():
+    """A prose line ending with a colon but no 'json' word is kept intact."""
+    citations: list[dict] = []
+    # "The main themes are:" is legitimate prose — it should NOT be stripped
+    full_text = "The main themes are:\n- Adventure\n- Mystery.\n" + json.dumps(
+        {"citations": citations, "confidence": "medium"}
+    )
+    answer, _, _ = _split_response(full_text)
+    assert "main themes" in answer
+
+
 # ---------------------------------------------------------------------------
 # _build_context — unit tests
 # ---------------------------------------------------------------------------

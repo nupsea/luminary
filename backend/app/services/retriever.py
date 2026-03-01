@@ -1,5 +1,6 @@
 import logging
 import re
+from collections import defaultdict
 from typing import Literal
 
 from sqlalchemy import text
@@ -11,6 +12,63 @@ from app.types import ScoredChunk
 logger = logging.getLogger(__name__)
 
 RRF_K = 60
+# Fraction of top-k chunks from one section that triggers diversity re-ranking.
+_DIVERSITY_THRESHOLD = 0.6
+
+
+def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
+    """Section-diversity re-ranking for broad queries.
+
+    When more than ``_DIVERSITY_THRESHOLD`` of the top-k candidates share the
+    same section_heading the results are biased toward one part of the document.
+    In that case, switch to a round-robin pick across sections (ordered by each
+    section's best RRF score) so the final k chunks span the document breadth.
+
+    Falls back to normal top-k when results are already diverse.
+    """
+    if len(candidates) <= k:
+        return candidates
+
+    top_k = candidates[:k]
+    headings = [c.section_heading or "" for c in top_k]
+    if headings:
+        most_common_count = max(headings.count(h) for h in set(headings))
+        concentration = most_common_count / len(headings)
+    else:
+        concentration = 0.0
+
+    if concentration <= _DIVERSITY_THRESHOLD:
+        return top_k
+
+    # Group all candidates by section, preserving RRF-score order within each group.
+    buckets: dict[str, list[ScoredChunk]] = defaultdict(list)
+    for chunk in candidates:
+        buckets[chunk.section_heading or ""].append(chunk)
+
+    # Visit sections in order of their highest-scoring chunk (most relevant first).
+    ordered_sections = sorted(buckets, key=lambda h: buckets[h][0].score, reverse=True)
+    indices: dict[str, int] = {h: 0 for h in ordered_sections}
+
+    result: list[ScoredChunk] = []
+    while len(result) < k:
+        added_this_round = False
+        for heading in ordered_sections:
+            if len(result) >= k:
+                break
+            idx = indices[heading]
+            if idx < len(buckets[heading]):
+                result.append(buckets[heading][idx])
+                indices[heading] += 1
+                added_this_round = True
+        if not added_this_round:
+            break
+
+    logger.debug(
+        "retrieval diversity: concentration=%.2f → round-robin across %d sections",
+        concentration,
+        len(ordered_sections),
+    )
+    return result
 
 
 def _sanitize_fts_query(query: str) -> str:
@@ -137,7 +195,7 @@ class HybridRetriever:
         keyword_results: list[ScoredChunk],
         k: int = 10,
     ) -> list[ScoredChunk]:
-        """Reciprocal Rank Fusion — combine and re-rank vector + keyword results."""
+        """Reciprocal Rank Fusion — combine, re-rank, then apply section diversity."""
         scores: dict[str, float] = {}
         meta: dict[str, ScoredChunk] = {}
         sources: dict[str, set[str]] = {}
@@ -152,16 +210,18 @@ class HybridRetriever:
             meta.setdefault(chunk.chunk_id, chunk)
             sources.setdefault(chunk.chunk_id, set()).add("keyword")
 
-        sorted_ids = sorted(scores, key=lambda cid: scores[cid], reverse=True)[:k]
+        # Build ALL candidates sorted by RRF score (not truncated yet).
+        # _diversify will pick the final k with section breadth in mind.
+        sorted_ids = sorted(scores, key=lambda cid: scores[cid], reverse=True)
 
-        merged: list[ScoredChunk] = []
+        candidates: list[ScoredChunk] = []
         for cid in sorted_ids:
             chunk = meta[cid]
             src_set = sources[cid]
             source: Literal["vector", "keyword", "both"] = (
                 "both" if len(src_set) > 1 else next(iter(src_set))  # type: ignore[assignment]
             )
-            merged.append(
+            candidates.append(
                 ScoredChunk(
                     chunk_id=chunk.chunk_id,
                     document_id=chunk.document_id,
@@ -172,7 +232,8 @@ class HybridRetriever:
                     source=source,
                 )
             )
-        return merged
+
+        return _diversify(candidates, k)
 
     async def retrieve(
         self,
