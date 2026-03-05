@@ -25,6 +25,7 @@ from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
 from app.routers.search import router as search_router
+from app.routers.sections import router as sections_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.services.graph import get_graph_service
@@ -103,6 +104,7 @@ app.include_router(monitoring_router)
 app.include_router(notes_router)
 app.include_router(qa_router)
 app.include_router(search_router)
+app.include_router(sections_router)
 app.include_router(study_router)
 app.include_router(summarize_router)
 

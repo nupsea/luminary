@@ -27,6 +27,8 @@ class DocumentModel(Base):
     # parsing|chunking|embedding|complete|error
     stage: Mapped[str] = mapped_column(String, default="parsing")
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # Number of detected sections/chapters (set during book ingestion).
+    chapter_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

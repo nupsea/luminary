@@ -80,6 +80,7 @@ class DocumentListItem(BaseModel):
     summary_one_sentence: str | None
     flashcard_count: int
     learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
+    chapter_count: int | None
 
 
 class DocumentListResponse(BaseModel):
@@ -263,6 +264,7 @@ async def list_documents(
                 learning_status=_derive_learning_status(
                     study_session_count, flashcard_count, summary_count
                 ),
+                chapter_count=doc.chapter_count,
             )
         )
 

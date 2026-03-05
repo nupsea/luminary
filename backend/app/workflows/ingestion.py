@@ -231,6 +231,103 @@ def _chunk_code_file(
     return chunks, chunk_metas
 
 
+async def _chunk_book(
+    state: IngestionState, pd: dict | None, doc_id: str
+) -> IngestionState:
+    """Book-specific chunking: process each section independently and link chunks to sections.
+
+    This ensures:
+    - No chunk crosses a section (chapter) boundary.
+    - Every chunk has section_id set to its parent SectionModel.
+    - DocumentModel.chapter_count is set to the number of detected sections.
+    - Flat books (no sections in parsed_document) get a single 'Full Text' section.
+    """
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    cfg = CHUNK_CONFIGS["book"]
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
+    )
+
+    raw_sections = pd["sections"] if pd else []
+    # Flat book: no sections detected → create a single "Full Text" section
+    if not raw_sections:
+        raw_text = pd["raw_text"] if pd else ""
+        raw_sections = [
+            {
+                "heading": "Full Text",
+                "level": 1,
+                "text": raw_text,
+                "page_start": 0,
+                "page_end": 0,
+            }
+        ]
+
+    chunks: list[dict] = []
+    async with get_session_factory()() as session:
+        section_models: list[SectionModel] = []
+        for s_idx, s in enumerate(raw_sections):
+            section_model = SectionModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                level=s.get("level", 1),
+                page_start=s.get("page_start", 0),
+                page_end=s.get("page_end", 0),
+                section_order=s_idx,
+                preview=s.get("text", "")[:300],
+            )
+            session.add(section_model)
+            section_models.append(section_model)
+
+        # Flush to assign IDs before linking chunks
+        await session.flush()
+
+        chunk_idx = 0
+        for section_model, s in zip(section_models, raw_sections, strict=False):
+            section_text = s.get("text", "")
+            if not section_text.strip():
+                continue
+            for text in splitter.split_text(section_text):
+                chunk_id = str(uuid.uuid4())
+                chunk = ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=section_model.id,
+                    text=text,
+                    token_count=len(text.split()),
+                    page_number=s.get("page_start", 0),
+                    speaker=None,
+                    chunk_index=chunk_idx,
+                )
+                session.add(chunk)
+                chunks.append(
+                    {"id": chunk_id, "document_id": doc_id, "text": text, "index": chunk_idx}
+                )
+                chunk_idx += 1
+
+        # Store chapter count on the document
+        chapter_count = len(section_models)
+        await session.execute(
+            _update(DocumentModel)
+            .where(DocumentModel.id == doc_id)
+            .values(chapter_count=chapter_count)
+        )
+        await session.commit()
+
+    logger.info(
+        "Book chunked with section linking",
+        extra={
+            "doc_id": doc_id,
+            "num_chunks": len(chunks),
+            "chapter_count": chapter_count,
+        },
+    )
+    return {**state, "chunks": chunks, "status": "embedding"}
+
+
 async def chunk_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
     with trace_ingestion_node("chunk", state):
@@ -272,6 +369,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                     extra={"doc_id": doc_id, "num_chunks": len(chunks)},
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
+
+            if content_type == "book":
+                return await _chunk_book(state, pd, doc_id)
 
             cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
             splitter = RecursiveCharacterTextSplitter(
