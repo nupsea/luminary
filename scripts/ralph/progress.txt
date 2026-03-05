@@ -715,3 +715,23 @@ Commit: 7735569
 - `DocumentModel.chapter_count` exposed via `DocumentListItem` for use by chapter sidebar (S60)
 - `has_summary` is always False (placeholder until section-level summaries implemented)
 ---
+
+## S56 — Conversation ingestion: speaker-turn chunking, roster, timeline (2026-03-05)
+Status: DONE
+Commit: 6a52c55
+
+### What was built
+- `app/services/conversation_chunker.py` — ConversationChunker: detect(), chunk(), extract_roster(), extract_timeline()
+- detect() matches >= 5 lines in first 60 using timestamp, name-colon, or name-arrow patterns
+- chunk() groups consecutive same-speaker lines into turns, accumulates to 450 tokens, carries 1 overlap turn
+- extract_roster() parses chunk texts for speaker lines to count per-speaker turns
+- extract_timeline() regex-scans for timestamps and returns first/last
+- `_chunk_conversation()` in ingestion.py: uses chunker if detect() → True, else fallback to RecursiveCharacterTextSplitter; sets chunk.speaker; writes conversation_metadata to DocumentModel
+- DocumentModel.conversation_metadata (JSON nullable) + migration DDL
+- GET /documents/{id}/conversation endpoint in documents router
+- 12 tests in test_conversation_chunker.py
+
+### Key learnings
+- extract_roster must parse speaker lines from chunk.text, not just count chunk.speaker — short convos fit in one chunk so chunk.speaker alone misses secondary speakers
+- Pattern order matters: try timestamp pattern before name-colon to avoid misparse
+---

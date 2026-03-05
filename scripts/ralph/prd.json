@@ -1490,7 +1490,7 @@
         "Fallback to RecursiveCharacterTextSplitter when speaker format not detected",
         "uv run pytest tests/test_conversation_chunker.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S57",
