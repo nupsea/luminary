@@ -326,6 +326,11 @@ export default function Learning() {
     tagsMutation.mutate({ id, tags })
   }
 
+  function handleContentTypeChange(_id: string, _contentType: ContentType) {
+    void queryClient.invalidateQueries({ queryKey: ["documents"] })
+    void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+  }
+
   function handleSelect(id: string, sel: boolean) {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -484,6 +489,7 @@ export default function Learning() {
                           onTagClick={handleTagClick}
                           onTagsChange={handleTagsChange}
                           onDelete={!selectMode ? handleDeleteDocument : undefined}
+                          onContentTypeChange={handleContentTypeChange}
                           selected={selectedIds.has(doc.id)}
                           onSelect={selectMode ? handleSelect : undefined}
                         />
@@ -528,6 +534,7 @@ export default function Learning() {
                         onTagClick={handleTagClick}
                         onTagsChange={handleTagsChange}
                         onDelete={!selectMode ? handleDeleteDocument : undefined}
+                        onContentTypeChange={handleContentTypeChange}
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}
                       />

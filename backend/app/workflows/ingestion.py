@@ -3,7 +3,7 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
@@ -14,6 +14,8 @@ from app.services.parser import DocumentParser
 from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
+
+ContentType = Literal["book", "conversation", "notes"]
 
 _parser = DocumentParser()
 
@@ -115,6 +117,14 @@ def parse_node(state: IngestionState) -> IngestionState:
 
 async def classify_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
+    # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
+    # Classification only runs for legacy paths where content_type is unknown.
+    if state.get("content_type") is not None:
+        logger.info(
+            "classify_node: skipping (user-provided content_type)",
+            extra={"doc_id": state["document_id"], "content_type": state["content_type"]},
+        )
+        return {**state, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
             pd = state["parsed_document"]
@@ -604,20 +614,22 @@ def _build_graph():
 ingestion_graph = _build_graph()
 
 
-async def run_ingestion(document_id: str, file_path: str, format: str) -> None:
+async def run_ingestion(
+    document_id: str, file_path: str, format: str, content_type: str | None = None
+) -> None:
     initial_state: IngestionState = {
         "document_id": document_id,
         "file_path": file_path,
         "format": format,
         "parsed_document": None,
-        "content_type": None,
+        "content_type": content_type,
         "chunks": None,
         "status": "parsing",
         "error": None,
     }
     logger.info(
         "Ingestion task started",
-        extra={"document_id": document_id, "format": format},
+        extra={"document_id": document_id, "format": format, "content_type": content_type},
     )
     await _update_stage(document_id, "parsing")
     with trace_chain(

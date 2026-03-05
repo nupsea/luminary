@@ -21,8 +21,26 @@ const STAGE_LABELS: Record<string, string> = {
   complete: "Complete!",
 }
 
+const CONTENT_TYPE_OPTIONS = [
+  {
+    value: "book" as const,
+    label: "Book",
+    description: "For novels, non-fiction, full-length documents",
+  },
+  {
+    value: "conversation" as const,
+    label: "Conversation",
+    description: "For chat exports, interviews, meeting transcripts",
+  },
+  {
+    value: "notes" as const,
+    label: "Notes",
+    description: "For personal notes, articles, papers, web clips",
+  },
+]
+
+type ContentTypeValue = "book" | "conversation" | "notes"
 type DialogTab = "upload" | "paste"
-type ContentTypeOption = "auto" | "book" | "paper" | "conversation" | "notes"
 type Mode = "idle" | "uploading" | "processing" | "success" | "error"
 
 interface StatusResponse {
@@ -37,9 +55,10 @@ interface UploadDialogProps {
   onClose: () => void
 }
 
-async function submitFile(file: File): Promise<string> {
+async function submitFile(file: File, contentType: ContentTypeValue): Promise<string> {
   const form = new FormData()
   form.append("file", file)
+  form.append("content_type", contentType)
   const res = await fetch(`${API_BASE}/documents/ingest`, { method: "POST", body: form })
   if (!res.ok) throw new Error("Upload failed")
   const data = (await res.json()) as { document_id: string }
@@ -54,9 +73,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [tab, setTab] = useState<DialogTab>("upload")
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
-  const [pasteType, setPasteType] = useState<ContentTypeOption>("auto")
+  const [pasteType, setPasteType] = useState<ContentTypeValue | null>(null)
+  const [typeError, setTypeError] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Upload progress state
@@ -99,9 +120,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     clearPolling()
     clearAutoClose()
     setSelectedFile(null)
+    setUploadType(null)
     setPasteLabel("")
     setPasteText("")
-    setPasteType("auto")
+    setPasteType(null)
+    setTypeError(false)
     setTab("upload")
     setMode("idle")
     setProgress(0)
@@ -216,7 +239,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }, 2000)
   }
 
-  async function doSubmit(file: File, title: string) {
+  async function doSubmit(file: File, title: string, contentType: ContentTypeValue) {
     const startTime = Date.now()
     uploadStartRef.current = startTime
     const sizeMB = file.size / (1024 * 1024)
@@ -225,10 +248,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setProgress(0)
     setStageLabel("Uploading...")
     setDocTitle(title)
-    logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2) })
+    logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2), content_type: contentType })
 
     try {
-      const docId = await submitFile(file)
+      const docId = await submitFile(file, contentType)
       logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId })
       toast.loading("Processing document...", { id: docId })
       setMode("processing")
@@ -246,23 +269,33 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function handleUploadSubmit() {
     if (!selectedFile) return
+    if (!uploadType) {
+      setTypeError(true)
+      return
+    }
+    setTypeError(false)
     const title = selectedFile.name.replace(/\.[^/.]+$/, "")
-    await doSubmit(selectedFile, title)
+    await doSubmit(selectedFile, title, uploadType)
   }
 
   async function handlePasteSubmit() {
     if (!pasteLabel.trim() || !pasteText.trim()) return
+    if (!pasteType) {
+      setTypeError(true)
+      return
+    }
+    setTypeError(false)
     const filename =
       pasteLabel.trim().replace(/[^a-z0-9_-]/gi, "_").toLowerCase() + ".txt"
     const file = new File([pasteText], filename, { type: "text/plain" })
-    await doSubmit(file, pasteLabel.trim())
+    await doSubmit(file, pasteLabel.trim(), pasteType)
   }
 
   async function handleRetry() {
     setErrorMessage("")
-    if (tab === "upload" && selectedFile) {
+    if (tab === "upload" && selectedFile && uploadType) {
       await handleUploadSubmit()
-    } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim()) {
+    } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim() && pasteType) {
       await handlePasteSubmit()
     } else {
       setMode("idle")
@@ -272,6 +305,55 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   if (!open) return null
 
   const isActive = mode === "uploading" || mode === "processing"
+
+  // Shared RadioGroup for content type selection
+  function ContentTypeRadioGroup({
+    value,
+    onChange,
+  }: {
+    value: ContentTypeValue | null
+    onChange: (v: ContentTypeValue) => void
+  }) {
+    return (
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-foreground">
+          Document type <span className="text-red-500">*</span>
+        </label>
+        <div className="space-y-1.5">
+          {CONTENT_TYPE_OPTIONS.map((opt) => (
+            <label
+              key={opt.value}
+              className={cn(
+                "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors",
+                value === opt.value
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50",
+              )}
+            >
+              <input
+                type="radio"
+                name="content_type"
+                value={opt.value}
+                checked={value === opt.value}
+                onChange={() => {
+                  onChange(opt.value)
+                  setTypeError(false)
+                }}
+                className="mt-0.5 accent-primary"
+              />
+              <div>
+                <p className="text-sm font-medium text-foreground">{opt.label}</p>
+                <p className="text-xs text-muted-foreground">{opt.description}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+        {typeError && (
+          <p className="text-xs text-red-600">Please select a document type</p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -380,6 +462,12 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
             {tab === "upload" ? (
               <div className="space-y-4">
+                {/* Content type selector */}
+                <ContentTypeRadioGroup
+                  value={uploadType}
+                  onChange={setUploadType}
+                />
+
                 {/* Drop zone */}
                 <div
                   onDragOver={(e) => {
@@ -421,7 +509,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handleUploadSubmit()}
-                  disabled={!selectedFile}
+                  disabled={!selectedFile || !uploadType}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Ingest
@@ -429,6 +517,12 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Content type selector */}
+                <ContentTypeRadioGroup
+                  value={pasteType}
+                  onChange={setPasteType}
+                />
+
                 <div>
                   <label className="mb-1 block text-sm font-medium text-foreground">
                     Label <span className="text-red-500">*</span>
@@ -440,23 +534,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     placeholder="Document title"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-foreground">
-                    Content type
-                  </label>
-                  <select
-                    value={pasteType}
-                    onChange={(e) => setPasteType(e.target.value as ContentTypeOption)}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="auto">Auto-detect</option>
-                    <option value="book">Book</option>
-                    <option value="paper">Paper</option>
-                    <option value="conversation">Conversation</option>
-                    <option value="notes">Notes</option>
-                  </select>
                 </div>
 
                 <div>
@@ -474,7 +551,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handlePasteSubmit()}
-                  disabled={!pasteLabel.trim() || !pasteText.trim()}
+                  disabled={!pasteLabel.trim() || !pasteText.trim() || !pasteType}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Ingest

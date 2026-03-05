@@ -163,6 +163,7 @@ async def test_ingest_endpoint_returns_processing(test_db, tmp_path):
             response = await client.post(
                 "/documents/ingest",
                 files={"file": ("sample.txt", fh, "text/plain")},
+                data={"content_type": "notes"},
             )
 
     assert response.status_code == 200
@@ -332,6 +333,7 @@ async def test_ingest_small_txt_classified_as_notes(test_db, tmp_path):
             response = await client.post(
                 "/documents/ingest",
                 files={"file": ("notes.txt", fh, "text/plain")},
+                data={"content_type": "notes"},
             )
 
     assert response.status_code == 200

@@ -292,6 +292,7 @@ async def test_http_upload_reaches_complete(upload_db):
             resp = await client.post(
                 "/documents/ingest",
                 files={"file": ("art_of_unix_ch1.txt", fh, "text/plain")},
+                data={"content_type": "notes"},
             )
         assert resp.status_code == 200
         body = resp.json()
@@ -328,6 +329,7 @@ async def test_http_status_schema_on_every_poll(upload_db):
             resp = await client.post(
                 "/documents/ingest",
                 files={"file": ("time_machine.txt", fh, "text/plain")},
+                data={"content_type": "book"},
             )
         assert resp.status_code == 200
         doc_id = resp.json()["document_id"]
@@ -375,6 +377,7 @@ async def test_http_corrupt_upload_terminates(upload_db):
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("corrupt.pdf", corrupt_bytes, "application/pdf")},
+            data={"content_type": "notes"},
         )
         assert resp.status_code == 200
         doc_id = resp.json()["document_id"]

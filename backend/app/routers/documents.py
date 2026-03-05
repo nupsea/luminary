@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 
@@ -28,7 +28,7 @@ from app.models import (
 from app.services.parser import DocumentParser
 from app.services.vector_store import get_lancedb_service
 from app.types import ParsedDocument, Section
-from app.workflows.ingestion import STAGE_PROGRESS, run_ingestion
+from app.workflows.ingestion import STAGE_PROGRESS, ContentType, run_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ class PatchTagsRequest(BaseModel):
 class PatchDocumentRequest(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
+    content_type: ContentType | None = None
 
 
 class SectionItem(BaseModel):
@@ -317,6 +318,7 @@ async def parse_document(
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
+    content_type: ContentType = Form(...),
     settings: Settings = Depends(get_settings),
 ):
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
@@ -382,9 +384,10 @@ async def ingest_document(
                 # Previous attempt failed — reset stage and retry ingestion on
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
+                existing.content_type = content_type
                 await session.commit()
                 asyncio.create_task(
-                    run_ingestion(existing.id, existing.file_path, existing.format)
+                    run_ingestion(existing.id, existing.file_path, existing.format, content_type)
                 )
                 logger.info(
                     "Retrying failed ingestion on existing doc",
@@ -423,7 +426,7 @@ async def ingest_document(
             id=doc_id,
             title=Path(file.filename or "upload").stem,
             format=fmt,
-            content_type="notes",
+            content_type=content_type,
             word_count=0,
             page_count=0,
             file_path=str(dest),
@@ -433,7 +436,7 @@ async def ingest_document(
         session.add(doc)
         await session.commit()
 
-    asyncio.create_task(run_ingestion(doc_id, str(dest), fmt))
+    asyncio.create_task(run_ingestion(doc_id, str(dest), fmt, content_type))
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -543,9 +546,14 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             doc.title = body.title
         if body.tags is not None:
             doc.tags = body.tags
+        if body.content_type is not None:
+            doc.content_type = body.content_type
         await session.commit()
     logger.info("Patched document", extra={"document_id": document_id})
-    return {"document_id": document_id, "updated": True}
+    response: dict = {"document_id": document_id, "updated": True}
+    if body.content_type is not None:
+        response["note"] = "Re-ingest document to apply new chunking strategy."
+    return response
 
 
 @router.patch("/{document_id}/tags")

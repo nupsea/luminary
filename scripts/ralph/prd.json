@@ -1456,7 +1456,7 @@
         "PATCH /documents/{id} updates content_type in DB",
         "uv run pytest tests/test_content_type.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S66",
