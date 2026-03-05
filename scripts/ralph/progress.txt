@@ -697,3 +697,21 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - db_module.get_session_factory() gives the async session factory for raw SQL in tests
   - pytest_plugins = ["tests.conftest_books"] loads the shared session fixture (note "tests." prefix for rootdir=backend)
 ---
+
+## S66 — Book ingestion: section-boundary chunking + chunk-to-section linking (2026-03-05)
+Status: DONE
+Commit: 7735569
+
+### What was built
+- `_chunk_book()` helper in `ingestion.py`: processes each section independently so no chunk crosses a chapter boundary
+- `ChunkModel.section_id` set on every book chunk linking to its `SectionModel`
+- `DocumentModel.chapter_count` (new nullable int column + migration) set after book ingestion
+- Flat books (no sections detected) get a synthetic "Full Text" SectionModel; all chunks link to it
+- `GET /sections/{document_id}` endpoint returns sections with accurate `chunk_count` per section
+- 4 tests in `tests/test_book_ingestion.py` covering all acceptance criteria
+
+### Key learnings
+- Use `session.flush()` before creating chunks so section PKs are available for FK references in the same transaction
+- `DocumentModel.chapter_count` exposed via `DocumentListItem` for use by chapter sidebar (S60)
+- `has_summary` is always False (placeholder until section-level summaries implemented)
+---

@@ -1473,7 +1473,7 @@
         "Flat book (no headings) creates a single 'Full Text' section with all chunks linked",
         "uv run pytest tests/test_book_ingestion.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S56",
