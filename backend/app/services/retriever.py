@@ -21,59 +21,90 @@ _EXPANSION_TYPES = {"book", "conversation", "notes"}
 _EXPANSION_SCORE_FACTOR = 0.75
 
 
-def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
-    """Section-diversity re-ranking for broad queries.
+def _round_robin(
+    candidates: list[ScoredChunk],
+    group_key: str,
+    k: int,
+    threshold: float,
+) -> list[ScoredChunk] | None:
+    """Generic round-robin diversifier over an arbitrary group key.
 
-    When more than ``_DIVERSITY_THRESHOLD`` of the top-k candidates share the
-    same section_heading the results are biased toward one part of the document.
-    In that case, switch to a round-robin pick across sections (ordered by each
-    section's best RRF score) so the final k chunks span the document breadth.
-
-    Falls back to normal top-k when results are already diverse.
+    Returns the k-capped round-robin result if the top-k candidates exceed
+    *threshold* concentration on a single group value, else returns None
+    (meaning the caller should not apply this diversifier).
     """
     if len(candidates) <= k:
-        return candidates
+        return None
 
     top_k = candidates[:k]
-    headings = [c.section_heading or "" for c in top_k]
-    if headings:
-        most_common_count = max(headings.count(h) for h in set(headings))
-        concentration = most_common_count / len(headings)
+    values = [getattr(c, group_key) or "" for c in top_k]
+    if values:
+        most_common_count = max(values.count(v) for v in set(values))
+        concentration = most_common_count / len(values)
     else:
         concentration = 0.0
 
-    if concentration <= _DIVERSITY_THRESHOLD:
-        return top_k
+    if concentration <= threshold:
+        return None  # already diverse
 
-    # Group all candidates by section, preserving RRF-score order within each group.
+    # Group all candidates by value, preserving score order within each group.
     buckets: dict[str, list[ScoredChunk]] = defaultdict(list)
     for chunk in candidates:
-        buckets[chunk.section_heading or ""].append(chunk)
+        key = getattr(chunk, group_key) or ""
+        buckets[key].append(chunk)
 
-    # Visit sections in order of their highest-scoring chunk (most relevant first).
-    ordered_sections = sorted(buckets, key=lambda h: buckets[h][0].score, reverse=True)
-    indices: dict[str, int] = {h: 0 for h in ordered_sections}
+    # Visit groups in order of their highest-scoring chunk (most relevant first).
+    ordered_groups = sorted(buckets, key=lambda v: buckets[v][0].score, reverse=True)
+    indices: dict[str, int] = {v: 0 for v in ordered_groups}
 
     result: list[ScoredChunk] = []
     while len(result) < k:
         added_this_round = False
-        for heading in ordered_sections:
+        for group in ordered_groups:
             if len(result) >= k:
                 break
-            idx = indices[heading]
-            if idx < len(buckets[heading]):
-                result.append(buckets[heading][idx])
-                indices[heading] += 1
+            idx = indices[group]
+            if idx < len(buckets[group]):
+                result.append(buckets[group][idx])
+                indices[group] += 1
                 added_this_round = True
         if not added_this_round:
             break
 
     logger.debug(
-        "retrieval diversity: concentration=%.2f → round-robin across %d sections",
+        "retrieval diversity (%s): concentration=%.2f → round-robin across %d groups",
+        group_key,
         concentration,
-        len(ordered_sections),
+        len(ordered_groups),
     )
     return result
+
+
+def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
+    """Speaker-then-section diversity re-ranking for broad queries.
+
+    1. If any chunk has speaker != None, apply speaker-diversity first.
+       When > _DIVERSITY_THRESHOLD of top-k share the same speaker, do
+       round-robin across speakers.
+    2. Else fall through to section-diversity (same logic on section_heading).
+    3. Falls back to normal top-k when results are already diverse.
+    """
+    if len(candidates) <= k:
+        return candidates
+
+    # Speaker-diversity path (conversation documents)
+    has_speaker = any(c.speaker is not None for c in candidates)
+    if has_speaker:
+        speaker_result = _round_robin(candidates, "speaker", k, _DIVERSITY_THRESHOLD)
+        if speaker_result is not None:
+            return speaker_result
+        return candidates[:k]
+
+    # Section-diversity path (books / notes)
+    section_result = _round_robin(candidates, "section_heading", k, _DIVERSITY_THRESHOLD)
+    if section_result is not None:
+        return section_result
+    return candidates[:k]
 
 
 def _sanitize_fts_query(query: str) -> str:
