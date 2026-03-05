@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
+from app.services.graph import get_graph_service
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
 from app.telemetry import trace_chain, trace_retrieval
@@ -19,6 +20,58 @@ from app.types import ScoredChunk
 logger = logging.getLogger(__name__)
 
 NOT_FOUND_SENTINEL = "NOT_FOUND_IN_CONTENT"
+
+# ---------------------------------------------------------------------------
+# Query rewriting — resolve vague pronouns via Kuzu entity lookup
+# ---------------------------------------------------------------------------
+
+VAGUE_REF_RE = re.compile(
+    r"\b(they|he|she|it|them|the author|the speaker|the protagonist|"
+    r"the character|the narrator|the writer|both|the two|someone|anyone)\b",
+    re.IGNORECASE,
+)
+
+_REWRITE_SYSTEM = (
+    "Rewrite the question replacing vague references with specific names from the list. "
+    "Return only the rewritten question, no explanation."
+)
+
+
+async def _maybe_rewrite_query(
+    question: str, document_ids: list[str] | None
+) -> str:
+    """Return a (possibly rewritten) query with vague references resolved.
+
+    Contract:
+    - No vague refs detected → returns question unchanged (0 LLM calls, 0 Kuzu queries).
+    - document_ids is None (all-docs scope) → returns question unchanged.
+    - Kuzu returns 0 entities → returns question unchanged.
+    - LLM fails → logs warning and returns question unchanged (non-fatal).
+    """
+    if VAGUE_REF_RE.search(question) is None:
+        return question
+    if document_ids is None:
+        return question
+    try:
+        entity_names = get_graph_service().get_entities_for_documents(document_ids)
+    except Exception:
+        logger.warning("_maybe_rewrite_query: Kuzu lookup failed", exc_info=True)
+        return question
+    if not entity_names:
+        return question
+    try:
+        llm = get_llm_service()
+        prompt = (
+            f"Question: {question}\n"
+            f"Available names: {', '.join(entity_names)}"
+        )
+        result = await llm.generate(prompt, system=_REWRITE_SYSTEM, stream=False)
+        rewritten = str(result).strip()
+        if rewritten:
+            return rewritten
+    except Exception:
+        logger.warning("_maybe_rewrite_query: LLM rewrite failed", exc_info=True)
+    return question
 
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
@@ -165,10 +218,18 @@ class QAService:
                     root_span.set_attribute("qa.document_ids", ", ".join(document_ids))
 
                 # Hybrid retrieval — RETRIEVER span
+                # Rewrite vague-reference queries using Kuzu entities (non-fatal).
+                # Use the rewritten query for retrieval but the original in the LLM prompt.
                 with trace_retrieval("hybrid", query=question) as ret_span:
                     effective_doc_ids = document_ids if scope == "single" else None
+                    retrieval_question = await _maybe_rewrite_query(question, effective_doc_ids)
+                    if retrieval_question != question:
+                        logger.info(
+                            "stream_answer: query rewritten for retrieval",
+                            extra={"original": question, "rewritten": retrieval_question},
+                        )
                     ret_span.set_attribute("retrieval.scope", scope)
-                    chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
+                    chunks = await retriever.retrieve(retrieval_question, effective_doc_ids, k=10)
                     ret_span.set_attribute("retrieval.chunk_count", len(chunks))
                     if chunks:
                         ret_span.set_attribute("retrieval.top_score", round(chunks[0].score, 4))

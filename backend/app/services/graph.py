@@ -187,6 +187,39 @@ class KuzuService:
             edge_count = 0
         return int(entity_count), int(edge_count)
 
+    def get_entities_for_documents(
+        self, document_ids: list[str], limit: int = 15
+    ) -> list[str]:
+        """Return entity names (PERSON, PLACE, CONCEPT) mentioned in the given documents.
+
+        Iterates over each document_id and collects unique names up to *limit*.
+        Returns empty list on any error (non-fatal for query rewriting).
+        """
+        if not document_ids:
+            return []
+        try:
+            seen: set[str] = set()
+            names: list[str] = []
+            for doc_id in document_ids:
+                if len(names) >= limit:
+                    break
+                result = self._conn.execute(
+                    "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                    " WHERE e.type IN ['PERSON', 'PLACE', 'CONCEPT']"
+                    " RETURN e.name",
+                    {"did": doc_id},
+                )
+                while result.has_next() and len(names) < limit:
+                    row = result.get_next()
+                    name = row[0]
+                    if name and name not in seen:
+                        seen.add(name)
+                        names.append(name)
+            return names
+        except Exception:
+            logger.warning("get_entities_for_documents failed", exc_info=True)
+            return []
+
     # -------------------------------------------------------------------------
     # Query
     # -------------------------------------------------------------------------

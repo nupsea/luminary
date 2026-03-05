@@ -1557,7 +1557,7 @@
         "Final answer generated with original question phrasing",
         "uv run pytest tests/test_query_rewriting.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S61",
