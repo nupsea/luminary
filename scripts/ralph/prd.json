@@ -1392,7 +1392,7 @@
         "Cross-book search: 'Odysseus' returns Odyssey results; 'Eloi' returns Time Machine results",
         "No blank screens, no 'undefined' text, no uncaught console errors in any tab for any book"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S54",
@@ -1420,7 +1420,7 @@
         "test_ingest_timing_all_books \u2014 all 3 books within manifest budget; actual timings printed",
         "make ci passes after adding this file (slow tests excluded from default run)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S62",

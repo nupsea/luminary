@@ -84,12 +84,21 @@ Query text
   → Re-rank and return top-N chunks
 ```
 
-## Current Implementation Status (as of S30, 2026-02-25)
+## Current Implementation Status (as of S54, 2026-03-05)
 
-All 30 stories through S30 are complete. Phases 1–5 fully implemented:
+Phases 1–7 (through S54) are complete:
 - Phase 1 (Core): scaffold, ingestion pipeline, hybrid retrieval, LiteLLM, summarization, Q&A, library UI
 - Phase 2 (Understanding): layer linter, doc gardener, Kuzu graph, GLiNER NER, Sigma.js Viz, search, explain, notes
 - Phase 3 (Learning): FSRS flashcards, spaced repetition, gap detection, teach-back, progress dashboard
 - Phase 4 (Monitoring): Arize Phoenix OTel, Langfuse, RAGAS evals, full Monitoring tab
 - Phase 5 (Code+Library): tree-sitter code ingestion, call graph, enhanced library catalog with tags/bulk/pagination
-- Phase 6 (S30): colorized dev log script (`make logs`)
+- Phase 6 (S30–S44): dev log, docs, resilience, logging, structured telemetry
+- Phase 7 (S45–S54): corpus canon (3 books), diagnostics endpoint, demo review gate, per-book content verification tests
+
+### Test Structure (Phase 7)
+Three slow test suites share a single `all_books_ingested` session fixture (conftest_books.py):
+- `test_e2e_book.py` — full pipeline for Time Machine (ingest → retrieve → QA → graph)
+- `test_diagnostics.py` — per-store count thresholds for all 3 books via `/diagnostics` endpoint
+- `test_book_content.py` — entity/keyword/co-occurrence/semantic verification for all 3 books
+
+Run all three with `make test-books-all` (books ingested exactly once per session).

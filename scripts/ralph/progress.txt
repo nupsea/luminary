@@ -665,3 +665,14 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
 - Fixed test_endpoint_not_found_response: updated assertion from not_found=True to error='no_context' (no-context guard fires before LLM when retriever returns [])
 - CI: 302 passed, 13 deselected (slow), ruff clean, tsc clean
 ---
+
+## 2026-03-05T00:00:00Z - S54 - Per-book content verification — known entities, keywords, co-occurrences, and semantic search for all 3 books
+- Implemented: backend/tests/test_book_content.py with 6 test methods, all @pytest.mark.slow, parametrized over manifest.json. TestBookContentVerification class: test_known_entities_in_kuzu (Kuzu graph case-insensitive substring match), test_known_keywords_in_fts (FTS5 keyword hits), test_co_occurrence_edges (bidirectional edge lookup), test_semantic_search_relevance (vector search), test_fts_raw_term_coverage (raw SQL COUNT), test_ingest_timing_all_books (prints timings for all 3 books). Also marked S53 (DEMO REVIEW GATE 1) as passing since approval file existed.
+- Files changed: backend/tests/test_book_content.py (created), scripts/ralph/prd.json (S53+S54 passes=true)
+- Learnings:
+  - get_graph_for_document returns {nodes: [{id, label, type, size, mention_count}], edges: [{source, target, weight}]}
+  - Edge lookup must check both directions (source==a,target==b OR source==b,target==a)
+  - asyncio_mode=auto means async test methods in classes work without @pytest.mark.asyncio
+  - db_module.get_session_factory() gives the async session factory for raw SQL in tests
+  - pytest_plugins = ["tests.conftest_books"] loads the shared session fixture (note "tests." prefix for rootdir=backend)
+---
