@@ -1540,7 +1540,7 @@
         "Clicking a chapter highlights it in sidebar",
         "uv run pytest tests/test_sections.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S58",
