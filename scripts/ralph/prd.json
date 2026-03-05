@@ -1438,7 +1438,7 @@
         "Empty state 'No documents tagged X' shown when filter returns 0 results",
         "uv run pytest tests/test_tags.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S63",

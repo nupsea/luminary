@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import logging
 import shutil
 import uuid
@@ -36,6 +37,28 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 _parser = DocumentParser()
 
 _ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx"})
+
+
+def _safe_tags(raw: object) -> list[str]:
+    """Deserialize tags regardless of how they were stored.
+
+    SQLite's JSON column occasionally surfaces the raw JSON text string instead
+    of a Python list (e.g. when rows were written by a different code path).
+    This helper normalises all three cases: already-a-list, JSON string, or
+    None.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(t) for t in parsed]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +254,7 @@ async def list_documents(
                 word_count=doc.word_count,
                 page_count=doc.page_count,
                 stage=doc.stage,
-                tags=doc.tags or [],
+                tags=_safe_tags(doc.tags),
                 created_at=doc.created_at,
                 last_accessed_at=doc.last_accessed_at,
                 summary_one_sentence=summary_one_sentence,
@@ -441,7 +464,7 @@ async def get_document(document_id: str):
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,
-        tags=doc.tags or [],
+        tags=_safe_tags(doc.tags),
         created_at=doc.created_at,
         last_accessed_at=doc.last_accessed_at,
         sections=[

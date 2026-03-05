@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookPlus, FileText, Plus, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterBar } from "@/components/library/FilterBar"
 import { SearchBar } from "@/components/library/SearchBar"
@@ -250,12 +251,14 @@ export default function Learning() {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const queryClient = useQueryClient()
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tagFilter = searchParams.get("tag")
+
   const [search, setSearch] = useState("")
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
   const [page, setPage] = useState(1)
-  const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
@@ -311,7 +314,11 @@ export default function Learning() {
   }
 
   function handleTagClick(tag: string) {
-    setTagFilter(tag)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set("tag", tag)
+      return next
+    })
     setPage(1)
   }
 
@@ -413,7 +420,11 @@ export default function Learning() {
           <span className="text-xs text-muted-foreground">Filtered by tag:</span>
           <button
             onClick={() => {
-              setTagFilter(null)
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev)
+                next.delete("tag")
+                return next
+              })
               setPage(1)
             }}
             className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
@@ -503,7 +514,9 @@ export default function Learning() {
                 </h2>
                 {items.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">
-                    No documents match your filters.
+                    {tagFilter
+                      ? `No documents tagged "${tagFilter}".`
+                      : "No documents match your filters."}
                   </p>
                 ) : viewMode === "grid" ? (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
