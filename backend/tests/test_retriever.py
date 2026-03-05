@@ -3,6 +3,8 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
+from stubs import MockEmbeddingService as _MockEmbeddingService
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -291,8 +293,7 @@ def test_vector_search_returns_scored_chunks(monkeypatch):
     mock_lancedb = MagicMock()
     mock_lancedb._get_table.return_value = mock_table
 
-    mock_embedder = MagicMock()
-    mock_embedder.encode.return_value = [[0.1] * 1024]
+    mock_embedder = _MockEmbeddingService()
 
     with (
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
@@ -320,8 +321,7 @@ def test_vector_search_filters_by_document_id(monkeypatch):
     mock_lancedb = MagicMock()
     mock_lancedb._get_table.return_value = mock_table
 
-    mock_embedder = MagicMock()
-    mock_embedder.encode.return_value = [[0.0] * 1024]
+    mock_embedder = _MockEmbeddingService()
 
     with (
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),

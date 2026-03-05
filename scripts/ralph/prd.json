@@ -1421,6 +1421,179 @@
         "make ci passes after adding this file (slow tests excluded from default run)"
       ],
       "passes": false
+    },
+    {
+      "id": "S62",
+      "title": "Fix tags \u2014 audit and repair end-to-end tag storage, filter, and UI",
+      "phase": 6,
+      "priority": 56,
+      "featureRef": "F-TAG",
+      "description": "Tags were scaffolded in S28 but do not work reliably. Audit and fix the full chain. Backend audit \u2014 three known failure modes: (1) SQLAlchemy JSON column on SQLite can return a raw JSON string instead of a Python list if the column was added post-migration without proper type handling. Fix: ensure tags is mapped as Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False). Add a Pydantic validator on DocumentListItem.tags to guarantee it is always list[str] (coerce from JSON string if needed). (2) GET /documents?tag=value filter uses `if tag in i.tags` in Python after fetching all docs. This only works when i.tags is already a list. If it is still a string, the `in` check matches substring of the JSON string. Fix: validate i.tags is list[str] before filtering. (3) Active tag filter in the frontend lives in useState and resets on any navigation or re-render. Fix: store the active tag filter in the URL search param (?tag=X) using useSearchParams. Frontend fixes: (a) patchTags(): confirm it sends PATCH /documents/{id}/tags with body {\"tags\": [...]} (JSON, not form data). (b) handleTagClick(): update URL search param instead of local state. Reading the filter: read from useSearchParams, not useState. (c) Add a visible active-filter indicator: when ?tag=X is in the URL, show a dismissible banner 'Filtered by tag: X [clear \u00d7]' above the document grid. Clicking clear removes the tag param from the URL. (d) Empty state: when tag filter returns 0 docs, show 'No documents tagged X'. Tests \u2014 tests/test_tags.py: (a) test_patch_tags_stores_list: PATCH with [\"a\",\"b\"], GET /documents, confirm tags field in response is [\"a\",\"b\"] (list, not string). (b) test_tag_filter_returns_matching_docs: add 2 docs, tag one with 'physics', GET /documents?tag=physics, assert only tagged doc returned. (c) test_tag_filter_no_substring_collision: tag doc with 'ai', GET /documents?tag='ai-research', assert 0 results (not substring match). (d) test_patch_tags_replaces_not_appends: patch ['a','b'], then patch ['c'], GET confirms only ['c'].",
+      "acceptanceCriteria": [
+        "PATCH /documents/{id}/tags stores tags as JSON list; GET /documents returns tags as list[str] not string",
+        "GET /documents?tag=X returns only documents whose tags list includes X as exact element (not substring)",
+        "test_patch_tags_stores_list, test_tag_filter_returns_matching_docs, test_tag_filter_no_substring_collision, test_patch_tags_replaces_not_appends all pass",
+        "Tag filter stored in URL search param (?tag=X); survives page navigation",
+        "Active filter banner visible with clear button when ?tag param present",
+        "Empty state 'No documents tagged X' shown when filter returns 0 results",
+        "uv run pytest tests/test_tags.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S63",
+      "title": "Mandatory content type selection in upload \u2014 book, conversation, notes",
+      "phase": 6,
+      "priority": 57,
+      "featureRef": "F-CT1",
+      "description": "The app currently auto-detects content type with unreliable heuristics. Replace auto-detection with a mandatory user selection at upload time. Scope: book, conversation, notes. No auto-detect. Backend \u2014 run_ingestion() signature: Add content_type: str parameter to run_ingestion(document_id, file_path, format, content_type). Valid values: 'book', 'conversation', 'notes'. Enforce with a Literal type alias ContentType = Literal['book', 'conversation', 'notes']. Pass content_type into the initial IngestionState as content_type=content_type (not None). classify_node: add fast-path at top \u2014 if state['content_type'] is not None, skip all heuristics and LLM, return state immediately with status='chunking'. The classify LLM call and heuristics only run for legacy code docs (content_type='code') or any future path where type is not known. Upload endpoint POST /documents/ingest: Add required form field content_type: ContentType = Form(...). If missing or invalid: return HTTP 422 with body {\"detail\": \"content_type is required. Choose: book, conversation, notes\"}. Pass content_type to run_ingestion(). Update DocumentModel.content_type at creation time (not just during ingestion workflow). PATCH /documents/{id}: Add content_type: ContentType | None = None to PatchDocumentRequest. If provided: update DocumentModel.content_type. Changing type does NOT re-trigger ingestion (show note in response: 'Re-ingest document to apply new chunking strategy.'). Frontend \u2014 UploadDialog (both file tab and paste tab): Add a required 'Document type' field above the file input. Three shadcn RadioGroup buttons, not a dropdown:   Book \u2014 'For novels, non-fiction, full-length documents'   Conversation \u2014 'For chat exports, interviews, meeting transcripts'   Notes \u2014 'For personal notes, articles, papers, web clips' No 'Auto-detect' option. Upload button is disabled until a type is selected. Show a validation message 'Please select a document type' if user tries to submit without selecting. DocumentCard in library: Show a content type badge on every card: Book (blue), Conversation (green), Notes (gray). Badge rendered as a small pill below the document title. Badge is clickable: opens a popover with the same 3-option RadioGroup. On selection: call PATCH /documents/{id} with {content_type: newType} and invalidate the documents query. Show a tooltip on the popover: 'Re-ingest document to apply new chunking strategy.' Tests: tests/test_content_type.py: (a) test_ingest_without_content_type_returns_422. (b) test_ingest_with_valid_type_skips_classify_llm (mock LLM, assert not called). (c) test_patch_content_type_updates_document. (d) test_invalid_content_type_returns_422.",
+      "acceptanceCriteria": [
+        "POST /documents/ingest without content_type returns HTTP 422",
+        "POST /documents/ingest with content_type='conversation' skips classify_node LLM (no LLM call for classification)",
+        "UploadDialog shows Book/Conversation/Notes radio buttons; upload button disabled until type selected",
+        "DocumentCard shows content type badge (book=blue, conversation=green, notes=gray)",
+        "Badge click opens type selector popover with PATCH on change",
+        "PATCH /documents/{id} updates content_type in DB",
+        "uv run pytest tests/test_content_type.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S66",
+      "title": "Book ingestion \u2014 link chunks to detected sections and section-boundary-aware chunking",
+      "phase": 6,
+      "priority": 58,
+      "featureRef": "F-BOOK1",
+      "description": "For books, chunk_node creates SectionModel rows but always sets chunk.section_id = None. Chunks are split across section boundaries, fragmenting chapter content. Fix both: assign section_id to each chunk AND respect section boundaries in chunking. Changes in app/workflows/ingestion.py \u2014 chunk_node (content_type == 'book' path): Step 1 \u2014 Section-boundary-aware chunking: Instead of joining all section texts and splitting the combined string, process each section independently. For each section s in pd['sections']:   - Split s['text'] with RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=120).   - All resulting chunks belong to that section. This ensures no chunk crosses a section/chapter boundary. Step 2 \u2014 Link chunks to sections: Create SectionModel rows first (same as now). Collect them in a list with their insertion order. For each chunk created from section s at index s_idx: set chunk.section_id = section_models[s_idx].id. For books with no detected sections (flat text, no headings): create a single 'Full Text' SectionModel, link all chunks to it. Step 3 \u2014 Book metadata on DocumentModel: After chunking: count detected sections (chapters). Store chapter_count in a new nullable integer column on DocumentModel: chapter_count: Mapped[int | None] = mapped_column(Integer, nullable=True). This is exposed in DocumentListItem and used by the chapter navigation sidebar (S60). Sections endpoint \u2014 GET /sections/{document_id} (add if missing, or verify it exists and returns correct data): Response: list[{id: str, heading: str, level: int, page_start: int, section_order: int, chunk_count: int, has_summary: bool}]. chunk_count: count of ChunkModel rows where section_id = section.id. has_summary: True if any SummaryModel row exists for this document_id and mode='one_sentence'   (section-level summaries are not yet implemented, this is a placeholder \u2014 always False for now). Tests: tests/test_book_ingestion.py: (a) test_book_chunks_have_section_id: ingest a book fixture with 3 chapters, assert all chunks have non-None section_id. (b) test_book_chunks_do_not_cross_section_boundary: assert no chunk's text contains content from two different sections. (c) test_sections_endpoint_returns_chunk_count: GET /sections/{id}, assert chunk_count > 0 for each section. (d) test_book_without_headings_gets_single_section: flat text book \u2192 1 section 'Full Text', all chunks linked.",
+      "acceptanceCriteria": [
+        "All chunks for a book doc have non-None section_id after ingestion",
+        "No chunk spans two different sections (text stays within section boundary)",
+        "DocumentModel.chapter_count set to number of detected sections",
+        "GET /sections/{document_id} returns sections with accurate chunk_count",
+        "Flat book (no headings) creates a single 'Full Text' section with all chunks linked",
+        "uv run pytest tests/test_book_ingestion.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S56",
+      "title": "Conversation ingestion \u2014 speaker-turn chunking, roster extraction, and timeline metadata",
+      "phase": 6,
+      "priority": 59,
+      "featureRef": "F-CONV1",
+      "description": "For conversation documents, the ingestion pipeline must: (1) split on speaker turns instead of character count, (2) populate chunk.speaker (column already exists in ChunkModel), (3) extract a speaker roster and timeline and store as document metadata. ChunkModel.speaker already exists. No schema change needed for chunks. Add conversation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True) to DocumentModel. This stores roster and timeline after ingestion. Create app/services/conversation_chunker.py \u2014 ConversationChunker class: detect(text: str) -> bool:   Returns True if text appears to be speaker-format.   Patterns to try (in order):   A: r'^\\[?\\d{1,2}[:/]\\d{2}' \u2014 timestamp prefix.   B: r'^[A-Z][a-zA-Z .]+:\\s' \u2014 capitalized name then colon.   C: r'^[A-Z][a-zA-Z .]+>\\s' \u2014 name then '>'.   Match >= 5 lines in first 60 lines with any pattern \u2192 True. chunk(text: str) -> list[ConversationChunk]:   ConversationChunk = dataclass(text: str, speaker: str, turn_index: int).   Parse each line into (speaker, message) pairs.   Group consecutive lines from the same speaker into one turn.   Accumulate turns into chunks of \u2264 450 tokens (len(text)//4).   20% overlap: include last turn of previous chunk as first turn of next.   Each chunk's speaker = first speaker in that chunk.   Chunk text preserves 'Speaker: message' format verbatim. extract_roster(chunks: list[ConversationChunk]) -> dict:   Pure function. Returns:   {     'speakers': [{'name': str, 'turn_count': int}] sorted by turn_count desc,     'total_turns': int,     'has_timestamps': bool   } extract_timeline(text: str) -> dict:   Scan for timestamp patterns: [DD/MM/YYYY, HH:MM] or ISO dates.   Returns {'first_timestamp': str | null, 'last_timestamp': str | null}.   If no timestamps found: returns {'first_timestamp': null, 'last_timestamp': null}. In chunk_node (content_type == 'conversation' path):   chunker = ConversationChunker().   If chunker.detect(raw_text): use chunker.chunk(); else fall back to RecursiveCharacterTextSplitter with conversation config.   Set chunk.speaker from ConversationChunk.speaker.   After chunking: call extract_roster() and extract_timeline().   Update DocumentModel.conversation_metadata = {**roster, **timeline}. Add GET /documents/{id}/conversation endpoint: Returns conversation_metadata JSON for a conversation document. 404 if document not found; 400 if content_type != 'conversation'. Tests: tests/test_conversation_chunker.py: (a) test_detect_whatsapp_format: timestamps detected \u2192 True. (b) test_detect_plain_speaker_format: 'Alice: ...' lines \u2192 True. (c) test_detect_returns_false_for_book_text: book paragraph \u2192 False. (d) test_chunk_sets_speaker_field: chunk speaker matches first speaker in turn group. (e) test_chunk_respects_token_limit: no chunk > 450 estimated tokens. (f) test_extract_roster_counts_turns_per_speaker: pure function test. (g) test_extract_timeline_finds_timestamps: pure function test. (h) test_fallback_to_default_splitter_when_not_detected.",
+      "acceptanceCriteria": [
+        "ConversationChunker.detect() returns True for WhatsApp format and plain 'Speaker:' format",
+        "After ingestion, conversation chunks have speaker field populated (not None)",
+        "conversation_metadata stored on DocumentModel with speakers roster and timeline",
+        "GET /documents/{id}/conversation returns roster and timeline",
+        "Fallback to RecursiveCharacterTextSplitter when speaker format not detected",
+        "uv run pytest tests/test_conversation_chunker.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S57",
+      "title": "Context expansion \u2014 fetch adjacent chunks for books and conversations to preserve narrative flow",
+      "phase": 6,
+      "priority": 60,
+      "featureRef": "F-RET1",
+      "description": "Book and conversation chat answers are choppy because retrieved chunks lack surrounding context. After RRF merge in HybridRetriever.retrieve(), fetch adjacent chunks for narrative content types. Add _expand_context(chunks: list[ScoredChunk], window: int = 1) -> list[ScoredChunk] to HybridRetriever. For each ScoredChunk c in the input list:   Query SQLite: SELECT id, text, speaker, section_id, chunk_index FROM chunks   WHERE document_id = c.document_id AND chunk_index IN (c.chunk_index - window, c.chunk_index + window).   Create a ScoredChunk for each neighbor: score = c.score * 0.75, source = 'context_expansion'. Dedup rule: if a neighbor's chunk_id already exists in the result set (independently retrieved), keep whichever instance has the higher score, discard the other. Apply expansion only when the retrieved chunks come from a single document OR all documents share the same content_type in {'book', 'conversation', 'notes'}. Skip expansion for 'code' or 'paper' content types. Fetch content_type for each document_id using a batch SELECT. Call _expand_context after rrf_merge in retrieve(), before returning. Limit total result to k * 2 (no unbounded growth). Sort final list by score desc before returning. Tests: tests/test_context_expansion.py: (a) test_expand_adds_neighbors: mock DB returns neighbors at index\u00b11; assert they appear in output with score=original*0.75. (b) test_expand_dedup_keeps_higher_score: same chunk returned by retrieval AND expansion; only one copy kept with higher score. (c) test_expand_skipped_for_code: content_type='code' \u2192 no expansion. (d) test_expand_capped_at_k_times_2.",
+      "acceptanceCriteria": [
+        "_expand_context adds chunk_index\u00b11 neighbors with score=0.75\u00d7original",
+        "Dedup: when neighbor already in result, keep higher score, no duplicate",
+        "Expansion skipped for content_type='code'",
+        "Result capped at k\u00d72 total chunks",
+        "uv run pytest tests/test_context_expansion.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S59",
+      "title": "Speaker-balanced retrieval \u2014 diversify conversation results across speakers",
+      "phase": 6,
+      "priority": 61,
+      "featureRef": "F-RET2",
+      "description": "When chatting with a conversation document, retrieved chunks cluster on the most talkative speaker. Extend _diversify() in app/services/retriever.py to balance results across speakers. ScoredChunk currently has chunk_id, document_id, text, section_heading, chunk_index, score, source fields. Add speaker: str | None = None to ScoredChunk (in app/types.py). Update HybridRetriever.vector_search: read speaker from LanceDB row (speaker field already stored there after S56). Update HybridRetriever.keyword_search: read speaker from SQLite ChunkModel. Populate ScoredChunk.speaker in both search methods. _diversify() logic \u2014 add speaker check BEFORE section check: If any chunk in candidates has speaker != None: run speaker-diversity path.   Concentration check (same as section): if > 60% of top-k chunks share the same speaker, apply round-robin.   Group candidates by speaker. Order groups by their best-scoring chunk (desc).   Round-robin across speakers until k results collected. Else (no speaker data): run existing section-diversity path unchanged. Tests: add to tests/test_retriever.py: (a) test_diversify_speaker_balanced: 8 chunks from Alice, 2 from Bob \u2192 both speakers in k=5 result. (b) test_diversify_speaker_no_op_when_diverse: 3 speakers with 2 chunks each (33% each) \u2192 no reorder. (c) test_diversify_falls_through_to_section_when_no_speaker: all chunks have speaker=None \u2192 section path used.",
+      "acceptanceCriteria": [
+        "ScoredChunk has speaker field; make ci passes",
+        "Speaker field populated from LanceDB (vector_search) and SQLite (keyword_search)",
+        "test_diversify_speaker_balanced: 8 Alice + 2 Bob \u2192 both in k=5 result",
+        "test_diversify_speaker_no_op_when_diverse: 3 speakers \u2192 no reorder",
+        "Section-diversity tests still pass (no regression)",
+        "uv run pytest tests/test_retriever.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S60",
+      "title": "Book chapter navigation and conversation speaker roster in Learning tab",
+      "phase": 6,
+      "priority": 62,
+      "featureRef": "F-UI1",
+      "description": "Learning tab shows the same flat view for all content types. Book documents should show a chapter/section sidebar. Conversation documents should show a speaker roster with message counts. Backend \u2014 GET /sections/{document_id} (add if not present, or fix to return chunk_count): Response: list[SectionItem] where SectionItem = {id: str, heading: str, level: int, page_start: int, section_order: int, chunk_count: int}. ORDER BY section_order ASC. Backend \u2014 GET /documents/{id}/conversation (added in S56): Returns conversation_metadata: {speakers: [{name, turn_count}], total_turns: int, has_timestamps: bool, first_timestamp, last_timestamp}. Frontend \u2014 Learning tab sidebar panel (left of the main reader/summary view): For content_type='book': render a 'Chapters' panel.   Each section: heading text + chunk_count badge (e.g. '14 chunks').   Click a chapter: set activeSection state, highlight the selected chapter in the sidebar.   Placeholder for section-specific summary (shown as a collapsed 'Summary' row, not yet functional \u2014 labeled 'Coming soon').   Loading state: 3 skeleton rows.   Empty state: 'No chapters detected. Re-ingest to detect chapter structure.' For content_type='conversation': render a 'Speakers' panel.   Each speaker: name + turn count (e.g. 'Alice  42 turns').   Click a speaker: setActiveSpeaker \u2014 passes speaker name to a query param so chat/search can filter to that speaker's chunks (future use; for now just highlight).   Show conversation timeline if has_timestamps: 'From {first_timestamp} to {last_timestamp}'.   Loading state: 2 skeleton rows.   Empty state: 'No speaker data. Re-ingest to detect speakers.' For content_type='notes': no sidebar (notes are flat). Tests: tests/test_sections.py: (a) test_sections_endpoint_returns_ordered_list. (b) test_sections_endpoint_chunk_count_matches_db. (c) test_conversation_metadata_endpoint_returns_roster (from S56).",
+      "acceptanceCriteria": [
+        "GET /sections/{id} returns ordered section list with chunk_count",
+        "Learning tab shows Chapters sidebar for book docs with loading and empty states",
+        "Learning tab shows Speakers sidebar for conversation docs with turn counts and timeline",
+        "Notes docs show no sidebar panel",
+        "Clicking a chapter highlights it in sidebar",
+        "uv run pytest tests/test_sections.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S58",
+      "title": "Query rewriting \u2014 resolve vague references using Kuzu entities before retrieval",
+      "phase": 6,
+      "priority": 63,
+      "featureRef": "F-RET3",
+      "description": "Questions like 'what did they argue about' or 'describe the protagonist' return poor results because pronouns and generic terms match nothing specific in the vector index. Rewrite the retrieval query using named entities from the Kuzu graph before calling the retriever. Add _maybe_rewrite_query(question: str, document_ids: list[str] | None) -> str to QAService. Pure function contract: takes question and doc ids, returns (possibly rewritten) question string. No side effects. Vague-ref detection \u2014 compile once as module-level constant: VAGUE_REF_RE = re.compile(r'\\b(they|he|she|it|them|the author|the speaker|the protagonist|the character|the narrator|the writer|both|the two|someone|anyone)\\b', re.IGNORECASE). If VAGUE_REF_RE.search(question) is None: return question immediately (zero LLM calls, zero Kuzu queries). If match found AND document_ids is not None (single/specific doc scope):   Query Kuzu: MATCH (e:Entity) WHERE e.document_id IN $ids   AND e.entity_type IN ['PERSON', 'PLACE', 'CONCEPT'] RETURN e.name LIMIT 15.   If Kuzu returns 0 entities: return original question.   Build LLM prompt: system='Rewrite the question replacing vague references with specific names from the list. Return only the rewritten question, no explanation.'   user=f'Question: {question}\\nAvailable names: {', '.join(entity_names)}'.   Call LLM with stream=False. Strip and return result.   If LLM fails: log warning and return original question (non-fatal). If scope='all' (document_ids is None): skip rewriting (too many entities across all docs to be useful). In QAService.stream_answer:   retrieval_question = await _maybe_rewrite_query(question, document_ids).   Use retrieval_question for retriever.retrieve().   Use original question in the final LLM prompt (so the user sees answers phrased to their original question). Tests: tests/test_query_rewriting.py (all with mocked Kuzu and LLM): (a) test_no_rewrite_when_no_vague_refs: 'What is osmosis?' \u2192 returns unchanged, 0 LLM calls. (b) test_rewrite_triggered_for_pronoun: 'What did they decide?' \u2192 LLM called with entity list. (c) test_skip_rewrite_for_all_scope: document_ids=None \u2192 no rewrite. (d) test_skip_rewrite_when_kuzu_empty: no entities found \u2192 original returned. (e) test_llm_failure_returns_original: LLM throws exception \u2192 original question returned.",
+      "acceptanceCriteria": [
+        "Question with no vague pronouns: zero LLM calls and zero Kuzu queries",
+        "Question with 'they' and document_ids set: LLM called with entity list from Kuzu",
+        "scope='all' (document_ids=None): rewriting skipped",
+        "LLM failure returns original question (non-fatal, logged)",
+        "Final answer generated with original question phrasing",
+        "uv run pytest tests/test_query_rewriting.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S61",
+      "title": "Document attribution in cross-document Chat \u2014 show source document in citation chips",
+      "phase": 6,
+      "priority": 64,
+      "featureRef": "F-CHAT1",
+      "description": "When scope='all' in Chat, citations show a page number but not which document the answer came from. Users cannot tell whether the answer is from Alice in Wonderland or The Odyssey. Backend \u2014 CitationItem schema (app/services/qa.py or app/routers/qa.py): Add document_title: str | None = None to CitationItem. In QAService.stream_answer, after building the citations list: Collect all unique document_ids from the citation chunks. Run: SELECT id, title FROM documents WHERE id IN (...). Populate citation.document_title for each citation from the result. Only populate when scope='all' or len(unique_doc_ids) > 1. For single-doc scope: leave document_title = None (redundant). Frontend \u2014 citation chip in Chat panel: Current format: 'p.{page}'. New format when document_title present: '{title} \u00b7 p.{page}' (title truncated to 20 chars if longer). Current format kept when document_title is None. No other UI changes. Tests: add to tests/test_qa.py: (a) test_citations_include_document_title_for_all_scope: mock retriever returns chunks from 2 different doc_ids, assert each citation has document_title populated. (b) test_citations_no_title_for_single_scope: scope='single', assert document_title=None on all citations.",
+      "acceptanceCriteria": [
+        "CitationItem has document_title: str | None field",
+        "scope='all' citations include document_title from DB lookup",
+        "scope='single' citations have document_title=None",
+        "Citation chips show '{title} \u00b7 p.N' when title present",
+        "test_citations_include_document_title_for_all_scope and test_citations_no_title_for_single_scope pass",
+        "uv run pytest tests/test_qa.py exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S55",
+      "title": "Cross-document holistic summary \u2014 All My Content library overview",
+      "phase": 6,
+      "priority": 65,
+      "featureRef": "F-LIB1",
+      "description": "When no document is selected in the Learning tab, the app shows the last viewed document's summary instead of a library-wide overview. Fix: synthesize a holistic summary from all ingested documents. Backend \u2014 add LibrarySummaryModel to app/models.py: LibrarySummaryModel(id: str PK, mode: str, content: str, created_at: datetime). No document_id FK \u2014 this is library-level aggregate data. Add to db_init create_all_tables(). Extend SummarizationService with stream_library_summary(mode: str, model: str | None) -> AsyncGenerator[str]: (1) Cache-first: fetch latest LibrarySummaryModel for this mode.   If found: stream full content as a single token event + done event with cached=True. (2) On cache miss:   Fetch all SummaryModel rows with mode='executive', group by document_id keeping most recent.   Fetch document titles for those document_ids.   If fewer than 2 documents have executive summaries: yield error event   {\"error\": \"not_enough_summaries\", \"message\": \"Ingest at least 2 documents to generate a library overview.\", \"done\": true}.   Build input text: for each doc ordered by title: '## {title}\\n{executive_summary}\\n\\n'.   Query Kuzu for entities appearing in 3+ documents:   MATCH (e:Entity) RETURN e.name, count(distinct e.document_id) as n WHERE n >= 3 RETURN e.name ORDER BY n DESC LIMIT 20.   If cross-doc entities found: append '## Shared themes\\n{entity_names joined by comma}'.   System prompts by mode:     one_sentence: 'Synthesize all documents in one sentence of at most 30 words.'     executive: 'List the 5-7 key themes across all documents as bullet points. Note connections between them.'     detailed: 'Write a structured overview: main themes, key documents, and how they relate to each other.'   Stream LLM response. Collect tokens. Store in LibrarySummaryModel. Yield done event. Add endpoint: POST /summarize/all \u2014 body: {mode: str, model: str | null}. Returns SSE stream identical format to POST /summarize/{document_id}. Invalidate cache (delete LibrarySummaryModel for this mode) when a new document is ingested. Frontend \u2014 Learning tab: Detect when no document is selected (activeDocumentId is null or the special 'all' sentinel). Show 'Library Overview' as heading (replacing document title). Call POST /summarize/all instead of POST /summarize/{document_id}. Same SSE streaming rendering as per-document summary. Show mode selector (one_sentence / executive / detailed) same as per-document view. Error state: when not_enough_summaries received, show 'Ingest at least 2 documents to get a library overview.' Tests: tests/test_library_summary.py: (a) test_library_summary_synthesizes_multiple_docs: 2 docs with executive summaries \u2192 POST /summarize/all returns tokens. (b) test_library_summary_cached_on_second_call: second call returns cached=true in done event. (c) test_library_summary_error_when_fewer_than_2_docs. (d) test_library_summary_cache_invalidated_after_new_ingest.",
+      "acceptanceCriteria": [
+        "LibrarySummaryModel table created; make ci passes",
+        "POST /summarize/all returns SSE stream with token and done events",
+        "Response includes content from more than one document when 2+ are ingested",
+        "Second call returns cached=true without LLM invocation",
+        "Cache invalidated when new document is ingested (fresh synthesis next request)",
+        "Error event returned when fewer than 2 executive summaries exist",
+        "Learning tab with no document selected shows Library Overview calling POST /summarize/all",
+        "uv run pytest tests/test_library_summary.py exits 0"
+      ],
+      "passes": false
     }
   ]
 }

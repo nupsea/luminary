@@ -27,10 +27,7 @@ from app.services.llm import get_llm_service
 logger = logging.getLogger(__name__)
 
 # Grounding prefix applied to every summarization prompt
-GROUNDING_PREFIX = (
-    "Answer using only information present in the provided text. "
-    "Do not introduce any facts, names, or claims not explicitly stated."
-)
+GROUNDING_PREFIX = "Answer using only information present in the provided text."
 
 # Mode-specific instructions appended after the grounding prefix
 MODE_INSTRUCTIONS: dict[str, str] = {
@@ -38,10 +35,9 @@ MODE_INSTRUCTIONS: dict[str, str] = {
     "executive": "List the 3 to 5 most important points as bullet points.",
     "detailed": "Summarize each section separately, preserving the heading structure.",
     "conversation": (
-        "Output a JSON object with keys: timeline (list of strings), "
-        "decisions (list of strings), "
-        "action_items (list of objects each with 'owner' and 'task' keys). "
-        "Return only valid JSON, no prose."
+        'Output a JSON object with keys: "timeline" (list of strings), '
+        '"decisions" (list of strings), '
+        '"action_items" (list of objects with "owner" and "task" keys).'
     ),
 }
 

@@ -3,7 +3,7 @@
 import json
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -15,6 +15,8 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel
 from app.services.flashcard import FlashcardService
+from stubs import CapturingLLMService as _CapturingLLMService
+from stubs import MockLLMService as _MockLLMService
 
 # ---------------------------------------------------------------------------
 # Isolated test DB fixture
@@ -119,8 +121,7 @@ async def test_service_parses_json_and_creates_cards(test_db):
             "source_excerpt": "Superposition...",
         },
     ])
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=llm_json)
+    mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -158,8 +159,7 @@ async def test_service_strips_markdown_fences(test_db):
         '[{"question": "Q1?", "answer": "A1.", "source_excerpt": "src."}]\n'
         "```"
     )
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=llm_json)
+    mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -185,7 +185,7 @@ async def test_service_returns_empty_when_no_chunks(test_db):
         session.add(_make_doc(doc_id))
         await session.commit()
 
-    mock_llm = MagicMock()
+    mock_llm = _MockLLMService()
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -199,7 +199,7 @@ async def test_service_returns_empty_when_no_chunks(test_db):
             )
 
     assert cards == []
-    mock_llm.generate.assert_not_called()
+    assert mock_llm.call_count == 0
 
 
 async def test_service_prompt_includes_count(test_db):
@@ -213,14 +213,7 @@ async def test_service_prompt_includes_count(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    captured_prompts: list[str] = []
-
-    async def fake_generate(prompt, system="", **kwargs):
-        captured_prompts.append(prompt)
-        return '[]'
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(side_effect=fake_generate)
+    mock_llm = _CapturingLLMService(response='[]')
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -233,8 +226,8 @@ async def test_service_prompt_includes_count(test_db):
                 session=session,
             )
 
-    assert captured_prompts, "LLM generate should have been called"
-    assert "7" in captured_prompts[0]
+    assert mock_llm.captured_prompts, "LLM generate should have been called"
+    assert "7" in mock_llm.captured_prompts[0]
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +249,7 @@ async def test_generate_endpoint_returns_201(test_db):
     llm_json = json.dumps([
         {"question": "Q?", "answer": "A.", "source_excerpt": "src."},
     ])
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=llm_json)
+    mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

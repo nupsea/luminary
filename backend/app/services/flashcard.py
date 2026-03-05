@@ -18,19 +18,14 @@ logger = logging.getLogger(__name__)
 
 FLASHCARD_SYSTEM = (
     "You are a flashcard generator. "
-    "You MUST output ONLY a valid JSON array. "
-    "Do NOT write any explanation, summary, preamble, or prose. "
-    "Do NOT use markdown code fences. "
-    "Start your response with [ and end with ]."
+    "Output a JSON array starting with [ and ending with ]. "
+    "Write no explanation, preamble, or markdown fences."
 )
 
 FLASHCARD_USER_TMPL = (
-    "Generate {count} question-answer flashcard pairs from the text below.\n"
-    "Rules:\n"
-    "- Each card must be answerable only from the provided text.\n"
-    "- Output ONLY a JSON array, nothing else.\n"
-    "- Format: "
-    '[{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n\n'
+    "Generate {count} flashcard pairs from the text below.\n"
+    "Each card must be answerable from the provided text only.\n"
+    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n\n'
     "Text:\n{text}\n\n"
     "JSON array:"
 )

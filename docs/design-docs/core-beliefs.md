@@ -184,3 +184,74 @@ CPU-bound ML models (GLiNER NER, embedding models) expose batch APIs that execut
 A per-item loop scales linearly with document size. A batch call of N items typically takes 2–4× the time of a single call — not N×. The speedup on CPU is 4–8×. Every per-item loop on a CPU-bound model is a performance bug.
 
 **Rationale**: NER on a 600-chunk document ran in ~12 minutes per-item vs ~3 minutes with batching. This is not a micro-optimisation — it is the difference between a usable ingestion pipeline and one that makes the laptop fan audible for every uploaded book.
+
+---
+
+## 22. Pure Functions for Core Domain Logic
+
+Core business logic — retrieval scoring, response parsing, recommendation engines, text transformations — must be pure functions: no I/O, no network calls, no database reads, all inputs as explicit parameters, same output for same inputs. Orchestration layers (`QAService`, `stream_answer`, workflow nodes) call these pure functions and own the I/O.
+
+```python
+# Good — pure, all inputs explicit, testable without mocking
+def _split_response(full_text: str) -> tuple[str, list[dict], str]: ...
+def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]: ...
+def rrf_merge(vector: list[ScoredChunk], keyword: list[ScoredChunk], k: int) -> list[ScoredChunk]: ...
+
+# Bad — business logic entangled with DB read
+async def rrf_merge(vector, keyword, k, session):
+    doc = await session.get(DocumentModel, ...)  # impure, untestable without DB
+```
+
+**Rationale**: Pure functions are testable with `assert` and no fixture setup. Luminary's `_split_response`, `_diversify`, and `rrf_merge` are all pure; their bugs were caught and fixed with a handful of unit tests that ran in milliseconds. An equivalent impure function would require a full DB fixture, a mock retriever, and an async test runner — and would still not expose the edge cases that `pytest.approx` or direct string assertions expose immediately.
+
+---
+
+## 23. LLM Prompts Must Be Minimal and Unambiguous
+
+System prompts must use plain, direct language with no parentheticals, qualifications, or meta-commentary about the output format. Every word in a system prompt is text the LLM may reproduce verbatim in its response. Instructions that explain themselves (`"output ONLY this JSON (no prose inside the JSON, do not repeat the answer):"`) are echoed by smaller models as literal output, corrupting the response.
+
+Rules:
+- State the instruction once, directly: `"Write your answer as prose. Then on a new line write this JSON:"`
+- Never include parenthetical qualifiers inside the instruction: no `(don't do X)`, no `ONLY`, no multi-clause constraints
+- The parser must tolerate LLM deviations (echoed labels, style variants) — one general rule beats two specific regexes
+
+**Rationale**: The Chat tab showed `ONLY JSON (no prose inside the JSON, do not repeat the answer):` as the visible answer because the system prompt contained that exact phrase and mistral echoed it verbatim. The fix required both simplifying the prompt (prevention) and replacing two hardcoded stripping regexes with one general rule that strips any trailing line mentioning "json" (resilience). Prevention and resilience are both required — neither alone is sufficient.
+
+---
+
+## 24. Structured Logging Only — No print() in Library Code
+
+All log output in `app/` must use `logger = logging.getLogger(__name__)`. Never use `print()` outside of CLI entry points and debug scripts. Log levels must be used correctly: `DEBUG` for operational traces, `INFO` for lifecycle events, `WARNING` for recoverable failures, `ERROR` for unhandled exceptions.
+
+```python
+# Good
+logger = logging.getLogger(__name__)
+logger.debug("vector_search: LanceDB table empty, returning []")
+logger.warning("stream_answer: LLM call failed", extra={"model": model}, exc_info=exc)
+
+# Bad — stdout pollution, not configurable, leaks into SSE streams
+print(f"DEBUG: chunks={len(chunks)}")
+```
+
+**Rationale**: `print()` statements in library code pollute stdout, leak into SSE event streams, cannot be silenced without monkeypatching, and provide no level filtering. Structured logging with `getLogger(__name__)` is configurable per-module, captured by test log collectors, and shows the calling module automatically. In an async streaming application a stray `print()` can corrupt a Server-Sent Events response.
+
+---
+
+## 25. Deterministic Stubs Over MagicMock for Domain Services
+
+When testing code that depends on domain services (EmbeddingService, EntityExtractor, LLM, Retriever), write a minimal stub class that returns fixed, predictable output — not a `MagicMock()` with patched return values. Stubs are real implementations of the interface contract; mocks are illusions that test the mock itself.
+
+```python
+# Good — a real implementation that returns deterministic output
+class _MockEmbeddingService:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1] * 1024 for _ in texts]  # fixed vector, exact assertions possible
+
+# Bad — tests that the mock was called, not that the system behaved correctly
+mock_embedder = MagicMock()
+mock_embedder.encode.return_value = MagicMock()  # vague, assertions are checks on call counts
+```
+
+Reserve `MagicMock` for external system boundaries only (LiteLLM, httpx, SQLAlchemy internals) where you cannot write a real stub. Domain service stubs should be plain Python classes with no mock framework dependencies.
+
+**Rationale**: `MagicMock()` creates objects that accept any attribute access and return other `MagicMock` objects. Tests built on them confirm that the mock was called, not that the application produced correct output. A `_MockEmbeddingService` that returns `[[0.1] * 1024]` lets you assert exact vector dimensions, count rows in LanceDB, and verify retrieval scores — none of which are possible with a vague mock. Deterministic stubs also prevent the class of regression where a real service interface changes but the mock silently continues accepting the old call signature.

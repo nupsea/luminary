@@ -66,6 +66,7 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-m 'not slow and not e2e'"
+pythonpath = ["tests"]
 markers = [
     "slow: marks tests as slow (real ML model downloads; excluded from make test fast path)",
     "e2e: requires live backend + Ollama; excluded from make ci",

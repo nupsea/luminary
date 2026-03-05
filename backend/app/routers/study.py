@@ -48,22 +48,22 @@ _GAP_MIN_REPS = 1
 
 _TEACHBACK_SYSTEM = (
     "You are a Socratic tutor evaluating a student's explanation. "
-    "Output only valid JSON, no markdown fences, no preamble."
+    "Output a JSON object with no preamble or markdown."
 )
 
 _TEACHBACK_USER_TMPL = (
     "The correct answer to the question is: {answer}\n"
     "The student explained: {explanation}\n\n"
-    "Evaluate whether the student's explanation is accurate and complete. "
-    "Score 0-100 (100 = perfectly correct and complete). "
-    "Identify specific correct points, missing points, and misconceptions.\n"
+    "Evaluate the student's explanation for accuracy and completeness. "
+    "Score 0 to 100. "
+    "Identify correct points, missing points, and misconceptions.\n"
     'Output JSON: {{"score": int, "correct_points": [str], '
     '"missing_points": [str], "misconceptions": [str]}}'
 )
 
 _CORRECTION_SYSTEM = (
     "You are a flashcard generator creating a targeted correction card. "
-    "Output only valid JSON, no markdown fences."
+    "Output a JSON object with no markdown."
 )
 
 _CORRECTION_USER_TMPL = (
@@ -108,6 +108,36 @@ class GapResult(BaseModel):
     weak_card_count: int
     avg_stability: float
     sample_questions: list[str]
+
+
+def _compute_gaps(
+    weak_cards: list[FlashcardModel],
+    chunk_to_section: dict[str, str | None],
+) -> list[GapResult]:
+    """Group weak cards by section, compute avg stability, return sorted results.
+
+    Pure function — no I/O. All inputs are explicit parameters.
+    """
+    groups: dict[str | None, list[FlashcardModel]] = {}
+    for card in weak_cards:
+        heading = chunk_to_section.get(card.chunk_id)
+        groups.setdefault(heading, []).append(card)
+
+    results: list[GapResult] = []
+    for heading, group_cards in groups.items():
+        avg_stab = sum(c.fsrs_stability for c in group_cards) / len(group_cards)
+        sample = [c.question for c in group_cards[:3]]
+        results.append(
+            GapResult(
+                section_heading=heading,
+                weak_card_count=len(group_cards),
+                avg_stability=round(avg_stab, 4),
+                sample_questions=sample,
+            )
+        )
+
+    results.sort(key=lambda r: r.avg_stability)
+    return results
 
 
 class TeachbackRequest(BaseModel):
@@ -206,7 +236,6 @@ async def get_gaps(
     session: AsyncSession = Depends(get_db),
 ) -> list[GapResult]:
     """Return sections with weak (seen but fragile) flashcards, ordered by avg stability."""
-    # Load weak cards for this document
     weak_stmt = (
         select(FlashcardModel)
         .where(FlashcardModel.document_id == document_id)
@@ -214,45 +243,22 @@ async def get_gaps(
         .where(FlashcardModel.reps > _GAP_MIN_REPS)
     )
     weak_result = await session.execute(weak_stmt)
-    weak_cards = weak_result.scalars().all()
+    weak_cards = list(weak_result.scalars().all())
 
     if not weak_cards:
         return []
 
-    # For each weak card, resolve its section heading via chunk → section join
-    # Build a mapping: card_id → section_heading
     chunk_ids = [c.chunk_id for c in weak_cards]
     chunk_stmt = select(ChunkModel, SectionModel.heading).outerjoin(
         SectionModel, ChunkModel.section_id == SectionModel.id
     ).where(ChunkModel.id.in_(chunk_ids))
     chunk_rows = await session.execute(chunk_stmt)
 
-    chunk_to_section: dict[str, str | None] = {}
-    for chunk, heading in chunk_rows:
-        chunk_to_section[chunk.id] = heading
+    chunk_to_section: dict[str, str | None] = {
+        chunk.id: heading for chunk, heading in chunk_rows
+    }
 
-    # Group by section heading
-    groups: dict[str | None, list[FlashcardModel]] = {}
-    for card in weak_cards:
-        heading = chunk_to_section.get(card.chunk_id)
-        groups.setdefault(heading, []).append(card)
-
-    results: list[GapResult] = []
-    for heading, group_cards in groups.items():
-        avg_stab = sum(c.fsrs_stability for c in group_cards) / len(group_cards)
-        sample = [c.question for c in group_cards[:3]]
-        results.append(
-            GapResult(
-                section_heading=heading,
-                weak_card_count=len(group_cards),
-                avg_stability=round(avg_stab, 4),
-                sample_questions=sample,
-            )
-        )
-
-    # Sort by avg_stability ascending (most fragile first)
-    results.sort(key=lambda r: r.avg_stability)
-    return results
+    return _compute_gaps(weak_cards, chunk_to_section)
 
 
 @router.post("/sessions/start", response_model=SessionResponse, status_code=201)

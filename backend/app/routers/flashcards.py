@@ -134,6 +134,19 @@ async def generate_flashcards(
     return [_to_response(c) for c in cards]
 
 
+def _cards_to_csv(cards: list[FlashcardModel], document_title: str) -> str:
+    """Render flashcards as a CSV string.
+
+    Pure function — no I/O. All inputs are explicit parameters.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["question", "answer", "source_excerpt", "document_title"])
+    for card in cards:
+        writer.writerow([card.question, card.answer, card.source_excerpt, document_title])
+    return output.getvalue()
+
+
 @router.get("/{document_id}/export/csv")
 async def export_flashcards_csv(
     document_id: str,
@@ -151,17 +164,10 @@ async def export_flashcards_csv(
         .where(FlashcardModel.document_id == document_id)
         .order_by(FlashcardModel.created_at.desc())
     )
-    cards = card_result.scalars().all()
+    cards = list(card_result.scalars().all())
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["question", "answer", "source_excerpt", "document_title"])
-    for card in cards:
-        writer.writerow([card.question, card.answer, card.source_excerpt, document_title])
-
-    output.seek(0)
     return StreamingResponse(
-        iter([output.getvalue()]),
+        iter([_cards_to_csv(cards, document_title)]),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=flashcards.csv"},
     )
