@@ -1574,7 +1574,7 @@
         "test_citations_include_document_title_for_all_scope and test_citations_no_title_for_single_scope pass",
         "uv run pytest tests/test_qa.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S55",

@@ -22,7 +22,7 @@ async function fetchDocList(): Promise<DocListItem[]> {
 }
 
 interface Citation {
-  document_title: string
+  document_title: string | null
   section_heading: string
   page: number
   excerpt: string
@@ -400,7 +400,9 @@ export default function Chat() {
                             className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                             title={c.excerpt}
                           >
-                            {c.document_title} › {c.section_heading} (p.{c.page})
+                            {c.document_title
+                              ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
+                              : `p.${c.page}`}
                           </span>
                         ))}
                       </div>

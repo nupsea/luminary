@@ -20,6 +20,7 @@ from app.services.qa import (
     QA_SYSTEM_PROMPT,
     QAService,
     _build_context,
+    _enrich_citation_titles,
     _split_response,
 )
 from app.types import ScoredChunk
@@ -288,7 +289,8 @@ async def test_stream_final_event_contains_citations(test_db):
     assert done_payload["done"] is True
     assert done_payload["confidence"] == "high"
     assert len(done_payload["citations"]) == 1
-    assert done_payload["citations"][0]["document_title"] == "Physics"
+    # scope='single' → document_title is cleared to None (redundant for single doc)
+    assert done_payload["citations"][0]["document_title"] is None
     assert "qa_id" in done_payload
 
 
@@ -571,3 +573,112 @@ async def test_qa_with_mock_llm(test_db):
     done_payload = json.loads(events[-1][len("data: "):])
     assert done_payload["done"] is True
     assert len(done_payload["citations"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# S61 — document attribution: _enrich_citation_titles and stream_answer
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_citation_titles_single_scope_clears_title():
+    """scope='single' → document_title set to None on all citations."""
+    chunk = _make_chunk("doc-a", section="Intro")
+    citations = [{"document_title": "Some Book", "section_heading": "Intro", "page": 1}]
+    result = _enrich_citation_titles(citations, [chunk], {"doc-a": "Some Book"}, "single")
+    assert result[0]["document_title"] is None
+
+
+def test_enrich_citation_titles_all_scope_populates_from_chunks():
+    """scope='all' → document_title populated from matched chunk's doc title."""
+    chunk = _make_chunk("doc-b", section="Chapter 2")
+    chunk.page = 5
+    citations = [{"document_title": "", "section_heading": "Chapter 2", "page": 5}]
+    result = _enrich_citation_titles(citations, [chunk], {"doc-b": "The Odyssey"}, "all")
+    assert result[0]["document_title"] == "The Odyssey"
+
+
+@pytest.mark.asyncio
+async def test_citations_include_document_title_for_all_scope(test_db):
+    """scope='all' with 2 doc chunks → citations carry document_title from DB."""
+    _engine, factory, tmp_path = test_db
+    doc_id_a = str(uuid.uuid4())
+    doc_id_b = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id_a, "Alice in Wonderland")
+    await _insert_doc(factory, tmp_path, doc_id_b, "The Odyssey")
+
+    chunk_a = _make_chunk(doc_id_a, section="Chapter 1")
+    chunk_a.page = 1
+    chunk_b = _make_chunk(doc_id_b, section="Book I")
+    chunk_b.page = 10
+
+    citations_json = [
+        {"document_title": "", "section_heading": "Chapter 1", "page": 1, "excerpt": "..."},
+        {"document_title": "", "section_heading": "Book I", "page": 10, "excerpt": "..."},
+    ]
+    llm_response = "Comparison answer." + json.dumps(
+        {"citations": citations_json, "confidence": "medium"}
+    )
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[chunk_a, chunk_b])
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
+
+    with (
+        patch("app.services.qa.get_retriever", return_value=mock_retriever),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.services.qa.get_graph_service"),  # suppress real Kuzu
+    ):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer("Compare the two books?", None, "all", None)
+        ]
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload["done"] is True
+    titles = {c["document_title"] for c in done_payload["citations"]}
+    assert "Alice in Wonderland" in titles
+    assert "The Odyssey" in titles
+
+
+@pytest.mark.asyncio
+async def test_citations_no_title_for_single_scope(test_db):
+    """scope='single' → document_title=None on all citations."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "Physics Textbook")
+
+    citations_json = [
+        {
+            "document_title": "Physics Textbook",
+            "section_heading": "Forces",
+            "page": 3,
+            "excerpt": "F=ma",
+        }
+    ]
+    llm_response = "Force equals mass times acceleration." + json.dumps(
+        {"citations": citations_json, "confidence": "high"}
+    )
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id, section="Forces")])
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
+
+    with (
+        patch("app.services.qa.get_retriever", return_value=mock_retriever),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.services.qa.get_graph_service"),  # suppress real Kuzu
+    ):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer(
+                "What is Newton's 2nd law?", [doc_id], "single", None
+            )
+        ]
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload["done"] is True
+    assert all(c["document_title"] is None for c in done_payload["citations"])

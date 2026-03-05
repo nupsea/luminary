@@ -73,6 +73,44 @@ async def _maybe_rewrite_query(
         logger.warning("_maybe_rewrite_query: LLM rewrite failed", exc_info=True)
     return question
 
+
+def _enrich_citation_titles(
+    citations: list[dict],
+    chunks: list[ScoredChunk],
+    doc_titles: dict[str, str],
+    scope: str,
+) -> list[dict]:
+    """Populate (or clear) document_title in each citation.
+
+    scope='single' — set document_title=None on all citations (redundant when
+    the user is already reading a specific document).
+
+    scope='all' — match each citation to a retrieved chunk by
+    (section_heading, page) and fill in the authoritative title from doc_titles.
+    If no chunk matches, keep whatever the LLM put in (graceful degradation).
+    """
+    if scope == "single":
+        for c in citations:
+            c["document_title"] = None
+        return citations
+
+    # Build lookup: (section_heading, page) -> document_id  (first match wins)
+    chunk_index: dict[tuple[str, int], str] = {}
+    for chunk in chunks:
+        key = (chunk.section_heading, chunk.page)
+        if key not in chunk_index:
+            chunk_index[key] = chunk.document_id
+
+    for c in citations:
+        heading = (c.get("section_heading") or "").strip()
+        page = int(c.get("page") or 0)
+        doc_id = chunk_index.get((heading, page))
+        if doc_id and doc_id in doc_titles:
+            c["document_title"] = doc_titles[doc_id]
+
+    return citations
+
+
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
     "Answer only using the provided context. "
@@ -290,6 +328,8 @@ class QAService:
 
                 # Parse citations JSON from the end of the response
                 answer_text, citations, confidence = _split_response(full_text)
+                # Authoritative document_title population from DB titles
+                citations = _enrich_citation_titles(citations, chunks, doc_titles, scope)
 
                 # Record the answer on the root span for Phoenix to show Q→A
                 root_span.set_attribute("output.value", answer_text[:2000])
