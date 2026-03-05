@@ -754,3 +754,18 @@ Commit: 288a678
 - SQL batch queries use string interpolation for IN clauses (SQLite doesn't support array binding)
 - Dedup: when a neighbor is already in result_map from a different source, compare scores and keep higher
 ---
+
+## S59 — Speaker-balanced retrieval (2026-03-05)
+Status: DONE
+Commit: a614a26
+
+### What was built
+- _round_robin() generic helper in retriever.py extracted from _diversify()
+- _diversify() now checks speakers FIRST: if any chunk.speaker != None and concentration > 60%, round-robin across speakers
+- Falls through to section-diversity when no speaker data present
+- 3 new tests in test_retriever.py
+
+### Key learnings
+- ScoredChunk.speaker was already added in S57 — S59 is purely a change to _diversify()
+- Generic _round_robin(group_key) works for both "speaker" and "section_heading" fields
+---

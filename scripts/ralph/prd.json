@@ -1523,7 +1523,7 @@
         "Section-diversity tests still pass (no regression)",
         "uv run pytest tests/test_retriever.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S60",
