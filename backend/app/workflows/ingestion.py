@@ -328,6 +328,97 @@ async def _chunk_book(
     return {**state, "chunks": chunks, "status": "embedding"}
 
 
+async def _chunk_conversation(
+    state: IngestionState, pd: dict | None, doc_id: str
+) -> IngestionState:
+    """Conversation-specific chunking: speaker-turn chunks with speaker field populated.
+
+    Uses ConversationChunker.detect() to decide whether to use speaker-aware
+    chunking or fall back to RecursiveCharacterTextSplitter.  After chunking,
+    extracts roster + timeline and writes them to DocumentModel.conversation_metadata.
+    """
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+    from app.services.conversation_chunker import ConversationChunker  # noqa: PLC0415
+
+    raw_text = (pd["raw_text"] if pd else "") or ""
+    chunker = ConversationChunker()
+
+    chunks: list[dict] = []
+    async with get_session_factory()() as session:
+        if chunker.detect(raw_text):
+            conv_chunks = chunker.chunk(raw_text)
+            for idx, cc in enumerate(conv_chunks):
+                chunk_id = str(uuid.uuid4())
+                chunk = ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=None,
+                    text=cc.text,
+                    token_count=len(cc.text) // 4,
+                    page_number=0,
+                    speaker=cc.speaker,
+                    chunk_index=idx,
+                )
+                session.add(chunk)
+                chunks.append(
+                    {"id": chunk_id, "document_id": doc_id, "text": cc.text, "index": idx}
+                )
+            # Extract metadata
+            roster = chunker.extract_roster(conv_chunks)
+            timeline = chunker.extract_timeline(raw_text)
+            conversation_metadata = {**roster, **timeline}
+        else:
+            # Fallback: plain text splitter (no speaker detection)
+            cfg = CHUNK_CONFIGS["conversation"]
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
+            )
+            all_texts = [s["text"] for s in (pd["sections"] if pd else []) if s["text"]]
+            raw_chunks_text = splitter.split_text("\n\n".join(all_texts) or raw_text)
+            for idx, text in enumerate(raw_chunks_text):
+                chunk_id = str(uuid.uuid4())
+                chunk = ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=None,
+                    text=text,
+                    token_count=len(text.split()),
+                    page_number=0,
+                    speaker=None,
+                    chunk_index=idx,
+                )
+                session.add(chunk)
+                chunks.append(
+                    {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
+                )
+            conversation_metadata = {
+                "speakers": [],
+                "total_turns": 0,
+                "has_timestamps": False,
+                "first_timestamp": None,
+                "last_timestamp": None,
+            }
+
+        await session.execute(
+            _update(DocumentModel)
+            .where(DocumentModel.id == doc_id)
+            .values(conversation_metadata=conversation_metadata)
+        )
+        await session.commit()
+
+    logger.info(
+        "Conversation chunked",
+        extra={
+            "doc_id": doc_id,
+            "num_chunks": len(chunks),
+            "speaker_count": len(conversation_metadata.get("speakers", [])),
+        },
+    )
+    return {**state, "chunks": chunks, "status": "embedding"}
+
+
 async def chunk_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
     with trace_ingestion_node("chunk", state):
@@ -372,6 +463,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
 
             if content_type == "book":
                 return await _chunk_book(state, pd, doc_id)
+
+            if content_type == "conversation":
+                return await _chunk_conversation(state, pd, doc_id)
 
             cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
             splitter = RecursiveCharacterTextSplitter(

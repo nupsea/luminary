@@ -699,3 +699,33 @@ async def get_document_diagnostics(document_id: str):
         edge_count=edge_count,
         vector_count=vector_count,
     )
+
+
+@router.get("/{document_id}/conversation")
+async def get_conversation_metadata(document_id: str) -> dict:
+    """Return speaker roster and timeline for a conversation document.
+
+    Returns 404 if not found, 400 if content_type != 'conversation'.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.content_type != "conversation":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document is not a conversation (content_type={doc.content_type})",
+        )
+
+    metadata = doc.conversation_metadata or {
+        "speakers": [],
+        "total_turns": 0,
+        "has_timestamps": False,
+        "first_timestamp": None,
+        "last_timestamp": None,
+    }
+    return metadata

@@ -29,6 +29,8 @@ class DocumentModel(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
     # Number of detected sections/chapters (set during book ingestion).
     chapter_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Speaker roster and timeline for conversation documents (set during ingestion).
+    conversation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
