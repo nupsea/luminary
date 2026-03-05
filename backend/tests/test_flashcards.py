@@ -8,6 +8,8 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import CapturingLLMService as _CapturingLLMService
+from stubs import MockLLMService as _MockLLMService
 
 import app.database as db_module
 from app.database import make_engine
@@ -15,8 +17,6 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel
 from app.services.flashcard import FlashcardService
-from stubs import CapturingLLMService as _CapturingLLMService
-from stubs import MockLLMService as _MockLLMService
 
 # ---------------------------------------------------------------------------
 # Isolated test DB fixture

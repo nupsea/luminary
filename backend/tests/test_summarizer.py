@@ -9,10 +9,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
-import app.database as db_module
 from stubs import CapturingLLMService as _CapturingLLMService
 from stubs import MockLLMService as _MockLLMService
+
+import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app

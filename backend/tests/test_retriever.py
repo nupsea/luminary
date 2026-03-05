@@ -3,11 +3,10 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-from stubs import MockEmbeddingService as _MockEmbeddingService
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import MockEmbeddingService as _MockEmbeddingService
 
 import app.database as db_module
 from app.database import make_engine
