@@ -736,11 +736,13 @@ _background_tasks: set[asyncio.Task] = set()
 
 
 async def _run_pregenerate(doc_id: str) -> None:
-    """Background task: pre-generate summaries after ingestion completes."""
+    """Background task: pre-generate summaries and invalidate library cache."""
     try:
         from app.services.summarizer import get_summarization_service  # noqa: PLC0415
         svc = get_summarization_service()
         await svc.pregenerate(doc_id)
+        # New document changes library-level synthesis — invalidate cached overview
+        await svc.invalidate_library_cache()
         logger.info("background summarize: done", extra={"doc_id": doc_id})
     except Exception as exc:
         logger.warning(

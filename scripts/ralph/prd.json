@@ -1593,7 +1593,7 @@
         "Learning tab with no document selected shows Library Overview calling POST /summarize/all",
         "uv run pytest tests/test_library_summary.py exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

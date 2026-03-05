@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookPlus, FileText, Plus, Trash2 } from "lucide-react"
+import { BookPlus, ChevronDown, FileText, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterBar } from "@/components/library/FilterBar"
 import { SearchBar } from "@/components/library/SearchBar"
@@ -95,6 +96,167 @@ async function bulkDelete(ids: string[]): Promise<void> {
 
 async function deleteDocument(id: string): Promise<void> {
   await fetch(`${API_BASE}/documents/${id}`, { method: "DELETE" })
+}
+
+// ---------------------------------------------------------------------------
+// LibraryOverview — holistic summary across all ingested documents
+// ---------------------------------------------------------------------------
+
+type LibraryOverviewMode = "one_sentence" | "executive" | "detailed"
+
+const LIBRARY_MODES: { mode: LibraryOverviewMode; label: string }[] = [
+  { mode: "one_sentence", label: "One sentence" },
+  { mode: "executive", label: "Key themes" },
+  { mode: "detailed", label: "Detailed" },
+]
+
+function LibraryOverview() {
+  const [activeMode, setActiveMode] = useState<LibraryOverviewMode>("executive")
+  const [summaries, setSummaries] = useState<Partial<Record<LibraryOverviewMode, string>>>({})
+  const [streaming, setStreaming] = useState<Partial<Record<LibraryOverviewMode, boolean>>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [notEnough, setNotEnough] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+
+  async function generate(mode: LibraryOverviewMode) {
+    setError(null)
+    setNotEnough(false)
+    setStreaming((s) => ({ ...s, [mode]: true }))
+    setSummaries((s) => ({ ...s, [mode]: "" }))
+    try {
+      const res = await fetch(`${API_BASE}/summarize/all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, model: null }),
+      })
+      if (!res.ok || !res.body) throw new Error("Failed")
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? ""
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
+              if (typeof payload["token"] === "string") {
+                setSummaries((s) => ({ ...s, [mode]: (s[mode] ?? "") + payload["token"] }))
+              }
+              if (payload["error"] === "not_enough_summaries") {
+                setNotEnough(true)
+                setStreaming((s) => ({ ...s, [mode]: false }))
+              } else if (payload["error"] === "llm_unavailable") {
+                setError(
+                  typeof payload["message"] === "string"
+                    ? payload["message"]
+                    : "Ollama is not running. Start it with: ollama serve",
+                )
+                setStreaming((s) => ({ ...s, [mode]: false }))
+              }
+              if (payload["done"] === true) {
+                setStreaming((s) => ({ ...s, [mode]: false }))
+              }
+            } catch {
+              // skip malformed SSE event
+            }
+          }
+        }
+      }
+    } catch {
+      setStreaming((s) => ({ ...s, [mode]: false }))
+      setError("Failed to generate library overview.")
+    }
+  }
+
+  const currentSummary = summaries[activeMode]
+  const isStreaming = streaming[activeMode] ?? false
+
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <button
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <span className="text-sm font-semibold text-foreground">Library Overview</span>
+        <ChevronDown
+          size={14}
+          className={cn(
+            "text-muted-foreground transition-transform",
+            collapsed && "-rotate-90",
+          )}
+        />
+      </button>
+      {!collapsed && (
+        <div className="border-t border-border px-4 pb-4 pt-3">
+          {/* Mode tabs */}
+          <div className="mb-3 flex gap-1 rounded-md bg-muted p-1">
+            {LIBRARY_MODES.map((m) => (
+              <button
+                key={m.mode}
+                onClick={() => setActiveMode(m.mode)}
+                className={cn(
+                  "flex-1 rounded py-1.5 text-xs font-medium transition-colors",
+                  activeMode === m.mode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {/* Content */}
+          {error && (
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {error}
+            </div>
+          )}
+          {notEnough ? (
+            <p className="text-sm text-muted-foreground">
+              Ingest at least 2 documents to get a library overview.
+            </p>
+          ) : isStreaming && !currentSummary ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 size={14} className="animate-spin" />
+              Summarizing...
+            </div>
+          ) : currentSummary ? (
+            <div className="space-y-2">
+              <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
+                {currentSummary}
+                {isStreaming && <span className="animate-pulse">▍</span>}
+              </pre>
+              {!isStreaming && (
+                <button
+                  onClick={() => void generate(activeMode)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw size={12} />
+                  Regenerate
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                Generate a holistic summary across all your documents.
+              </p>
+              <button
+                onClick={() => void generate(activeMode)}
+                className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Generate
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function LoadingSkeleton() {
@@ -471,6 +633,11 @@ export default function Learning() {
                     Deselect all
                   </button>
                 </div>
+              )}
+
+              {/* Library overview — only on first page, no active filters */}
+              {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
+                <LibraryOverview />
               )}
 
               {/* Recently accessed — hide when filters active */}

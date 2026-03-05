@@ -22,6 +22,11 @@ class SummarizeRequest(BaseModel):
     model: str | None = None
 
 
+class LibrarySummarizeRequest(BaseModel):
+    mode: Literal["one_sentence", "executive", "detailed"] = "executive"
+    model: str | None = None
+
+
 @router.get("/{document_id}/cached")
 async def get_cached_summaries(document_id: str) -> dict:
     """Return which summary modes are already cached for this document.
@@ -43,6 +48,20 @@ async def get_cached_summaries(document_id: str) -> dict:
                 seen.add(row.mode)
                 summaries[row.mode] = {"id": row.id, "content": row.content}
     return {"document_id": document_id, "summaries": summaries}
+
+
+@router.post("/all")
+async def summarize_library(req: LibrarySummarizeRequest) -> StreamingResponse:
+    """Stream a holistic summary synthesized from all ingested documents.
+
+    Cache-first: if a library summary is stored for this mode it is streamed from
+    the database.  Regenerated after any new document is ingested.
+    """
+    svc = get_summarization_service()
+    return StreamingResponse(
+        svc.stream_library_summary(req.mode, req.model),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/{document_id}")

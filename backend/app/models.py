@@ -170,6 +170,16 @@ class QAHistoryModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class LibrarySummaryModel(Base):
+    __tablename__ = "library_summaries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # one_sentence|executive|detailed
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class SettingsModel(Base):
     __tablename__ = "settings"
 

@@ -9,6 +9,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     DocumentModel,
     EvalRunModel,
     FlashcardModel,
+    LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
     QAHistoryModel,
