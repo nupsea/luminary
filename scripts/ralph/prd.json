@@ -1506,7 +1506,7 @@
         "Result capped at k\u00d72 total chunks",
         "uv run pytest tests/test_context_expansion.py exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S59",

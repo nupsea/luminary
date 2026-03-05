@@ -735,3 +735,22 @@ Commit: 6a52c55
 - extract_roster must parse speaker lines from chunk.text, not just count chunk.speaker — short convos fit in one chunk so chunk.speaker alone misses secondary speakers
 - Pattern order matters: try timestamp pattern before name-colon to avoid misparse
 ---
+
+## S57 — Context expansion: adjacent chunks for books/conversations after RRF (2026-03-05)
+Status: DONE
+Commit: 288a678
+
+### What was built
+- ScoredChunk extended with `chunk_index: int = 0` and `speaker: str | None = None`
+- source Literal extended with 'context_expansion'
+- vector_search: reads speaker from LanceDB row (stored as "" → converted to None)
+- keyword_search: batch SELECT from chunks table after FTS to get speaker + chunk_index
+- _expand_context(): queries SQLite for chunk_index by chunk_id, then fetches neighbors at ±window; skips code/paper; dedup keeping higher score; caps at k*2; sorts desc
+- retrieve() now calls _expand_context after rrf_merge
+- 4 tests
+
+### Key learnings
+- chunk_index is not stored in LanceDB, so _expand_context does a SQLite lookup by chunk_id to get it
+- SQL batch queries use string interpolation for IN clauses (SQLite doesn't support array binding)
+- Dedup: when a neighbor is already in result_map from a different source, compare scores and keep higher
+---
