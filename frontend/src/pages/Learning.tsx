@@ -1,9 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookPlus, ChevronDown, FileText, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
+import {
+  BookPlus,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  FileText,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { FilterBar } from "@/components/library/FilterBar"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
@@ -16,8 +35,8 @@ import type {
   DocumentListItem,
   DocumentListResponse,
   SortOption,
-  ViewMode,
 } from "@/components/library/types"
+import { STATUS_LABELS, STATUS_VARIANTS, formatDate } from "@/components/library/utils"
 import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
@@ -269,6 +288,140 @@ function LoadingSkeleton() {
   )
 }
 
+type TableSortCol = "title" | "created_at"
+
+interface LibraryTableProps {
+  items: DocumentListItem[]
+  isLoading: boolean
+  isError: boolean
+  onRowClick: (id: string) => void
+  onRetry: () => void
+}
+
+function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }: LibraryTableProps) {
+  const [sortCol, setSortCol] = useState<TableSortCol | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+
+  function handleColClick(col: TableSortCol) {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortCol(col)
+      setSortDir("asc")
+    }
+  }
+
+  function SortIcon({ col }: { col: TableSortCol }) {
+    if (sortCol !== col) return <ChevronsUpDown size={12} className="ml-1 inline text-muted-foreground/50" />
+    return sortDir === "asc"
+      ? <ChevronUp size={12} className="ml-1 inline text-foreground" />
+      : <ChevronDown size={12} className="ml-1 inline text-foreground" />
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    if (!sortCol) return 0
+    const dir = sortDir === "asc" ? 1 : -1
+    if (sortCol === "title") return a.title.localeCompare(b.title) * dir
+    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir
+  })
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <span className="flex-1">Could not load library. Check that the backend is running.</span>
+        <button
+          onClick={onRetry}
+          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>
+            <button
+              onClick={() => handleColClick("title")}
+              className="flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Title
+              <SortIcon col="title" />
+            </button>
+          </TableHead>
+          <TableHead>Content Type</TableHead>
+          <TableHead>Format</TableHead>
+          <TableHead>
+            <button
+              onClick={() => handleColClick("created_at")}
+              className="flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Ingested At
+              <SortIcon col="created_at" />
+            </button>
+          </TableHead>
+          <TableHead className="text-right">Chunks</TableHead>
+          <TableHead>Status</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {isLoading
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <TableRow key={i}>
+                <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-10" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+              </TableRow>
+            ))
+          : sorted.length === 0
+          ? (
+              <TableRow>
+                <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                  No documents yet. Upload your first document to get started.
+                </TableCell>
+              </TableRow>
+            )
+          : sorted.map((doc) => (
+              <TableRow
+                key={doc.id}
+                className="cursor-pointer"
+                onClick={() => onRowClick(doc.id)}
+              >
+                <TableCell className="font-medium text-foreground">
+                  {doc.title}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="gray" className="capitalize">
+                    {doc.content_type}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground capitalize">
+                  {doc.format}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {formatDate(doc.created_at)}
+                </TableCell>
+                <TableCell className="text-right text-xs text-muted-foreground">
+                  {doc.chunk_count}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
+                    {STATUS_LABELS[doc.learning_status]}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+      </TableBody>
+    </Table>
+  )
+}
+
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -411,13 +564,14 @@ function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const libraryView = useAppStore((s) => s.libraryView)
+  const setLibraryView = useAppStore((s) => s.setLibraryView)
   const queryClient = useQueryClient()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const tagFilter = searchParams.get("tag")
 
   const [search, setSearch] = useState("")
-  const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
   const [page, setPage] = useState(1)
@@ -428,7 +582,7 @@ export default function Learning() {
 
   const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
 
-  const { data: pageData, isLoading } = useQuery({
+  const { data: pageData, isLoading, isError, refetch } = useQuery({
     queryKey: ["documents", content_type, tagFilter, sort, page, PAGE_SIZE],
     queryFn: () =>
       fetchDocuments({
@@ -556,7 +710,7 @@ export default function Learning() {
         {!searchActive && (
           <>
             <SortSelect value={sort} onChange={handleSortChange} />
-            <ViewToggle value={viewMode} onChange={setViewMode} />
+            <ViewToggle value={libraryView} onChange={setLibraryView} />
           </>
         )}
         <button
@@ -608,9 +762,9 @@ export default function Learning() {
         <>
           <FilterBar selected={selectedTypes} onChange={handleTypesChange} />
 
-          {isLoading ? (
+          {isLoading && libraryView === "grid" ? (
             <LoadingSkeleton />
-          ) : total === 0 && !tagFilter && selectedTypes.size === 0 ? (
+          ) : !isLoading && !isError && total === 0 && !tagFilter && selectedTypes.size === 0 ? (
             <EmptyState onAdd={() => setUploadOpen(true)} />
           ) : (
             <>
@@ -646,7 +800,7 @@ export default function Learning() {
                   <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Recently accessed
                   </h2>
-                  {viewMode === "grid" ? (
+                  {libraryView === "grid" ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                       {recentItems.map((doc) => (
                         <DocumentCard
@@ -685,13 +839,31 @@ export default function Learning() {
                     </span>
                   )}
                 </h2>
-                {items.length === 0 ? (
+                {libraryView === "list" ? (
+                  <LibraryTable
+                    items={items}
+                    isLoading={isLoading}
+                    isError={isError}
+                    onRowClick={handleDocumentClick}
+                    onRetry={() => void refetch()}
+                  />
+                ) : isError ? (
+                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <span className="flex-1">Could not load library. Check that the backend is running.</span>
+                    <button
+                      onClick={() => void refetch()}
+                      className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : items.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">
                     {tagFilter
                       ? `No documents tagged "${tagFilter}".`
                       : "No documents match your filters."}
                   </p>
-                ) : viewMode === "grid" ? (
+                ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {items.map((doc) => (
                       <DocumentCard
@@ -705,12 +877,6 @@ export default function Learning() {
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}
                       />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {items.map((doc) => (
-                      <DocumentRow key={doc.id} doc={doc} onClick={handleDocumentClick} />
                     ))}
                   </div>
                 )}

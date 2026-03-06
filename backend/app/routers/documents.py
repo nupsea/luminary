@@ -81,6 +81,7 @@ class DocumentListItem(BaseModel):
     flashcard_count: int
     learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
     chapter_count: int | None
+    chunk_count: int
 
 
 class DocumentListResponse(BaseModel):
@@ -227,6 +228,12 @@ async def list_documents(
             .correlate(DocumentModel)
             .scalar_subquery()
         )
+        chunk_count_sq = (
+            select(func.count())
+            .where(ChunkModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
 
         stmt = select(
             DocumentModel,
@@ -234,6 +241,7 @@ async def list_documents(
             flashcard_count_sq.label("flashcard_count"),
             summary_count_sq.label("summary_count"),
             study_session_count_sq.label("study_session_count"),
+            chunk_count_sq.label("chunk_count"),
         )
 
         result = await session.execute(stmt)
@@ -247,6 +255,7 @@ async def list_documents(
         flashcard_count = row[2] or 0
         summary_count = row[3] or 0
         study_session_count = row[4] or 0
+        chunk_count = row[5] or 0
         all_items.append(
             DocumentListItem(
                 id=doc.id,
@@ -265,6 +274,7 @@ async def list_documents(
                     study_session_count, flashcard_count, summary_count
                 ),
                 chapter_count=doc.chapter_count,
+                chunk_count=chunk_count,
             )
         )
 

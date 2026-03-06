@@ -22,8 +22,18 @@ import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from 
 import ReactMarkdown from "react-markdown"
 import { useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
-import { relativeDate } from "@/components/library/utils"
+import { formatDate, relativeDate } from "@/components/library/utils"
+import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
 
@@ -342,6 +352,8 @@ export default function NotesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
+  const notesView = useAppStore((s) => s.notesView)
+  const setNotesView = useAppStore((s) => s.setNotesView)
 
   useEffect(() => {
     logger.info("[Notes] mounted")
@@ -389,13 +401,37 @@ export default function NotesPage() {
   let panelContent: React.ReactNode
 
   if (notesLoading) {
-    panelContent = (
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-12 w-full rounded-md" />
-      </div>
-    )
+    panelContent =
+      notesView === "list" ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Title</TableHead>
+              <TableHead>Tags</TableHead>
+              <TableHead>Group</TableHead>
+              <TableHead>Created At</TableHead>
+              <TableHead>Document</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <TableRow key={i}>
+                <TableCell><Skeleton className="h-4 w-40" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-12 w-full rounded-md" />
+          <Skeleton className="h-12 w-full rounded-md" />
+          <Skeleton className="h-12 w-full rounded-md" />
+        </div>
+      )
   } else if (notesError) {
     panelContent = (
       <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -422,6 +458,50 @@ export default function NotesPage() {
           New note
         </button>
       </div>
+    )
+  } else if (notesView === "list") {
+    // Build doc title lookup from already-fetched document list
+    const docTitleMap = Object.fromEntries(documents.map((d) => [d.id, d.title]))
+
+    panelContent = (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Tags</TableHead>
+            <TableHead>Group</TableHead>
+            <TableHead>Created At</TableHead>
+            <TableHead>Document</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {noteList.map((note) => (
+            <TableRow
+              key={note.id}
+              className="cursor-pointer"
+              onClick={() => {
+                /* open note editor — same as clicking NoteCard */
+              }}
+            >
+              <TableCell className="max-w-[200px] truncate font-medium text-foreground">
+                {note.content.slice(0, 60)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.tags.length > 0 ? note.tags.join(", ") : "—"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.group_name ?? "—"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatDate(note.created_at)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.document_id ? (docTitleMap[note.document_id] ?? note.document_id) : "Standalone"}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     )
   } else {
     panelContent = (
@@ -497,8 +577,8 @@ export default function NotesPage() {
 
       {/* Right panel */}
       <div className="flex-1 overflow-auto p-6">
-        {/* Panel header with + button */}
-        <div className="mb-4 flex items-center justify-between">
+        {/* Panel header with view toggle + button */}
+        <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
             {filter.type === "all"
               ? "All Notes"
@@ -506,14 +586,17 @@ export default function NotesPage() {
                 ? filter.name
                 : `#${filter.name}`}
           </h2>
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-            title="New note"
-          >
-            <Plus size={13} />
-            New
-          </button>
+          <div className="flex items-center gap-2">
+            <ViewToggle value={notesView} onChange={setNotesView} />
+            <button
+              onClick={() => setShowCreate((v) => !v)}
+              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+              title="New note"
+            >
+              <Plus size={13} />
+              New
+            </button>
+          </div>
         </div>
 
         {/* Create form */}
