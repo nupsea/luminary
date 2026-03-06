@@ -19,6 +19,16 @@ Started: Fri  6 Mar 2026 23:08:42 AEST
   - litellm.ServiceUnavailableError must be caught at the asyncio.gather level, not inside each unit coro, because the semaphore pattern uses gather; individual unit errors are non-fatal but Ollama-offline is fatal-for-session
 ---
 
+## 2026-03-07T07:00:00Z - S79 - Pure context packer: smart context window assembly with deduplication and section grouping
+- Implemented: context_packer.py pack_context() pure function (no I/O), synthesize_node uses pack_context() instead of _build_context(), section_context capped at 1000 tokens, search_node adds section_summary as separate field
+- Files changed: backend/app/services/context_packer.py (new), backend/app/runtime/chat_graph.py (synthesize_node + search_node updated), backend/tests/test_context_packer.py (new, 7 pure unit tests), scripts/smoke/S79.sh (new)
+- Learnings:
+  - pack_context groups by section_id or section_heading fallback; sorts groups by max(relevance_score) desc
+  - LCS DP with row-rolling optimization (_LCS_CHAR_LIMIT=300 for O(n²) performance)
+  - dedup_ratio=1.0 disables deduplication (always include all chunks within budget)
+  - 426 tests pass, ruff clean
+---
+
 ## 2026-03-07T06:00:00Z - S78 - Strategy nodes: summary_lookup, graph_traversal, comparative, search with section augmentation
 - Implemented: summary_node (DB executive summary fetch → fallthrough), graph_node (Kuzu entity traversal + hybrid retrieval supplement → fallthrough on error), comparative_node (dual retrieval + interleave), search_node (hybrid retrieval + SectionSummaryModel batch-lookup + text augmentation), synthesize_node (intent-aware prompts + section_context), conditional fallthrough edges
 - Files changed: backend/app/runtime/chat_graph.py (major rewrite), backend/tests/test_chat_graph.py (updated for new summary_node behavior), backend/tests/test_chat_graph_nodes.py (new, 6 tests), scripts/smoke/S78.sh (new)
