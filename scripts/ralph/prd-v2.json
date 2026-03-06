@@ -93,7 +93,7 @@
         "uv run pytest tests/test_document_summary_fast_path.py exits 0",
         "scripts/smoke/S76.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S77",
