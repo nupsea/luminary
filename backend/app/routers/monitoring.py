@@ -8,6 +8,7 @@ Routes:
 
 import json
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,10 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
 _PHOENIX_BASE = "http://localhost:6006"
 _TRACES_TIMEOUT = 3.0  # seconds
+_PHOENIX_REACHABILITY_TTL = 30.0  # seconds
+
+# Module-level cache: {"value": bool, "ts": float}
+_phoenix_reachability_cache: dict = {}
 
 # evals/scores_history.jsonl relative to this file (repo-root/evals/)
 _SCORES_HISTORY_PATH = Path(__file__).parent.parent.parent.parent / "evals" / "scores_history.jsonl"
@@ -87,6 +92,11 @@ class EvalRunResponse(BaseModel):
     context_recall: float | None
 
 
+class PhoenixUrlResponse(BaseModel):
+    url: str
+    enabled: bool
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -99,6 +109,23 @@ async def _check_phoenix_running() -> bool:
             return resp.status_code < 400
     except Exception:
         return False
+
+
+async def _check_phoenix_reachable_cached() -> bool:
+    """HEAD request to Phoenix with 2-second timeout; result cached for 30 seconds."""
+    now = time.monotonic()
+    cached = _phoenix_reachability_cache
+    if cached.get("ts") and now - cached["ts"] < _PHOENIX_REACHABILITY_TTL:
+        return bool(cached["value"])
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.head(f"{_PHOENIX_BASE}")
+            reachable = resp.status_code < 500
+    except Exception:
+        reachable = False
+    _phoenix_reachability_cache["value"] = reachable
+    _phoenix_reachability_cache["ts"] = now
+    return reachable
 
 
 async def _fetch_phoenix_spans(limit: int = 50) -> list[TraceItem]:
@@ -148,6 +175,16 @@ async def _fetch_phoenix_spans(limit: int = 50) -> list[TraceItem]:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/phoenix-url", response_model=PhoenixUrlResponse)
+async def get_phoenix_url() -> PhoenixUrlResponse:
+    """Return the Phoenix UI URL and whether it is currently reachable."""
+    settings = get_settings()
+    if not settings.PHOENIX_ENABLED:
+        return PhoenixUrlResponse(url=_PHOENIX_BASE, enabled=False)
+    reachable = await _check_phoenix_reachable_cached()
+    return PhoenixUrlResponse(url=_PHOENIX_BASE, enabled=reachable)
 
 
 @router.get("/traces", response_model=TracesResponse)

@@ -1717,7 +1717,7 @@
         "uv run pytest tests/test_monitoring.py exits 0",
         "scripts/smoke/S72.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S73",
