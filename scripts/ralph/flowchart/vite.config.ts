@@ -3,26 +3,29 @@ import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import path from 'path'
 
-// Plugin: serve prd.json from the parent directory (scripts/ralph/prd.json)
-// so the app can fetch('/prd.json') and get live story status
-const servePrdJson = () => ({
-  name: 'serve-prd-json',
+// Plugin: serve prd.json and prd-v2.json from the parent directory
+// so the app can fetch('/prd.json') and fetch('/prd-v2.json') and get live story status
+const servePrdFiles = () => ({
+  name: 'serve-prd-files',
   configureServer(server: any) {
-    server.middlewares.use('/prd.json', (_req: any, res: any) => {
-      try {
-        const filePath = path.resolve(__dirname, '../prd.json')
-        const data = fs.readFileSync(filePath, 'utf-8')
-        res.setHeader('Content-Type', 'application/json')
-        res.setHeader('Cache-Control', 'no-cache')
-        res.end(data)
-      } catch {
-        res.statusCode = 404
-        res.end('not found')
-      }
-    })
+    const serveFile = (urlPath: string, filePath: string) => {
+      server.middlewares.use(urlPath, (_req: any, res: any) => {
+        try {
+          const data = fs.readFileSync(path.resolve(__dirname, filePath), 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.setHeader('Cache-Control', 'no-cache')
+          res.end(data)
+        } catch {
+          res.statusCode = 404
+          res.end('not found')
+        }
+      })
+    }
+    serveFile('/prd.json', '../prd.json')
+    serveFile('/prd-v2.json', '../prd-v2.json')
   },
 })
 
 export default defineConfig({
-  plugins: [react(), servePrdJson()],
+  plugins: [react(), servePrdFiles()],
 })

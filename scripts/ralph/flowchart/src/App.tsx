@@ -17,7 +17,7 @@ import './App.css'
 interface Story {
   id: string
   title: string
-  phase: number
+  phase: number | string
   priority: number
   description: string
   acceptanceCriteria: string[]
@@ -26,10 +26,12 @@ interface Story {
 }
 
 type StoryStatus = 'done' | 'active' | 'gate' | 'pending'
+type PrdVersion = 'v1' | 'v2'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const PHASE_NAMES: Record<number, string> = {
+// v1 numeric phases
+const V1_PHASE_NAMES: Record<number, string> = {
   1: 'Phase 1 — Core Infrastructure',
   2: 'Phase 2 — Knowledge & Search',
   3: 'Phase 3 — Learning Engine',
@@ -37,9 +39,14 @@ const PHASE_NAMES: Record<number, string> = {
   5: 'Phase 5 — Code & Polish',
   6: 'Phase 6 — Bugfixes & Hardening',
   7: 'Phase 7 — Book Learning Vertical',
+  8: 'Phase 8 — Books, Conversations & Polish',
 }
 
-const PHASE_COLORS: Record<number, { bg: string; border: string; label: string }> = {
+// v2 string phases map to display name (identity — they're already good strings)
+// Colors keyed by phase identifier (number for v1, string for v2)
+type PhaseColor = { bg: string; border: string; label: string }
+
+const V1_PHASE_COLORS: Record<number, PhaseColor> = {
   1: { bg: '#eff6ff', border: '#bfdbfe', label: '#1d4ed8' },
   2: { bg: '#faf5ff', border: '#e9d5ff', label: '#6d28d9' },
   3: { bg: '#fff7ed', border: '#fed7aa', label: '#c2410c' },
@@ -47,9 +54,26 @@ const PHASE_COLORS: Record<number, { bg: string; border: string; label: string }
   5: { bg: '#fafafa', border: '#e5e5e5', label: '#404040' },
   6: { bg: '#fdf2f8', border: '#f0abfc', label: '#a21caf' },
   7: { bg: '#fff8f1', border: '#fdba74', label: '#c2410c' },
+  8: { bg: '#f0f9ff', border: '#7dd3fc', label: '#0369a1' },
 }
 
-const DEFAULT_PHASE_COLOR = { bg: '#f8fafc', border: '#cbd5e1', label: '#475569' }
+const V2_PHASE_COLORS: Record<string, PhaseColor> = {
+  'V2A — Hierarchical Knowledge': { bg: '#eff6ff', border: '#bfdbfe', label: '#1d4ed8' },
+  'V2B — Agentic Chat':           { bg: '#faf5ff', border: '#e9d5ff', label: '#6d28d9' },
+  'V2C — Quality Gates':          { bg: '#f0fdf4', border: '#bbf7d0', label: '#15803d' },
+}
+
+const DEFAULT_PHASE_COLOR: PhaseColor = { bg: '#f8fafc', border: '#cbd5e1', label: '#475569' }
+
+function getPhaseColor(phase: number | string): PhaseColor {
+  if (typeof phase === 'number') return V1_PHASE_COLORS[phase] ?? DEFAULT_PHASE_COLOR
+  return V2_PHASE_COLORS[phase] ?? DEFAULT_PHASE_COLOR
+}
+
+function getPhaseName(phase: number | string): string {
+  if (typeof phase === 'number') return V1_PHASE_NAMES[phase] ?? `Phase ${phase}`
+  return phase  // v2 phases are already descriptive strings
+}
 
 const STATUS_STYLES: Record<StoryStatus, {
   bg: string; border: string; idColor: string
@@ -133,17 +157,27 @@ function buildNodes(stories: Story[]): Node[] {
   const nodes: Node[] = []
   let y = 0
 
-  const phases = [...new Set(sorted.map(s => s.phase))].sort((a, b) => a - b)
-  for (const phase of phases) {
-    const ps = sorted.filter(s => s.phase === phase)
+  // Group by phase preserving insertion order (priority-sorted stories determine order)
+  const phaseOrder: (number | string)[] = []
+  const phaseMap = new Map<number | string, Story[]>()
+  for (const s of sorted) {
+    if (!phaseMap.has(s.phase)) {
+      phaseOrder.push(s.phase)
+      phaseMap.set(s.phase, [])
+    }
+    phaseMap.get(s.phase)!.push(s)
+  }
+
+  for (const phase of phaseOrder) {
+    const ps = phaseMap.get(phase)!
     if (!ps.length) continue
 
     const rows = Math.ceil(ps.length / STORIES_PER_ROW)
     const cols = Math.min(ps.length, STORIES_PER_ROW)
     const bgW = cols * (NODE_W + H_GAP) - H_GAP + PADDING * 2
     const bgH = LABEL_H + rows * (NODE_H + V_GAP) - V_GAP + PADDING * 2
-    const pc = PHASE_COLORS[phase] ?? DEFAULT_PHASE_COLOR
-    const phaseName = PHASE_NAMES[phase] ?? `Phase ${phase}`
+    const pc = getPhaseColor(phase)
+    const phaseName = getPhaseName(phase)
 
     nodes.push({
       id: `bg-${phase}`,
@@ -199,7 +233,7 @@ function DetailPanel({ story, onClose }: { story: Story; onClose: () => void }) 
           <span className="panel-badge" style={{ background: s.badgeBg, color: s.badgeColor }}>
             {s.badge}
           </span>
-          <span className="panel-phase">Phase {story.phase} · Priority {story.priority}</span>
+          <span className="panel-phase">{story.phase} · Priority {story.priority}</span>
           <button className="panel-close" onClick={onClose}>×</button>
         </div>
         <h2 className="panel-title">{story.title}</h2>
@@ -220,28 +254,46 @@ function DetailPanel({ story, onClose }: { story: Story; onClose: () => void }) 
 
 // ── App ────────────────────────────────────────────────────────────────────
 
+interface PrdData {
+  stories: Story[]
+  branchName: string
+}
+
 export default function App() {
-  const [stories, setStories] = useState<Story[]>([])
-  const [branchName, setBranchName] = useState('')
+  const [v1Data, setV1Data] = useState<PrdData | null>(null)
+  const [v2Data, setV2Data] = useState<PrdData | null>(null)
+  const [activePrd, setActivePrd] = useState<PrdVersion>('v2')
   const [selected, setSelected] = useState<Story | null>(null)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
 
-  const fetchPrd = () => {
-    fetch('/prd.json?t=' + Date.now())
-      .then(r => r.json())
-      .then(data => {
-        setStories(data.stories ?? [])
-        setBranchName(data.branchName ?? '')
-        setUpdatedAt(new Date())
-      })
-      .catch(console.error)
+  const fetchAll = () => {
+    const load = (url: string) =>
+      fetch(url + '?t=' + Date.now())
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null)
+
+    Promise.allSettled([load('/prd.json'), load('/prd-v2.json')]).then(([r1, r2]) => {
+      const d1: PrdData | null = r1.status === 'fulfilled' ? r1.value : null
+      const d2: PrdData | null = r2.status === 'fulfilled' ? r2.value : null
+      setV1Data(d1)
+      setV2Data(d2)
+      // Auto-select: prefer the PRD with pending stories; default to v2 if exists
+      if (d2?.stories?.some(s => !s.passes)) setActivePrd('v2')
+      else if (d1?.stories?.some(s => !s.passes)) setActivePrd('v1')
+      else if (d2) setActivePrd('v2')
+      setUpdatedAt(new Date())
+    })
   }
 
   useEffect(() => {
-    fetchPrd()
-    const timer = setInterval(fetchPrd, 15_000)
+    fetchAll()
+    const timer = setInterval(fetchAll, 15_000)
     return () => clearInterval(timer)
   }, [])
+
+  const current = activePrd === 'v2' ? v2Data : v1Data
+  const stories = current?.stories ?? []
+  const branchName = current?.branchName ?? ''
 
   const nodes = useMemo(() => buildNodes(stories), [stories])
 
@@ -256,7 +308,7 @@ export default function App() {
     }
   }
 
-  if (!stories.length) {
+  if (!v1Data && !v2Data) {
     return <div className="loading">Loading Luminary PRD…</div>
   }
 
@@ -266,6 +318,25 @@ export default function App() {
         <div className="hdr-left">
           <h1>Luminary</h1>
           <span className="branch">{branchName}</span>
+          {/* PRD version toggle */}
+          <div className="prd-toggle">
+            {v1Data && (
+              <button
+                className={`prd-btn ${activePrd === 'v1' ? 'prd-btn-active' : ''}`}
+                onClick={() => setActivePrd('v1')}
+              >
+                v1
+              </button>
+            )}
+            {v2Data && (
+              <button
+                className={`prd-btn ${activePrd === 'v2' ? 'prd-btn-active' : ''}`}
+                onClick={() => setActivePrd('v2')}
+              >
+                v2
+              </button>
+            )}
+          </div>
         </div>
         <div className="hdr-center">
           <div className="prog-label">{done} / {total} stories complete &nbsp;·&nbsp; {pct}%</div>
