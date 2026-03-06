@@ -264,6 +264,14 @@ class SummarizationService:
             }
             yield f"data: {json.dumps(err_evt)}\n\n"
 
+    async def generate_all_summaries(self, document_id: str, model: str | None = None) -> None:
+        """Public entry point for background summary generation.
+
+        Generates one_sentence, executive, and detailed summaries sequentially.
+        Delegates to pregenerate which handles caching and error isolation.
+        """
+        await self.pregenerate(document_id, model)
+
     async def pregenerate(self, document_id: str, model: str | None = None) -> None:
         """Pre-generate and store summaries for PREGENERATE_MODES.
 

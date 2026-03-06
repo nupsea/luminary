@@ -286,13 +286,14 @@ async def _chunk_book(
         await session.flush()
 
         chunk_idx = 0
+        chunk_models: list[ChunkModel] = []
         for section_model, s in zip(section_models, raw_sections, strict=False):
             section_text = s.get("text", "")
             if not section_text.strip():
                 continue
             for text in splitter.split_text(section_text):
                 chunk_id = str(uuid.uuid4())
-                chunk = ChunkModel(
+                chunk_models.append(ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
                     section_id=section_model.id,
@@ -301,12 +302,12 @@ async def _chunk_book(
                     page_number=s.get("page_start", 0),
                     speaker=None,
                     chunk_index=chunk_idx,
-                )
-                session.add(chunk)
+                ))
                 chunks.append(
                     {"id": chunk_id, "document_id": doc_id, "text": text, "index": chunk_idx}
                 )
                 chunk_idx += 1
+        session.add_all(chunk_models)
 
         # Store chapter count on the document
         chapter_count = len(section_models)
@@ -347,11 +348,12 @@ async def _chunk_conversation(
 
     chunks: list[dict] = []
     async with get_session_factory()() as session:
+        chunk_models: list[ChunkModel] = []
         if chunker.detect(raw_text):
             conv_chunks = chunker.chunk(raw_text)
             for idx, cc in enumerate(conv_chunks):
                 chunk_id = str(uuid.uuid4())
-                chunk = ChunkModel(
+                chunk_models.append(ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
                     section_id=None,
@@ -360,8 +362,7 @@ async def _chunk_conversation(
                     page_number=0,
                     speaker=cc.speaker,
                     chunk_index=idx,
-                )
-                session.add(chunk)
+                ))
                 chunks.append(
                     {"id": chunk_id, "document_id": doc_id, "text": cc.text, "index": idx}
                 )
@@ -379,7 +380,7 @@ async def _chunk_conversation(
             raw_chunks_text = splitter.split_text("\n\n".join(all_texts) or raw_text)
             for idx, text in enumerate(raw_chunks_text):
                 chunk_id = str(uuid.uuid4())
-                chunk = ChunkModel(
+                chunk_models.append(ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
                     section_id=None,
@@ -388,8 +389,7 @@ async def _chunk_conversation(
                     page_number=0,
                     speaker=None,
                     chunk_index=idx,
-                )
-                session.add(chunk)
+                ))
                 chunks.append(
                     {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
                 )
@@ -400,6 +400,7 @@ async def _chunk_conversation(
                 "first_timestamp": None,
                 "last_timestamp": None,
             }
+        session.add_all(chunk_models)
 
         await session.execute(
             _update(DocumentModel)
@@ -433,8 +434,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 raw_chunks, code_metas = _chunk_code_file(raw_text, file_path, doc_id)
                 chunks = []
                 async with get_session_factory()() as session:
+                    chunk_models: list[ChunkModel] = []
                     for idx, (rc, meta) in enumerate(zip(raw_chunks, code_metas, strict=False)):
-                        chunk = ChunkModel(
+                        chunk_models.append(ChunkModel(
                             id=rc["id"],
                             document_id=doc_id,
                             section_id=None,
@@ -443,8 +445,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                             page_number=meta.get("start_line", 0),
                             speaker=None,
                             chunk_index=idx,
-                        )
-                        session.add(chunk)
+                        ))
                         chunks.append(
                             {
                                 "id": rc["id"],
@@ -454,6 +455,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                                 **{k: v for k, v in meta.items() if k != "chunk_id"},
                             }
                         )
+                    session.add_all(chunk_models)
                     await session.commit()
                 logger.info(
                     "Code chunked document",
@@ -490,9 +492,10 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         preview=s.get("text", "")[:300],
                     )
                     session.add(section_model)
+                chunk_models: list[ChunkModel] = []
                 for idx, text in enumerate(raw_chunks_text):
                     chunk_id = str(uuid.uuid4())
-                    chunk = ChunkModel(
+                    chunk_models.append(ChunkModel(
                         id=chunk_id,
                         document_id=doc_id,
                         section_id=None,
@@ -501,11 +504,11 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         page_number=0,
                         speaker=None,
                         chunk_index=idx,
-                    )
-                    session.add(chunk)
+                    ))
                     chunks.append(
                         {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
                     )
+                session.add_all(chunk_models)
                 await session.commit()
             logger.info(
                 "Chunked document",
@@ -740,7 +743,7 @@ async def _run_pregenerate(doc_id: str) -> None:
     try:
         from app.services.summarizer import get_summarization_service  # noqa: PLC0415
         svc = get_summarization_service()
-        await svc.pregenerate(doc_id)
+        await svc.generate_all_summaries(doc_id)
         # New document changes library-level synthesis — invalidate cached overview
         await svc.invalidate_library_cache()
         logger.info("background summarize: done", extra={"doc_id": doc_id})
