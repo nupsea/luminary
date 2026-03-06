@@ -828,3 +828,5 @@ Commit: a614a26
   - Removing Skeleton import after replacing skeleton loading with spinner triggers TS6133 error — always remove unused imports when changing loading UI
   - retryDelay: 1000 in QueryClient defaultOptions applies a fixed 1s delay between retries (TanStack Query supports function for exponential backoff, but story specifies fixed 1000ms)
 ---
+
+2026-03-06 S69 PASS — Markdown rendering throughout. MarkdownRenderer.tsx created (react-markdown + remark-gfm + rehype-highlight). Applied to Chat, SummaryPanel, ExplanationSheet, FlashcardCard, LibraryOverview. Notes Write/Preview tab editor. Backend prompts updated in summarizer (MODE_INSTRUCTIONS + LIBRARY_SYSTEM_PROMPTS), qa, flashcard. 5 new prompt tests. 373 tests pass, tsc clean, build clean.
