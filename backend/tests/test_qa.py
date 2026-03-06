@@ -21,6 +21,7 @@ from app.services.qa import (
     QAService,
     _build_context,
     _enrich_citation_titles,
+    _should_use_summary,
     _split_response,
 )
 from app.types import ScoredChunk
@@ -682,3 +683,70 @@ async def test_citations_no_title_for_single_scope(test_db):
     done_payload = json.loads(events[-1][len("data: "):])
     assert done_payload["done"] is True
     assert all(c["document_title"] is None for c in done_payload["citations"])
+
+
+# ---------------------------------------------------------------------------
+# S71 — _should_use_summary and summary context enrichment
+# ---------------------------------------------------------------------------
+
+
+def test_should_use_summary_matches_keywords():
+    assert _should_use_summary("Can you summarize this document?") is True
+    assert _should_use_summary("Give me an overview of the book") is True
+    assert _should_use_summary("What are the key points?") is True
+    assert _should_use_summary("What is this about?") is True
+
+
+def test_should_use_summary_no_match():
+    assert _should_use_summary("Who is Achilles?") is False
+    assert _should_use_summary("What happens in chapter 3?") is False
+
+
+@pytest.mark.asyncio
+async def test_qa_uses_summary_for_overview_question(test_db):
+    """When scope=single and question matches summary-intent, executive summary is prepended."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, title="Iliad")
+
+    # Store an executive summary in DB
+    from app.models import SummaryModel  # noqa: PLC0415
+    async with factory() as session:
+        session.add(SummaryModel(
+            id=str(uuid.uuid4()),
+            document_id=doc_id,
+            mode="executive",
+            content="This document is about the Trojan War.",
+        ))
+        await session.commit()
+
+    captured_prompts: list[str] = []
+
+    class CapturingLLM:
+        async def generate(self, prompt: str, system: str = "", stream: bool = False, model=None):
+            captured_prompts.append(prompt)
+            if stream:
+                async def _gen():
+                    yield "The Iliad covers the Trojan War."
+                    yield '\n{"citations":[],"confidence":"high"}'
+                return _gen()
+            return "ok"
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id, "chunk text")])
+
+    with (
+        patch("app.services.qa.get_retriever", return_value=mock_retriever),
+        patch("app.services.qa.get_llm_service", return_value=CapturingLLM()),
+        patch("app.services.qa.get_graph_service"),
+    ):
+        svc = QAService()
+        _ = [e async for e in svc.stream_answer(
+            "Can you summarize this document?", [doc_id], "single", None
+        )]
+
+    assert len(captured_prompts) == 1
+    assert "Document Summary" in captured_prompts[0], (
+        "Executive summary not prepended to context for summary-intent question"
+    )
+    assert "Trojan War" in captured_prompts[0]

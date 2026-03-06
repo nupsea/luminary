@@ -138,7 +138,7 @@ function LibraryOverview() {
   const [notEnough, setNotEnough] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
-  async function generate(mode: LibraryOverviewMode) {
+  async function generate(mode: LibraryOverviewMode, forceRefresh = false) {
     setError(null)
     setNotEnough(false)
     setStreaming((s) => ({ ...s, [mode]: true }))
@@ -147,7 +147,7 @@ function LibraryOverview() {
       const res = await fetch(`${API_BASE}/summarize/all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, model: null }),
+        body: JSON.stringify({ mode, model: null, force_refresh: forceRefresh }),
       })
       if (!res.ok || !res.body) throw new Error("Failed")
       const reader = res.body.getReader()
@@ -252,7 +252,8 @@ function LibraryOverview() {
               </div>
               {!isStreaming && (
                 <button
-                  onClick={() => void generate(activeMode)}
+                  title="Regenerate summary (uses LLM — may take a moment)"
+                  onClick={() => void generate(activeMode, true)}
                   className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
                 >
                   <RefreshCw size={12} />

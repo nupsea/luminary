@@ -49,6 +49,11 @@ MODE_INSTRUCTIONS: dict[str, str] = {
         '"decisions" (list of strings), '
         '"action_items" (list of objects with "owner" and "task" keys).'
     ),
+    "glossary": (
+        "Extract a glossary of domain-specific terms from the text. "
+        "For each term provide a brief one-sentence definition. "
+        "Output as Markdown with each term **bolded** followed by a colon and the definition."
+    ),
 }
 
 # Token threshold above which map-reduce is applied
@@ -207,6 +212,7 @@ class SummarizationService:
         document_id: str,
         mode: str,
         model: str | None,
+        force_refresh: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -215,13 +221,16 @@ class SummarizationService:
         Only falls back to LLM generation when no cached version exists, then
         stores the result so subsequent calls are instant.
 
+        force_refresh=True skips the cache lookup and re-generates via LLM,
+        overwriting the stored summary.
+
         Yields:
             ``data: {"token": "..."}\\n\\n``  — one word at a time
             ``data: {"done": true, "summary_id": "..."}\\n\\n``  — final event
             ``data: {"error": "llm_unavailable", ...}\\n\\n``  — on LLM failure
         """
         try:
-            cached = await self._fetch_cached(document_id, mode)
+            cached = None if force_refresh else await self._fetch_cached(document_id, mode)
             if cached is not None:
                 logger.info(
                     "Serving cached summary",
@@ -411,6 +420,7 @@ class SummarizationService:
         self,
         mode: str,
         model: str | None,
+        force_refresh: bool = False,
     ) -> AsyncGenerator[str]:
         """Synthesize a holistic summary across all ingested documents.
 
@@ -419,14 +429,16 @@ class SummarizationService:
         from all documents, queries Kuzu for cross-doc entities, builds input text,
         and generates via LLM.
 
+        force_refresh=True skips the cache and regenerates.
+
         Yields:
             ``data: {"token": "..."}\\n\\n``  — one or more token events
             ``data: {"done": true, ...}\\n\\n``  — final event with cached flag
             ``data: {"error": "not_enough_summaries", ...}\\n\\n``  — when < 2 docs
         """
         try:
-            # Cache-first
-            cached = await self._fetch_library_cached(mode)
+            # Cache-first (skipped when force_refresh=True)
+            cached = None if force_refresh else await self._fetch_library_cached(mode)
             if cached is not None:
                 logger.info("Serving cached library summary", extra={"mode": mode})
                 yield f'data: {json.dumps({"token": cached.content})}\n\n'

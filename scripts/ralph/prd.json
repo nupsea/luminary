@@ -1697,7 +1697,7 @@
         "uv run pytest tests/test_summarizer.py exits 0",
         "scripts/smoke/S71.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S72",

@@ -111,6 +111,19 @@ def _enrich_citation_titles(
     return citations
 
 
+_SUMMARY_INTENT_KEYWORDS: frozenset[str] = frozenset({
+    "summarize", "summary", "summaries", "overview", "key points",
+    "what is this about", "main idea", "main ideas", "brief", "briefly",
+    "gist", "outline", "recap",
+})
+
+
+def _should_use_summary(question: str) -> bool:
+    """Return True if the question has summary-intent keywords."""
+    q = question.lower()
+    return any(kw in q for kw in _SUMMARY_INTENT_KEYWORDS)
+
+
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
     "Answer only using the provided context. "
@@ -292,6 +305,32 @@ class QAService:
                 all_doc_ids = list({c.document_id for c in chunks})
                 doc_titles = await self._fetch_doc_titles(all_doc_ids)
                 context = _build_context(chunks, doc_titles)
+
+                # Prepend cached executive summary for summary-intent questions
+                # (scope=single only — cross-doc scope would mix document summaries)
+                if scope == "single" and document_ids and _should_use_summary(question):
+                    try:
+                        from app.services.summarizer import (  # noqa: PLC0415
+                            get_summarization_service,
+                        )
+                        cached_svc = get_summarization_service()
+                        exec_summary = await cached_svc._fetch_cached(
+                            document_ids[0], "executive"
+                        )
+                        if exec_summary:
+                            context = (
+                                f"[Document Summary]\n{exec_summary.content}"
+                                f"\n\n---\n\n{context}"
+                            )
+                            logger.debug(
+                                "stream_answer: prepended executive summary",
+                                extra={"document_id": document_ids[0]},
+                            )
+                    except Exception:
+                        logger.warning(
+                            "stream_answer: failed to fetch executive summary", exc_info=True
+                        )
+
                 prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
 
                 # LLM generation — LiteLLM is auto-instrumented so the LLM child

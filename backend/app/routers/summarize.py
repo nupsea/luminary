@@ -18,13 +18,15 @@ router = APIRouter(prefix="/summarize", tags=["summarize"])
 
 
 class SummarizeRequest(BaseModel):
-    mode: Literal["one_sentence", "executive", "detailed", "conversation"]
+    mode: Literal["one_sentence", "executive", "detailed", "conversation", "glossary"]
     model: str | None = None
+    force_refresh: bool = False
 
 
 class LibrarySummarizeRequest(BaseModel):
     mode: Literal["one_sentence", "executive", "detailed"] = "executive"
     model: str | None = None
+    force_refresh: bool = False
 
 
 @router.get("/{document_id}/cached")
@@ -59,7 +61,7 @@ async def summarize_library(req: LibrarySummarizeRequest) -> StreamingResponse:
     """
     svc = get_summarization_service()
     return StreamingResponse(
-        svc.stream_library_summary(req.mode, req.model),
+        svc.stream_library_summary(req.mode, req.model, force_refresh=req.force_refresh),
         media_type="text/event-stream",
     )
 
@@ -83,6 +85,6 @@ async def summarize_document(document_id: str, req: SummarizeRequest) -> Streami
 
     svc = get_summarization_service()
     return StreamingResponse(
-        svc.stream_summary(document_id, req.mode, req.model),
+        svc.stream_summary(document_id, req.mode, req.model, force_refresh=req.force_refresh),
         media_type="text/event-stream",
     )

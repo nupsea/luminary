@@ -269,23 +269,25 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
     return () => { cancelled = true }
   }, [documentId])
 
-  async function generateSummary(mode: SummaryMode) {
+  async function generateSummary(mode: SummaryMode, forceRefresh = false) {
     setSummaryError(null)
 
-    // Check cache first — pregenerate may have finished since mount
-    try {
-      const cacheRes = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-      if (cacheRes.ok) {
-        const cacheData = (await cacheRes.json()) as {
-          summaries: Record<string, { id: string; content: string }>
+    // Check cache first (skipped when forceRefresh=true)
+    if (!forceRefresh) {
+      try {
+        const cacheRes = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
+        if (cacheRes.ok) {
+          const cacheData = (await cacheRes.json()) as {
+            summaries: Record<string, { id: string; content: string }>
+          }
+          if (cacheData.summaries[mode]) {
+            setSummaries((s) => ({ ...s, [mode]: cacheData.summaries[mode].content }))
+            return
+          }
         }
-        if (cacheData.summaries[mode]) {
-          setSummaries((s) => ({ ...s, [mode]: cacheData.summaries[mode].content }))
-          return
-        }
+      } catch {
+        // cache check failed — fall through to streaming
       }
-    } catch {
-      // cache check failed — fall through to streaming
     }
 
     setStreaming((s) => ({ ...s, [mode]: true }))
@@ -294,7 +296,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
       const res = await fetch(`${API_BASE}/summarize/${documentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, model: null }),
+        body: JSON.stringify({ mode, model: null, force_refresh: forceRefresh }),
       })
       if (!res.ok || !res.body) throw new Error("Summarization failed")
       const reader = res.body.getReader()
@@ -381,7 +383,8 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
             </div>
             {!isStreaming && (
               <button
-                onClick={() => void generateSummary(activeTab as SummaryMode)}
+                title="Regenerate summary (uses LLM — may take a moment)"
+                onClick={() => void generateSummary(activeTab as SummaryMode, true)}
                 className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <RefreshCw size={12} />
