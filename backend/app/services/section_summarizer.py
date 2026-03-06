@@ -38,6 +38,12 @@ class SectionSummarizerService:
         Returns the number of SectionSummaryModel rows inserted.
         Returns 0 immediately (non-raising) if Ollama is unreachable.
         """
+        # Invalidate the _section_reduce cache so pregenerate() recomputes the
+        # document summary using the freshly generated section summaries.
+        from app.services.summarizer import get_summarization_service  # noqa: PLC0415
+
+        await get_summarization_service().invalidate_section_reduce_cache(document_id)
+
         # Fetch qualifying sections
         async with get_session_factory()() as session:
             result = await session.execute(

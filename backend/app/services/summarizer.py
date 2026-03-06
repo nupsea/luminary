@@ -22,7 +22,13 @@ import litellm
 from sqlalchemy import delete, select
 
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel, LibrarySummaryModel, SummaryModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    LibrarySummaryModel,
+    SectionSummaryModel,
+    SummaryModel,
+)
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -209,6 +215,26 @@ class SummarizationService:
         await self._store_summary(document_id, "_map_reduce", result)
         return result
 
+    async def _build_section_summary_input(self, document_id: str) -> str | None:
+        """Return a markdown string built from section summaries, or None if < 3 units exist.
+
+        When >= 3 section summary units are available, this string is used as the
+        direct input to all summarization modes (fast path), bypassing chunk map-reduce.
+        """
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(SectionSummaryModel)
+                .where(SectionSummaryModel.document_id == document_id)
+                .order_by(SectionSummaryModel.unit_index)
+            )
+            rows = list(result.scalars().all())
+
+        if len(rows) < 3:
+            return None
+
+        parts = [f"## {row.heading}\n{row.content}" for row in rows]
+        return "\n\n".join(parts)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -297,8 +323,14 @@ class SummarizationService:
         Failures are logged and suppressed — a missing pre-generated summary is
         not a reason to fail ingestion.
 
-        The map-reduce step (_build_input_text) is run once and shared across all
-        modes so large documents don't pay the cost of multiple sequential map passes.
+        Fast path (V2): when >= 3 section summaries exist (written by S75), each
+        mode is one LLM call on the concatenated section summaries.  Input is
+        cached as mode='_section_reduce' for reuse across modes.
+
+        Slow path (V1 / no section summaries): existing chunk-based map-reduce.
+        The map-reduce result (_build_input_text) is run once and shared across
+        all modes so large documents don't pay the cost of multiple sequential
+        map passes.
         """
         try:
             # Determine which modes still need generation
@@ -317,17 +349,45 @@ class SummarizationService:
             if not modes_needed:
                 return
 
-            chunks = await self._fetch_chunks(document_id)
-            if not chunks:
-                logger.warning(
-                    "pregenerate: no chunks found",
+            # Fast path: use section summaries when >= 3 units available
+            section_input = await self._build_section_summary_input(document_id)
+
+            if section_input is not None:
+                # Cache the combined section summaries as _section_reduce for reuse
+                cached_sr = await self._fetch_cached(document_id, "_section_reduce")
+                if cached_sr is None:
+                    await self._store_summary(document_id, "_section_reduce", section_input)
+                    logger.info(
+                        "pregenerate: stored _section_reduce",
+                        extra={"document_id": document_id},
+                    )
+                else:
+                    section_input = cached_sr.content
+
+                input_text = section_input
+                logger.info(
+                    "pregenerate: using section summary fast path (%d chars)",
+                    len(input_text),
                     extra={"document_id": document_id},
                 )
-                return
+            else:
+                # Slow path: chunk-based map-reduce
+                chunks = await self._fetch_chunks(document_id)
+                if not chunks:
+                    logger.warning(
+                        "pregenerate: no chunks found",
+                        extra={"document_id": document_id},
+                    )
+                    return
 
-            # Build input text once — map-reduce is expensive (many LLM calls for
-            # large documents); sharing it across modes avoids running it N times.
-            input_text = await self._build_input_text(document_id, chunks, model)
+                # Build input text once — map-reduce is expensive (many LLM calls for
+                # large documents); sharing it across modes avoids running it N times.
+                input_text = await self._build_input_text(document_id, chunks, model)
+                logger.info(
+                    "pregenerate: using chunk map-reduce slow path",
+                    extra={"document_id": document_id},
+                )
+
             llm = get_llm_service()
 
             for mode in modes_needed:
@@ -354,6 +414,19 @@ class SummarizationService:
                 extra={"document_id": document_id},
                 exc_info=exc,
             )
+
+    async def invalidate_section_reduce_cache(self, document_id: str) -> None:
+        """Delete the '_section_reduce' summary row so pregenerate() recomputes it."""
+        async with get_session_factory()() as session:
+            await session.execute(
+                delete(SummaryModel)
+                .where(SummaryModel.document_id == document_id)
+                .where(SummaryModel.mode == "_section_reduce")
+            )
+            await session.commit()
+        logger.info(
+            "_section_reduce cache invalidated", extra={"document_id": document_id}
+        )
 
 
     # ------------------------------------------------------------------
