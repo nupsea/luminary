@@ -6,11 +6,13 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 
+import litellm
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
+from app.services.graph import get_graph_service
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
 from app.telemetry import trace_chain, trace_retrieval
@@ -20,12 +22,116 @@ logger = logging.getLogger(__name__)
 
 NOT_FOUND_SENTINEL = "NOT_FOUND_IN_CONTENT"
 
+# ---------------------------------------------------------------------------
+# Query rewriting — resolve vague pronouns via Kuzu entity lookup
+# ---------------------------------------------------------------------------
+
+VAGUE_REF_RE = re.compile(
+    r"\b(they|he|she|it|them|the author|the speaker|the protagonist|"
+    r"the character|the narrator|the writer|both|the two|someone|anyone)\b",
+    re.IGNORECASE,
+)
+
+_REWRITE_SYSTEM = (
+    "Rewrite the question replacing vague references with specific names from the list. "
+    "Return only the rewritten question, no explanation."
+)
+
+
+async def _maybe_rewrite_query(
+    question: str, document_ids: list[str] | None
+) -> str:
+    """Return a (possibly rewritten) query with vague references resolved.
+
+    Contract:
+    - No vague refs detected → returns question unchanged (0 LLM calls, 0 Kuzu queries).
+    - document_ids is None (all-docs scope) → returns question unchanged.
+    - Kuzu returns 0 entities → returns question unchanged.
+    - LLM fails → logs warning and returns question unchanged (non-fatal).
+    """
+    if VAGUE_REF_RE.search(question) is None:
+        return question
+    if document_ids is None:
+        return question
+    try:
+        entity_names = get_graph_service().get_entities_for_documents(document_ids)
+    except Exception:
+        logger.warning("_maybe_rewrite_query: Kuzu lookup failed", exc_info=True)
+        return question
+    if not entity_names:
+        return question
+    try:
+        llm = get_llm_service()
+        prompt = (
+            f"Question: {question}\n"
+            f"Available names: {', '.join(entity_names)}"
+        )
+        result = await llm.generate(prompt, system=_REWRITE_SYSTEM, stream=False)
+        rewritten = str(result).strip()
+        if rewritten:
+            return rewritten
+    except Exception:
+        logger.warning("_maybe_rewrite_query: LLM rewrite failed", exc_info=True)
+    return question
+
+
+def _enrich_citation_titles(
+    citations: list[dict],
+    chunks: list[ScoredChunk],
+    doc_titles: dict[str, str],
+    scope: str,
+) -> list[dict]:
+    """Populate (or clear) document_title in each citation.
+
+    scope='single' — set document_title=None on all citations (redundant when
+    the user is already reading a specific document).
+
+    scope='all' — match each citation to a retrieved chunk by
+    (section_heading, page) and fill in the authoritative title from doc_titles.
+    If no chunk matches, keep whatever the LLM put in (graceful degradation).
+    """
+    if scope == "single":
+        for c in citations:
+            c["document_title"] = None
+        return citations
+
+    # Build lookup: (section_heading, page) -> document_id  (first match wins)
+    chunk_index: dict[tuple[str, int], str] = {}
+    for chunk in chunks:
+        key = (chunk.section_heading, chunk.page)
+        if key not in chunk_index:
+            chunk_index[key] = chunk.document_id
+
+    for c in citations:
+        heading = (c.get("section_heading") or "").strip()
+        page = int(c.get("page") or 0)
+        doc_id = chunk_index.get((heading, page))
+        if doc_id and doc_id in doc_titles:
+            c["document_title"] = doc_titles[doc_id]
+
+    return citations
+
+
+_SUMMARY_INTENT_KEYWORDS: frozenset[str] = frozenset({
+    "summarize", "summary", "summaries", "overview", "key points",
+    "what is this about", "main idea", "main ideas", "brief", "briefly",
+    "gist", "outline", "recap",
+})
+
+
+def _should_use_summary(question: str) -> bool:
+    """Return True if the question has summary-intent keywords."""
+    q = question.lower()
+    return any(kw in q for kw in _SUMMARY_INTENT_KEYWORDS)
+
+
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
     "Answer only using the provided context. "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
-    "Write your answer as prose. Then on a new line write this JSON: "
+    "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
+    "Then on a new line write this JSON: "
     '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
     '"confidence":"high|medium|low"}'
 )
@@ -165,10 +271,18 @@ class QAService:
                     root_span.set_attribute("qa.document_ids", ", ".join(document_ids))
 
                 # Hybrid retrieval — RETRIEVER span
+                # Rewrite vague-reference queries using Kuzu entities (non-fatal).
+                # Use the rewritten query for retrieval but the original in the LLM prompt.
                 with trace_retrieval("hybrid", query=question) as ret_span:
                     effective_doc_ids = document_ids if scope == "single" else None
+                    retrieval_question = await _maybe_rewrite_query(question, effective_doc_ids)
+                    if retrieval_question != question:
+                        logger.info(
+                            "stream_answer: query rewritten for retrieval",
+                            extra={"original": question, "rewritten": retrieval_question},
+                        )
                     ret_span.set_attribute("retrieval.scope", scope)
-                    chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
+                    chunks = await retriever.retrieve(retrieval_question, effective_doc_ids, k=10)
                     ret_span.set_attribute("retrieval.chunk_count", len(chunks))
                     if chunks:
                         ret_span.set_attribute("retrieval.top_score", round(chunks[0].score, 4))
@@ -192,6 +306,32 @@ class QAService:
                 all_doc_ids = list({c.document_id for c in chunks})
                 doc_titles = await self._fetch_doc_titles(all_doc_ids)
                 context = _build_context(chunks, doc_titles)
+
+                # Prepend cached executive summary for summary-intent questions
+                # (scope=single only — cross-doc scope would mix document summaries)
+                if scope == "single" and document_ids and _should_use_summary(question):
+                    try:
+                        from app.services.summarizer import (  # noqa: PLC0415
+                            get_summarization_service,
+                        )
+                        cached_svc = get_summarization_service()
+                        exec_summary = await cached_svc._fetch_cached(
+                            document_ids[0], "executive"
+                        )
+                        if exec_summary:
+                            context = (
+                                f"[Document Summary]\n{exec_summary.content}"
+                                f"\n\n---\n\n{context}"
+                            )
+                            logger.debug(
+                                "stream_answer: prepended executive summary",
+                                extra={"document_id": document_ids[0]},
+                            )
+                    except Exception:
+                        logger.warning(
+                            "stream_answer: failed to fetch executive summary", exc_info=True
+                        )
+
                 prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
 
                 # LLM generation — LiteLLM is auto-instrumented so the LLM child
@@ -211,11 +351,14 @@ class QAService:
                     )
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "llm_unavailable")
-                    yield (
-                        'data: {"error": "llm_unavailable", '
-                        '"message": "Ollama is not running or unreachable. '
-                        'Start it with: ollama serve", "done": true}\n\n'
-                    )
+                    if isinstance(exc, ValueError):
+                        msg = "LLM provider not configured. Add your API key in Settings."
+                    elif isinstance(exc, litellm.AuthenticationError):
+                        msg = "LLM API key is invalid. Check your key in Settings."
+                    else:
+                        msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+                    err = {"error": "llm_unavailable", "message": msg, "done": True}
+                    yield f"data: {json.dumps(err)}\n\n"
                     return
 
                 full_text = "".join(collected)
@@ -229,6 +372,8 @@ class QAService:
 
                 # Parse citations JSON from the end of the response
                 answer_text, citations, confidence = _split_response(full_text)
+                # Authoritative document_title population from DB titles
+                citations = _enrich_citation_titles(citations, chunks, doc_titles, scope)
 
                 # Record the answer on the root span for Phoenix to show Q→A
                 root_span.set_attribute("output.value", answer_text[:2000])

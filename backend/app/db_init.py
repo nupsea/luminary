@@ -9,6 +9,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     DocumentModel,
     EvalRunModel,
     FlashcardModel,
+    LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
     QAHistoryModel,
@@ -40,6 +41,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # SQLite ignores "duplicate column" errors so we wrap each in its own try.
         for ddl in [
             "ALTER TABLE documents ADD COLUMN file_hash TEXT",
+            "ALTER TABLE documents ADD COLUMN chapter_count INTEGER",
+            "ALTER TABLE documents ADD COLUMN conversation_metadata JSON",
         ]:
             try:
                 await conn.execute(text(ddl))

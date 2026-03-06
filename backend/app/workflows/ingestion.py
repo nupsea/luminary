@@ -3,7 +3,7 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
@@ -14,6 +14,8 @@ from app.services.parser import DocumentParser
 from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
+
+ContentType = Literal["book", "conversation", "notes"]
 
 _parser = DocumentParser()
 
@@ -115,6 +117,14 @@ def parse_node(state: IngestionState) -> IngestionState:
 
 async def classify_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
+    # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
+    # Classification only runs for legacy paths where content_type is unknown.
+    if state.get("content_type") is not None:
+        logger.info(
+            "classify_node: skipping (user-provided content_type)",
+            extra={"doc_id": state["document_id"], "content_type": state["content_type"]},
+        )
+        return {**state, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
             pd = state["parsed_document"]
@@ -221,6 +231,195 @@ def _chunk_code_file(
     return chunks, chunk_metas
 
 
+async def _chunk_book(
+    state: IngestionState, pd: dict | None, doc_id: str
+) -> IngestionState:
+    """Book-specific chunking: process each section independently and link chunks to sections.
+
+    This ensures:
+    - No chunk crosses a section (chapter) boundary.
+    - Every chunk has section_id set to its parent SectionModel.
+    - DocumentModel.chapter_count is set to the number of detected sections.
+    - Flat books (no sections in parsed_document) get a single 'Full Text' section.
+    """
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    cfg = CHUNK_CONFIGS["book"]
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
+    )
+
+    raw_sections = pd["sections"] if pd else []
+    # Flat book: no sections detected → create a single "Full Text" section
+    if not raw_sections:
+        raw_text = pd["raw_text"] if pd else ""
+        raw_sections = [
+            {
+                "heading": "Full Text",
+                "level": 1,
+                "text": raw_text,
+                "page_start": 0,
+                "page_end": 0,
+            }
+        ]
+
+    chunks: list[dict] = []
+    async with get_session_factory()() as session:
+        section_models: list[SectionModel] = []
+        for s_idx, s in enumerate(raw_sections):
+            section_model = SectionModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                level=s.get("level", 1),
+                page_start=s.get("page_start", 0),
+                page_end=s.get("page_end", 0),
+                section_order=s_idx,
+                preview=s.get("text", "")[:300],
+            )
+            session.add(section_model)
+            section_models.append(section_model)
+
+        # Flush to assign IDs before linking chunks
+        await session.flush()
+
+        chunk_idx = 0
+        chunk_models: list[ChunkModel] = []
+        for section_model, s in zip(section_models, raw_sections, strict=False):
+            section_text = s.get("text", "")
+            if not section_text.strip():
+                continue
+            for text in splitter.split_text(section_text):
+                chunk_id = str(uuid.uuid4())
+                chunk_models.append(ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=section_model.id,
+                    text=text,
+                    token_count=len(text.split()),
+                    page_number=s.get("page_start", 0),
+                    speaker=None,
+                    chunk_index=chunk_idx,
+                ))
+                chunks.append(
+                    {"id": chunk_id, "document_id": doc_id, "text": text, "index": chunk_idx}
+                )
+                chunk_idx += 1
+        session.add_all(chunk_models)
+
+        # Store chapter count on the document
+        chapter_count = len(section_models)
+        await session.execute(
+            _update(DocumentModel)
+            .where(DocumentModel.id == doc_id)
+            .values(chapter_count=chapter_count)
+        )
+        await session.commit()
+
+    logger.info(
+        "Book chunked with section linking",
+        extra={
+            "doc_id": doc_id,
+            "num_chunks": len(chunks),
+            "chapter_count": chapter_count,
+        },
+    )
+    return {**state, "chunks": chunks, "status": "embedding"}
+
+
+async def _chunk_conversation(
+    state: IngestionState, pd: dict | None, doc_id: str
+) -> IngestionState:
+    """Conversation-specific chunking: speaker-turn chunks with speaker field populated.
+
+    Uses ConversationChunker.detect() to decide whether to use speaker-aware
+    chunking or fall back to RecursiveCharacterTextSplitter.  After chunking,
+    extracts roster + timeline and writes them to DocumentModel.conversation_metadata.
+    """
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+    from app.services.conversation_chunker import ConversationChunker  # noqa: PLC0415
+
+    raw_text = (pd["raw_text"] if pd else "") or ""
+    chunker = ConversationChunker()
+
+    chunks: list[dict] = []
+    async with get_session_factory()() as session:
+        chunk_models: list[ChunkModel] = []
+        if chunker.detect(raw_text):
+            conv_chunks = chunker.chunk(raw_text)
+            for idx, cc in enumerate(conv_chunks):
+                chunk_id = str(uuid.uuid4())
+                chunk_models.append(ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=None,
+                    text=cc.text,
+                    token_count=len(cc.text) // 4,
+                    page_number=0,
+                    speaker=cc.speaker,
+                    chunk_index=idx,
+                ))
+                chunks.append(
+                    {"id": chunk_id, "document_id": doc_id, "text": cc.text, "index": idx}
+                )
+            # Extract metadata
+            roster = chunker.extract_roster(conv_chunks)
+            timeline = chunker.extract_timeline(raw_text)
+            conversation_metadata = {**roster, **timeline}
+        else:
+            # Fallback: plain text splitter (no speaker detection)
+            cfg = CHUNK_CONFIGS["conversation"]
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
+            )
+            all_texts = [s["text"] for s in (pd["sections"] if pd else []) if s["text"]]
+            raw_chunks_text = splitter.split_text("\n\n".join(all_texts) or raw_text)
+            for idx, text in enumerate(raw_chunks_text):
+                chunk_id = str(uuid.uuid4())
+                chunk_models.append(ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=None,
+                    text=text,
+                    token_count=len(text.split()),
+                    page_number=0,
+                    speaker=None,
+                    chunk_index=idx,
+                ))
+                chunks.append(
+                    {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
+                )
+            conversation_metadata = {
+                "speakers": [],
+                "total_turns": 0,
+                "has_timestamps": False,
+                "first_timestamp": None,
+                "last_timestamp": None,
+            }
+        session.add_all(chunk_models)
+
+        await session.execute(
+            _update(DocumentModel)
+            .where(DocumentModel.id == doc_id)
+            .values(conversation_metadata=conversation_metadata)
+        )
+        await session.commit()
+
+    logger.info(
+        "Conversation chunked",
+        extra={
+            "doc_id": doc_id,
+            "num_chunks": len(chunks),
+            "speaker_count": len(conversation_metadata.get("speakers", [])),
+        },
+    )
+    return {**state, "chunks": chunks, "status": "embedding"}
+
+
 async def chunk_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
     with trace_ingestion_node("chunk", state):
@@ -235,8 +434,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 raw_chunks, code_metas = _chunk_code_file(raw_text, file_path, doc_id)
                 chunks = []
                 async with get_session_factory()() as session:
+                    chunk_models: list[ChunkModel] = []
                     for idx, (rc, meta) in enumerate(zip(raw_chunks, code_metas, strict=False)):
-                        chunk = ChunkModel(
+                        chunk_models.append(ChunkModel(
                             id=rc["id"],
                             document_id=doc_id,
                             section_id=None,
@@ -245,8 +445,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                             page_number=meta.get("start_line", 0),
                             speaker=None,
                             chunk_index=idx,
-                        )
-                        session.add(chunk)
+                        ))
                         chunks.append(
                             {
                                 "id": rc["id"],
@@ -256,12 +455,19 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                                 **{k: v for k, v in meta.items() if k != "chunk_id"},
                             }
                         )
+                    session.add_all(chunk_models)
                     await session.commit()
                 logger.info(
                     "Code chunked document",
                     extra={"doc_id": doc_id, "num_chunks": len(chunks)},
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
+
+            if content_type == "book":
+                return await _chunk_book(state, pd, doc_id)
+
+            if content_type == "conversation":
+                return await _chunk_conversation(state, pd, doc_id)
 
             cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
             splitter = RecursiveCharacterTextSplitter(
@@ -286,9 +492,10 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         preview=s.get("text", "")[:300],
                     )
                     session.add(section_model)
+                chunk_models: list[ChunkModel] = []
                 for idx, text in enumerate(raw_chunks_text):
                     chunk_id = str(uuid.uuid4())
-                    chunk = ChunkModel(
+                    chunk_models.append(ChunkModel(
                         id=chunk_id,
                         document_id=doc_id,
                         section_id=None,
@@ -297,11 +504,11 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         page_number=0,
                         speaker=None,
                         chunk_index=idx,
-                    )
-                    session.add(chunk)
+                    ))
                     chunks.append(
                         {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
                     )
+                session.add_all(chunk_models)
                 await session.commit()
             logger.info(
                 "Chunked document",
@@ -532,11 +739,11 @@ _background_tasks: set[asyncio.Task] = set()
 
 
 async def _run_pregenerate(doc_id: str) -> None:
-    """Background task: pre-generate summaries after ingestion completes."""
+    """Background task: pre-generate summaries and invalidate library cache."""
+    from app.services.summarizer import get_summarization_service  # noqa: PLC0415
+    svc = get_summarization_service()
     try:
-        from app.services.summarizer import get_summarization_service  # noqa: PLC0415
-        svc = get_summarization_service()
-        await svc.pregenerate(doc_id)
+        await svc.generate_all_summaries(doc_id)
         logger.info("background summarize: done", extra={"doc_id": doc_id})
     except Exception as exc:
         logger.warning(
@@ -544,6 +751,10 @@ async def _run_pregenerate(doc_id: str) -> None:
             extra={"doc_id": doc_id},
             exc_info=exc,
         )
+    finally:
+        # Always invalidate library cache — a new document was ingested regardless
+        # of whether its individual summaries could be generated (e.g. Ollama offline).
+        await svc.invalidate_library_cache()
 
 
 async def summarize_node(state: IngestionState) -> IngestionState:
@@ -604,20 +815,22 @@ def _build_graph():
 ingestion_graph = _build_graph()
 
 
-async def run_ingestion(document_id: str, file_path: str, format: str) -> None:
+async def run_ingestion(
+    document_id: str, file_path: str, format: str, content_type: str | None = None
+) -> None:
     initial_state: IngestionState = {
         "document_id": document_id,
         "file_path": file_path,
         "format": format,
         "parsed_document": None,
-        "content_type": None,
+        "content_type": content_type,
         "chunks": None,
         "status": "parsing",
         "error": None,
     }
     logger.info(
         "Ingestion task started",
-        extra={"document_id": document_id, "format": format},
+        extra={"document_id": document_id, "format": format, "content_type": content_type},
     )
     await _update_stage(document_id, "parsing")
     with trace_chain(

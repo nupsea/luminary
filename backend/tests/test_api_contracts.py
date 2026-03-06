@@ -116,6 +116,7 @@ async def test_ingest_unsupported_extension_returns_400(test_db):
         r = await c.post(
             "/documents/ingest",
             files={"file": ("image.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+            data={"content_type": "notes"},
         )
     assert r.status_code == 400
     body = r.json()
@@ -129,6 +130,7 @@ async def test_ingest_unsupported_binary_returns_400(test_db):
         r = await c.post(
             "/documents/ingest",
             files={"file": ("program.exe", b"MZ\x90\x00", "application/octet-stream")},
+            data={"content_type": "notes"},
         )
     assert r.status_code == 400
     _assert_detail_str(r.json())

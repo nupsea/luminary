@@ -1,4 +1,5 @@
 # Luminary Architecture
+<!-- Last updated: 2026-03-06 — added query rewriting note in Retrieval domain -->
 
 ## Top-Level Domain Map
 

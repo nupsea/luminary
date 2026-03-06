@@ -5,9 +5,47 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
+import app.database as db_module
+from app.database import make_engine
+from app.db_init import create_all_tables
 from app.main import app
 from app.services.llm import LLMService, get_llm_service
+
+# ---------------------------------------------------------------------------
+# Shared DB fixture for /settings/llm tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def settings_db(tmp_path, monkeypatch):
+    """In-memory SQLite with tables; resets settings cache before/after."""
+    import app.services.settings_service as svc_module
+    from app.services.settings_service import _DEFAULTS
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    await create_all_tables(engine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    orig_engine = db_module._engine
+    orig_factory = db_module._session_factory
+    db_module._engine = engine
+    db_module._session_factory = factory
+    svc_module._cache.update(_DEFAULTS)
+
+    yield
+
+    db_module._engine = orig_engine
+    db_module._session_factory = orig_factory
+    get_settings.cache_clear()
+    svc_module._cache.update(_DEFAULTS)
+    await engine.dispose()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -204,21 +242,8 @@ async def test_gemini_prefix_sets_api_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_llm_settings_unavailable_when_ollama_down(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-    monkeypatch.setenv("GOOGLE_API_KEY", "")
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
-        mock_client_cls.return_value = mock_client
-
+async def test_llm_settings_unavailable_when_ollama_down(settings_db):
+    with patch("app.routers.settings._fetch_ollama_models", return_value=[]):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/settings/llm")
 
@@ -226,29 +251,14 @@ async def test_llm_settings_unavailable_when_ollama_down(monkeypatch):
     data = resp.json()
     assert data["processing_mode"] == "unavailable"
     assert data["available_local_models"] == []
-    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_llm_settings_local_when_ollama_up(monkeypatch):
-    monkeypatch.setenv("OLLAMA_URL", "http://localhost:11434")
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-
-    fake_tags_response = MagicMock()
-    fake_tags_response.status_code = 200
-    fake_tags_response.json.return_value = {
-        "models": [{"name": "llama3:latest"}, {"name": "mistral:latest"}]
-    }
-
-    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=fake_tags_response)
-        mock_client_cls.return_value = mock_client
-
+async def test_llm_settings_local_when_ollama_up(settings_db):
+    with patch(
+        "app.routers.settings._fetch_ollama_models",
+        return_value=["ollama/llama3:latest", "ollama/mistral:latest"],
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/settings/llm")
 
@@ -258,25 +268,22 @@ async def test_llm_settings_local_when_ollama_up(monkeypatch):
     assert "ollama/llama3:latest" in data["available_local_models"]
     assert "active_model" in data
     assert "cloud_providers" in data
-    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_llm_settings_cloud_when_no_ollama_but_api_key(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-key")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-    monkeypatch.setenv("GOOGLE_API_KEY", "")
-    from app.config import get_settings
+async def test_llm_settings_cloud_when_no_ollama_but_api_key(settings_db):
+    """Cloud mode + openai key in DB → processing_mode=cloud, openai available."""
+    from app.database import get_session_factory
 
-    get_settings.cache_clear()
+    # Write cloud mode + encrypted openai key to the in-memory DB
+    async with get_session_factory()() as session:
+        from app.services.settings_service import update_llm_settings
 
-    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(side_effect=Exception("Ollama down"))
-        mock_client_cls.return_value = mock_client
+        await update_llm_settings(
+            session, mode="cloud", provider="openai", openai_api_key="sk-real-key"
+        )
 
+    with patch("app.routers.settings._fetch_ollama_models", return_value=[]):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/settings/llm")
 
@@ -285,7 +292,6 @@ async def test_llm_settings_cloud_when_no_ollama_but_api_key(monkeypatch):
     assert data["processing_mode"] == "cloud"
     openai_provider = next(p for p in data["cloud_providers"] if p["name"] == "openai")
     assert openai_provider["available"] is True
-    get_settings.cache_clear()
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Quality Score — Luminary
 
-Last Updated: 2026-03-01 — most recently completed: end-to-end storybook hardening
+Last Updated: 2026-03-06 — most recently completed: S58 query rewriting, S60 chapter/speaker sidebar
 
 Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (partial), D (minimal), F (not started).
 
@@ -26,7 +26,7 @@ Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (par
 
 **Summarization (A)**: Cache-first, ingestion-time pre-generation. `one_sentence`, `executive`, `detailed` pre-generated as background task after ingestion. Map-reduce intermediate stored as `_map_reduce` pseudo-mode — shared across all modes and subsequent on-demand requests. `GET /summarize/{id}/cached` returns all stored summaries on document open (instant, no LLM). `POST /summarize/{id}` is cache-first; cache hit returns full content as a single SSE event. `conversation` mode still on-demand but skips map step if `_map_reduce` cached.
 
-**Q&A (B)**: Hybrid RAG (RRF vector + keyword) via HybridRetriever. Chat tab with streaming, citations, confidence. Phoenix tracing wired.
+**Q&A (B)**: Hybrid RAG (RRF vector + keyword) via HybridRetriever. Chat tab with streaming, citations, confidence. Phoenix tracing wired. Query rewriting: vague-reference pronouns resolved via Kuzu entity lookup before retrieval (S58).
 
 **Knowledge Graph (B)**: Kuzu schema + KuzuService (S15a). Entity extraction wired into ingestion (S15b). Sigma.js Viz tab with force-layout, entity-type filter, node search, click popover, edge tooltip (S16a/b). Call graph view added (S27).
 

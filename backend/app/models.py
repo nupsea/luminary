@@ -27,6 +27,10 @@ class DocumentModel(Base):
     # parsing|chunking|embedding|complete|error
     stage: Mapped[str] = mapped_column(String, default="parsing")
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # Number of detected sections/chapters (set during book ingestion).
+    chapter_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Speaker roster and timeline for conversation documents (set during ingestion).
+    conversation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -163,6 +167,16 @@ class QAHistoryModel(Base):
     citations: Mapped[list] = mapped_column(JSON, default=list)
     confidence: Mapped[str] = mapped_column(String, nullable=False)  # high|medium|low
     model_used: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LibrarySummaryModel(Base):
+    __tablename__ = "library_summaries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # one_sentence|executive|detailed
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

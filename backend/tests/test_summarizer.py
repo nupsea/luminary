@@ -17,8 +17,10 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SummaryModel
+from app.services.qa import QA_SYSTEM_PROMPT
 from app.services.summarizer import (
     GROUNDING_PREFIX,
+    LIBRARY_SYSTEM_PROMPTS,
     MAP_TOKEN_THRESHOLD,
     MODE_INSTRUCTIONS,
     SummarizationService,
@@ -128,6 +130,28 @@ def test_all_modes_include_grounding_prefix():
     for mode in MODE_INSTRUCTIONS:
         prompt = _build_system_prompt(mode)
         assert GROUNDING_PREFIX in prompt, f"mode={mode} missing grounding prefix"
+
+
+def test_executive_prompt_contains_markdown_instruction():
+    prompt = _build_system_prompt("executive")
+    assert "Markdown" in prompt
+
+
+def test_detailed_prompt_contains_markdown_instruction():
+    prompt = _build_system_prompt("detailed")
+    assert "Markdown" in prompt
+
+
+def test_library_executive_prompt_contains_markdown_instruction():
+    assert "Markdown" in LIBRARY_SYSTEM_PROMPTS["executive"]
+
+
+def test_library_detailed_prompt_contains_markdown_instruction():
+    assert "Markdown" in LIBRARY_SYSTEM_PROMPTS["detailed"]
+
+
+def test_qa_system_prompt_contains_markdown_instruction():
+    assert "Markdown" in QA_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -342,3 +366,79 @@ async def test_endpoint_accepts_conversation_mode(test_db):
     # First event should carry the JSON output as a token
     first = json.loads(events[0][len("data: "):])
     assert "token" in first
+
+
+# ---------------------------------------------------------------------------
+# S71 — Cache and force_refresh tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stream_summary_returns_cached_on_second_call(test_db):
+    """Second call to stream_summary must return cached: true without calling LLM."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["sample content"], [10])
+
+    mock_llm = _MockLLMService(tokens=["First", " call"])
+
+    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+        svc = SummarizationService()
+        # First call — generates and stores
+        _ = [e async for e in svc.stream_summary(doc_id, "executive", None)]
+        assert mock_llm.call_count == 1
+
+        # Second call — must serve from cache, no LLM call
+        events = [e async for e in svc.stream_summary(doc_id, "executive", None)]
+
+    assert mock_llm.call_count == 1, "LLM was called on second request (cache miss)"
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload.get("cached") is True
+
+
+@pytest.mark.asyncio
+async def test_force_refresh_bypasses_cache(test_db):
+    """force_refresh=True must regenerate via LLM even when cache exists."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["text here"], [5])
+
+    mock_llm = _MockLLMService(tokens=["Fresh", " summary"])
+
+    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+        svc = SummarizationService()
+        # Populate cache
+        _ = [e async for e in svc.stream_summary(doc_id, "executive", None)]
+        assert mock_llm.call_count == 1
+
+        # force_refresh=True — must call LLM again
+        events = [
+            e async for e in svc.stream_summary(doc_id, "executive", None, force_refresh=True)
+        ]
+
+    assert mock_llm.call_count >= 2, "LLM not called on force_refresh=True"
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload.get("cached") is False
+
+
+@pytest.mark.asyncio
+async def test_glossary_cached_same_as_other_modes(test_db):
+    """Glossary mode participates in the same cache-first logic."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["domain terms"], [5])
+
+    mock_llm = _MockLLMService(tokens=["**Term**: definition"])
+
+    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+        svc = SummarizationService()
+        # First call — generates via LLM
+        _ = [e async for e in svc.stream_summary(doc_id, "glossary", None)]
+        assert mock_llm.call_count == 1
+
+        # Second call — served from cache
+        events = [e async for e in svc.stream_summary(doc_id, "glossary", None)]
+
+    assert mock_llm.call_count == 1, "LLM called on second glossary request (expected cache hit)"
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload.get("cached") is True

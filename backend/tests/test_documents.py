@@ -513,3 +513,51 @@ async def test_patch_tags_endpoint_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.patch("/documents/no-such-id/tags", json={"tags": ["x"]})
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# chunk_count in GET /documents
+# ---------------------------------------------------------------------------
+
+
+async def test_documents_list_includes_chunk_count(test_db):
+    """GET /documents includes chunk_count >= 1 for a doc with chunks."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        for i in range(3):
+            session.add(
+                ChunkModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    text=f"Chunk text {i}",
+                    chunk_index=i,
+                )
+            )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents")
+
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["chunk_count"] >= 1
+
+
+async def test_documents_chunk_count_is_zero_for_fresh_doc(test_db):
+    """GET /documents returns chunk_count=0 for a document with no chunks."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents")
+
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["chunk_count"] == 0

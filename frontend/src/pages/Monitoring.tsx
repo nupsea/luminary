@@ -99,6 +99,11 @@ interface LLMSettings {
   active_model: string
 }
 
+interface PhoenixUrl {
+  url: string
+  enabled: boolean
+}
+
 interface Document {
   id: string
   title: string
@@ -167,6 +172,12 @@ async function fetchEvalHistory(): Promise<EvalHistoryItem[]> {
   const res = await fetch(`${API_BASE}/monitoring/eval-history`)
   if (!res.ok) throw new Error("eval-history failed")
   return res.json() as Promise<EvalHistoryItem[]>
+}
+
+async function fetchPhoenixUrl(): Promise<PhoenixUrl> {
+  const res = await fetch(`${API_BASE}/monitoring/phoenix-url`)
+  if (!res.ok) throw new Error("phoenix-url failed")
+  return res.json() as Promise<PhoenixUrl>
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +500,41 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Traces card — Phoenix link
+// ---------------------------------------------------------------------------
+
+function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
+  const enabled = phoenix?.enabled ?? false
+  const url = phoenix?.url ?? "http://localhost:6006"
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-block h-2.5 w-2.5 rounded-full ${enabled ? "bg-green-500" : "bg-gray-400"}`}
+        />
+        <span className="text-sm font-medium text-foreground">Arize Phoenix — Distributed Tracing</span>
+      </div>
+      <button
+        disabled={!enabled}
+        onClick={() => window.open(url, "_blank")}
+        title={
+          enabled
+            ? "Open Phoenix UI"
+            : "Start Phoenix: cd backend && uv run python -m phoenix.server.main"
+        }
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          enabled
+            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+            : "cursor-not-allowed bg-secondary text-muted-foreground"
+        }`}
+      >
+        View Traces
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Monitoring page
 // ---------------------------------------------------------------------------
 
@@ -508,6 +554,9 @@ export default function Monitoring() {
   )
   const [llmState, setLlmState] = useState<SectionState<LLMSettings | null>>(initSection(null))
   const [docsState, setDocsState] = useState<SectionState<Document[]>>(initSection([]))
+  const [phoenixUrlState, setPhoenixUrlState] = useState<SectionState<PhoenixUrl | null>>(
+    initSection(null),
+  )
 
   const [selectedTrace, setSelectedTrace] = useState<TraceItem | null>(null)
 
@@ -577,8 +626,22 @@ export default function Monitoring() {
         if (!cancelled) setDocsState({ loading: false, data: [], error: true })
       })
 
+    const loadPhoenixUrl = () => {
+      fetchPhoenixUrl()
+        .then((d) => {
+          if (!cancelled) setPhoenixUrlState({ loading: false, data: d, error: false })
+        })
+        .catch((e: unknown) => {
+          logger.warn("[Monitoring] section failed", "Phoenix URL", e)
+          if (!cancelled) setPhoenixUrlState({ loading: false, data: null, error: true })
+        })
+    }
+    loadPhoenixUrl()
+    const phoenixInterval = setInterval(loadPhoenixUrl, 30_000)
+
     return () => {
       cancelled = true
+      clearInterval(phoenixInterval)
     }
   }, [])
 
@@ -589,6 +652,20 @@ export default function Monitoring() {
   return (
     <div className="flex flex-col gap-8 px-6 py-8">
       <h1 className="text-2xl font-semibold text-foreground">Monitoring</h1>
+
+      {/* 0. Traces link card */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold text-foreground">Traces</h2>
+        {phoenixUrlState.loading ? (
+          <Skeleton className="h-12 w-full rounded-lg" />
+        ) : phoenixUrlState.error ? (
+          <div className="flex h-12 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-sm text-red-600">
+            Could not check Phoenix status.
+          </div>
+        ) : (
+          <TracesCard phoenix={phoenixUrlState.data} />
+        )}
+      </section>
 
       {/* 1. System Status */}
       <section className="flex flex-col gap-3">

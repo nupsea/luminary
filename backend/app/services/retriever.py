@@ -15,60 +15,96 @@ RRF_K = 60
 # Fraction of top-k chunks from one section that triggers diversity re-ranking.
 _DIVERSITY_THRESHOLD = 0.6
 
+# Content types eligible for context expansion.
+_EXPANSION_TYPES = {"book", "conversation", "notes"}
+# Score multiplier for neighbour chunks added by context expansion.
+_EXPANSION_SCORE_FACTOR = 0.75
 
-def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
-    """Section-diversity re-ranking for broad queries.
 
-    When more than ``_DIVERSITY_THRESHOLD`` of the top-k candidates share the
-    same section_heading the results are biased toward one part of the document.
-    In that case, switch to a round-robin pick across sections (ordered by each
-    section's best RRF score) so the final k chunks span the document breadth.
+def _round_robin(
+    candidates: list[ScoredChunk],
+    group_key: str,
+    k: int,
+    threshold: float,
+) -> list[ScoredChunk] | None:
+    """Generic round-robin diversifier over an arbitrary group key.
 
-    Falls back to normal top-k when results are already diverse.
+    Returns the k-capped round-robin result if the top-k candidates exceed
+    *threshold* concentration on a single group value, else returns None
+    (meaning the caller should not apply this diversifier).
     """
     if len(candidates) <= k:
-        return candidates
+        return None
 
     top_k = candidates[:k]
-    headings = [c.section_heading or "" for c in top_k]
-    if headings:
-        most_common_count = max(headings.count(h) for h in set(headings))
-        concentration = most_common_count / len(headings)
+    values = [getattr(c, group_key) or "" for c in top_k]
+    if values:
+        most_common_count = max(values.count(v) for v in set(values))
+        concentration = most_common_count / len(values)
     else:
         concentration = 0.0
 
-    if concentration <= _DIVERSITY_THRESHOLD:
-        return top_k
+    if concentration <= threshold:
+        return None  # already diverse
 
-    # Group all candidates by section, preserving RRF-score order within each group.
+    # Group all candidates by value, preserving score order within each group.
     buckets: dict[str, list[ScoredChunk]] = defaultdict(list)
     for chunk in candidates:
-        buckets[chunk.section_heading or ""].append(chunk)
+        key = getattr(chunk, group_key) or ""
+        buckets[key].append(chunk)
 
-    # Visit sections in order of their highest-scoring chunk (most relevant first).
-    ordered_sections = sorted(buckets, key=lambda h: buckets[h][0].score, reverse=True)
-    indices: dict[str, int] = {h: 0 for h in ordered_sections}
+    # Visit groups in order of their highest-scoring chunk (most relevant first).
+    ordered_groups = sorted(buckets, key=lambda v: buckets[v][0].score, reverse=True)
+    indices: dict[str, int] = {v: 0 for v in ordered_groups}
 
     result: list[ScoredChunk] = []
     while len(result) < k:
         added_this_round = False
-        for heading in ordered_sections:
+        for group in ordered_groups:
             if len(result) >= k:
                 break
-            idx = indices[heading]
-            if idx < len(buckets[heading]):
-                result.append(buckets[heading][idx])
-                indices[heading] += 1
+            idx = indices[group]
+            if idx < len(buckets[group]):
+                result.append(buckets[group][idx])
+                indices[group] += 1
                 added_this_round = True
         if not added_this_round:
             break
 
     logger.debug(
-        "retrieval diversity: concentration=%.2f → round-robin across %d sections",
+        "retrieval diversity (%s): concentration=%.2f → round-robin across %d groups",
+        group_key,
         concentration,
-        len(ordered_sections),
+        len(ordered_groups),
     )
     return result
+
+
+def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
+    """Speaker-then-section diversity re-ranking for broad queries.
+
+    1. If any chunk has speaker != None, apply speaker-diversity first.
+       When > _DIVERSITY_THRESHOLD of top-k share the same speaker, do
+       round-robin across speakers.
+    2. Else fall through to section-diversity (same logic on section_heading).
+    3. Falls back to normal top-k when results are already diverse.
+    """
+    if len(candidates) <= k:
+        return candidates
+
+    # Speaker-diversity path (conversation documents)
+    has_speaker = any(c.speaker is not None for c in candidates)
+    if has_speaker:
+        speaker_result = _round_robin(candidates, "speaker", k, _DIVERSITY_THRESHOLD)
+        if speaker_result is not None:
+            return speaker_result
+        return candidates[:k]
+
+    # Section-diversity path (books / notes)
+    section_result = _round_robin(candidates, "section_heading", k, _DIVERSITY_THRESHOLD)
+    if section_result is not None:
+        return section_result
+    return candidates[:k]
 
 
 def _sanitize_fts_query(query: str) -> str:
@@ -85,6 +121,122 @@ def _sanitize_fts_query(query: str) -> str:
     cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", cleaned, flags=re.IGNORECASE)
     # Collapse runs of whitespace
     return " ".join(cleaned.split())
+
+
+async def _expand_context(
+    chunks: list[ScoredChunk],
+    k: int,
+    window: int = 1,
+) -> list[ScoredChunk]:
+    """Fetch adjacent chunks (±window) for eligible content types.
+
+    For each ScoredChunk in the input list, queries SQLite for neighbouring
+    chunks (chunk_index ± window) within the same document.  Neighbours get
+    score = original_score * _EXPANSION_SCORE_FACTOR and source='context_expansion'.
+
+    Rules:
+    - Only applies to content types in _EXPANSION_TYPES ('book', 'conversation', 'notes').
+    - Dedup: if a neighbour's chunk_id already exists in the result set, keep
+      whichever has the higher score and discard the other.
+    - Total result capped at k * 2 (sorted by score desc).
+    """
+    if not chunks:
+        return chunks
+
+    # Collect all document_ids to fetch content_types in a single query.
+    doc_ids = list({c.document_id for c in chunks})
+
+    async with get_session_factory()() as session:
+        # Fetch content_type per document
+        ct_result = await session.execute(
+            text(
+                "SELECT id, content_type FROM documents WHERE id IN ("
+                + ", ".join(f"'{did}'" for did in doc_ids)
+                + ")"
+            )
+        )
+        content_types: dict[str, str] = {row[0]: row[1] for row in ct_result.fetchall()}
+
+        # Check if any chunk qualifies for expansion
+        eligible_docs = {
+            did for did, ct in content_types.items() if ct in _EXPANSION_TYPES
+        }
+        if not eligible_docs:
+            return chunks
+
+        # Fetch chunk_index for all input chunks
+        chunk_ids = [c.chunk_id for c in chunks]
+        idx_result = await session.execute(
+            text(
+                "SELECT id, chunk_index FROM chunks WHERE id IN ("
+                + ", ".join(f"'{cid}'" for cid in chunk_ids)
+                + ")"
+            )
+        )
+        chunk_index_map: dict[str, int] = {row[0]: row[1] for row in idx_result.fetchall()}
+
+        # Gather all (document_id, target_index) pairs we need to fetch
+        neighbor_queries: list[tuple[str, int, float]] = []
+        for chunk in chunks:
+            if chunk.document_id not in eligible_docs:
+                continue
+            cidx = chunk_index_map.get(chunk.chunk_id)
+            if cidx is None:
+                continue
+            for delta in range(-window, window + 1):
+                if delta == 0:
+                    continue
+                neighbor_queries.append(
+                    (chunk.document_id, cidx + delta, chunk.score * _EXPANSION_SCORE_FACTOR)
+                )
+
+        # Build result set: start with original chunks
+        result_map: dict[str, ScoredChunk] = {c.chunk_id: c for c in chunks}
+
+        # Fetch neighbors
+        for doc_id, target_idx, neighbor_score in neighbor_queries:
+            nb_result = await session.execute(
+                text(
+                    "SELECT id, text, speaker, chunk_index FROM chunks "
+                    "WHERE document_id = :doc_id AND chunk_index = :cidx"
+                ),
+                {"doc_id": doc_id, "cidx": target_idx},
+            )
+            row = nb_result.fetchone()
+            if row is None:
+                continue
+            nb_id, nb_text, nb_speaker, nb_cidx = row
+
+            if nb_id in result_map:
+                # Dedup: keep higher score
+                if neighbor_score > result_map[nb_id].score:
+                    result_map[nb_id] = ScoredChunk(
+                        chunk_id=nb_id,
+                        document_id=doc_id,
+                        text=nb_text,
+                        section_heading="",
+                        page=0,
+                        score=neighbor_score,
+                        source="context_expansion",
+                        chunk_index=nb_cidx,
+                        speaker=nb_speaker or None,
+                    )
+            else:
+                result_map[nb_id] = ScoredChunk(
+                    chunk_id=nb_id,
+                    document_id=doc_id,
+                    text=nb_text,
+                    section_heading="",
+                    page=0,
+                    score=neighbor_score,
+                    source="context_expansion",
+                    chunk_index=nb_cidx,
+                    speaker=nb_speaker or None,
+                )
+
+    # Sort by score desc, cap at k * 2
+    expanded = sorted(result_map.values(), key=lambda c: c.score, reverse=True)
+    return expanded[: k * 2]
 
 
 class HybridRetriever:
@@ -136,6 +288,8 @@ class HybridRetriever:
                         page=int(row.get("page", 0)),
                         score=1.0 - distance,
                         source="vector",
+                        chunk_index=0,
+                        speaker=row.get("speaker") or None,
                     )
                 )
             return results
@@ -174,7 +328,23 @@ class HybridRetriever:
 
         async with get_session_factory()() as session:
             result = await session.execute(sql, {"query": safe_query, "k": k})
-            rows = result.fetchall()
+            fts_rows = result.fetchall()
+
+            # Batch-fetch speaker and chunk_index from chunks table
+            if fts_rows:
+                fts_ids = [row.chunk_id for row in fts_rows]
+                meta_result = await session.execute(
+                    text(
+                        "SELECT id, speaker, chunk_index FROM chunks WHERE id IN ("
+                        + ", ".join(f"'{cid}'" for cid in fts_ids)
+                        + ")"
+                    )
+                )
+                meta_map: dict[str, tuple[str | None, int]] = {
+                    row[0]: (row[1] or None, row[2] or 0) for row in meta_result.fetchall()
+                }
+            else:
+                meta_map = {}
 
         return [
             ScoredChunk(
@@ -185,8 +355,10 @@ class HybridRetriever:
                 page=0,
                 score=float(row.score),
                 source="keyword",
+                chunk_index=meta_map.get(row.chunk_id, (None, 0))[1],
+                speaker=meta_map.get(row.chunk_id, (None, 0))[0],
             )
-            for row in rows
+            for row in fts_rows
         ]
 
     def rrf_merge(
@@ -230,6 +402,8 @@ class HybridRetriever:
                     page=chunk.page,
                     score=scores[cid],
                     source=source,
+                    chunk_index=chunk.chunk_index,
+                    speaker=chunk.speaker,
                 )
             )
 
@@ -241,11 +415,12 @@ class HybridRetriever:
         document_ids: list[str] | None,
         k: int,
     ) -> list[ScoredChunk]:
-        """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF."""
+        """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion."""
         with trace_retrieval("hybrid", query=query) as span:
             vector_results = self.vector_search(query, document_ids, k=20)
             keyword_results = await self.keyword_search(query, document_ids, k=20)
             results = self.rrf_merge(vector_results, keyword_results, k=k)
+            results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:
                 span.set_attribute("retrieval.top_score", round(results[0].score, 4))

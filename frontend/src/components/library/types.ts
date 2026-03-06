@@ -17,6 +17,7 @@ export interface DocumentListItem {
   summary_one_sentence: string | null
   flashcard_count: number
   learning_status: LearningStatus
+  chunk_count: number
 }
 
 export interface DocumentListResponse {

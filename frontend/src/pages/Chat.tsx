@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Send, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import ReactMarkdown from "react-markdown"
 import { Badge } from "@/components/ui/badge"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
@@ -22,7 +22,7 @@ async function fetchDocList(): Promise<DocListItem[]> {
 }
 
 interface Citation {
-  document_title: string
+  document_title: string | null
   section_heading: string
   page: number
   excerpt: string
@@ -72,12 +72,10 @@ const EXAMPLE_QUESTIONS = [
 
 function buildModelOptions(settings: LLMSettings | undefined): string[] {
   if (!settings) return []
-  const opts: string[] = []
-  for (const m of settings.available_local_models) opts.push(m)
-  for (const p of settings.cloud_providers) {
-    if (p.available) opts.push(p.name)
-  }
-  return opts.length > 0 ? opts : [settings.active_model]
+  // Cloud mode: backend handles routing via get_effective_routing(); no model selector needed.
+  if (settings.processing_mode === "cloud") return []
+  const opts = settings.available_local_models
+  return opts.length > 0 ? opts : (settings.active_model ? [settings.active_model] : [])
 }
 
 export default function Chat() {
@@ -385,7 +383,7 @@ export default function Chat() {
                       [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
                       [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
                       [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
-                      <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      <MarkdownRenderer>{msg.text}</MarkdownRenderer>
                       {msg.isStreaming && <span className="animate-pulse">▍</span>}
                     </div>
                   )}
@@ -400,7 +398,9 @@ export default function Chat() {
                             className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                             title={c.excerpt}
                           >
-                            {c.document_title} › {c.section_heading} (p.{c.page})
+                            {c.document_title
+                              ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
+                              : `p.${c.page}`}
                           </span>
                         ))}
                       </div>

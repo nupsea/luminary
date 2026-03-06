@@ -1,23 +1,28 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Settings, X } from "lucide-react"
-import { useRef, useState } from "react"
+import { Cloud, Settings, Shield, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
 
-type ProcessingMode = "local" | "cloud" | "unavailable"
-
-interface CloudProvider {
-  name: string
-  available: boolean
-}
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface LLMSettings {
-  processing_mode: ProcessingMode
+  // New DB-backed fields
+  mode: "private" | "cloud"
+  provider: string
+  model: string
+  has_openai_key: boolean
+  has_anthropic_key: boolean
+  has_google_key: boolean
+  // Backward-compat
+  processing_mode: string
   active_model: string
   available_local_models: string[]
-  cloud_providers: CloudProvider[]
 }
 
 interface StorageInfo {
@@ -27,12 +32,30 @@ interface StorageInfo {
   models_mb: number
 }
 
-type CloudTab = "openai" | "anthropic" | "google"
+// ---------------------------------------------------------------------------
+// API functions
+// ---------------------------------------------------------------------------
 
 async function fetchLLMSettings(): Promise<LLMSettings> {
   const res = await fetch(`${API_BASE}/settings/llm`)
   if (!res.ok) throw new Error("Failed to fetch LLM settings")
   return res.json() as Promise<LLMSettings>
+}
+
+async function patchLLMSettings(updates: {
+  mode?: string
+  provider?: string
+  model?: string
+  openai_api_key?: string | null
+  anthropic_api_key?: string | null
+  google_api_key?: string | null
+}): Promise<void> {
+  const res = await fetch(`${API_BASE}/settings/llm`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  })
+  if (!res.ok) throw new Error("Failed to save settings")
 }
 
 async function fetchStorage(): Promise<StorageInfo> {
@@ -41,33 +64,9 @@ async function fetchStorage(): Promise<StorageInfo> {
   return res.json() as Promise<StorageInfo>
 }
 
-async function patchSettings(updates: Record<string, string>): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  })
-  if (!res.ok) throw new Error("Failed to save settings")
-}
-
-const CLOUD_KEY_MAP: Record<CloudTab, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  google: "GOOGLE_API_KEY",
-}
-
-const DOT_COLOR: Record<ProcessingMode, string> = {
-  local: "bg-green-500",
-  cloud: "bg-blue-500",
-  unavailable: "bg-red-500",
-}
-
-function modeLabel(settings: LLMSettings | undefined): string {
-  if (!settings) return "..."
-  if (settings.processing_mode === "local") return `local: ${settings.active_model}`
-  if (settings.processing_mode === "cloud") return `cloud: ${settings.active_model}`
-  return "unavailable"
-}
+// ---------------------------------------------------------------------------
+// SettingsDrawer
+// ---------------------------------------------------------------------------
 
 interface SettingsDrawerProps {
   open: boolean
@@ -87,27 +86,53 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     enabled: open,
   })
 
-  const [subMode, setSubMode] = useState<"local" | "cloud">("local")
-  const [cloudTab, setCloudTab] = useState<CloudTab>("openai")
-  const [apiKeys, setApiKeys] = useState<Record<CloudTab, string>>({
-    openai: "",
-    anthropic: "",
-    google: "",
-  })
+  const [localMode, setLocalMode] = useState<"private" | "cloud">("private")
+  const [localProvider, setLocalProvider] = useState("openai")
+  const [localModel, setLocalModel] = useState("gpt-4o-mini")
+  const [apiKey, setApiKey] = useState("")
+  const [isSaving, setIsSaving] = useState(false)
+
   const [pullModel, setPullModel] = useState("")
   const [pullLines, setPullLines] = useState<string[]>([])
   const [isPulling, setIsPulling] = useState(false)
   const pullScrollRef = useRef<HTMLDivElement>(null)
 
-  async function handleSaveKey(tab: CloudTab) {
-    const key = apiKeys[tab].trim()
-    if (!key) return
+  useEffect(() => {
+    if (llm) {
+      setLocalMode(llm.mode)
+      setLocalProvider(llm.provider)
+      setLocalModel(llm.model)
+    }
+  }, [llm])
+
+  async function handleSave() {
+    setIsSaving(true)
     try {
-      await patchSettings({ [CLOUD_KEY_MAP[tab]]: key })
-      toast.success("API key saved")
+      const updates: {
+        mode?: string
+        provider?: string
+        model?: string
+        openai_api_key?: string | null
+        anthropic_api_key?: string | null
+        google_api_key?: string | null
+      } = {
+        mode: localMode,
+        provider: localProvider,
+        model: localModel,
+      }
+      if (apiKey.trim()) {
+        if (localProvider === "openai") updates.openai_api_key = apiKey.trim()
+        else if (localProvider === "anthropic") updates.anthropic_api_key = apiKey.trim()
+        else updates.google_api_key = apiKey.trim()
+      }
+      await patchLLMSettings(updates)
+      setApiKey("")
+      toast.success("Settings saved")
       void queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
     } catch {
-      toast.error("Failed to save API key")
+      toast.error("Failed to save settings")
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -158,16 +183,18 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
   if (!open) return null
 
-  const mode = llm?.processing_mode ?? "unavailable"
+  const hasKeyForProvider =
+    localProvider === "openai"
+      ? llm?.has_openai_key
+      : localProvider === "anthropic"
+        ? llm?.has_anthropic_key
+        : llm?.has_google_key
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
 
-      {/* Drawer panel */}
       <div className="relative z-10 flex h-full w-[400px] flex-col border-l border-border bg-background shadow-xl">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold text-foreground">Settings</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
@@ -175,129 +202,154 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-auto px-5 py-4 space-y-6">
+        <div className="flex-1 overflow-auto space-y-6 px-5 py-4">
           {/* Section 1: LLM Mode */}
           <section>
             <h3 className="mb-3 text-sm font-semibold text-foreground">LLM Mode</h3>
 
-            {/* Current mode indicator */}
-            <div className="mb-3 flex items-center gap-2">
-              <span className={cn("h-2.5 w-2.5 rounded-full", DOT_COLOR[mode])} />
-              <span className="text-sm text-muted-foreground">{modeLabel(llm)}</span>
-            </div>
-
-            {/* Local / Cloud radio */}
-            <div className="mb-4 flex gap-4">
-              {(["local", "cloud"] as const).map((m) => (
-                <label key={m} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="subMode"
-                    value={m}
-                    checked={subMode === m}
-                    onChange={() => setSubMode(m)}
-                    className="accent-primary"
-                  />
-                  <span className="text-sm capitalize text-foreground">{m}</span>
-                </label>
-              ))}
-            </div>
-
-            {subMode === "local" ? (
-              <div className="space-y-4">
-                {/* Available models */}
-                {llm && llm.available_local_models.length > 0 && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-medium text-muted-foreground">Available models</p>
-                    {llm.available_local_models.map((m) => (
-                      <label key={m} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="localModel"
-                          value={m}
-                          defaultChecked={m === llm.active_model}
-                          className="accent-primary"
-                        />
-                        <span className="text-sm text-foreground font-mono">{m}</span>
-                      </label>
-                    ))}
-                  </div>
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <label
+                className={cn(
+                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
+                  localMode === "private"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground",
                 )}
-
-                {/* Pull model */}
-                <div>
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">Pull a model</p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={pullModel}
-                      onChange={(e) => setPullModel(e.target.value)}
-                      placeholder="e.g. mistral"
-                      className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <button
-                      onClick={() => void handlePull()}
-                      disabled={!pullModel.trim() || isPulling}
-                      className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                    >
-                      {isPulling ? "Pulling..." : "Pull"}
-                    </button>
-                  </div>
-                  {pullLines.length > 0 && (
-                    <div
-                      ref={pullScrollRef}
-                      className="mt-2 h-24 overflow-auto rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground"
-                    >
-                      {pullLines.map((l, i) => (
-                        <div key={i}>{l}</div>
-                      ))}
-                    </div>
-                  )}
+              >
+                <input
+                  type="radio"
+                  name="llmMode"
+                  value="private"
+                  checked={localMode === "private"}
+                  onChange={() => setLocalMode("private")}
+                  className="sr-only"
+                />
+                <div className="flex items-center gap-2">
+                  <Shield size={16} className="text-green-600" />
+                  <span className="text-sm font-semibold text-foreground">Private</span>
                 </div>
-              </div>
-            ) : (
+                <p className="text-xs text-muted-foreground">
+                  Your data never leaves your device. Uses local Ollama.
+                </p>
+              </label>
+
+              <label
+                className={cn(
+                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
+                  localMode === "cloud"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="llmMode"
+                  value="cloud"
+                  checked={localMode === "cloud"}
+                  onChange={() => setLocalMode("cloud")}
+                  className="sr-only"
+                />
+                <div className="flex items-center gap-2">
+                  <Cloud size={16} className="text-blue-500" />
+                  <span className="text-sm font-semibold text-foreground">Cloud</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Faster responses using OpenAI, Anthropic, or Google.
+                </p>
+              </label>
+            </div>
+
+            {localMode === "cloud" && (
               <div className="space-y-3">
-                {/* Cloud provider tabs */}
-                <div className="flex gap-1 rounded-md bg-muted p-1">
-                  {(["openai", "anthropic", "google"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setCloudTab(t)}
-                      className={cn(
-                        "flex-1 rounded py-1.5 text-xs font-medium capitalize transition-colors",
-                        cloudTab === t
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {t}
-                    </button>
-                  ))}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Provider
+                  </label>
+                  <select
+                    value={localProvider}
+                    onChange={(e) => setLocalProvider(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="gemini">Google Gemini</option>
+                  </select>
                 </div>
 
-                <div className="flex gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Model
+                  </label>
+                  <input
+                    type="text"
+                    value={localModel}
+                    onChange={(e) => setLocalModel(e.target.value)}
+                    placeholder="gpt-4o-mini"
+                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    API Key
+                    {hasKeyForProvider ? (
+                      <span className="text-green-600">Key configured</span>
+                    ) : (
+                      <span className="text-amber-600">Key not set</span>
+                    )}
+                  </label>
                   <input
                     type="password"
-                    value={apiKeys[cloudTab]}
-                    onChange={(e) =>
-                      setApiKeys((prev) => ({ ...prev, [cloudTab]: e.target.value }))
-                    }
-                    placeholder={`${CLOUD_KEY_MAP[cloudTab]}`}
-                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder={hasKeyForProvider ? "Enter to replace" : "Paste API key"}
+                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  <button
-                    onClick={() => void handleSaveKey(cloudTab)}
-                    disabled={!apiKeys[cloudTab].trim()}
-                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                  >
-                    Save
-                  </button>
                 </div>
               </div>
             )}
+
+            {localMode === "private" && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Pull a model</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={pullModel}
+                    onChange={(e) => setPullModel(e.target.value)}
+                    placeholder="e.g. mistral"
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <button
+                    onClick={() => void handlePull()}
+                    disabled={!pullModel.trim() || isPulling}
+                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {isPulling ? "Pulling..." : "Pull"}
+                  </button>
+                </div>
+                {pullLines.length > 0 && (
+                  <div
+                    ref={pullScrollRef}
+                    className="h-24 overflow-auto rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground"
+                  >
+                    {pullLines.map((l, i) => (
+                      <div key={i}>{l}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              onClick={() => void handleSave()}
+              disabled={isSaving}
+              className="mt-4 w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : "Save"}
+            </button>
           </section>
 
-          {/* Divider */}
           <div className="border-t border-border" />
 
           {/* Section 2: Storage */}
@@ -337,14 +389,14 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             )}
           </section>
 
-          {/* Divider */}
           <div className="border-t border-border" />
 
           {/* Section 3: Privacy notice */}
           <section>
             <p className="text-xs text-muted-foreground">
-              In local mode, no content leaves your machine. All processing happens on-device using
-              Ollama and local embedding models.
+              {localMode === "private"
+                ? "No content leaves your machine. All processing happens on-device using Ollama and local embedding models."
+                : "API calls are sent to the configured cloud provider. Your documents are included in requests."}
             </p>
           </section>
         </div>
@@ -352,6 +404,10 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// LLMModeBadge — shown in sidebar footer, populates Zustand store
+// ---------------------------------------------------------------------------
 
 interface LLMModeBadgeProps {
   onClick: () => void
@@ -363,21 +419,29 @@ export function LLMModeBadge({ onClick }: LLMModeBadgeProps) {
     queryFn: fetchLLMSettings,
     refetchInterval: 30_000,
   })
+  const setLlmMode = useAppStore((s) => s.setLlmMode)
 
-  const mode: ProcessingMode = data?.processing_mode ?? "unavailable"
-  const label = modeLabel(data)
+  useEffect(() => {
+    if (data) {
+      setLlmMode(data.mode, data.provider)
+    }
+  }, [data, setLlmMode])
+
+  const mode = data?.mode ?? "private"
+  const dotColor = mode === "cloud" ? "bg-blue-500" : "bg-green-500"
+  const label = mode === "cloud" ? `Cloud: ${data?.model ?? ""}` : "Private"
 
   return (
     <button
       onClick={onClick}
       title={label}
-      className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-accent relative"
+      className="relative flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-accent"
     >
       <Settings size={20} />
       <span
         className={cn(
           "absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-background",
-          DOT_COLOR[mode],
+          dotColor,
         )}
       />
     </button>

@@ -12,10 +12,11 @@ Read this file as a MAP. Follow the links below for deeper context.
 - Frontend conventions → `docs/FRONTEND.md`
 - Active execution plans → `docs/exec-plans/active/`
 - Tool references (uv, LanceDB, LangGraph, Kuzu, FSRS) → `docs/references/`
+- Agentic workflow (model routing, agents, hooks, context optimization) → `docs/agentic-workflow.md`
 
 ## Your Task Loop
 
-1. Read `scripts/ralph/prd.json` — tech stack, stories, data model
+1. Determine which PRD to use: if `scripts/ralph/prd-v2.json` exists and has any story with `passes: false`, use it. Otherwise use `scripts/ralph/prd.json`. Load the chosen PRD file.
 2. Read `scripts/ralph/progress.txt` — check `## Codebase Patterns` section first (create file if missing)
 3. Check you are on branch matching `prd.branchName`. Create from main if missing.
 4. Pick the **lowest priority number** story where `passes: false`
@@ -24,7 +25,7 @@ Read this file as a MAP. Follow the links below for deeper context.
 6. Run quality checks. If `Makefile` exists: `make ci`. Otherwise run individually: `cd backend && uv run ruff check . && uv run pytest`, `cd frontend && npx tsc --noEmit && npm run build`
 7. If a check fails: read the error message — it contains remediation instructions. Fix, do not bypass.
 8. Commit with message: `feat: [Story ID] - [Story Title]`
-9. Set `passes: true` for the completed story in `scripts/ralph/prd.json`
+9. Set `passes: true` for the completed story in the PRD file you loaded in step 1
 10. Append progress to `scripts/ralph/progress.txt`
 11. If `scripts/ralph/doc_gardener.py` exists: run `python scripts/ralph/doc_gardener.py` and fix any stale doc warnings. Skip this step if the file does not exist yet.
 
@@ -64,6 +65,32 @@ APPEND to progress.txt (never replace):
 ## Codebase Patterns (read first, update when you find new patterns)
 
 Maintained in `## Codebase Patterns` section at TOP of progress.txt.
+
+## Model Routing (cost-aware)
+
+Route sub-tasks to the cheapest capable model:
+- **Exploration / file search / doc reads**: use Haiku via `Task` tool — fast and cheap
+- **Code implementation / multi-file changes**: Sonnet (current context) — best balance
+- **Complex architecture decisions / cross-domain refactors**: spawn `luminary-planner` agent (Sonnet with planning focus)
+- **Post-story code review**: spawn `luminary-reviewer` agent (Sonnet with review focus)
+- **Docs updates** (QUALITY_SCORE.md, tech-debt-tracker): spawn `luminary-docs` agent (Haiku)
+
+## Context Optimization
+
+Use Python to determine the active PRD and extract the next pending story:
+```python
+import json, os
+prd_v2 = "scripts/ralph/prd-v2.json"
+prd_v1 = "scripts/ralph/prd.json"
+prd_file = prd_v2 if os.path.exists(prd_v2) else prd_v1
+with open(prd_file) as f:
+    prd = json.load(f)
+pending = [s for s in prd["stories"] if not s.get("passes")]
+pending.sort(key=lambda s: s["priority"])
+print(f"PRD: {prd_file}, branch: {prd['branchName']}, pending: {len(pending)}")
+# Work with pending[0] only
+```
+For completed stories you only need their IDs — skip reading their full description.
 
 ## Stop Condition
 

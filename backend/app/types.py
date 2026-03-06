@@ -29,4 +29,6 @@ class ScoredChunk:
     section_heading: str
     page: int
     score: float
-    source: Literal["vector", "keyword", "both"]
+    source: Literal["vector", "keyword", "both", "context_expansion"]
+    chunk_index: int = 0
+    speaker: str | None = None

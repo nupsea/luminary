@@ -33,6 +33,14 @@ export function formatWordCount(count: number): string {
   return `${count} words`
 }
 
+export function formatDate(isoStr: string): string {
+  return new Date(isoStr).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+}
+
 export function relativeDate(isoStr: string): string {
   const date = new Date(isoStr)
   const now = new Date()

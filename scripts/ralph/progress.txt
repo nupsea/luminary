@@ -1,3 +1,62 @@
+## 2026-03-06T03:00:00+00:00 - S55 - Cross-document holistic summary — All My Content library overview
+- Implemented: (1) backend/app/models.py — added `LibrarySummaryModel(id: str PK, mode: str, content: str, created_at: datetime)`; no document_id FK (library-level aggregate data). (2) backend/app/db_init.py — imported LibrarySummaryModel to register with SQLAlchemy Base.metadata. (3) backend/app/services/summarizer.py — added `LIBRARY_SYSTEM_PROMPTS` dict (one_sentence/executive/detailed); added 4 methods to SummarizationService: `_fetch_library_cached(mode)`, `_store_library_summary(mode, content)`, `_fetch_all_executive_summaries()` (most-recent executive summary per doc), `_get_cross_doc_entities(min_docs=3, limit=20)` (Kuzu query with MENTIONED_IN edges, non-fatal try/except), `stream_library_summary(mode, model)` (cache-first, not-enough-summaries guard, builds input text from executive summaries + cross-doc entities, streams LLM), `invalidate_library_cache()` (delete all LibrarySummaryModel rows). (4) backend/app/routers/summarize.py — added `LibrarySummarizeRequest` schema; added `POST /summarize/all` endpoint (must be declared before `/{document_id}` route to avoid path conflict). (5) backend/app/workflows/ingestion.py — `_run_pregenerate` now calls `svc.invalidate_library_cache()` after pregenerate() completes. (6) frontend/src/pages/Learning.tsx — added imports (ChevronDown, Loader2, RefreshCw, cn); added `LibraryOverview` component with mode tabs, SSE streaming, error states; inserted `<LibraryOverview />` before "Recently accessed" section (visible when no filters/tags, page 1, not in select mode). (7) backend/tests/test_library_summary.py (new) — 4 async tests, all pass. (8) scripts/smoke/S55.sh (new) — POST /summarize/all returns 200 with text/event-stream. CI: 366 tests pass.
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/summarizer.py, backend/app/routers/summarize.py, backend/app/workflows/ingestion.py, frontend/src/pages/Learning.tsx, backend/tests/test_library_summary.py (new), scripts/smoke/S55.sh (new), scripts/ralph/prd.json (S55 passes=True)
+- Learnings:
+  - POST /summarize/all must be declared BEFORE POST /{document_id} in FastAPI router or FastAPI matches "all" as document_id
+  - patch("app.services.summarizer.get_graph_service") fails because get_graph_service is a local import inside _get_cross_doc_entities — must either add module-level import or let the method's try/except handle it naturally in tests
+  - LibrarySummaryModel has no document_id FK — use delete(LibrarySummaryModel) to invalidate all modes at once when a new doc arrives
+---
+
+## 2026-03-06T02:00:00+00:00 - S61 - Document attribution in cross-document Chat — show source document in citation chips
+- Implemented: (1) backend/app/services/qa.py — added `_enrich_citation_titles(citations, chunks, doc_titles, scope) -> list[dict]` function: for scope='single' sets document_title=None on all citations (redundant for single-doc view); for scope='all' builds chunk index by (section_heading, page) and overwrites document_title from doc_titles dict for each matched citation; called inside stream_answer immediately after _split_response, reusing already-available chunks and doc_titles variables (no extra DB query). (2) frontend/src/pages/Chat.tsx — changed Citation interface `document_title: string` to `document_title: string | null`; updated chip render: when document_title present → `{title[:20]}{'…' if >20} · p.{page}`; when null → `p.{page}`. (3) backend/tests/test_qa.py — imported `_enrich_citation_titles`; fixed `test_stream_final_event_contains_citations` (scope='single' → asserts document_title is None); added 2 unit tests (test_enrich_citation_titles_single_scope_clears_title, test_enrich_citation_titles_all_scope_populates_from_chunks) + 2 integration tests (test_citations_include_document_title_for_all_scope, test_citations_no_title_for_single_scope). All 362 tests pass. (4) scripts/smoke/S61.sh (new).
+- Files changed: backend/app/services/qa.py, frontend/src/pages/Chat.tsx, backend/tests/test_qa.py, scripts/smoke/S61.sh (new), scripts/ralph/prd.json (S61 passes=True)
+- Learnings:
+  - doc_titles is already built from chunks before _split_response — _enrich_citation_titles reuses it directly, no extra DB round-trip
+  - Matching by (section_heading.strip(), page) is reliable: LLM extracts these verbatim from context prefix
+  - scope='single' always gets document_title=None even if LLM set a value — frontend nil-check decides format
+  - TypeScript `string | null` in union type is required for JSX template literal conditional on citation chip
+---
+
+## 2026-03-06T01:00:00+00:00 - S58 - Query rewriting — resolve vague references using Kuzu entities before retrieval
+- Implemented: (1) backend/app/services/graph.py — added `get_entities_for_documents(document_ids, limit=15) -> list[str]` to KuzuService: iterates over doc IDs, uses MENTIONED_IN edges to find Entity nodes with type IN ['PERSON', 'PLACE', 'CONCEPT'], deduplicates, returns up to limit names; returns [] on any Kuzu error (non-fatal). (2) backend/app/services/qa.py — added `import from app.services.graph`; added module-level `VAGUE_REF_RE` regex constant (16 vague-ref patterns, compiled once, IGNORECASE); added `_REWRITE_SYSTEM` prompt constant; added async `_maybe_rewrite_query(question, document_ids) -> str` function implementing all 4 guard conditions (no vague refs → return unchanged; document_ids=None → return unchanged; empty Kuzu results → return unchanged; LLM failure → log warning + return unchanged); modified `stream_answer` to call `_maybe_rewrite_query(question, effective_doc_ids)` before retrieval, use rewritten query for `retriever.retrieve()` but keep original question in the LLM prompt, log when rewrite occurs. (3) backend/tests/test_query_rewriting.py (new) — 5 async tests, all with mocked Kuzu and LLM: test_no_rewrite_when_no_vague_refs (0 Kuzu/LLM calls for 'What is osmosis?'), test_rewrite_triggered_for_pronoun (LLM called + entity names in prompt), test_skip_rewrite_for_all_scope (document_ids=None → no calls), test_skip_rewrite_when_kuzu_empty (empty entities → LLM not called), test_llm_failure_returns_original (exception → original returned). All 358 tests pass. (4) scripts/smoke/S58.sh (new) — POST /qa with scope=all and scope=single both return 200.
+- Files changed: backend/app/services/graph.py, backend/app/services/qa.py, backend/tests/test_query_rewriting.py (new), scripts/smoke/S58.sh (new), scripts/ralph/prd.json (S58 passes=True)
+- Learnings:
+  - Entity nodes in Kuzu don't have a document_id field — use MENTIONED_IN relationship to find entities per document (prd.json description had wrong query; used correct schema)
+  - Kuzu's WHERE e.type IN ['PERSON', 'PLACE', 'CONCEPT'] works as a literal list in Cypher — no parameter needed for the type filter
+  - Iterating over document_ids is safer than list parameters for IN clause (avoids Kuzu version-specific parameter binding differences)
+  - Import `get_graph_service` at module level in qa.py (not inside function) — no circular import risk since graph.py doesn't import from qa.py
+---
+
+## 2026-03-06T00:00:00+00:00 - S60 - Book chapter navigation and conversation speaker roster in Learning tab
+- Implemented: All backend and frontend code was already in place from prior stories. (1) backend/app/routers/sections.py — GET /sections/{document_id} exists: returns list[SectionResponse] ordered by section_order with accurate chunk_count from a single batch GROUP BY query; has_summary always False (section summaries not yet implemented). (2) backend/app/routers/documents.py — GET /documents/{id}/conversation exists: returns conversation_metadata (speakers, total_turns, has_timestamps, first_timestamp, last_timestamp); returns 404 for unknown doc, 400 for non-conversation. (3) frontend/src/components/reader/DocumentReader.tsx — ContentSidebar component renders Chapters panel (book: section list with chunk_count badge, click-to-highlight, "Coming soon" collapsed summary row, 3-skeleton loading, empty state) and Speakers panel (conversation: speaker list with turn_count badge, click-to-highlight, timestamp timeline if has_timestamps, 2-skeleton loading, empty state); no sidebar for notes/other types; integrated into DocumentReader as w-48 shrink-0 panel at left. (4) backend/tests/test_sections.py (tracked from untracked): 3 tests all pass — test_sections_endpoint_returns_ordered_list, test_sections_endpoint_chunk_count_matches_db, test_conversation_metadata_endpoint_returns_roster. (5) scripts/smoke/S60.sh (new) — GET /sections/nonexistent returns [] (200); GET /documents/nonexistent/conversation returns 404.
+- Files changed: scripts/smoke/S60.sh (new), scripts/ralph/prd.json (S60 passes=True)
+- Learnings:
+  - All implementation was already present; the story just needed tests verified and smoke test created
+  - ContentSidebar uses enabled: contentType === "book" / "conversation" so queries only fire for the relevant type — avoids 400 errors from GET /documents/{id}/conversation on non-conversation docs
+  - SectionResponse includes has_summary (always False for now) — future-proof field for when section-level summaries are added
+---
+
+## 2026-03-05T01:00:00+00:00 - S63 - Mandatory content type selection in upload — book, conversation, notes
+- Implemented: (1) backend/app/workflows/ingestion.py — added `ContentType = Literal["book", "conversation", "notes"]`; added fast-path at top of `classify_node`: if `state.get("content_type") is not None`, skip all heuristics and LLM, return immediately with `status='chunking'`; updated `run_ingestion()` signature to accept `content_type: str | None = None` and pass it into `IngestionState`. (2) backend/app/routers/documents.py — added `Form` to fastapi imports; imported `ContentType` from `app.workflows.ingestion`; added `content_type: ContentType | None = None` to `PatchDocumentRequest`; updated `POST /documents/ingest` to require `content_type: ContentType = Form(...)`; updated `doc.content_type = content_type` at creation time; passes `content_type` to `run_ingestion()`; updated `PATCH /{id}` to update `content_type` in DB with note `'Re-ingest document to apply new chunking strategy.'` in response. (3) backend/tests/test_content_type.py (new) — 4 async tests: test_ingest_without_content_type_returns_422, test_ingest_with_valid_type_skips_classify_llm (checks DB content_type=book), test_patch_content_type_updates_document (checks DB + response note), test_invalid_content_type_returns_422. (4) frontend/src/components/library/UploadDialog.tsx — removed auto-detect option; added `CONTENT_TYPE_OPTIONS` array with book/conversation/notes; added `uploadType`/`pasteType` states (null until selected); added `typeError` state; `ContentTypeRadioGroup` inline component renders 3 radio buttons; upload button disabled until type selected; `submitFile()` now sends `content_type` in FormData. (5) frontend/src/components/library/DocumentCard.tsx — added `CONTENT_TYPE_BADGE` map (book=blue, conversation=green, notes=gray, paper=purple, code=orange); added clickable badge pill below title; `typePopoverOpen` state + outside-click dismiss; popover shows 3 changeable types with tooltip note; `handleTypeChange()` calls PATCH /documents/{id} and invokes `onContentTypeChange` prop. (6) frontend/src/pages/Learning.tsx — added `handleContentTypeChange()` that invalidates documents queries; passed `onContentTypeChange` to both DocumentCard usages. (7) scripts/smoke/S63.sh (new) — 4 smoke checks: 422 on missing type, 422 on invalid type, 200 on valid ingest, PATCH with re-ingest note. Fixed existing tests: test_api_contracts.py, test_e2e_upload.py (3 calls), test_ingest.py (2 calls), test_logging.py (4 calls) — all needed `data={"content_type": "..."}` in ingest requests.
+- Files changed: backend/app/workflows/ingestion.py, backend/app/routers/documents.py, backend/tests/test_content_type.py (new), backend/tests/test_api_contracts.py, backend/tests/test_e2e_upload.py, backend/tests/test_ingest.py, backend/tests/test_logging.py, frontend/src/components/library/UploadDialog.tsx, frontend/src/components/library/DocumentCard.tsx, frontend/src/pages/Learning.tsx, scripts/smoke/S63.sh (new), scripts/ralph/prd.json (S63 passes=True)
+- Learnings:
+  - FastAPI `Form(...)` makes a form field required — missing field returns 422 automatically (no manual check needed); matches prd acceptance criterion "HTTP 422 if missing"
+  - `asyncio.create_task(coro)` schedules a background task; the coroutine body hasn't executed when the response is returned — tests that mock run_ingestion and check `called` list will fail; instead verify DB state which is set synchronously before the task is started
+  - ContentType Literal alias imported from ingestion.py into documents.py avoids duplication and keeps PatchDocumentRequest in sync with the workflow
+  - Outside-click dismiss for inline popover: `document.addEventListener("mousedown", handler)` + `ref.contains(e.target)` pattern; useEffect cleanup removes the listener
+  - All pre-existing ingest tests needed `data={"content_type": "notes"}` added — systematic fix across 4 test files
+---
+
+## 2026-03-05T00:00:00+00:00 - S62 - Fix tags — audit and repair end-to-end tag storage, filter, and UI
+- Implemented: (1) backend/app/routers/documents.py — added `import json`; added `_safe_tags(raw) -> list[str]` helper that normalises tags regardless of how they were stored (None→[], list→list[str], JSON string→list[str]); updated list_documents and get_document to use `_safe_tags(doc.tags)` instead of `doc.tags or []`; tag filter `tag in i.tags` is now safe because i.tags is always a Python list (exact element match, not substring). (2) backend/tests/test_tags.py (new) — 4 async tests: test_patch_tags_stores_list (PATCH returns list; GET /documents returns list[str]), test_tag_filter_returns_matching_docs (only tagged doc returned), test_tag_filter_no_substring_collision (tag='bio' does NOT match tags=['biology']), test_patch_tags_replaces_not_appends (second PATCH replaces, doesn't append). (3) frontend/src/pages/Learning.tsx — import useSearchParams from react-router-dom; replaced `useState<string|null>(null)` tagFilter with `useSearchParams()` (tagFilter = searchParams.get('tag')); handleTagClick sets URL param; clear filter button removes URL param; empty state message now shows 'No documents tagged "X".' when tagFilter is active. (4) scripts/smoke/S62.sh (new) — ingest doc, PATCH tags, verify GET ?tag= returns doc, verify GET ?tag=substring returns no match.
+- Files changed: backend/app/routers/documents.py, backend/tests/test_tags.py (new), frontend/src/pages/Learning.tsx, scripts/smoke/S62.sh (new), scripts/ralph/prd.json (S62 passes=True)
+- Learnings:
+  - SQLAlchemy JSON on SQLite may return raw string if row was written outside of ORM; _safe_tags() defensive helper handles all 3 cases (None, list, JSON string)
+  - `tag in list` is exact element match; `tag in string` is substring — the bug manifests when doc.tags is not deserialized; _safe_tags fixes the root cause
+  - useSearchParams (React Router) persists filter state across navigation; replaces useState which resets on re-mount
+  - ruff I001 (import sorting) triggered by stdlib-before-third-party order in test file; `ruff --fix` auto-resolves
+---
+
 ## 2026-02-27T02:00:00+00:00 - S52 - End-to-end integration test — full pipeline from ingest to all 5 features on Time Machine
 - Implemented: Created backend/tests/test_e2e_book.py — TestTimeMachineEndToEnd class (9 tests) referencing all_books_ingested session fixture from conftest_books.py via pytest_plugins. Tests: test_ingest_completed (stage='complete'), test_diagnostics_counts (chunk>=100, fts>=100, vector>=50, entity>=20, edge>=10), test_vector_search (>=3 results for 'time traveller'), test_keyword_search (>=2 results for 'Eloi Morlocks'), test_hybrid_retrieve (>=5 results for 'What is the Time Machine?'), test_qa_stream (>=1 token event, done=true with citations>=1 — mocks get_llm_service via patch), test_graph_nodes (>=20 nodes, >=10 edges), test_search_endpoint (>=1 result for 'Weena'), test_ingest_elapsed (<=600s). Marked @pytest.mark.slow — excluded from default CI. TypeScript fix: removed unused X import from Notes.tsx (delete confirmation uses Trash2 icon, not X). Fixed scripts/smoke/S49.sh.
 - Files changed: backend/tests/test_e2e_book.py (new), frontend/src/pages/Notes.tsx (remove unused X import), scripts/smoke/S52.sh (new), scripts/ralph/prd.json (S52 passes=True)
@@ -676,3 +735,108 @@ Started: Tue 24 Feb 2026 08:01:32 AEST
   - db_module.get_session_factory() gives the async session factory for raw SQL in tests
   - pytest_plugins = ["tests.conftest_books"] loads the shared session fixture (note "tests." prefix for rootdir=backend)
 ---
+
+## S66 — Book ingestion: section-boundary chunking + chunk-to-section linking (2026-03-05)
+Status: DONE
+Commit: 7735569
+
+### What was built
+- `_chunk_book()` helper in `ingestion.py`: processes each section independently so no chunk crosses a chapter boundary
+- `ChunkModel.section_id` set on every book chunk linking to its `SectionModel`
+- `DocumentModel.chapter_count` (new nullable int column + migration) set after book ingestion
+- Flat books (no sections detected) get a synthetic "Full Text" SectionModel; all chunks link to it
+- `GET /sections/{document_id}` endpoint returns sections with accurate `chunk_count` per section
+- 4 tests in `tests/test_book_ingestion.py` covering all acceptance criteria
+
+### Key learnings
+- Use `session.flush()` before creating chunks so section PKs are available for FK references in the same transaction
+- `DocumentModel.chapter_count` exposed via `DocumentListItem` for use by chapter sidebar (S60)
+- `has_summary` is always False (placeholder until section-level summaries implemented)
+---
+
+## S56 — Conversation ingestion: speaker-turn chunking, roster, timeline (2026-03-05)
+Status: DONE
+Commit: 6a52c55
+
+### What was built
+- `app/services/conversation_chunker.py` — ConversationChunker: detect(), chunk(), extract_roster(), extract_timeline()
+- detect() matches >= 5 lines in first 60 using timestamp, name-colon, or name-arrow patterns
+- chunk() groups consecutive same-speaker lines into turns, accumulates to 450 tokens, carries 1 overlap turn
+- extract_roster() parses chunk texts for speaker lines to count per-speaker turns
+- extract_timeline() regex-scans for timestamps and returns first/last
+- `_chunk_conversation()` in ingestion.py: uses chunker if detect() → True, else fallback to RecursiveCharacterTextSplitter; sets chunk.speaker; writes conversation_metadata to DocumentModel
+- DocumentModel.conversation_metadata (JSON nullable) + migration DDL
+- GET /documents/{id}/conversation endpoint in documents router
+- 12 tests in test_conversation_chunker.py
+
+### Key learnings
+- extract_roster must parse speaker lines from chunk.text, not just count chunk.speaker — short convos fit in one chunk so chunk.speaker alone misses secondary speakers
+- Pattern order matters: try timestamp pattern before name-colon to avoid misparse
+---
+
+## S57 — Context expansion: adjacent chunks for books/conversations after RRF (2026-03-05)
+Status: DONE
+Commit: 288a678
+
+### What was built
+- ScoredChunk extended with `chunk_index: int = 0` and `speaker: str | None = None`
+- source Literal extended with 'context_expansion'
+- vector_search: reads speaker from LanceDB row (stored as "" → converted to None)
+- keyword_search: batch SELECT from chunks table after FTS to get speaker + chunk_index
+- _expand_context(): queries SQLite for chunk_index by chunk_id, then fetches neighbors at ±window; skips code/paper; dedup keeping higher score; caps at k*2; sorts desc
+- retrieve() now calls _expand_context after rrf_merge
+- 4 tests
+
+### Key learnings
+- chunk_index is not stored in LanceDB, so _expand_context does a SQLite lookup by chunk_id to get it
+- SQL batch queries use string interpolation for IN clauses (SQLite doesn't support array binding)
+- Dedup: when a neighbor is already in result_map from a different source, compare scores and keep higher
+---
+
+## S59 — Speaker-balanced retrieval (2026-03-05)
+Status: DONE
+Commit: a614a26
+
+### What was built
+- _round_robin() generic helper in retriever.py extracted from _diversify()
+- _diversify() now checks speakers FIRST: if any chunk.speaker != None and concentration > 60%, round-robin across speakers
+- Falls through to section-diversity when no speaker data present
+- 3 new tests in test_retriever.py
+
+### Key learnings
+- ScoredChunk.speaker was already added in S57 — S59 is purely a change to _diversify()
+- Generic _round_robin(group_key) works for both "speaker" and "section_heading" fields
+---
+
+## 2026-03-06T16:00:00+00:00 - S67 - Library and Notes list view — tabular layout with metadata columns
+- Implemented: (1) backend/app/routers/documents.py — added `chunk_count_sq` correlated scalar subquery (COUNT chunks per document); added `chunk_count: int` to `DocumentListItem` Pydantic model; fetches chunk_count from row[5] in list_documents. (2) backend/tests/test_documents.py — added `test_documents_list_includes_chunk_count` (ingest 1 doc + 3 chunks, GET /documents, assert chunk_count>=1) and `test_documents_chunk_count_is_zero_for_fresh_doc` (doc with no chunks, assert chunk_count=0). (3) frontend/src/components/library/types.ts — added `chunk_count: number` to DocumentListItem interface. (4) frontend/src/store.ts — added `libraryView: 'grid'|'list'` and `notesView: 'grid'|'list'` state + setters to Zustand store. (5) frontend/src/components/ui/table.tsx (new) — shadcn Table component: Table, TableHeader, TableBody, TableRow, TableHead, TableCell forwardRef wrappers. (6) frontend/src/components/library/utils.ts — added `formatDate(isoStr)` helper (returns e.g. 'Mar 6, 2026'). (7) frontend/src/pages/Learning.tsx — removed local `useState<ViewMode>`, uses `libraryView`/`setLibraryView` from Zustand; added `isError`+`refetch` to useQuery; added `LibraryTable` component (sortable by Title and Ingested At with ChevronsUpDown/ChevronUp/ChevronDown icons, 5-skeleton-row loading, empty state, error state with retry); updated list view in "All documents" section to use LibraryTable; grid view unchanged. (8) frontend/src/pages/Notes.tsx — imports ViewToggle + useAppStore; uses `notesView`/`setNotesView` from store; added list view (Table with columns: Title 60-char truncated, Tags comma-joined, Group, Created At, Document Link or Standalone); loading state shows 3 skeleton table rows; panel header updated to include ViewToggle. (9) scripts/smoke/S67.sh (new) — GET /documents asserts 200 + 'chunk_count' in response. CI: 368 tests pass, tsc noEmit pass, vite build pass.
+- Files changed: backend/app/routers/documents.py, backend/tests/test_documents.py, frontend/src/components/library/types.ts, frontend/src/store.ts, frontend/src/components/ui/table.tsx (new), frontend/src/components/library/utils.ts, frontend/src/pages/Learning.tsx, frontend/src/pages/Notes.tsx, scripts/smoke/S67.sh (new), scripts/ralph/prd.json (S67 passes=True)
+- Learnings:
+  - chunk_count correlated subquery follows exact same pattern as flashcard_count_sq and summary_count_sq already in list_documents — consistent and no N+1
+  - shadcn Table component was missing from ui/ — created it as forwardRef wrappers with standard Tailwind classes; must be created before using in Table-based list view
+  - LibraryTable has its own sortCol/sortDir local state — sorts the already-fetched items array client-side; server-side sort (newest/oldest/etc.) still controls initial order
+  - ViewMode import removed from types.ts import in Learning.tsx (not needed since viewMode is now from store as string literal) — use string literals directly
+  - Notes list view document link lookup: build `Object.fromEntries(documents.map(d => [d.id, d.title]))` from already-fetched documents list — no extra API call
+---
+
+## 2026-03-06T17:00:00+00:00 - S68 - App startup readiness — skeleton loading prevents false empty-state flash on cold start
+- Implemented: (1) frontend/src/App.tsx — updated QueryClient defaultOptions: `retry: 1 → 2`, added `retryDelay: 1000`, added `gcTime: 60_000` alongside existing `staleTime: 60_000`. (2) frontend/src/pages/Learning.tsx — destructured `isSuccess` from useQuery; changed EmptyState guard from `!isLoading && !isError && total === 0` to `isSuccess && total === 0` (prevents false empty-state flash during loading); added `staleTime: 10_000, gcTime: 60_000` to the documents query override. (3) frontend/src/pages/Notes.tsx — added `staleTime: 10_000, gcTime: 60_000` to the notes query; changed grid loading state from 3 h-12 skeleton rows to 2 h-28 skeleton card placeholders (matches NoteCard dimensions). (4) frontend/src/pages/Study.tsx — changed flashcard loading state from 6 skeleton grid cards to centered spinner (Loader2 animate-spin) with "Loading your cards..." label; removed unused Skeleton import. (5) scripts/smoke/S68.sh (new) — sleep 2 then GET /documents assert 200.
+- Files changed: frontend/src/App.tsx, frontend/src/pages/Learning.tsx, frontend/src/pages/Notes.tsx, frontend/src/pages/Study.tsx, scripts/smoke/S68.sh (new), scripts/ralph/prd.json (S68 passes=True)
+- Learnings:
+  - TanStack Query isLoading = true only when query has no data AND is fetching; use isSuccess for EmptyState guard to strictly distinguish 'not yet loaded' from 'truly empty'
+  - QueryClient global staleTime was already 60_000; adding staleTime: 10_000 on specific query overrides the global to a shorter window — added per acceptance criteria requirement
+  - Removing Skeleton import after replacing skeleton loading with spinner triggers TS6133 error — always remove unused imports when changing loading UI
+  - retryDelay: 1000 in QueryClient defaultOptions applies a fixed 1s delay between retries (TanStack Query supports function for exponential backoff, but story specifies fixed 1000ms)
+---
+
+2026-03-06 S69 PASS — Markdown rendering throughout. MarkdownRenderer.tsx created (react-markdown + remark-gfm + rehype-highlight). Applied to Chat, SummaryPanel, ExplanationSheet, FlashcardCard, LibraryOverview. Notes Write/Preview tab editor. Backend prompts updated in summarizer (MODE_INSTRUCTIONS + LIBRARY_SYSTEM_PROMPTS), qa, flashcard. 5 new prompt tests. 373 tests pass, tsc clean, build clean.
+
+2026-03-06 S70 PASS — Ingestion performance. SQLite chunk writes batched with session.add_all() in all 4 chunk paths. generate_all_summaries() added to SummarizationService (embedding+NER+summarization were already batched/fire-and-forget). 3 new tests. 376 tests pass, ruff clean, tsc clean.
+
+2026-03-06 S71 PASS — Summary caching. force_refresh param added to stream_summary/stream_library_summary; bypasses cached lookup when True. glossary mode added to MODE_INSTRUCTIONS and SummarizeRequest. QA stream_answer enriches context with cached executive summary for overview/summary questions (_should_use_summary keyword detection). Frontend regenerate buttons pass force_refresh=true. 6 new tests (cache-hit, force_refresh, glossary, _should_use_summary). 54 targeted tests pass, ruff clean, tsc clean.
+
+2026-03-06 S72 PASS — Monitoring tab Phoenix link. GET /monitoring/phoenix-url endpoint returns {url, enabled}. Reachability checked via HEAD request (2s timeout) and cached 30s in module-level dict. Monitoring.tsx Traces card: green/gray dot indicator, View Traces button (opens localhost:6006; disabled+tooltip when unreachable), polls every 30s, loading skeleton, error state. 2 new tests. 71 targeted tests pass, ruff clean, tsc clean, build clean.
+
+2026-03-06 S73 PASS — Flashcard improvements. FLASHCARD_SYSTEM updated with Bloom's taxonomy guidance (comprehension/application/analysis/evaluation) and AVOID block (hypothetical, trivia, yes/no). StudySession.tsx FlashCard flip animation fixed: per-face motion.div animation (front rotateY -180, back rotateY 0/180) eliminates mirroring/overlap caused by rotating the parent wrapper. Card now clickable to toggle flip via onFlip prop. 2 new prompt tests. 13 total flashcard tests pass, ruff clean, tsc clean.
+
+2026-03-06 S74 PASS — LLM provider mode (Private/Cloud). Backend: settings_service.py with XOR-encrypted API key storage (hostname SHA256 key, hex output). Module-level _cache singleton for zero-latency routing lookups. GET/PATCH /settings/llm endpoints — never expose raw keys, returns has_*_key booleans. Backward-compat fields (processing_mode, active_model, available_local_models, cloud_providers) for Monitoring.tsx. LiteLLM routing updated: get_effective_routing() returns (model, key|None); raises ValueError → 503 for cloud+no_key. Frontend: store.ts updated with llmMode:'private'|'cloud', currentProvider, setLlmMode. SettingsDrawer.tsx rewritten with Private/Cloud radio cards (Shield/Cloud icons), provider dropdown, model text field, API key input with status indicator, Save PATCH call. LLMModeBadge populates Zustand on mount. 7 new tests (encrypt/decrypt round-trip, default private, patch persists, encrypted storage, has_key boolean, cloud 503). ruff clean, tsc clean, smoke clean.

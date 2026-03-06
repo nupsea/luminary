@@ -19,11 +19,21 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
-import ReactMarkdown from "react-markdown"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
-import { relativeDate } from "@/components/library/utils"
+import { formatDate, relativeDate } from "@/components/library/utils"
+import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
 
@@ -124,7 +134,16 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
   const [content, setContent] = useState("")
   const [tagsRaw, setTagsRaw] = useState("")
   const [docId, setDocId] = useState<string>("")
+  const [createTab, setCreateTab] = useState<"write" | "preview">("write")
+  const createTaRef = useRef<HTMLTextAreaElement>(null)
   const qc = useQueryClient()
+
+  const adjustCreateHeight = useCallback(() => {
+    const ta = createTaRef.current
+    if (!ta) return
+    ta.style.height = "auto"
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [])
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -146,13 +165,41 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
 
   return (
     <div className="mb-4 rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-      <textarea
-        rows={4}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Write your note..."
-        className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
+      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
+        <button
+          onClick={() => setCreateTab("write")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            createTab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Write
+        </button>
+        <button
+          onClick={() => setCreateTab("preview")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            createTab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Preview
+        </button>
+      </div>
+      {createTab === "write" ? (
+        <textarea
+          ref={createTaRef}
+          value={content}
+          onChange={(e) => { setContent(e.target.value); adjustCreateHeight() }}
+          placeholder="Write your note in Markdown..."
+          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      ) : (
+        <div className="min-h-[200px] rounded border border-border bg-background px-3 py-2">
+          {content ? (
+            <MarkdownRenderer>{content}</MarkdownRenderer>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
+          )}
+        </div>
+      )}
       <input
         type="text"
         value={tagsRaw}
@@ -187,6 +234,89 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
         <button
           onClick={onClose}
           className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NoteEditorTabs — Write / Preview tab editor for note content
+// ---------------------------------------------------------------------------
+
+interface NoteEditorTabsProps {
+  value: string
+  onChange: (v: string) => void
+  onSave: () => void
+  onCancel: () => void
+  isPending: boolean
+}
+
+function NoteEditorTabs({ value, onChange, onSave, onCancel, isPending }: NoteEditorTabsProps) {
+  const [tab, setTab] = useState<"write" | "preview">("write")
+  const taRef = useRef<HTMLTextAreaElement>(null)
+
+  const adjustHeight = useCallback(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = "auto"
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [])
+
+  useEffect(() => {
+    if (tab === "write") adjustHeight()
+  }, [value, tab, adjustHeight])
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
+        <button
+          onClick={() => setTab("write")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            tab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Write
+        </button>
+        <button
+          onClick={() => setTab("preview")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            tab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Preview
+        </button>
+      </div>
+      {tab === "write" ? (
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={(e) => { onChange(e.target.value); adjustHeight() }}
+          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-2 py-1.5 font-mono text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      ) : (
+        <div className="min-h-[200px] rounded border border-border bg-background px-2 py-2">
+          {value ? (
+            <MarkdownRenderer>{value}</MarkdownRenderer>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
+          )}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={onSave}
+          disabled={!value.trim() || isPending}
+          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Check size={11} />
+          Save
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
         >
           Cancel
         </button>
@@ -277,35 +407,22 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
       {/* Content */}
       {editing ? (
         <div className="flex flex-col gap-2">
-          <textarea
+          {/* Write / Preview tabs */}
+          <NoteEditorTabs
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="min-h-[80px] w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            onChange={setContent}
+            onSave={() => saveMut.mutate()}
+            onCancel={() => { setEditing(false); setContent(note.content) }}
+            isPending={saveMut.isPending}
           />
-          <div className="flex gap-2">
-            <button
-              onClick={() => saveMut.mutate()}
-              disabled={saveMut.isPending}
-              className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Check size={11} />
-              Save
-            </button>
-            <button
-              onClick={() => { setEditing(false); setContent(note.content) }}
-              className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </button>
-          </div>
         </div>
       ) : (
         !confirming && (
           <div
-            className="prose prose-sm max-w-none cursor-pointer text-foreground"
+            className="cursor-pointer"
             onClick={() => setEditing(true)}
           >
-            <ReactMarkdown>{note.content.slice(0, 200)}</ReactMarkdown>
+            <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
           </div>
         )
       )}
@@ -342,6 +459,8 @@ export default function NotesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
+  const notesView = useAppStore((s) => s.notesView)
+  const setNotesView = useAppStore((s) => s.setNotesView)
 
   useEffect(() => {
     logger.info("[Notes] mounted")
@@ -369,6 +488,8 @@ export default function NotesPage() {
   } = useQuery({
     queryKey: ["notes", groupParam, tagParam],
     queryFn: () => fetchNotes(undefined, groupParam, tagParam),
+    staleTime: 10_000,
+    gcTime: 60_000,
   })
 
   useEffect(() => {
@@ -389,13 +510,36 @@ export default function NotesPage() {
   let panelContent: React.ReactNode
 
   if (notesLoading) {
-    panelContent = (
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-12 w-full rounded-md" />
-      </div>
-    )
+    panelContent =
+      notesView === "list" ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Title</TableHead>
+              <TableHead>Tags</TableHead>
+              <TableHead>Group</TableHead>
+              <TableHead>Created At</TableHead>
+              <TableHead>Document</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <TableRow key={i}>
+                <TableCell><Skeleton className="h-4 w-40" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Skeleton className="h-28 w-full rounded-lg" />
+          <Skeleton className="h-28 w-full rounded-lg" />
+        </div>
+      )
   } else if (notesError) {
     panelContent = (
       <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -422,6 +566,50 @@ export default function NotesPage() {
           New note
         </button>
       </div>
+    )
+  } else if (notesView === "list") {
+    // Build doc title lookup from already-fetched document list
+    const docTitleMap = Object.fromEntries(documents.map((d) => [d.id, d.title]))
+
+    panelContent = (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Tags</TableHead>
+            <TableHead>Group</TableHead>
+            <TableHead>Created At</TableHead>
+            <TableHead>Document</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {noteList.map((note) => (
+            <TableRow
+              key={note.id}
+              className="cursor-pointer"
+              onClick={() => {
+                /* open note editor — same as clicking NoteCard */
+              }}
+            >
+              <TableCell className="max-w-[200px] truncate font-medium text-foreground">
+                {note.content.slice(0, 60)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.tags.length > 0 ? note.tags.join(", ") : "—"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.group_name ?? "—"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatDate(note.created_at)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.document_id ? (docTitleMap[note.document_id] ?? note.document_id) : "Standalone"}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     )
   } else {
     panelContent = (
@@ -497,8 +685,8 @@ export default function NotesPage() {
 
       {/* Right panel */}
       <div className="flex-1 overflow-auto p-6">
-        {/* Panel header with + button */}
-        <div className="mb-4 flex items-center justify-between">
+        {/* Panel header with view toggle + button */}
+        <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
             {filter.type === "all"
               ? "All Notes"
@@ -506,14 +694,17 @@ export default function NotesPage() {
                 ? filter.name
                 : `#${filter.name}`}
           </h2>
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-            title="New note"
-          >
-            <Plus size={13} />
-            New
-          </button>
+          <div className="flex items-center gap-2">
+            <ViewToggle value={notesView} onChange={setNotesView} />
+            <button
+              onClick={() => setShowCreate((v) => !v)}
+              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+              title="New note"
+            >
+              <Plus size={13} />
+              New
+            </button>
+          </div>
         </div>
 
         {/* Create form */}

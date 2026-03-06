@@ -18,10 +18,11 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import select
+import litellm
+from sqlalchemy import delete, select
 
 from app.database import get_session_factory
-from app.models import ChunkModel, SummaryModel
+from app.models import ChunkModel, DocumentModel, LibrarySummaryModel, SummaryModel
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -29,15 +30,33 @@ logger = logging.getLogger(__name__)
 # Grounding prefix applied to every summarization prompt
 GROUNDING_PREFIX = "Answer using only information present in the provided text."
 
+_MARKDOWN_INSTRUCTION = (
+    "Format your response using Markdown. "
+    "Use ## headings, **bold**, bullet lists, and `code` spans where appropriate."
+)
+
 # Mode-specific instructions appended after the grounding prefix
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
-    "executive": "List the 3 to 5 most important points as bullet points.",
-    "detailed": "Summarize each section separately, preserving the heading structure.",
+    "executive": (
+        "List the 3 to 5 most important intellectual points as bullet points. "
+        "Focus on ideas, arguments, narratives, and findings — "
+        "ignore copyright notices, licensing terms, and distribution metadata. "
+        f"{_MARKDOWN_INSTRUCTION}"
+    ),
+    "detailed": (
+        "Summarize each section separately, preserving the heading structure. "
+        f"{_MARKDOWN_INSTRUCTION}"
+    ),
     "conversation": (
         'Output a JSON object with keys: "timeline" (list of strings), '
         '"decisions" (list of strings), '
         '"action_items" (list of objects with "owner" and "task" keys).'
+    ),
+    "glossary": (
+        "Extract a glossary of domain-specific terms from the text. "
+        "For each term provide a brief one-sentence definition. "
+        "Output as Markdown with each term **bolded** followed by a colon and the definition."
     ),
 }
 
@@ -49,6 +68,21 @@ _MAP_BATCH_TOKENS = 3_000
 
 # Modes pre-generated at ingestion time
 PREGENERATE_MODES = ("one_sentence", "executive", "detailed")
+
+# System prompts for library-level synthesis
+LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
+    "one_sentence": "Synthesize all documents in one sentence of at most 30 words.",
+    "executive": (
+        "List the 5-7 key themes across all documents as bullet points. "
+        "Focus on intellectual content, ideas, arguments, and narratives — "
+        "ignore copyright notices, licensing terms, and distribution metadata. "
+        f"Note connections between them. {_MARKDOWN_INSTRUCTION}"
+    ),
+    "detailed": (
+        "Write a structured overview: main themes, key documents, "
+        f"and how they relate to each other. {_MARKDOWN_INSTRUCTION}"
+    ),
+}
 
 
 def _build_system_prompt(mode: str) -> str:
@@ -184,6 +218,7 @@ class SummarizationService:
         document_id: str,
         mode: str,
         model: str | None,
+        force_refresh: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -192,13 +227,16 @@ class SummarizationService:
         Only falls back to LLM generation when no cached version exists, then
         stores the result so subsequent calls are instant.
 
+        force_refresh=True skips the cache lookup and re-generates via LLM,
+        overwriting the stored summary.
+
         Yields:
             ``data: {"token": "..."}\\n\\n``  — one word at a time
             ``data: {"done": true, "summary_id": "..."}\\n\\n``  — final event
             ``data: {"error": "llm_unavailable", ...}\\n\\n``  — on LLM failure
         """
         try:
-            cached = await self._fetch_cached(document_id, mode)
+            cached = None if force_refresh else await self._fetch_cached(document_id, mode)
             if cached is not None:
                 logger.info(
                     "Serving cached summary",
@@ -234,12 +272,22 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
-            err_evt = {
-                "error": "llm_unavailable",
-                "message": "Ollama is not running. Start it with: ollama serve",
-                "done": True,
-            }
+            if isinstance(exc, ValueError):
+                msg = "LLM provider not configured. Add your API key in Settings."
+            elif isinstance(exc, litellm.AuthenticationError):
+                msg = "LLM API key is invalid. Check your key in Settings."
+            else:
+                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
+
+    async def generate_all_summaries(self, document_id: str, model: str | None = None) -> None:
+        """Public entry point for background summary generation.
+
+        Generates one_sentence, executive, and detailed summaries sequentially.
+        Delegates to pregenerate which handles caching and error isolation.
+        """
+        await self.pregenerate(document_id, model)
 
     async def pregenerate(self, document_id: str, model: str | None = None) -> None:
         """Pre-generate and store summaries for PREGENERATE_MODES.
@@ -306,6 +354,179 @@ class SummarizationService:
                 extra={"document_id": document_id},
                 exc_info=exc,
             )
+
+
+    # ------------------------------------------------------------------
+    # Library-level summary (cross-document synthesis)
+    # ------------------------------------------------------------------
+
+    async def _fetch_library_cached(self, mode: str) -> LibrarySummaryModel | None:
+        """Return the most recent LibrarySummaryModel for this mode, or None."""
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(LibrarySummaryModel)
+                .where(LibrarySummaryModel.mode == mode)
+                .order_by(LibrarySummaryModel.created_at.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def _store_library_summary(self, mode: str, content: str) -> str:
+        summary_id = str(uuid.uuid4())
+        async with get_session_factory()() as session:
+            session.add(
+                LibrarySummaryModel(id=summary_id, mode=mode, content=content)
+            )
+            await session.commit()
+        return summary_id
+
+    async def _fetch_all_executive_summaries(self) -> dict[str, str]:
+        """Return best-available summary content keyed by document_id.
+
+        Priority: executive > detailed > one_sentence > conversation.
+        Documents with no summary of any kind are excluded.
+        """
+        _MODE_PRIORITY = {"executive": 0, "detailed": 1, "one_sentence": 2, "conversation": 3}
+        async with get_session_factory()() as session:
+            rows = await session.execute(
+                select(
+                    SummaryModel.document_id,
+                    SummaryModel.mode,
+                    SummaryModel.content,
+                    SummaryModel.created_at,
+                ).order_by(SummaryModel.created_at.desc())
+            )
+            # best[doc_id] = (priority, content)
+            best: dict[str, tuple[int, str]] = {}
+            for row in rows:
+                prio = _MODE_PRIORITY.get(row.mode, 99)
+                if row.document_id not in best or prio < best[row.document_id][0]:
+                    best[row.document_id] = (prio, row.content)
+        return {doc_id: content for doc_id, (_, content) in best.items()}
+
+    def _get_cross_doc_entities(self, min_docs: int = 3, limit: int = 20) -> list[str]:
+        """Query Kuzu for entity names appearing in min_docs or more documents.
+
+        Returns an empty list if Kuzu is unavailable or no entities qualify.
+        """
+        try:
+            from app.services.graph import get_graph_service  # noqa: PLC0415
+
+            conn = get_graph_service()._conn
+            result = conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
+                " WITH e.name AS name, COUNT(DISTINCT d.id) AS doc_count"
+                " WHERE doc_count >= $min"
+                " RETURN name"
+                " ORDER BY doc_count DESC"
+                " LIMIT $lim",
+                {"min": min_docs, "lim": limit},
+            )
+            names: list[str] = []
+            while result.has_next():
+                row = result.get_next()
+                if row[0]:
+                    names.append(row[0])
+            return names
+        except Exception:
+            logger.warning("_get_cross_doc_entities: Kuzu query failed", exc_info=True)
+            return []
+
+    async def stream_library_summary(
+        self,
+        mode: str,
+        model: str | None,
+        force_refresh: bool = False,
+    ) -> AsyncGenerator[str]:
+        """Synthesize a holistic summary across all ingested documents.
+
+        Cache-first: if a LibrarySummaryModel for this mode already exists it is
+        streamed as a single token event.  On cache miss, fetches executive summaries
+        from all documents, queries Kuzu for cross-doc entities, builds input text,
+        and generates via LLM.
+
+        force_refresh=True skips the cache and regenerates.
+
+        Yields:
+            ``data: {"token": "..."}\\n\\n``  — one or more token events
+            ``data: {"done": true, ...}\\n\\n``  — final event with cached flag
+            ``data: {"error": "not_enough_summaries", ...}\\n\\n``  — when < 2 docs
+        """
+        try:
+            # Cache-first (skipped when force_refresh=True)
+            cached = None if force_refresh else await self._fetch_library_cached(mode)
+            if cached is not None:
+                logger.info("Serving cached library summary", extra={"mode": mode})
+                yield f'data: {json.dumps({"token": cached.content})}\n\n'
+                done_evt = {"done": True, "summary_id": cached.id, "cached": True}
+                yield f"data: {json.dumps(done_evt)}\n\n"
+                return
+
+            # Fetch executive summaries per document
+            exec_summaries = await self._fetch_all_executive_summaries()
+
+            if len(exec_summaries) < 2:
+                yield (
+                    'data: {"error": "not_enough_summaries", '
+                    '"message": "Ingest at least 2 documents to generate a library overview.", '
+                    '"done": true}\n\n'
+                )
+                return
+
+            # Fetch document titles
+            doc_ids = list(exec_summaries.keys())
+            async with get_session_factory()() as session:
+                rows = await session.execute(
+                    select(DocumentModel.id, DocumentModel.title).where(
+                        DocumentModel.id.in_(doc_ids)
+                    )
+                )
+                titles = {row.id: row.title for row in rows}
+
+            # Build input text ordered by title
+            ordered = sorted(doc_ids, key=lambda did: titles.get(did, ""))
+            parts = [
+                f"## {titles.get(did, did)}\n{exec_summaries[did]}" for did in ordered
+            ]
+
+            # Cross-doc entities from Kuzu (non-fatal)
+            entity_names = self._get_cross_doc_entities()
+            if entity_names:
+                parts.append(f"## Shared themes\n{', '.join(entity_names)}")
+
+            input_text = "\n\n".join(parts)
+            system = LIBRARY_SYSTEM_PROMPTS.get(mode, LIBRARY_SYSTEM_PROMPTS["executive"])
+
+            llm = get_llm_service()
+            token_stream = await llm.generate(input_text, system=system, model=model, stream=True)
+
+            collected: list[str] = []
+            async for token in token_stream:
+                collected.append(token)
+                yield f'data: {json.dumps({"token": token})}\n\n'
+
+            summary_text = "".join(collected)
+            summary_id = await self._store_library_summary(mode, summary_text)
+            done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+            yield f"data: {json.dumps(done_evt)}\n\n"
+
+        except Exception as exc:
+            logger.warning("stream_library_summary failed", exc_info=exc)
+            if isinstance(exc, ValueError):
+                msg = "LLM provider not configured. Add your API key in Settings."
+            elif isinstance(exc, litellm.AuthenticationError):
+                msg = "LLM API key is invalid. Check your key in Settings."
+            else:
+                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
+            yield f"data: {json.dumps(err_evt)}\n\n"
+
+    async def invalidate_library_cache(self) -> None:
+        """Delete all LibrarySummaryModel rows so the next call regenerates."""
+        async with get_session_factory()() as session:
+            await session.execute(delete(LibrarySummaryModel))
+            await session.commit()
+        logger.info("library summary cache invalidated")
 
 
 _summarization_service: SummarizationService | None = None

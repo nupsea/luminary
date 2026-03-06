@@ -18,8 +18,15 @@ router = APIRouter(prefix="/summarize", tags=["summarize"])
 
 
 class SummarizeRequest(BaseModel):
-    mode: Literal["one_sentence", "executive", "detailed", "conversation"]
+    mode: Literal["one_sentence", "executive", "detailed", "conversation", "glossary"]
     model: str | None = None
+    force_refresh: bool = False
+
+
+class LibrarySummarizeRequest(BaseModel):
+    mode: Literal["one_sentence", "executive", "detailed"] = "executive"
+    model: str | None = None
+    force_refresh: bool = False
 
 
 @router.get("/{document_id}/cached")
@@ -45,6 +52,20 @@ async def get_cached_summaries(document_id: str) -> dict:
     return {"document_id": document_id, "summaries": summaries}
 
 
+@router.post("/all")
+async def summarize_library(req: LibrarySummarizeRequest) -> StreamingResponse:
+    """Stream a holistic summary synthesized from all ingested documents.
+
+    Cache-first: if a library summary is stored for this mode it is streamed from
+    the database.  Regenerated after any new document is ingested.
+    """
+    svc = get_summarization_service()
+    return StreamingResponse(
+        svc.stream_library_summary(req.mode, req.model, force_refresh=req.force_refresh),
+        media_type="text/event-stream",
+    )
+
+
 @router.post("/{document_id}")
 async def summarize_document(document_id: str, req: SummarizeRequest) -> StreamingResponse:
     """Stream a summary for the given document and mode.
@@ -64,6 +85,6 @@ async def summarize_document(document_id: str, req: SummarizeRequest) -> Streami
 
     svc = get_summarization_service()
     return StreamingResponse(
-        svc.stream_summary(document_id, req.mode, req.model),
+        svc.stream_summary(document_id, req.mode, req.model, force_refresh=req.force_refresh),
         media_type="text/event-stream",
     )

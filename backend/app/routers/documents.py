@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import logging
 import shutil
 import uuid
@@ -7,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 
@@ -27,7 +28,7 @@ from app.models import (
 from app.services.parser import DocumentParser
 from app.services.vector_store import get_lancedb_service
 from app.types import ParsedDocument, Section
-from app.workflows.ingestion import STAGE_PROGRESS, run_ingestion
+from app.workflows.ingestion import STAGE_PROGRESS, ContentType, run_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,28 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 _parser = DocumentParser()
 
 _ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx"})
+
+
+def _safe_tags(raw: object) -> list[str]:
+    """Deserialize tags regardless of how they were stored.
+
+    SQLite's JSON column occasionally surfaces the raw JSON text string instead
+    of a Python list (e.g. when rows were written by a different code path).
+    This helper normalises all three cases: already-a-list, JSON string, or
+    None.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(t) for t in parsed]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +80,8 @@ class DocumentListItem(BaseModel):
     summary_one_sentence: str | None
     flashcard_count: int
     learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
+    chapter_count: int | None
+    chunk_count: int
 
 
 class DocumentListResponse(BaseModel):
@@ -77,6 +102,7 @@ class PatchTagsRequest(BaseModel):
 class PatchDocumentRequest(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
+    content_type: ContentType | None = None
 
 
 class SectionItem(BaseModel):
@@ -202,6 +228,12 @@ async def list_documents(
             .correlate(DocumentModel)
             .scalar_subquery()
         )
+        chunk_count_sq = (
+            select(func.count())
+            .where(ChunkModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
 
         stmt = select(
             DocumentModel,
@@ -209,6 +241,7 @@ async def list_documents(
             flashcard_count_sq.label("flashcard_count"),
             summary_count_sq.label("summary_count"),
             study_session_count_sq.label("study_session_count"),
+            chunk_count_sq.label("chunk_count"),
         )
 
         result = await session.execute(stmt)
@@ -222,6 +255,7 @@ async def list_documents(
         flashcard_count = row[2] or 0
         summary_count = row[3] or 0
         study_session_count = row[4] or 0
+        chunk_count = row[5] or 0
         all_items.append(
             DocumentListItem(
                 id=doc.id,
@@ -231,7 +265,7 @@ async def list_documents(
                 word_count=doc.word_count,
                 page_count=doc.page_count,
                 stage=doc.stage,
-                tags=doc.tags or [],
+                tags=_safe_tags(doc.tags),
                 created_at=doc.created_at,
                 last_accessed_at=doc.last_accessed_at,
                 summary_one_sentence=summary_one_sentence,
@@ -239,6 +273,8 @@ async def list_documents(
                 learning_status=_derive_learning_status(
                     study_session_count, flashcard_count, summary_count
                 ),
+                chapter_count=doc.chapter_count,
+                chunk_count=chunk_count,
             )
         )
 
@@ -294,6 +330,7 @@ async def parse_document(
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
+    content_type: ContentType = Form(...),
     settings: Settings = Depends(get_settings),
 ):
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
@@ -359,9 +396,10 @@ async def ingest_document(
                 # Previous attempt failed — reset stage and retry ingestion on
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
+                existing.content_type = content_type
                 await session.commit()
                 asyncio.create_task(
-                    run_ingestion(existing.id, existing.file_path, existing.format)
+                    run_ingestion(existing.id, existing.file_path, existing.format, content_type)
                 )
                 logger.info(
                     "Retrying failed ingestion on existing doc",
@@ -400,7 +438,7 @@ async def ingest_document(
             id=doc_id,
             title=Path(file.filename or "upload").stem,
             format=fmt,
-            content_type="notes",
+            content_type=content_type,
             word_count=0,
             page_count=0,
             file_path=str(dest),
@@ -410,7 +448,7 @@ async def ingest_document(
         session.add(doc)
         await session.commit()
 
-    asyncio.create_task(run_ingestion(doc_id, str(dest), fmt))
+    asyncio.create_task(run_ingestion(doc_id, str(dest), fmt, content_type))
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -441,7 +479,7 @@ async def get_document(document_id: str):
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,
-        tags=doc.tags or [],
+        tags=_safe_tags(doc.tags),
         created_at=doc.created_at,
         last_accessed_at=doc.last_accessed_at,
         sections=[
@@ -520,9 +558,14 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             doc.title = body.title
         if body.tags is not None:
             doc.tags = body.tags
+        if body.content_type is not None:
+            doc.content_type = body.content_type
         await session.commit()
     logger.info("Patched document", extra={"document_id": document_id})
-    return {"document_id": document_id, "updated": True}
+    response: dict = {"document_id": document_id, "updated": True}
+    if body.content_type is not None:
+        response["note"] = "Re-ingest document to apply new chunking strategy."
+    return response
 
 
 @router.patch("/{document_id}/tags")
@@ -666,3 +709,33 @@ async def get_document_diagnostics(document_id: str):
         edge_count=edge_count,
         vector_count=vector_count,
     )
+
+
+@router.get("/{document_id}/conversation")
+async def get_conversation_metadata(document_id: str) -> dict:
+    """Return speaker roster and timeline for a conversation document.
+
+    Returns 404 if not found, 400 if content_type != 'conversation'.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.content_type != "conversation":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document is not a conversation (content_type={doc.content_type})",
+        )
+
+    metadata = doc.conversation_metadata or {
+        "speakers": [],
+        "total_turns": 0,
+        "has_timestamps": False,
+        "first_timestamp": None,
+        "last_timestamp": None,
+    }
+    return metadata

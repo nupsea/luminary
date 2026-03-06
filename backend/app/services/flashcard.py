@@ -17,7 +17,16 @@ from app.telemetry import trace_chain
 logger = logging.getLogger(__name__)
 
 FLASHCARD_SYSTEM = (
-    "You are a flashcard generator. "
+    "You are a learning assistant creating flashcards for active recall. "
+    "Generate questions that test understanding of the passage. "
+    "Prefer questions that: (1) ask the learner to explain a concept in their own words"
+    " (comprehension), "
+    "(2) apply a concept to a new situation (application), "
+    "(3) distinguish between similar concepts (analysis), "
+    "or (4) evaluate a claim or argument (evaluation). "
+    "AVOID: trivia questions about exact wording, hypothetical questions not grounded"
+    " in the passage, "
+    "questions whose answer is not in the text, yes/no questions. "
     "Output a JSON array starting with [ and ending with ]. "
     "Write no explanation, preamble, or markdown fences."
 )
@@ -25,7 +34,8 @@ FLASHCARD_SYSTEM = (
 FLASHCARD_USER_TMPL = (
     "Generate {count} flashcard pairs from the text below.\n"
     "Each card must be answerable from the provided text only.\n"
-    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n\n'
+    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
+    "The \"answer\" field may use Markdown (bold, lists) for clarity.\n\n"
     "Text:\n{text}\n\n"
     "JSON array:"
 )
