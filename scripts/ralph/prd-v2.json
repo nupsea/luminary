@@ -147,7 +147,7 @@
         "uv run pytest tests/test_chat_graph_nodes.py exits 0",
         "scripts/smoke/S78.sh exits 0 \u2014 both /qa calls return HTTP 200 within 30 seconds"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S79",

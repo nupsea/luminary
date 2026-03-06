@@ -19,6 +19,17 @@ Started: Fri  6 Mar 2026 23:08:42 AEST
   - litellm.ServiceUnavailableError must be caught at the asyncio.gather level, not inside each unit coro, because the semaphore pattern uses gather; individual unit errors are non-fatal but Ollama-offline is fatal-for-session
 ---
 
+## 2026-03-07T06:00:00Z - S78 - Strategy nodes: summary_lookup, graph_traversal, comparative, search with section augmentation
+- Implemented: summary_node (DB executive summary fetch → fallthrough), graph_node (Kuzu entity traversal + hybrid retrieval supplement → fallthrough on error), comparative_node (dual retrieval + interleave), search_node (hybrid retrieval + SectionSummaryModel batch-lookup + text augmentation), synthesize_node (intent-aware prompts + section_context), conditional fallthrough edges
+- Files changed: backend/app/runtime/chat_graph.py (major rewrite), backend/tests/test_chat_graph.py (updated for new summary_node behavior), backend/tests/test_chat_graph_nodes.py (new, 6 tests), scripts/smoke/S78.sh (new)
+- Learnings:
+  - Lazy import `get_graph_service` inside graph_node: patch at source (`app.services.graph.get_graph_service`) not destination module
+  - SectionSummaryModel batch lookup by (document_id, heading) using sqlalchemy OR conditions — avoids N+1 queries
+  - Conditional edges after strategy nodes: _route_after_strategy checks intent='factual' as fallthrough signal
+  - synthesize_node no-context check: not_found only when BOTH chunks and section_context are absent
+  - 419 tests pass, ruff clean
+---
+
 ## 2026-03-07T05:00:00Z - S77 - ChatState TypedDict + LangGraph chat router skeleton with intent classifier
 - Implemented: IntentType + ChatState TypedDict (app/types.py), intent classifier service (app/services/intent.py), LangGraph StateGraph (app/runtime/chat_graph.py) with classify_node/route_node/stub strategy nodes/search_node/synthesize_node, qa.py migrated to graph.ainvoke, test_qa.py rewritten with graph-level mocking, test_intent_classifier.py (7 tests), test_chat_graph.py (4 tests), smoke S77.sh
 - Files changed: backend/app/types.py, backend/app/services/qa.py, backend/tests/test_qa.py (modified); backend/app/runtime/__init__.py, backend/app/runtime/chat_graph.py, backend/app/services/intent.py, backend/tests/test_chat_graph.py, backend/tests/test_intent_classifier.py, scripts/smoke/S77.sh (new)
