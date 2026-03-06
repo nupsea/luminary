@@ -7,6 +7,7 @@ set -e
 # Parse arguments
 TOOL="amp"  # Default to amp for backwards compatibility
 MAX_ITERATIONS=10
+PRD_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -16,6 +17,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tool=*)
       TOOL="${1#*=}"
+      shift
+      ;;
+    --prd)
+      PRD_OVERRIDE="$2"
+      shift 2
+      ;;
+    --prd=*)
+      PRD_OVERRIDE="${1#*=}"
       shift
       ;;
     *)
@@ -34,7 +43,14 @@ if [[ "$TOOL" != "amp" && "$TOOL" != "claude" ]]; then
   exit 1
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRD_FILE="$SCRIPT_DIR/prd.json"
+# --prd flag overrides default; otherwise use prd-v2.json if it exists, else prd.json
+if [[ -n "$PRD_OVERRIDE" ]]; then
+  PRD_FILE="$SCRIPT_DIR/$PRD_OVERRIDE"
+elif [[ -f "$SCRIPT_DIR/prd-v2.json" ]]; then
+  PRD_FILE="$SCRIPT_DIR/prd-v2.json"
+else
+  PRD_FILE="$SCRIPT_DIR/prd.json"
+fi
 PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
