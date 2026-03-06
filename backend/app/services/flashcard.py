@@ -17,7 +17,16 @@ from app.telemetry import trace_chain
 logger = logging.getLogger(__name__)
 
 FLASHCARD_SYSTEM = (
-    "You are a flashcard generator. "
+    "You are a learning assistant creating flashcards for active recall. "
+    "Generate questions that test understanding of the passage. "
+    "Prefer questions that: (1) ask the learner to explain a concept in their own words"
+    " (comprehension), "
+    "(2) apply a concept to a new situation (application), "
+    "(3) distinguish between similar concepts (analysis), "
+    "or (4) evaluate a claim or argument (evaluation). "
+    "AVOID: trivia questions about exact wording, hypothetical questions not grounded"
+    " in the passage, "
+    "questions whose answer is not in the text, yes/no questions. "
     "Output a JSON array starting with [ and ending with ]. "
     "Write no explanation, preamble, or markdown fences."
 )

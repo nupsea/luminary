@@ -373,3 +373,24 @@ async def test_export_csv_returns_valid_csv(test_db):
     assert "question" in text
     assert "What is a qubit?" in text
     assert "My Study Guide" in text
+
+
+# ---------------------------------------------------------------------------
+# S73 — Smart question generation prompt tests
+# ---------------------------------------------------------------------------
+
+
+def test_flashcard_prompt_contains_taxonomy():
+    """FLASHCARD_SYSTEM must include comprehension and application quality guidance."""
+    from app.services.flashcard import FLASHCARD_SYSTEM
+
+    assert "comprehension" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'comprehension'"
+    assert "application" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'application'"
+
+
+def test_flashcard_prompt_forbids_hypothetical():
+    """FLASHCARD_SYSTEM must include AVOID block listing hypothetical questions."""
+    from app.services.flashcard import FLASHCARD_SYSTEM
+
+    assert "AVOID" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'AVOID'"
+    assert "hypothetical" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'hypothetical'"

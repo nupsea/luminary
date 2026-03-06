@@ -224,34 +224,37 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 interface FlashCardProps {
   card: Flashcard
   showAnswer: boolean
+  onFlip?: () => void
 }
 
-function FlashCard({ card, showAnswer }: FlashCardProps) {
+function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
   return (
-    <div className="relative h-64 w-full max-w-2xl" style={{ perspective: "1000px" }}>
+    <div
+      className="relative h-64 w-full max-w-2xl cursor-pointer"
+      style={{ perspective: "1000px", position: "relative" }}
+      onClick={onFlip}
+    >
+      {/* Front — question */}
       <motion.div
-        className="absolute inset-0"
-        animate={{ rotateY: showAnswer ? 180 : 0 }}
+        className="absolute flex h-full w-full flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center shadow-md"
+        animate={{ rotateY: showAnswer ? -180 : 0 }}
         transition={{ duration: 0.4, ease: "easeInOut" }}
-        style={{ transformStyle: "preserve-3d" }}
+        style={{ backfaceVisibility: "hidden" }}
       >
-        {/* Front — question */}
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center shadow-md"
-          style={{ backfaceVisibility: "hidden" }}
-        >
-          <p className="text-xl font-semibold text-foreground">{card.question}</p>
-        </div>
+        <p className="text-xl font-semibold text-foreground">{card.question}</p>
+      </motion.div>
 
-        {/* Back — question + answer (rotated 180 so it reads correctly when flipped) */}
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-4 rounded-xl border border-border bg-card p-8 text-center shadow-md"
-          style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
-        >
-          <p className="text-sm text-muted-foreground">{card.question}</p>
-          <hr className="w-3/4 border-border" />
-          <p className="text-lg font-medium text-foreground">{card.answer}</p>
-        </div>
+      {/* Back — question + answer */}
+      <motion.div
+        className="absolute flex h-full w-full flex-col items-center justify-center gap-4 rounded-xl border border-border bg-card p-8 text-center shadow-md"
+        initial={{ rotateY: 180 }}
+        animate={{ rotateY: showAnswer ? 0 : 180 }}
+        transition={{ duration: 0.4, ease: "easeInOut" }}
+        style={{ backfaceVisibility: "hidden" }}
+      >
+        <p className="text-sm text-muted-foreground">{card.question}</p>
+        <hr className="w-3/4 border-border" />
+        <p className="text-lg font-medium text-foreground">{card.answer}</p>
       </motion.div>
     </div>
   )
@@ -507,7 +510,11 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
               transition={{ duration: 0.25, ease: "easeInOut" }}
               className="w-full max-w-2xl"
             >
-              <FlashCard card={currentCard} showAnswer={showAnswer} />
+              <FlashCard
+                card={currentCard}
+                showAnswer={showAnswer}
+                onFlip={() => setShowAnswer((prev) => !prev)}
+              />
             </motion.div>
           </AnimatePresence>
 
