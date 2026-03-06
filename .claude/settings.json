@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-pip-blocker.sh"
+          }
+        ],
+        "description": "Block pip install — enforce uv invariant (#1)"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-direct-llm-blocker.sh"
+          }
+        ],
+        "description": "Block direct OpenAI/Anthropic SDK install — enforce LiteLLM invariant (#5)"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-python-lint.sh",
+            "async": true,
+            "timeout": 30
+          }
+        ],
+        "description": "Run ruff check after Python file edits in backend/"
+      }
+    ]
+  }
+}

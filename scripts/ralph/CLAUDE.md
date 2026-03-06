@@ -12,6 +12,7 @@ Read this file as a MAP. Follow the links below for deeper context.
 - Frontend conventions → `docs/FRONTEND.md`
 - Active execution plans → `docs/exec-plans/active/`
 - Tool references (uv, LanceDB, LangGraph, Kuzu, FSRS) → `docs/references/`
+- Agentic workflow (model routing, agents, hooks, context optimization) → `docs/agentic-workflow.md`
 
 ## Your Task Loop
 
@@ -64,6 +65,27 @@ APPEND to progress.txt (never replace):
 ## Codebase Patterns (read first, update when you find new patterns)
 
 Maintained in `## Codebase Patterns` section at TOP of progress.txt.
+
+## Model Routing (cost-aware)
+
+Route sub-tasks to the cheapest capable model:
+- **Exploration / file search / doc reads**: use Haiku via `Task` tool — fast and cheap
+- **Code implementation / multi-file changes**: Sonnet (current context) — best balance
+- **Complex architecture decisions / cross-domain refactors**: spawn `luminary-planner` agent (Sonnet with planning focus)
+- **Post-story code review**: spawn `luminary-reviewer` agent (Sonnet with review focus)
+- **Docs updates** (QUALITY_SCORE.md, tech-debt-tracker): spawn `luminary-docs` agent (Haiku)
+
+## Context Optimization
+
+When reading `scripts/ralph/prd.json`, focus on `passes: false` stories. Skip story details for `passes: true` entries — you only need their IDs to verify branch alignment. Use Python to extract pending stories:
+```python
+import json
+with open("scripts/ralph/prd.json") as f:
+    prd = json.load(f)
+pending = [s for s in prd["stories"] if not s.get("passes")]
+pending.sort(key=lambda s: s["priority"])
+# Work with pending[0] only
+```
 
 ## Stop Condition
 
