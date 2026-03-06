@@ -19,6 +19,17 @@ Started: Fri  6 Mar 2026 23:08:42 AEST
   - litellm.ServiceUnavailableError must be caught at the asyncio.gather level, not inside each unit coro, because the semaphore pattern uses gather; individual unit errors are non-fatal but Ollama-offline is fatal-for-session
 ---
 
+## 2026-03-07T05:00:00Z - S77 - ChatState TypedDict + LangGraph chat router skeleton with intent classifier
+- Implemented: IntentType + ChatState TypedDict (app/types.py), intent classifier service (app/services/intent.py), LangGraph StateGraph (app/runtime/chat_graph.py) with classify_node/route_node/stub strategy nodes/search_node/synthesize_node, qa.py migrated to graph.ainvoke, test_qa.py rewritten with graph-level mocking, test_intent_classifier.py (7 tests), test_chat_graph.py (4 tests), smoke S77.sh
+- Files changed: backend/app/types.py, backend/app/services/qa.py, backend/tests/test_qa.py (modified); backend/app/runtime/__init__.py, backend/app/runtime/chat_graph.py, backend/app/services/intent.py, backend/tests/test_chat_graph.py, backend/tests/test_intent_classifier.py, scripts/smoke/S77.sh (new)
+- Learnings:
+  - search_node must NOT write stub answer — if answer non-empty, synthesize_node passes through and no_context flow breaks
+  - qa.py helpers (_split_response, _build_context, etc.) stay at module level — chat_graph.py imports them directly from app.services.qa
+  - Lazy import: `from app.runtime.chat_graph import get_chat_graph  # noqa: PLC0415` inside stream_answer() avoids circular import
+  - test_qa.py: mock at graph level with `patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph)` where mock_graph.ainvoke is AsyncMock
+  - 413 tests pass, ruff clean
+---
+
 ## 2026-03-07T00:00:00Z - S76 - Document summary fast-path using section summaries
 - Implemented: pregenerate() fast-path (already in summarizer.py from prior work), invalidate_section_reduce_cache() call at start of SectionSummarizerService.generate(), 4 pytest tests (fast path 3 LLM calls, slow path >3, _section_reduce cached row, <3 units falls back), smoke script S76.sh
 - Files changed: backend/app/services/summarizer.py (ruff import sort fix), backend/app/services/section_summarizer.py (invalidation call), backend/tests/test_document_summary_fast_path.py (new), scripts/smoke/S76.sh (new)

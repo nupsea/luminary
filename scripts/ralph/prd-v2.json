@@ -121,7 +121,7 @@
         "uv run pytest tests/test_intent_classifier.py tests/test_chat_graph.py exits 0",
         "scripts/smoke/S77.sh exits 0 \u2014 POST /qa returns HTTP 200 with non-empty answer"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S78",
