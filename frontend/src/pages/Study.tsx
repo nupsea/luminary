@@ -25,7 +25,6 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
@@ -646,10 +645,9 @@ export default function Study() {
         )}
 
         {cardsLoading ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 w-full" />
-            ))}
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+            <Loader2 size={24} className="animate-spin" />
+            <span className="text-sm">Loading your cards...</span>
           </div>
         ) : cardsError ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

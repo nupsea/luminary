@@ -582,7 +582,7 @@ export default function Learning() {
 
   const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
 
-  const { data: pageData, isLoading, isError, refetch } = useQuery({
+  const { data: pageData, isLoading, isError, isSuccess, refetch } = useQuery({
     queryKey: ["documents", content_type, tagFilter, sort, page, PAGE_SIZE],
     queryFn: () =>
       fetchDocuments({
@@ -592,6 +592,8 @@ export default function Learning() {
         page,
         page_size: PAGE_SIZE,
       }),
+    staleTime: 10_000,
+    gcTime: 60_000,
   })
 
   const { data: recentItems } = useQuery({
@@ -764,7 +766,7 @@ export default function Learning() {
 
           {isLoading && libraryView === "grid" ? (
             <LoadingSkeleton />
-          ) : !isLoading && !isError && total === 0 && !tagFilter && selectedTypes.size === 0 ? (
+          ) : isSuccess && total === 0 && !tagFilter && selectedTypes.size === 0 ? (
             <EmptyState onAdd={() => setUploadOpen(true)} />
           ) : (
             <>

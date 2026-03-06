@@ -381,6 +381,8 @@ export default function NotesPage() {
   } = useQuery({
     queryKey: ["notes", groupParam, tagParam],
     queryFn: () => fetchNotes(undefined, groupParam, tagParam),
+    staleTime: 10_000,
+    gcTime: 60_000,
   })
 
   useEffect(() => {
@@ -426,10 +428,9 @@ export default function NotesPage() {
           </TableBody>
         </Table>
       ) : (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-12 w-full rounded-md" />
-          <Skeleton className="h-12 w-full rounded-md" />
-          <Skeleton className="h-12 w-full rounded-md" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Skeleton className="h-28 w-full rounded-lg" />
+          <Skeleton className="h-28 w-full rounded-lg" />
         </div>
       )
   } else if (notesError) {
