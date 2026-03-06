@@ -33,7 +33,6 @@ from app.services.llm import get_llm_service
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
     QA_SYSTEM_PROMPT,
-    _build_context,
     _enrich_citation_titles,
     _maybe_rewrite_query,
     _should_use_summary,
@@ -460,18 +459,19 @@ async def search_node(state: ChatState) -> dict:
         section_summary_map = await _fetch_section_summaries(pairs)
 
         for c in chunks:
+            section_summary = (
+                section_summary_map.get((c.document_id, c.section_heading))
+                if c.section_heading
+                else None
+            )
             augmented_text = c.text
-            if c.section_heading:
-                section_summary = section_summary_map.get(
-                    (c.document_id, c.section_heading)
+            if section_summary:
+                augmented_text = (
+                    f"### {c.section_heading}\n"
+                    f"{section_summary}\n"
+                    f"---\n"
+                    f"{c.text}"
                 )
-                if section_summary:
-                    augmented_text = (
-                        f"### {c.section_heading}\n"
-                        f"{section_summary}\n"
-                        f"---\n"
-                        f"{c.text}"
-                    )
 
             chunks_dicts.append(
                 {
@@ -479,6 +479,7 @@ async def search_node(state: ChatState) -> dict:
                     "document_id": c.document_id,
                     "text": augmented_text,
                     "section_heading": c.section_heading,
+                    "section_summary": section_summary,
                     "page": c.page,
                     "score": c.score,
                     "source": c.source,
@@ -529,7 +530,9 @@ async def synthesize_node(state: ChatState) -> dict:
     if not chunks_dicts and not section_context:
         return {"not_found": True}
 
-    # Reconstruct ScoredChunk objects for _build_context / _enrich_citation_titles
+    from app.services.context_packer import pack_context  # noqa: PLC0415
+
+    # Reconstruct ScoredChunk objects for _enrich_citation_titles
     scored_chunks = [
         ScoredChunk(
             chunk_id=c.get("chunk_id", ""),
@@ -542,15 +545,22 @@ async def synthesize_node(state: ChatState) -> dict:
         )
         for c in chunks_dicts
     ]
-
     doc_titles = await _fetch_doc_titles_for_chunks(chunks_dicts)
-    context_parts: list[str] = []
 
+    # Assemble chunk context using the pure context packer (dedup + section grouping)
+    chunks_context = pack_context(chunks_dicts, token_budget=3000) if chunks_dicts else ""
+
+    # section_context (graph results, executive summary) capped at 1000 tokens
+    context_parts: list[str] = []
     if section_context:
+        words = section_context.split()
+        cap_words = int(1000 / 1.3)  # approx word count for 1000 tokens
+        if len(words) > cap_words:
+            section_context = " ".join(words[:cap_words]) + " ..."
         context_parts.append(section_context)
 
-    if scored_chunks:
-        context_parts.append(_build_context(scored_chunks, doc_titles))
+    if chunks_context:
+        context_parts.append(chunks_context)
 
     context = "\n\n---\n\n".join(context_parts) if context_parts else ""
 

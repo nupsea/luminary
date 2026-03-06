@@ -1,0 +1,183 @@
+"""Pure context packer for the V2 agentic chat router (S79).
+
+pack_context() assembles retrieved chunks into a context string that:
+  - Groups chunks by section_id (or section_heading when section_id absent)
+  - Orders section groups by highest relevance_score descending
+  - Emits the section summary once per section group (if provided)
+  - Deduplicates near-duplicate chunks using LCS character similarity
+  - Respects a strict token budget (estimated as word_count * 1.3)
+
+This is a PURE FUNCTION — no imports from repos, models, or external services.
+All I/O happens in the caller (synthesize_node in chat_graph.py).
+"""
+
+
+# ---------------------------------------------------------------------------
+# Token estimate — fast approximation, no tokenizer dependency
+# ---------------------------------------------------------------------------
+
+def _token_estimate(text: str) -> int:
+    """Estimate token count: word_count * 1.3, rounded up."""
+    return int(len(text.split()) * 1.3 + 0.5)
+
+
+# ---------------------------------------------------------------------------
+# LCS-based similarity — determines whether a chunk is near-duplicate
+# ---------------------------------------------------------------------------
+
+_LCS_CHAR_LIMIT = 300  # truncate inputs for O(n²) DP performance
+
+
+def _lcs_ratio(a: str, b: str) -> float:
+    """Longest common substring length / max(len(a), len(b)).
+
+    Both strings are truncated to _LCS_CHAR_LIMIT before comparison
+    to keep the O(n²) DP fast even for long chunks.
+
+    Returns 0.0 if either input is empty.
+    """
+    a = a[:_LCS_CHAR_LIMIT]
+    b = b[:_LCS_CHAR_LIMIT]
+    la, lb = len(a), len(b)
+    if la == 0 or lb == 0:
+        return 0.0
+
+    # DP: dp[i][j] = length of longest common substring ending at a[i-1], b[j-1]
+    prev = [0] * (lb + 1)
+    longest = 0
+    for i in range(1, la + 1):
+        curr = [0] * (lb + 1)
+        for j in range(1, lb + 1):
+            if a[i - 1] == b[j - 1]:
+                curr[j] = prev[j - 1] + 1
+                longest = max(longest, curr[j])
+        prev = curr
+
+    return longest / max(la, lb)
+
+
+# ---------------------------------------------------------------------------
+# pack_context — main public function
+# ---------------------------------------------------------------------------
+
+
+def pack_context(
+    chunks: list[dict],
+    token_budget: int = 3000,
+    dedup_ratio: float = 0.8,
+) -> str:
+    """Assemble retrieved chunks into a context string within token_budget.
+
+    Args:
+        chunks: List of chunk dicts with keys:
+            text (str)                — the chunk content (may include augmented heading)
+            section_id (str | None)   — groups chunks into sections
+            section_heading (str | None)
+            section_summary (str | None) — emitted once as a section header if provided
+            relevance_score (float)   — 'score' is also accepted as a fallback key
+        token_budget: Maximum estimated tokens for the output string.
+        dedup_ratio: LCS ratio above which a chunk is considered a near-duplicate
+                     and skipped.  1.0 disables deduplication.
+
+    Returns:
+        Assembled context string.  Empty string if chunks is empty.
+    """
+    if not chunks:
+        return ""
+
+    # -----------------------------------------------------------------------
+    # 1. Normalise chunk dicts — accept 'score' as alias for 'relevance_score'
+    # -----------------------------------------------------------------------
+    normalised: list[dict] = []
+    for c in chunks:
+        score = c.get("relevance_score") or c.get("score") or 0.0
+        group_key = c.get("section_id") or c.get("section_heading") or id(c)
+        normalised.append(
+            {
+                "text": c.get("text", ""),
+                "section_id": c.get("section_id"),
+                "section_heading": c.get("section_heading"),
+                "section_summary": c.get("section_summary"),
+                "relevance_score": float(score),
+                "_group_key": group_key,
+            }
+        )
+
+    # -----------------------------------------------------------------------
+    # 2. Group chunks by section key; sort groups by max relevance descending
+    # -----------------------------------------------------------------------
+    groups: dict[object, list[dict]] = {}
+    for c in normalised:
+        key = c["_group_key"]
+        groups.setdefault(key, []).append(c)
+
+    # Sort groups by highest chunk score (descending)
+    sorted_groups = sorted(
+        groups.values(),
+        key=lambda grp: max(c["relevance_score"] for c in grp),
+        reverse=True,
+    )
+
+    # Within each group, sort chunks by relevance descending
+    for grp in sorted_groups:
+        grp.sort(key=lambda c: c["relevance_score"], reverse=True)
+
+    # -----------------------------------------------------------------------
+    # 3. Assemble output respecting token_budget and dedup_ratio
+    # -----------------------------------------------------------------------
+    parts: list[str] = []
+    emitted_texts: list[str] = []  # track for near-duplicate detection
+    total_tokens = 0
+    budget_hit = False
+
+    for grp in sorted_groups:
+        if budget_hit:
+            break
+
+        # Emit section header (heading + summary) once per group
+        heading = grp[0]["section_heading"]
+        summary = grp[0]["section_summary"]
+        header_parts: list[str] = []
+        if heading:
+            header_parts.append(f"### {heading}")
+        if summary:
+            header_parts.append(summary)
+        if header_parts:
+            header = "\n".join(header_parts) + "\n"
+            header_tokens = _token_estimate(header)
+            if total_tokens + header_tokens <= token_budget:
+                parts.append(header)
+                total_tokens += header_tokens
+
+        # Emit individual chunks
+        for c in grp:
+            chunk_text = c["text"]
+            if not chunk_text:
+                continue
+
+            # Near-duplicate check
+            if dedup_ratio < 1.0 and emitted_texts:
+                if any(
+                    _lcs_ratio(chunk_text, prev) >= dedup_ratio
+                    for prev in emitted_texts
+                ):
+                    continue
+
+            chunk_str = f"---\n{chunk_text}\n"
+            chunk_tokens = _token_estimate(chunk_str)
+
+            if total_tokens + chunk_tokens > token_budget:
+                # Enforce at least the first chunk (truncated if needed)
+                if not emitted_texts:
+                    # Include this chunk even if it alone exceeds budget
+                    parts.append(chunk_str)
+                    total_tokens += chunk_tokens
+                    emitted_texts.append(chunk_text)
+                budget_hit = True
+                break
+
+            parts.append(chunk_str)
+            total_tokens += chunk_tokens
+            emitted_texts.append(chunk_text)
+
+    return "".join(parts)
