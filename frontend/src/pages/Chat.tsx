@@ -72,12 +72,10 @@ const EXAMPLE_QUESTIONS = [
 
 function buildModelOptions(settings: LLMSettings | undefined): string[] {
   if (!settings) return []
-  const opts: string[] = []
-  for (const m of settings.available_local_models) opts.push(m)
-  for (const p of settings.cloud_providers) {
-    if (p.available) opts.push(p.name)
-  }
-  return opts.length > 0 ? opts : [settings.active_model]
+  // Cloud mode: backend handles routing via get_effective_routing(); no model selector needed.
+  if (settings.processing_mode === "cloud") return []
+  const opts = settings.available_local_models
+  return opts.length > 0 ? opts : (settings.active_model ? [settings.active_model] : [])
 }
 
 export default function Chat() {

@@ -18,6 +18,7 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 
+import litellm
 from sqlalchemy import delete, select
 
 from app.database import get_session_factory
@@ -38,7 +39,10 @@ _MARKDOWN_INSTRUCTION = (
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
     "executive": (
-        f"List the 3 to 5 most important points as bullet points. {_MARKDOWN_INSTRUCTION}"
+        "List the 3 to 5 most important intellectual points as bullet points. "
+        "Focus on ideas, arguments, narratives, and findings — "
+        "ignore copyright notices, licensing terms, and distribution metadata. "
+        f"{_MARKDOWN_INSTRUCTION}"
     ),
     "detailed": (
         "Summarize each section separately, preserving the heading structure. "
@@ -70,6 +74,8 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
     "one_sentence": "Synthesize all documents in one sentence of at most 30 words.",
     "executive": (
         "List the 5-7 key themes across all documents as bullet points. "
+        "Focus on intellectual content, ideas, arguments, and narratives — "
+        "ignore copyright notices, licensing terms, and distribution metadata. "
         f"Note connections between them. {_MARKDOWN_INSTRUCTION}"
     ),
     "detailed": (
@@ -266,11 +272,13 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
-            err_evt = {
-                "error": "llm_unavailable",
-                "message": "Ollama is not running. Start it with: ollama serve",
-                "done": True,
-            }
+            if isinstance(exc, ValueError):
+                msg = "LLM provider not configured. Add your API key in Settings."
+            elif isinstance(exc, litellm.AuthenticationError):
+                msg = "LLM API key is invalid. Check your key in Settings."
+            else:
+                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
 
     async def generate_all_summaries(self, document_id: str, model: str | None = None) -> None:
@@ -373,20 +381,28 @@ class SummarizationService:
         return summary_id
 
     async def _fetch_all_executive_summaries(self) -> dict[str, str]:
-        """Return most-recent executive summary content keyed by document_id."""
+        """Return best-available summary content keyed by document_id.
+
+        Priority: executive > detailed > one_sentence > conversation.
+        Documents with no summary of any kind are excluded.
+        """
+        _MODE_PRIORITY = {"executive": 0, "detailed": 1, "one_sentence": 2, "conversation": 3}
         async with get_session_factory()() as session:
             rows = await session.execute(
-                select(SummaryModel.document_id, SummaryModel.content, SummaryModel.created_at)
-                .where(SummaryModel.mode == "executive")
-                .order_by(SummaryModel.created_at.desc())
+                select(
+                    SummaryModel.document_id,
+                    SummaryModel.mode,
+                    SummaryModel.content,
+                    SummaryModel.created_at,
+                ).order_by(SummaryModel.created_at.desc())
             )
-            seen: set[str] = set()
-            summaries: dict[str, str] = {}
+            # best[doc_id] = (priority, content)
+            best: dict[str, tuple[int, str]] = {}
             for row in rows:
-                if row.document_id not in seen:
-                    seen.add(row.document_id)
-                    summaries[row.document_id] = row.content
-        return summaries
+                prio = _MODE_PRIORITY.get(row.mode, 99)
+                if row.document_id not in best or prio < best[row.document_id][0]:
+                    best[row.document_id] = (prio, row.content)
+        return {doc_id: content for doc_id, (_, content) in best.items()}
 
     def _get_cross_doc_entities(self, min_docs: int = 3, limit: int = 20) -> list[str]:
         """Query Kuzu for entity names appearing in min_docs or more documents.
@@ -496,11 +512,13 @@ class SummarizationService:
 
         except Exception as exc:
             logger.warning("stream_library_summary failed", exc_info=exc)
-            err_evt = {
-                "error": "llm_unavailable",
-                "message": "Ollama is not running. Start it with: ollama serve",
-                "done": True,
-            }
+            if isinstance(exc, ValueError):
+                msg = "LLM provider not configured. Add your API key in Settings."
+            elif isinstance(exc, litellm.AuthenticationError):
+                msg = "LLM API key is invalid. Check your key in Settings."
+            else:
+                msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+            err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
 
     async def invalidate_library_cache(self) -> None:

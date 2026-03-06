@@ -740,12 +740,10 @@ _background_tasks: set[asyncio.Task] = set()
 
 async def _run_pregenerate(doc_id: str) -> None:
     """Background task: pre-generate summaries and invalidate library cache."""
+    from app.services.summarizer import get_summarization_service  # noqa: PLC0415
+    svc = get_summarization_service()
     try:
-        from app.services.summarizer import get_summarization_service  # noqa: PLC0415
-        svc = get_summarization_service()
         await svc.generate_all_summaries(doc_id)
-        # New document changes library-level synthesis — invalidate cached overview
-        await svc.invalidate_library_cache()
         logger.info("background summarize: done", extra={"doc_id": doc_id})
     except Exception as exc:
         logger.warning(
@@ -753,6 +751,10 @@ async def _run_pregenerate(doc_id: str) -> None:
             extra={"doc_id": doc_id},
             exc_info=exc,
         )
+    finally:
+        # Always invalidate library cache — a new document was ingested regardless
+        # of whether its individual summaries could be generated (e.g. Ollama offline).
+        await svc.invalidate_library_cache()
 
 
 async def summarize_node(state: IngestionState) -> IngestionState:

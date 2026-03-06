@@ -19,7 +19,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -135,7 +135,15 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
   const [tagsRaw, setTagsRaw] = useState("")
   const [docId, setDocId] = useState<string>("")
   const [createTab, setCreateTab] = useState<"write" | "preview">("write")
+  const createTaRef = useRef<HTMLTextAreaElement>(null)
   const qc = useQueryClient()
+
+  const adjustCreateHeight = useCallback(() => {
+    const ta = createTaRef.current
+    if (!ta) return
+    ta.style.height = "auto"
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [])
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -177,14 +185,14 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
       </div>
       {createTab === "write" ? (
         <textarea
-          rows={4}
+          ref={createTaRef}
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => { setContent(e.target.value); adjustCreateHeight() }}
           placeholder="Write your note in Markdown..."
-          className="w-full rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       ) : (
-        <div className="min-h-[96px] rounded border border-border bg-background px-3 py-2">
+        <div className="min-h-[200px] rounded border border-border bg-background px-3 py-2">
           {content ? (
             <MarkdownRenderer>{content}</MarkdownRenderer>
           ) : (
@@ -248,6 +256,19 @@ interface NoteEditorTabsProps {
 
 function NoteEditorTabs({ value, onChange, onSave, onCancel, isPending }: NoteEditorTabsProps) {
   const [tab, setTab] = useState<"write" | "preview">("write")
+  const taRef = useRef<HTMLTextAreaElement>(null)
+
+  const adjustHeight = useCallback(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = "auto"
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [])
+
+  useEffect(() => {
+    if (tab === "write") adjustHeight()
+  }, [value, tab, adjustHeight])
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
@@ -270,12 +291,13 @@ function NoteEditorTabs({ value, onChange, onSave, onCancel, isPending }: NoteEd
       </div>
       {tab === "write" ? (
         <textarea
+          ref={taRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="min-h-[80px] w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          onChange={(e) => { onChange(e.target.value); adjustHeight() }}
+          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-2 py-1.5 font-mono text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       ) : (
-        <div className="min-h-[80px] rounded border border-border bg-background px-2 py-1.5">
+        <div className="min-h-[200px] rounded border border-border bg-background px-2 py-2">
           {value ? (
             <MarkdownRenderer>{value}</MarkdownRenderer>
           ) : (

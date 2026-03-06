@@ -6,6 +6,7 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 
+import litellm
 from sqlalchemy import select
 
 from app.config import get_settings
@@ -350,11 +351,14 @@ class QAService:
                     )
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "llm_unavailable")
-                    yield (
-                        'data: {"error": "llm_unavailable", '
-                        '"message": "Ollama is not running or unreachable. '
-                        'Start it with: ollama serve", "done": true}\n\n'
-                    )
+                    if isinstance(exc, ValueError):
+                        msg = "LLM provider not configured. Add your API key in Settings."
+                    elif isinstance(exc, litellm.AuthenticationError):
+                        msg = "LLM API key is invalid. Check your key in Settings."
+                    else:
+                        msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+                    err = {"error": "llm_unavailable", "message": msg, "done": True}
+                    yield f"data: {json.dumps(err)}\n\n"
                     return
 
                 full_text = "".join(collected)

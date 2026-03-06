@@ -80,6 +80,18 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
         {"name": "gemini", "available": data["has_google_key"]},
     ]
 
+    # active_model is what Chat.tsx sends as the model parameter to /qa.
+    # For private mode: the first available Ollama model (or the config default).
+    # For cloud mode: "" so Chat sends model=null and the backend uses
+    # get_effective_routing() which reads the DB-stored key correctly.
+    cfg = get_settings()
+    if data["mode"] == "private":
+        active_model = (
+            available_local_models[0] if available_local_models else cfg.LITELLM_DEFAULT_MODEL
+        )
+    else:
+        active_model = ""
+
     return LLMSettingsResponse(
         mode=data["mode"],
         provider=data["provider"],
@@ -88,7 +100,7 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
         has_anthropic_key=data["has_anthropic_key"],
         has_google_key=data["has_google_key"],
         processing_mode=processing_mode,
-        active_model=data["model"],
+        active_model=active_model,
         available_local_models=available_local_models,
         cloud_providers=cloud_providers,
     )
