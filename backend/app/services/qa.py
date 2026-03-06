@@ -1,4 +1,9 @@
-"""Grounded Q&A service — retrieval, citation extraction, Phoenix tracing."""
+"""Grounded Q&A service — retrieval, citation extraction, Phoenix tracing.
+
+V2: stream_answer() invokes the LangGraph chat router (app/runtime/chat_graph.py).
+The graph handles: intent classification, query rewriting, retrieval, LLM call,
+citation enrichment.  stream_answer() remains the thin SSE streaming layer.
+"""
 
 import json
 import logging
@@ -14,8 +19,7 @@ from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
 from app.services.llm import get_llm_service
-from app.services.retriever import get_retriever
-from app.telemetry import trace_chain, trace_retrieval
+from app.telemetry import trace_chain
 from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -201,7 +205,12 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
 
 
 class QAService:
-    """Retrieve → ground → cite → stream answer over SSE."""
+    """Retrieve → ground → cite → stream answer over SSE.
+
+    V2: delegates to the LangGraph chat router.  stream_answer() is the thin
+    SSE streaming wrapper; all retrieval, LLM, and citation logic lives inside
+    the graph nodes (app/runtime/chat_graph.py).
+    """
 
     async def _fetch_doc_titles(self, document_ids: list[str]) -> dict[str, str]:
         if not document_ids:
@@ -250,105 +259,47 @@ class QAService:
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
-        Yields ``data: {"token": "..."}\\n\\n`` for each answer word.
-        Yields a final ``data: {"done": true, ...}\\n\\n`` event with citations.
-        On NOT_FOUND: yields ``data: {"done": true, "not_found": true}\\n\\n``.
+        V2: invokes the LangGraph chat router and streams the answer from the
+        graph result.  The SSE format is identical to V1:
+          data: {"token": "..."}\\n\\n   — one token event per word
+          data: {"done": true, ...}\\n\\n — final event with citations/confidence
+          data: {"error": "...", ...}\\n\\n — on error
 
         All exceptions are caught and yielded as SSE error events so the HTTP
-        stream is never silently dropped (which causes a generic frontend error).
+        stream is never silently dropped.
         """
         try:
             settings = get_settings()
             effective_model = model or settings.LITELLM_DEFAULT_MODEL
-            retriever = get_retriever()
-            llm = get_llm_service()
 
-            # Top-level CHAIN span for the entire Q&A journey
             with trace_chain("qa.answer", input_value=question) as root_span:
                 root_span.set_attribute("qa.scope", scope)
                 root_span.set_attribute("qa.model", effective_model)
                 if document_ids:
                     root_span.set_attribute("qa.document_ids", ", ".join(document_ids))
 
-                # Hybrid retrieval — RETRIEVER span
-                # Rewrite vague-reference queries using Kuzu entities (non-fatal).
-                # Use the rewritten query for retrieval but the original in the LLM prompt.
-                with trace_retrieval("hybrid", query=question) as ret_span:
-                    effective_doc_ids = document_ids if scope == "single" else None
-                    retrieval_question = await _maybe_rewrite_query(question, effective_doc_ids)
-                    if retrieval_question != question:
-                        logger.info(
-                            "stream_answer: query rewritten for retrieval",
-                            extra={"original": question, "rewritten": retrieval_question},
-                        )
-                    ret_span.set_attribute("retrieval.scope", scope)
-                    chunks = await retriever.retrieve(retrieval_question, effective_doc_ids, k=10)
-                    ret_span.set_attribute("retrieval.chunk_count", len(chunks))
-                    if chunks:
-                        ret_span.set_attribute("retrieval.top_score", round(chunks[0].score, 4))
+                from app.runtime.chat_graph import get_chat_graph  # noqa: PLC0415
 
-                # No-context guard
-                if not chunks:
-                    logger.warning(
-                        "stream_answer: no chunks retrieved",
-                        extra={"question": question},
-                    )
-                    root_span.set_attribute("error", True)
-                    root_span.set_attribute("error.message", "no_context")
-                    yield (
-                        'data: {"error": "no_context", '
-                        '"message": "No relevant content found. '
-                        'Make sure a document has been ingested.", "done": true}\n\n'
-                    )
-                    return
+                graph = get_chat_graph()
 
-                # Build context string
-                all_doc_ids = list({c.document_id for c in chunks})
-                doc_titles = await self._fetch_doc_titles(all_doc_ids)
-                context = _build_context(chunks, doc_titles)
+                initial_state: dict = {
+                    "question": question,
+                    "doc_ids": document_ids or [],
+                    "scope": scope,
+                    "model": model,
+                    "intent": None,
+                    "rewritten_question": None,
+                    "chunks": [],
+                    "section_context": None,
+                    "answer": "",
+                    "citations": [],
+                    "confidence": "low",
+                    "not_found": False,
+                }
 
-                # Prepend cached executive summary for summary-intent questions
-                # (scope=single only — cross-doc scope would mix document summaries)
-                if scope == "single" and document_ids and _should_use_summary(question):
-                    try:
-                        from app.services.summarizer import (  # noqa: PLC0415
-                            get_summarization_service,
-                        )
-                        cached_svc = get_summarization_service()
-                        exec_summary = await cached_svc._fetch_cached(
-                            document_ids[0], "executive"
-                        )
-                        if exec_summary:
-                            context = (
-                                f"[Document Summary]\n{exec_summary.content}"
-                                f"\n\n---\n\n{context}"
-                            )
-                            logger.debug(
-                                "stream_answer: prepended executive summary",
-                                extra={"document_id": document_ids[0]},
-                            )
-                    except Exception:
-                        logger.warning(
-                            "stream_answer: failed to fetch executive summary", exc_info=True
-                        )
-
-                prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
-
-                # LLM generation — LiteLLM is auto-instrumented so the LLM child
-                # span appears automatically; this block just handles error routing.
                 try:
-                    token_gen = await llm.generate(
-                        prompt, system=QA_SYSTEM_PROMPT, model=model, stream=True
-                    )
-                    collected: list[str] = []
-                    async for token in token_gen:
-                        collected.append(token)
+                    result = await graph.ainvoke(initial_state)
                 except Exception as exc:
-                    logger.warning(
-                        "stream_answer: LLM call failed",
-                        extra={"model": effective_model},
-                        exc_info=exc,
-                    )
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "llm_unavailable")
                     if isinstance(exc, ValueError):
@@ -357,34 +308,41 @@ class QAService:
                         msg = "LLM API key is invalid. Check your key in Settings."
                     else:
                         msg = "LLM service unavailable. If using Ollama, run: ollama serve"
-                    err = {"error": "llm_unavailable", "message": msg, "done": True}
-                    yield f"data: {json.dumps(err)}\n\n"
+                    payload = {"error": "llm_unavailable", "message": msg, "done": True}
+                    yield f"data: {json.dumps(payload)}\n\n"
                     return
 
-                full_text = "".join(collected)
+                root_span.set_attribute("qa.intent", result.get("intent") or "")
+                root_span.set_attribute("qa.confidence", result.get("confidence") or "")
 
-                # NOT_FOUND check
-                if NOT_FOUND_SENTINEL in full_text:
-                    await self._store_qa(question, None, [], "low", None, scope, effective_model)
-                    root_span.set_attribute("qa.not_found", True)
-                    yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                chunks_returned = result.get("chunks") or []
+
+                if result.get("not_found"):
+                    if not chunks_returned:
+                        # No context retrieved — surface as a distinct error
+                        root_span.set_attribute("error", True)
+                        root_span.set_attribute("error.message", "no_context")
+                        yield (
+                            'data: {"error": "no_context", '
+                            '"message": "No relevant content found. '
+                            'Make sure a document has been ingested.", "done": true}\n\n'
+                        )
+                    else:
+                        # Chunks present but LLM could not find the answer
+                        await self._store_qa(
+                            question, None, [], "low", None, scope, effective_model
+                        )
+                        root_span.set_attribute("qa.not_found", True)
+                        yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
                     return
 
-                # Parse citations JSON from the end of the response
-                answer_text, citations, confidence = _split_response(full_text)
-                # Authoritative document_title population from DB titles
-                citations = _enrich_citation_titles(citations, chunks, doc_titles, scope)
-
-                # Record the answer on the root span for Phoenix to show Q→A
-                root_span.set_attribute("output.value", answer_text[:2000])
-                root_span.set_attribute("qa.confidence", confidence)
-                root_span.set_attribute("qa.citation_count", len(citations))
-
-            # Stream answer as token events (word granularity)
-            # NOTE: streaming happens outside the trace_chain block intentionally —
-            # the span is closed once we have the full answer (before streaming starts).
+            # Stream answer tokens (outside the trace span — same as V1)
+            answer_text = result.get("answer") or ""
             for word in answer_text.split():
                 yield f'data: {json.dumps({"token": word + " "})}\n\n'
+
+            citations = result.get("citations") or []
+            confidence = result.get("confidence") or "low"
 
             # Persist Q&A history
             first_doc_id = document_ids[0] if document_ids else None
@@ -412,7 +370,7 @@ _qa_service: QAService | None = None
 
 
 def get_qa_service() -> QAService:
-    global _qa_service
+    global _qa_service  # noqa: PLW0603
     if _qa_service is None:
         _qa_service = QAService()
     return _qa_service
