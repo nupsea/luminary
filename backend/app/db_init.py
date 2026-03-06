@@ -14,6 +14,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     NoteModel,
     QAHistoryModel,
     SectionModel,
+    SectionSummaryModel,
     SettingsModel,
     StudySessionModel,
     SummaryModel,

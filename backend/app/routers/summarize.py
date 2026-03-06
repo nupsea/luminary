@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, SummaryModel
+from app.models import DocumentModel, SectionSummaryModel, SummaryModel
 from app.services.summarizer import get_summarization_service
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,29 @@ class LibrarySummarizeRequest(BaseModel):
     mode: Literal["one_sentence", "executive", "detailed"] = "executive"
     model: str | None = None
     force_refresh: bool = False
+
+
+@router.get("/{document_id}/sections")
+async def get_section_summaries(document_id: str) -> list[dict]:
+    """Return section summaries for a document, ordered by unit_index.
+
+    Returns an empty list if no section summaries exist (pre-V2 documents or
+    documents where section summarization was skipped due to Ollama being offline).
+    """
+    async with get_session_factory()() as session:
+        rows = await session.execute(
+            select(
+                SectionSummaryModel.unit_index,
+                SectionSummaryModel.heading,
+                SectionSummaryModel.content,
+            )
+            .where(SectionSummaryModel.document_id == document_id)
+            .order_by(SectionSummaryModel.unit_index)
+        )
+        return [
+            {"unit_index": r.unit_index, "heading": r.heading, "content": r.content}
+            for r in rows
+        ]
 
 
 @router.get("/{document_id}/cached")

@@ -48,6 +48,7 @@ class IngestionState(TypedDict):
     chunks: list[dict[str, Any]] | None
     status: str
     error: str | None
+    section_summary_count: int | None
 
 
 def _classify(raw_text: str, sections: list[dict], word_count: int, file_ext: str) -> str:
@@ -757,6 +758,31 @@ async def _run_pregenerate(doc_id: str) -> None:
         await svc.invalidate_library_cache()
 
 
+async def section_summarize_node(state: IngestionState) -> IngestionState:
+    """Generate section-level summaries (bounded to 100 units) before document summarization.
+
+    Non-fatal: if Ollama is offline or summarization fails, ingestion continues.
+    """
+    doc_id = state["document_id"]
+    logger.debug("node_start", extra={"node": "section_summarize", "doc_id": doc_id})
+    try:
+        from app.services.section_summarizer import get_section_summarizer_service  # noqa: PLC0415
+
+        svc = get_section_summarizer_service()
+        count = await svc.generate(doc_id)
+        logger.info(
+            "section_summarize_node: %d units stored", count, extra={"doc_id": doc_id}
+        )
+        return {**state, "section_summary_count": count}
+    except Exception as exc:
+        logger.warning(
+            "section_summarize_node failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+        return {**state, "section_summary_count": 0}
+
+
 async def summarize_node(state: IngestionState) -> IngestionState:
     """Fire off summary pre-generation as a background task and return immediately.
 
@@ -798,6 +824,7 @@ def _build_graph():
     builder.add_node("embed", embed_node)
     builder.add_node("keyword_index", keyword_index_node)
     builder.add_node("entity_extract", entity_extract_node)
+    builder.add_node("section_summarize", section_summarize_node)
     builder.add_node("summarize", summarize_node)
     builder.add_node("error_finalize", error_finalize_node)
     builder.add_edge(START, "parse")
@@ -806,7 +833,8 @@ def _build_graph():
     builder.add_conditional_edges("chunk", _route_on_status("embed"))
     builder.add_edge("embed", "keyword_index")
     builder.add_edge("keyword_index", "entity_extract")
-    builder.add_edge("entity_extract", "summarize")
+    builder.add_edge("entity_extract", "section_summarize")
+    builder.add_edge("section_summarize", "summarize")
     builder.add_edge("summarize", END)
     builder.add_edge("error_finalize", END)
     return builder.compile()
@@ -827,6 +855,7 @@ async def run_ingestion(
         "chunks": None,
         "status": "parsing",
         "error": None,
+        "section_summary_count": None,
     }
     logger.info(
         "Ingestion task started",
