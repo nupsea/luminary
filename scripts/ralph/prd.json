@@ -1763,7 +1763,7 @@
         "uv run pytest tests/test_settings.py exits 0",
         "scripts/smoke/S74.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

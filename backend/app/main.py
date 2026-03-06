@@ -26,6 +26,7 @@ from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
 from app.routers.search import router as search_router
 from app.routers.sections import router as sections_router
+from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.services.graph import get_graph_service
@@ -105,6 +106,7 @@ app.include_router(notes_router)
 app.include_router(qa_router)
 app.include_router(search_router)
 app.include_router(sections_router)
+app.include_router(settings_router)
 app.include_router(study_router)
 app.include_router(summarize_router)
 
@@ -112,41 +114,6 @@ app.include_router(summarize_router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "1.0.0"}
-
-
-@app.get("/settings/llm")
-async def read_llm_settings(settings: Settings = Depends(get_settings)):
-    available_local_models: list[str] = []
-    processing_mode = "unavailable"
-
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                # Prefix with "ollama/" so LiteLLM can route the call correctly.
-                available_local_models = [
-                    f"ollama/{m['name']}" for m in data.get("models", [])
-                ]
-                processing_mode = "local"
-    except Exception:
-        pass
-
-    cloud_providers = [
-        {"name": "openai", "available": bool(settings.OPENAI_API_KEY)},
-        {"name": "anthropic", "available": bool(settings.ANTHROPIC_API_KEY)},
-        {"name": "gemini", "available": bool(settings.GOOGLE_API_KEY)},
-    ]
-
-    if processing_mode == "unavailable" and any(p["available"] for p in cloud_providers):
-        processing_mode = "cloud"
-
-    return {
-        "processing_mode": processing_mode,
-        "active_model": settings.LITELLM_DEFAULT_MODEL,
-        "available_local_models": available_local_models,
-        "cloud_providers": cloud_providers,
-    }
 
 
 @app.get("/settings")

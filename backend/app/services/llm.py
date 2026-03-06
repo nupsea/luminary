@@ -81,10 +81,17 @@ class LLMService:
     """
 
     def _build_kwargs(
-        self, model: str, messages: list[dict], settings: Settings
+        self,
+        model: str,
+        messages: list[dict],
+        settings: Settings,
+        *,
+        override_key: str | None = None,
     ) -> dict:
         kwargs: dict = {"model": model, "messages": messages}
-        if model.startswith("ollama/"):
+        if override_key is not None:
+            kwargs["api_key"] = override_key
+        elif model.startswith("ollama/"):
             kwargs["api_base"] = settings.OLLAMA_URL
         elif model.startswith("openai/"):
             kwargs["api_key"] = settings.OPENAI_API_KEY
@@ -102,14 +109,30 @@ class LLMService:
         stream: bool = False,
     ) -> str | AsyncGenerator[str]:
         settings = get_settings()
-        effective_model = model or settings.LITELLM_DEFAULT_MODEL
+        override_key: str | None = None
+
+        if model is None:
+            try:
+                from app.services.settings_service import (  # noqa: PLC0415
+                    get_effective_routing,
+                )
+
+                effective_model, override_key = get_effective_routing()
+            except ValueError:
+                raise
+            except Exception:
+                effective_model = settings.LITELLM_DEFAULT_MODEL
+        else:
+            effective_model = model
 
         messages: list[dict] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        kwargs = self._build_kwargs(effective_model, messages, settings)
+        kwargs = self._build_kwargs(
+            effective_model, messages, settings, override_key=override_key
+        )
 
         if not stream:
             with trace_llm_call("generate", model=effective_model) as span:
