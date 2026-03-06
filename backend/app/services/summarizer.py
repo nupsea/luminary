@@ -29,11 +29,21 @@ logger = logging.getLogger(__name__)
 # Grounding prefix applied to every summarization prompt
 GROUNDING_PREFIX = "Answer using only information present in the provided text."
 
+_MARKDOWN_INSTRUCTION = (
+    "Format your response using Markdown. "
+    "Use ## headings, **bold**, bullet lists, and `code` spans where appropriate."
+)
+
 # Mode-specific instructions appended after the grounding prefix
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
-    "executive": "List the 3 to 5 most important points as bullet points.",
-    "detailed": "Summarize each section separately, preserving the heading structure.",
+    "executive": (
+        f"List the 3 to 5 most important points as bullet points. {_MARKDOWN_INSTRUCTION}"
+    ),
+    "detailed": (
+        "Summarize each section separately, preserving the heading structure. "
+        f"{_MARKDOWN_INSTRUCTION}"
+    ),
     "conversation": (
         'Output a JSON object with keys: "timeline" (list of strings), '
         '"decisions" (list of strings), '
@@ -55,11 +65,11 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
     "one_sentence": "Synthesize all documents in one sentence of at most 30 words.",
     "executive": (
         "List the 5-7 key themes across all documents as bullet points. "
-        "Note connections between them."
+        f"Note connections between them. {_MARKDOWN_INSTRUCTION}"
     ),
     "detailed": (
         "Write a structured overview: main themes, key documents, "
-        "and how they relate to each other."
+        f"and how they relate to each other. {_MARKDOWN_INSTRUCTION}"
     ),
 }
 

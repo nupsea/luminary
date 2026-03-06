@@ -116,7 +116,8 @@ QA_SYSTEM_PROMPT = (
     "Answer only using the provided context. "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
-    "Write your answer as prose. Then on a new line write this JSON: "
+    "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
+    "Then on a new line write this JSON: "
     '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
     '"confidence":"high|medium|low"}'
 )

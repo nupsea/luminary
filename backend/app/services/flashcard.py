@@ -25,7 +25,8 @@ FLASHCARD_SYSTEM = (
 FLASHCARD_USER_TMPL = (
     "Generate {count} flashcard pairs from the text below.\n"
     "Each card must be answerable from the provided text only.\n"
-    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n\n'
+    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
+    "The \"answer\" field may use Markdown (bold, lists) for clarity.\n\n"
     "Text:\n{text}\n\n"
     "JSON array:"
 )

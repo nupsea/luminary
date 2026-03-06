@@ -17,8 +17,10 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SummaryModel
+from app.services.qa import QA_SYSTEM_PROMPT
 from app.services.summarizer import (
     GROUNDING_PREFIX,
+    LIBRARY_SYSTEM_PROMPTS,
     MAP_TOKEN_THRESHOLD,
     MODE_INSTRUCTIONS,
     SummarizationService,
@@ -128,6 +130,28 @@ def test_all_modes_include_grounding_prefix():
     for mode in MODE_INSTRUCTIONS:
         prompt = _build_system_prompt(mode)
         assert GROUNDING_PREFIX in prompt, f"mode={mode} missing grounding prefix"
+
+
+def test_executive_prompt_contains_markdown_instruction():
+    prompt = _build_system_prompt("executive")
+    assert "Markdown" in prompt
+
+
+def test_detailed_prompt_contains_markdown_instruction():
+    prompt = _build_system_prompt("detailed")
+    assert "Markdown" in prompt
+
+
+def test_library_executive_prompt_contains_markdown_instruction():
+    assert "Markdown" in LIBRARY_SYSTEM_PROMPTS["executive"]
+
+
+def test_library_detailed_prompt_contains_markdown_instruction():
+    assert "Markdown" in LIBRARY_SYSTEM_PROMPTS["detailed"]
+
+
+def test_qa_system_prompt_contains_markdown_instruction():
+    assert "Markdown" in QA_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------

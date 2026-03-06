@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
@@ -238,7 +239,7 @@ function FlashcardCard({
             {showAnswer ? "Hide answer" : "Show answer"}
           </button>
           {showAnswer && (
-            <p className="mt-1 text-sm text-muted-foreground">{card.answer}</p>
+            <MarkdownRenderer className="mt-1 text-sm">{card.answer}</MarkdownRenderer>
           )}
         </div>
       )}

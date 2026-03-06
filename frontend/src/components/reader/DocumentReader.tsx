@@ -10,6 +10,7 @@ import type { ExplainMode } from "@/components/FloatingToolbar"
 import type { DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
 const API_BASE = "http://localhost:8000"
 
@@ -374,10 +375,10 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
           </div>
         ) : currentSummary ? (
           <div className="space-y-2">
-            <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
-              {currentSummary}
-              {isStreaming && <span className="animate-pulse">▍</span>}
-            </pre>
+            <div>
+              <MarkdownRenderer>{currentSummary}</MarkdownRenderer>
+              {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
+            </div>
             {!isStreaming && (
               <button
                 onClick={() => void generateSummary(activeTab as SummaryMode)}

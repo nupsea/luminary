@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Send, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import ReactMarkdown from "react-markdown"
 import { Badge } from "@/components/ui/badge"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
@@ -385,7 +385,7 @@ export default function Chat() {
                       [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
                       [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
                       [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
-                      <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      <MarkdownRenderer>{msg.text}</MarkdownRenderer>
                       {msg.isStreaming && <span className="animate-pulse">▍</span>}
                     </div>
                   )}

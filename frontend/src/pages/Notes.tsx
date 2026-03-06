@@ -19,8 +19,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
-import ReactMarkdown from "react-markdown"
 import { useEffect, useRef, useState } from "react"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -134,6 +134,7 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
   const [content, setContent] = useState("")
   const [tagsRaw, setTagsRaw] = useState("")
   const [docId, setDocId] = useState<string>("")
+  const [createTab, setCreateTab] = useState<"write" | "preview">("write")
   const qc = useQueryClient()
 
   const createMut = useMutation({
@@ -156,13 +157,41 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
 
   return (
     <div className="mb-4 rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-      <textarea
-        rows={4}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Write your note..."
-        className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
+      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
+        <button
+          onClick={() => setCreateTab("write")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            createTab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Write
+        </button>
+        <button
+          onClick={() => setCreateTab("preview")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            createTab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Preview
+        </button>
+      </div>
+      {createTab === "write" ? (
+        <textarea
+          rows={4}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="Write your note in Markdown..."
+          className="w-full rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      ) : (
+        <div className="min-h-[96px] rounded border border-border bg-background px-3 py-2">
+          {content ? (
+            <MarkdownRenderer>{content}</MarkdownRenderer>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
+          )}
+        </div>
+      )}
       <input
         type="text"
         value={tagsRaw}
@@ -197,6 +226,75 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
         <button
           onClick={onClose}
           className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NoteEditorTabs — Write / Preview tab editor for note content
+// ---------------------------------------------------------------------------
+
+interface NoteEditorTabsProps {
+  value: string
+  onChange: (v: string) => void
+  onSave: () => void
+  onCancel: () => void
+  isPending: boolean
+}
+
+function NoteEditorTabs({ value, onChange, onSave, onCancel, isPending }: NoteEditorTabsProps) {
+  const [tab, setTab] = useState<"write" | "preview">("write")
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
+        <button
+          onClick={() => setTab("write")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            tab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Write
+        </button>
+        <button
+          onClick={() => setTab("preview")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            tab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Preview
+        </button>
+      </div>
+      {tab === "write" ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="min-h-[80px] w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      ) : (
+        <div className="min-h-[80px] rounded border border-border bg-background px-2 py-1.5">
+          {value ? (
+            <MarkdownRenderer>{value}</MarkdownRenderer>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
+          )}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={onSave}
+          disabled={!value.trim() || isPending}
+          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Check size={11} />
+          Save
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
         >
           Cancel
         </button>
@@ -287,35 +385,22 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
       {/* Content */}
       {editing ? (
         <div className="flex flex-col gap-2">
-          <textarea
+          {/* Write / Preview tabs */}
+          <NoteEditorTabs
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="min-h-[80px] w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            onChange={setContent}
+            onSave={() => saveMut.mutate()}
+            onCancel={() => { setEditing(false); setContent(note.content) }}
+            isPending={saveMut.isPending}
           />
-          <div className="flex gap-2">
-            <button
-              onClick={() => saveMut.mutate()}
-              disabled={saveMut.isPending}
-              className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Check size={11} />
-              Save
-            </button>
-            <button
-              onClick={() => { setEditing(false); setContent(note.content) }}
-              className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </button>
-          </div>
         </div>
       ) : (
         !confirming && (
           <div
-            className="prose prose-sm max-w-none cursor-pointer text-foreground"
+            className="cursor-pointer"
             onClick={() => setEditing(true)}
           >
-            <ReactMarkdown>{note.content.slice(0, 200)}</ReactMarkdown>
+            <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
           </div>
         )
       )}

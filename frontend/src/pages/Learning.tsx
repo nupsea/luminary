@@ -37,6 +37,7 @@ import type {
   SortOption,
 } from "@/components/library/types"
 import { STATUS_LABELS, STATUS_VARIANTS, formatDate } from "@/components/library/utils"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
@@ -245,10 +246,10 @@ function LibraryOverview() {
             </div>
           ) : currentSummary ? (
             <div className="space-y-2">
-              <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
-                {currentSummary}
-                {isStreaming && <span className="animate-pulse">▍</span>}
-              </pre>
+              <div>
+                <MarkdownRenderer>{currentSummary}</MarkdownRenderer>
+                {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
+              </div>
               {!isStreaming && (
                 <button
                   onClick={() => void generate(activeMode)}

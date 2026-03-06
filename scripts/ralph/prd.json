@@ -1654,7 +1654,7 @@
         "uv run pytest tests/test_summarizer.py exits 0 (prompt assertion tests)",
         "scripts/smoke/S69.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S70",

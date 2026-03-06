@@ -7,6 +7,7 @@
 import { Loader2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { ExplainMode } from "./FloatingToolbar"
+import { MarkdownRenderer } from "./MarkdownRenderer"
 
 const API_BASE = "http://localhost:8000"
 
@@ -124,10 +125,10 @@ export function ExplanationSheet({
               Generating explanation...
             </div>
           ) : (
-            <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
-              {content}
-              {loading && <span className="animate-pulse">▍</span>}
-            </pre>
+            <div>
+              <MarkdownRenderer>{content}</MarkdownRenderer>
+              {loading && <span className="animate-pulse text-foreground">▍</span>}
+            </div>
           )}
         </div>
       </div>
