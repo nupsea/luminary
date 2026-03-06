@@ -818,3 +818,13 @@ Commit: a614a26
   - ViewMode import removed from types.ts import in Learning.tsx (not needed since viewMode is now from store as string literal) — use string literals directly
   - Notes list view document link lookup: build `Object.fromEntries(documents.map(d => [d.id, d.title]))` from already-fetched documents list — no extra API call
 ---
+
+## 2026-03-06T17:00:00+00:00 - S68 - App startup readiness — skeleton loading prevents false empty-state flash on cold start
+- Implemented: (1) frontend/src/App.tsx — updated QueryClient defaultOptions: `retry: 1 → 2`, added `retryDelay: 1000`, added `gcTime: 60_000` alongside existing `staleTime: 60_000`. (2) frontend/src/pages/Learning.tsx — destructured `isSuccess` from useQuery; changed EmptyState guard from `!isLoading && !isError && total === 0` to `isSuccess && total === 0` (prevents false empty-state flash during loading); added `staleTime: 10_000, gcTime: 60_000` to the documents query override. (3) frontend/src/pages/Notes.tsx — added `staleTime: 10_000, gcTime: 60_000` to the notes query; changed grid loading state from 3 h-12 skeleton rows to 2 h-28 skeleton card placeholders (matches NoteCard dimensions). (4) frontend/src/pages/Study.tsx — changed flashcard loading state from 6 skeleton grid cards to centered spinner (Loader2 animate-spin) with "Loading your cards..." label; removed unused Skeleton import. (5) scripts/smoke/S68.sh (new) — sleep 2 then GET /documents assert 200.
+- Files changed: frontend/src/App.tsx, frontend/src/pages/Learning.tsx, frontend/src/pages/Notes.tsx, frontend/src/pages/Study.tsx, scripts/smoke/S68.sh (new), scripts/ralph/prd.json (S68 passes=True)
+- Learnings:
+  - TanStack Query isLoading = true only when query has no data AND is fetching; use isSuccess for EmptyState guard to strictly distinguish 'not yet loaded' from 'truly empty'
+  - QueryClient global staleTime was already 60_000; adding staleTime: 10_000 on specific query overrides the global to a shorter window — added per acceptance criteria requirement
+  - Removing Skeleton import after replacing skeleton loading with spinner triggers TS6133 error — always remove unused imports when changing loading UI
+  - retryDelay: 1000 in QueryClient defaultOptions applies a fixed 1s delay between retries (TanStack Query supports function for exponential backoff, but story specifies fixed 1000ms)
+---

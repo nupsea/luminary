@@ -1633,7 +1633,7 @@
         "Reload localhost:5173 with content in DB: skeleton appears immediately then content loads, no false empty state",
         "scripts/smoke/S68.sh exits 0 (backend responds within 2s)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S69",
