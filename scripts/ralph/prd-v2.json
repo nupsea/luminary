@@ -68,9 +68,10 @@
         "test_short_sections_skipped passes",
         "test_ollama_offline_returns_zero passes",
         "uv run pytest tests/test_section_summarizer.py exits 0",
-        "scripts/smoke/S75.sh exits 0"
+        "scripts/smoke/S75.sh exits 0",
+        "No datetime.utcnow() calls in section_summarizer.py \u2014 use datetime.now(datetime.UTC) for created_at and any other datetime construction in this file"
       ],
-      "passes": true
+      "passes": false
     },
     {
       "id": "S76",
@@ -93,7 +94,7 @@
         "uv run pytest tests/test_document_summary_fast_path.py exits 0",
         "scripts/smoke/S76.sh exits 0"
       ],
-      "passes": true
+      "passes": false
     },
     {
       "id": "S77",
@@ -103,7 +104,7 @@
       "featureRef": "F-CHAT-V2",
       "description": "CONTEXT: The current qa.py stream_answer() is a linear async function that always does: rewrite query \u2192 hybrid retrieval \u2192 (maybe prepend summary) \u2192 LLM call. There is no intelligence about what kind of question is being asked. V2 replaces this with a LangGraph StateGraph in app/runtime/chat_graph.py. This story creates the graph skeleton, the ChatState type, and the intent classifier node. Subsequent stories (S78, S79) fill in the strategy nodes and context packer. TYPES \u2014 Create app/types/chat.py. Define: (1) IntentType = Literal['summary', 'factual', 'relational', 'comparative', 'exploratory']. (2) ChatState as a TypedDict with fields: question: str, doc_ids: list[str], scope: Literal['single', 'all'], intent: IntentType | None, rewritten_question: str | None, chunks: list[dict], section_context: str | None, answer: str, citations: list[dict], confidence: Literal['high', 'medium', 'low'], not_found: bool, model: str | None. All fields must have defaults compatible with TypedDict (use total=False for optional fields OR provide all defaults). INTENT CLASSIFIER \u2014 The intent classifier runs as the first node in the graph. It must be fast because it adds latency to every query. Strategy: keyword heuristics first (pure function, microseconds), LLM fallback only when heuristics return low confidence. Pure function classify_intent_heuristic(question: str) -> tuple[IntentType, float]: implements the following rules in order (first match wins): (1) If question contains any of [summarize, overview, what is this about, what are the themes, main points, key ideas, synopsis, brief me, give me a summary]: return ('summary', 0.9). (2) If question contains any of [how are, how does, relation between, connection between, what is the relationship, how do X and Y]: return ('relational', 0.85). (3) If question contains any of [compare, difference between, how is X different, versus, vs., similarities]: return ('comparative', 0.85). (4) If question contains any of [explain, what does, who is, where is, when did, which, list all, how many, what happened]: return ('factual', 0.8). (5) Otherwise: return ('exploratory', 0.5). All string matching is case-insensitive. This function lives in app/services/intent.py as a pure function with no imports from other app layers. LLM FALLBACK: if confidence < 0.7, call LiteLLM with system='Classify the question. Reply with exactly one word: summary, factual, relational, comparative, or exploratory.', user=question. Parse response: strip whitespace and lowercase. If response matches one of the five values, use it with confidence=0.8. Otherwise fall back to 'factual' with confidence=0.6. The LLM fallback must be wrapped in try/except \u2014 if it fails (Ollama offline), default to 'factual'. GRAPH SKELETON \u2014 Create app/runtime/chat_graph.py. Build a LangGraph StateGraph[ChatState] with the following nodes: (1) classify_node: calls classify_intent_heuristic(), if confidence < 0.7 calls LLM fallback, writes intent and (if rewriting enabled) calls existing Kuzu rewriting logic (import from qa.py, do not duplicate). (2) route_node: a conditional edge function, not a node \u2014 reads intent from state and routes: 'summary' -> 'summary_node', 'relational' -> 'graph_node', 'comparative' -> 'comparative_node', 'factual' OR 'exploratory' -> 'search_node'. (3) summary_node: STUB for S78 \u2014 for now, writes answer='[summary_node stub]' to state, sets confidence='high'. (4) search_node: STUB for S78 \u2014 calls the existing _hybrid_retrieval logic from qa.py, writes chunks to state, writes answer='[search_node stub]'. (5) graph_node: STUB for S78 \u2014 writes answer='[graph_node stub]'. (6) comparative_node: STUB for S78 \u2014 writes answer='[comparative_node stub]'. (7) synthesize_node: STUB for S79 \u2014 takes chunks from state, calls LLM, writes answer. For now copies existing LLM call logic from stream_answer(). The graph's entry point is classify_node. All terminal nodes (after their answer is set) route to synthesize_node, then END. QA.PY INTEGRATION \u2014 Modify stream_answer() in qa.py to invoke the LangGraph graph instead of its existing logic. The signature of stream_answer() does NOT change \u2014 the frontend contract is unchanged. stream_answer() creates the initial ChatState from its parameters, invokes the graph with graph.invoke(state), then streams the answer field token by token using the same SSE format as before. The graph must be compiled once at module load (graph = build_chat_graph().compile()) and reused. IMPORTANT: The streaming behavior from the frontend's perspective must be identical to v1 \u2014 the same SSE events with the same fields (token, done, citations, confidence, not_found). The graph's synthesize_node is responsible for calling LLM and accumulating tokens. TESTS \u2014 tests/test_intent_classifier.py: (a) test_summary_keywords_detected: each keyword in the summary list triggers intent='summary'. (b) test_comparative_keywords_detected. (c) test_relational_keywords_detected. (d) test_low_confidence_triggers_llm_fallback: mock LiteLLM to return 'factual', assert intent='factual'. (e) test_llm_fallback_offline_defaults_to_factual: mock LiteLLM to raise exception, assert intent='factual'. tests/test_chat_graph.py: (a) test_summary_question_routes_to_summary_node: run graph with question='summarize this book', assert stub answer contains 'summary_node'. (b) test_factual_question_routes_to_search_node. (c) test_graph_invoke_does_not_raise: run full graph with real state dict, assert no exception. SMOKE \u2014 scripts/smoke/S77.sh: POST /qa with body {question: 'What are the main themes?', document_ids: [], scope: 'all'}, assert HTTP 200 and response body contains 'answer' field with non-empty string. Exit 0.",
       "acceptanceCriteria": [
-        "app/types/chat.py defines IntentType literal and ChatState TypedDict",
+        "app/types.py defines IntentType literal and ChatState TypedDict (collocated with ScoredChunk and other types \u2014 do NOT create a separate app/types/chat.py)",
         "app/services/intent.py contains classify_intent_heuristic() as a pure function with no I/O",
         "Keyword heuristics cover all five intent types with case-insensitive matching",
         "LLM fallback invoked only when heuristic confidence < 0.7",
@@ -112,16 +113,21 @@
         "route_node is a conditional edge dispatching on intent field",
         "Stub nodes for summary/graph/comparative return placeholder answers (replaced in S78)",
         "search_node stub calls existing hybrid retrieval and writes chunks to state",
-        "stream_answer() in qa.py invokes the graph; SSE output format unchanged",
-        "Graph compiled once at module load, not per request",
         "test_summary_keywords_detected passes for all keywords in the summary list",
         "test_llm_fallback_offline_defaults_to_factual passes",
         "test_summary_question_routes_to_summary_node passes",
         "test_graph_invoke_does_not_raise passes",
         "uv run pytest tests/test_intent_classifier.py tests/test_chat_graph.py exits 0",
-        "scripts/smoke/S77.sh exits 0 \u2014 POST /qa returns HTTP 200 with non-empty answer"
+        "scripts/smoke/S77.sh exits 0 \u2014 POST /qa returns HTTP 200 with non-empty answer",
+        "True streaming: stream_answer() does NOT buffer the full LLM response before yielding tokens. Implement one of: (a) graph.astream_events(version='v1') intercepting on_chat_model_stream events from synthesize_node, OR (b) synthesize_node returns the prepared prompt+context in state without calling the LLM, and stream_answer() calls the LLM directly after ainvoke(). In either case, the SSE client receives the first 'token' event as the LLM generates it, not after all tokens are collected.",
+        "Graph singleton compiled once at module load (not per request) and reused across all calls to stream_answer()",
+        "'summary' (the word alone) is in _SUMMARY_KWS \u2014 'what is the summary?', 'provide a summary', 'give me a summary', 'the summary of this' all classify as summary intent",
+        "'how does' and 'how do' are removed from _RELATIONAL_KWS \u2014 factual questions like 'how does the main character escape?' and 'how does FSRS scheduling work?' must NOT misclassify as relational intent",
+        "test_streaming_is_progressive: with a mock LLM async-generator that yields 3 tokens one at a time (with asyncio.sleep(0) between each), assert that the first SSE 'token' event is yielded before all 3 tokens are generated \u2014 verifies tokens are not fully buffered before streaming begins",
+        "test_summary_keyword_alone: classify_intent_heuristic('what is the summary of this book?') returns ('summary', 0.9)",
+        "test_factual_question_not_relational: classify_intent_heuristic('how does the hero escape?') returns intent != 'relational'"
       ],
-      "passes": true
+      "passes": false
     },
     {
       "id": "S78",
@@ -145,9 +151,14 @@
         "test_graph_node_falls_through_on_kuzu_error passes",
         "test_search_node_augments_chunks_with_section_summaries passes",
         "uv run pytest tests/test_chat_graph_nodes.py exits 0",
-        "scripts/smoke/S78.sh exits 0 \u2014 both /qa calls return HTTP 200 within 30 seconds"
+        "scripts/smoke/S78.sh exits 0 \u2014 both /qa calls return HTTP 200 within 30 seconds",
+        "summary_node populates state['answer'] directly from executive summary text (not state['section_context']) when the summary exists \u2014 the pass-through check in synthesize_node (if existing_answer: return {}) prevents a redundant second LLM call for summary intent",
+        "summary_node sets confidence='high' explicitly when it populates the answer from an executive summary",
+        "synthesize_node's pass-through (existing_answer non-empty \u2192 return {}) works correctly with the answer set by summary_node \u2014 no LLM call is made for summary intent when executive summary is cached",
+        "test_summary_node_sets_answer_directly: mock session returns an executive summary row; assert summary_node returns dict containing non-empty 'answer' key and confidence='high'; assert synthesize_node is NOT called (0 LLM invocations)",
+        "test_summary_intent_end_to_end: POST /qa with scope='single' and question='summarize this document' returns HTTP 200, done event has non-empty answer and confidence='high'"
       ],
-      "passes": true
+      "passes": false
     },
     {
       "id": "S79",
@@ -172,7 +183,7 @@
         "uv run pytest tests/test_context_packer.py exits 0",
         "scripts/smoke/S79.sh exits 0"
       ],
-      "passes": true
+      "passes": false
     },
     {
       "id": "S80",
@@ -185,8 +196,6 @@
         "tests/test_v2_pipeline.py contains all 7 integration tests listed above",
         "test_section_summaries_generated_for_all_books: each of the 3 corpus books has >= 10 section summary rows",
         "test_document_summary_uses_fast_path: each book has a '_section_reduce' SummaryModel row",
-        "test_intent_routing_summary: POST /qa summary question returns HTTP 200 with non-empty answer",
-        "test_intent_routing_factual: POST /qa factual question returns at least one citation",
         "test_intent_routing_comparative: POST /qa comparative question returns HTTP 200",
         "test_intent_routing_relational: POST /qa relational question returns HTTP 200",
         "test_library_overview_includes_all_three_books passes",
@@ -195,9 +204,47 @@
         "docs/QUALITY_SCORE.md updated: Q&A grade A, ingestion notes updated",
         "TD-011 added to tech-debt-tracker.md",
         "uv run pytest tests/test_v2_pipeline.py exits 0 (with real books ingested)",
-        "scripts/smoke/S80.sh exits 0"
+        "scripts/smoke/S80.sh exits 0",
+        "test_intent_routing_factual: mock LLM returns a response string that includes the citation JSON block (e.g. '\\n{\"citations\":[{\"section_heading\":\"Chapter 1\",\"page\":1,\"excerpt\":\"...\"}],\"confidence\":\"high\"}') \u2014 done event assertions check that citations list is non-empty and first citation has a non-empty section_heading",
+        "test_intent_routing_summary: POST /qa with question='summarize this document' and a document that has a cached executive summary returns HTTP 200, done event has non-empty answer and confidence='high' (no LLM call needed when summary is cached)",
+        "test_keyword_summary_word: classify_intent_heuristic('Please give me a summary of this') returns ('summary', 0.9) \u2014 unit test, no DB required",
+        "test_streaming_not_buffered: with mock LLM yielding tokens one-by-one via async generator, first SSE 'token' event is yielded by stream_answer() before the mock generator has yielded all its tokens \u2014 verifies streaming is not batched"
       ],
-      "passes": true
+      "passes": false
+    },
+    {
+      "id": "S81",
+      "title": "Confidence-adaptive retry: augment context with complementary strategies when confidence is low",
+      "phase": "V2",
+      "priority": 81,
+      "featureRef": "V2-adaptive-retrieval",
+      "description": "CONTEXT: The current chat graph always ends after one synthesize call. If the LLM returns confidence='low' (meaning it lacked sufficient context), the answer is returned as-is. This story adds a confidence check gate after synthesize_node that triggers a second retrieval pass using a complementary strategy, then re-synthesizes with the combined richer context.\n\nCURRENT GRAPH TOPOLOGY:\n  classify_node \u2192 route_node \u2192 [summary|graph|comparative|search]_node \u2192 synthesize_node \u2192 END\n\nNEW TOPOLOGY AFTER THIS STORY:\n  classify_node \u2192 route_node \u2192 [strategy]_node \u2192 synthesize_node\n    \u2192 confidence_gate_node\n      \u2192 (high|medium confidence, OR retry_attempted=True) \u2192 END\n      \u2192 (low confidence, retry_attempted=False) \u2192 augment_node\n        \u2192 synthesize_node (re-runs with appended context)\n        \u2192 confidence_gate_node \u2192 END (always, retry_attempted=True)\n\nCOMPLEMENTARY STRATEGY MAPPING (augment_node selects based on primary_strategy):\n  'search' or 'factual' or 'exploratory' \u2192 add Kuzu graph entity relationships\n    (run _query_kuzu_for_entity for entities extracted from the question)\n  'relational' \u2192 add hybrid search results (k=15, broader)\n  'summary' \u2192 add hybrid search results (k=10)\n  'comparative' \u2192 add hybrid search results with no doc_id filter (k=10)\n\nCONTEXT MERGING: augment_node APPENDS to state['chunks'] and state['section_context'] (does not replace). pack_context() in synthesize_node handles deduplication and token budget enforcement automatically \u2014 no special merge logic needed.\n\nLOOP PREVENTION: ChatState gains retry_attempted: bool (default False). route_node sets primary_strategy in state. augment_node sets retry_attempted=True. confidence_gate_node checks retry_attempted before re-routing \u2014 guarantees at most 1 retry.\n\nGRAPH KNOWLEDGE WHEREVER NECESSARY: This story ensures graph entity context supplements every factual/exploratory/search answer when the LLM signals insufficient context, not just when the user explicitly asks a relational question.",
+      "acceptanceCriteria": [
+        "ChatState in app/types.py gains two new fields: retry_attempted: bool (default False) and primary_strategy: str | None (default None)",
+        "route_node (the conditional edge function) sets state['primary_strategy'] to the node name it dispatches to (e.g. 'search_node', 'graph_node', 'summary_node', 'comparative_node')",
+        "confidence_gate_node added as a real graph node (not just a conditional edge function): reads state['confidence'] and state['retry_attempted']; returns {} to proceed to END or {} to proceed to augment_node",
+        "confidence_gate_node routes to END when: confidence in ('high', 'medium') OR retry_attempted is True",
+        "confidence_gate_node routes to augment_node when: confidence == 'low' AND retry_attempted is False",
+        "augment_node selects complementary strategy based on primary_strategy: search|factual|exploratory \u2192 Kuzu entity graph lines appended to section_context; relational \u2192 hybrid search k=15 appended to chunks; summary \u2192 hybrid search k=10 appended to chunks; comparative \u2192 hybrid search k=10 no doc_id filter appended to chunks",
+        "augment_node sets retry_attempted=True in its return dict before returning",
+        "augment_node APPENDS to existing state['chunks'] (list concatenation) and APPENDS to state['section_context'] (string join with separator) \u2014 never overwrites",
+        "augment_node is non-fatal: all errors (Kuzu offline, retrieval failure) are caught and logged; returns {retry_attempted: True} with no context changes rather than raising",
+        "synthesize_node is re-used unchanged \u2014 it is wired to both the first-pass and retry-pass edges; pack_context() handles deduplication of appended chunks automatically",
+        "Graph topology: synthesize_node \u2192 confidence_gate_node \u2192 (conditional) \u2192 [END | augment_node \u2192 synthesize_node \u2192 confidence_gate_node \u2192 END]",
+        "Singleton _compiled_graph is reset to None when build_chat_graph() is called \u2014 changing graph topology without restarting the server works correctly in tests via monkeypatching get_chat_graph",
+        "test_low_confidence_triggers_retry: first synthesize_node call returns confidence='low'; assert augment_node runs and second synthesize_node call occurs; final response has retry_attempted=True in state",
+        "test_medium_confidence_skips_retry: first synthesize_node call returns confidence='medium'; assert augment_node does NOT run; END reached after first synthesis",
+        "test_no_double_retry: second synthesize_node call (post-augment) returns confidence='low'; assert flow ends at confidence_gate_node without a third synthesis call",
+        "test_augment_appends_chunks: augment_node for primary_strategy='search_node' returns dict with chunks list that is LONGER than the original state chunks (graph context added)",
+        "test_augment_non_fatal: Kuzu connection raises Exception; augment_node returns {retry_attempted: True} without raising; test asserts no exception propagates",
+        "test_graph_knowledge_supplements_factual: end-to-end mock test where search intent returns confidence='low'; augment_node adds Kuzu entity lines to section_context; re-synthesis receives richer context",
+        "uv run pytest tests/test_confidence_retry.py exits 0",
+        "uv run pytest tests/test_chat_graph.py exits 0 (no regression in existing graph tests)",
+        "scripts/smoke/S81.sh: POST /qa with a question that triggers low confidence (mock) returns HTTP 200 and done event with retry_attempted visible in response metadata or logs",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
     }
-  ]
+  ],
+  "regressionBaseline": "423 tests pass on branch ralph/luminary-v2 before re-implementation begins (run: uv run pytest --ignore=tests/test_v2_pipeline.py --ignore=tests/test_v2_ingestion_perf.py --ignore=tests/test_ingestion_perf.py --ignore=tests/test_performance.py). After each story, the test count must be >= 423. Any drop is a regression \u2014 stop and fix before marking passes:true."
 }

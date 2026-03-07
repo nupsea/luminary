@@ -5,6 +5,8 @@ Previous milestone: 2026-03-06 — S58 query rewriting, S60 chapter/speaker side
 
 Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (partial), D (minimal), F (not started).
 
+**Grade policy**: Ralph may promote a domain to B based on story completion. Promotion to A requires either a passing human demo-review gate OR a passing `make eval` run with all thresholds met. Self-reported A grades without one of these are provisional.
+
 | Domain          | Implemented | Tested       | Documented   | Quality Grade |
 |-----------------|-------------|--------------|--------------|---------------|
 | Ingestion       | yes         | yes          | yes          | A             |

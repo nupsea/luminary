@@ -103,6 +103,14 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
   echo "==============================================================="
 
+  # Warn if working tree is dirty from a previous incomplete iteration
+  DIRTY=$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null | grep -v "^??" || true)
+  if [ -n "$DIRTY" ]; then
+    echo "[Ralph] WARNING: working tree has uncommitted changes from a previous iteration."
+    echo "$DIRTY"
+    echo "[Ralph] The agent should commit or stash these before proceeding."
+  fi
+
   # Run the selected tool with the ralph prompt
   if [[ "$TOOL" == "amp" ]]; then
     OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true

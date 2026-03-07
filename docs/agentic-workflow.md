@@ -12,8 +12,8 @@ Route sub-tasks to the cheapest capable model. Token cost is the primary lever o
 |------|-------|--------|
 | File search, doc reads, pattern lookup | Haiku | Fast, cheap — correct on simple lookups |
 | Multi-file implementation, code review | Sonnet | Best balance for coding tasks |
-| Cross-domain refactor, architecture decision | Sonnet via luminary-planner agent | Planning focus with read-only tools |
-| Post-story quality review | Sonnet via luminary-reviewer agent | Structured review checklist |
+| Cross-domain refactor, architecture decision | Sonnet via luminary-planner agent | Planning focus — **mandatory** for stories touching 3+ files |
+| Post-story quality review | Sonnet via luminary-reviewer agent | Structured review checklist — **mandatory** after every story |
 | QUALITY_SCORE.md, tech-debt-tracker updates | Haiku via luminary-docs agent | Structured doc writes, no reasoning needed |
 
 Operative rule: **exploration is cheap; implementation is medium; architecture is deliberate.** Match model cost to task complexity.
@@ -26,24 +26,26 @@ Agents live in `.claude/agents/`. They are invoked via the Task tool or automati
 
 ### luminary-planner (Sonnet)
 
-Use before implementing a new story or architectural change.
+**Mandatory** for stories touching 3+ files or crossing domain boundaries.
 
-- Reads: `docs/ARCHITECTURE.md`, `core-beliefs.md`, `QUALITY_SCORE.md`, `tech-debt-tracker.md`, `prd.json`
+- Reads: `docs/ARCHITECTURE.md`, `core-beliefs.md`, `QUALITY_SCORE.md`, `tech-debt-tracker.md`, `scripts/ralph/patterns.md`, active PRD (`prd-v2.json` if present, else `prd.json`)
 - Produces: file-level impact list, ordered implementation steps, acceptance criteria, risk flags
-- Tools: Read, Grep, Glob, Bash (read-only — cannot modify files)
+- **Saves plan to**: `docs/exec-plans/active/[story-id].md`
+- Tools: Read, Grep, Glob, Bash, Write
 
-**When to invoke**: Before writing any code for a story that touches 3+ files, crosses domain boundaries, or involves a new service.
+**When to invoke**: Before writing any code for a story that touches 3+ files, crosses domain boundaries, or involves a new service. Ralph reads the saved plan from `docs/exec-plans/active/[story-id].md` before implementing.
 
 ### luminary-reviewer (Sonnet)
 
-Use after implementing a story or significant change.
+**Mandatory** after every story implementation, before committing.
 
 - Runs: `ruff check`, `pytest -x`, `tsc --noEmit`
-- Checks: layer order, LiteLLM gateway, `print()` violations, test coverage, frontend three-state completeness
+- Checks: layer order, LiteLLM gateway, `print()` violations, test coverage, frontend three-state completeness, smoke test existence
 - Produces: prioritised issue list (Critical / High / Low) with file:line citations
-- Tools: Read, Grep, Glob, Bash
+- **Fixes Critical items inline** using the Edit tool — does not just report them
+- Tools: Read, Grep, Glob, Bash, Edit
 
-**When to invoke**: Before committing, after any backend service change, or when a quality check produces an unexpected failure.
+**When to invoke**: After `make ci` passes, before committing. Ralph must not mark `passes: true` until reviewer returns no Critical items.
 
 ### luminary-docs (Haiku)
 
@@ -89,7 +91,9 @@ For completed stories, you only need their IDs (to verify branch alignment) — 
 
 ## Multi-Session Memory
 
-Ralph accumulates learnings in `scripts/ralph/progress.txt` under the `## Codebase Patterns` section at the top. This is the persistent memory across Ralph iterations. Always read it before starting a story.
+Ralph accumulates stable codebase patterns in `scripts/ralph/patterns.md` — a standalone file updated in-place by section (not appended chronologically). Read this before starting any story.
+
+`scripts/ralph/progress.txt` is append-only chronological log. Skim recent entries for story context but do not use it as the pattern reference.
 
 For interactive sessions, use `.claude/` memory files (auto-maintained by Claude Code). Key patterns discovered interactively should also be encoded in `docs/` (belief #2: repo is system of record) so Ralph can access them.
 

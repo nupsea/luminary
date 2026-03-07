@@ -3,12 +3,7 @@ Started: Fri  6 Mar 2026 23:08:42 AEST
 ---
 
 ## Codebase Patterns
-- Settings field for LLM model: `get_settings().LITELLM_DEFAULT_MODEL` (not `default_model`)
-- Settings field for Ollama URL: `get_settings().OLLAMA_URL`
-- Test fixtures: use `make_engine("sqlite+aiosqlite:///:memory:")` + `create_all_tables` + monkeypatch `db_module._engine` and `db_module._session_factory`
-- All uv/pytest commands run from /Users/sethurama/DEV/LM/learning-mate/backend (no `cd backend &&` prefix)
-- `asyncio.gather` with `Semaphore` pattern: wrap each coro in `async with semaphore:` inside an inner async fn, then `gather(*[inner(i) for i in units])`
-- `litellm.ServiceUnavailableError` must be re-raised before `asyncio.gather` catches it — use try/except around gather to catch and return 0
+Patterns are now maintained in `scripts/ralph/patterns.md` — read that file instead of this section.
 
 ## 2026-03-06T13:20:05Z - S75 - SectionSummaryModel + parallel section summarization node
 - Implemented: SectionSummaryModel (models.py + db_init.py), SectionSummarizerService (section_summarizer.py), section_summarize_node wired into ingestion graph (entity_extract → section_summarize → summarize), GET /summarize/{id}/sections endpoint
