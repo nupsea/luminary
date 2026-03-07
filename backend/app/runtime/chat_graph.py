@@ -177,10 +177,13 @@ async def summary_node(state: ChatState) -> dict:
         return {"intent": "factual"}
 
     logger.debug("summary_node: executive summary found (%d chars)", len(summary_content))
+    # Set answer directly so synthesize_node passes through (no redundant LLM call).
+    # confidence='high' because the executive summary is the authoritative answer for
+    # summary intent — no LLM generation uncertainty applies.
     return {
-        "section_context": summary_content,
+        "answer": summary_content,
+        "confidence": "high",
         "chunks": [],
-        "answer": "",
     }
 
 

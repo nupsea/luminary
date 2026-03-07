@@ -23,15 +23,18 @@
     assert get_llm_service().generate was called.
 """
 
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.main import app
 from app.models import DocumentModel, SectionSummaryModel, SummaryModel
 from app.runtime.chat_graph import (
     comparative_node,
@@ -116,8 +119,12 @@ async def _insert_doc(factory, doc_id: str, title: str = "Test Doc") -> None:
 
 
 @pytest.mark.asyncio
-async def test_summary_node_returns_executive_summary(test_db):
-    """summary_node sets section_context to executive summary content."""
+async def test_summary_node_sets_answer_directly(test_db):
+    """summary_node sets answer directly from exec summary (not section_context).
+
+    S78 AC: summary_node populates state['answer'] with the executive summary text
+    and confidence='high'. synthesize_node then passes through (no LLM call).
+    """
     _engine, factory, _tmp = test_db
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, doc_id)
@@ -137,9 +144,12 @@ async def test_summary_node_returns_executive_summary(test_db):
     state = _make_state(doc_ids=[doc_id], scope="single", intent="summary")
     result = await summary_node(state)
 
-    assert result.get("section_context") == summary_content
+    # answer must be the executive summary; confidence must be 'high'
+    assert result.get("answer") == summary_content
+    assert result.get("confidence") == "high"
     assert result.get("chunks") == []
-    assert result.get("answer") == ""
+    # section_context is NOT used for the direct-answer path
+    assert not result.get("section_context")
 
 
 # ---------------------------------------------------------------------------
@@ -334,3 +344,54 @@ async def test_synthesize_node_prepares_llm_prompt(test_db):
     # answer should NOT be set — LLM not yet called
     assert not result.get("answer")
     assert not result.get("not_found")
+
+
+# ---------------------------------------------------------------------------
+# test_summary_intent_end_to_end — S78 AC
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_summary_intent_end_to_end(test_db):
+    """POST /qa with summary question + cached exec summary returns HTTP 200
+    with non-empty answer and confidence='high'.  No LLM call needed because
+    summary_node returns the executive summary text directly as the answer.
+    """
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    exec_summary = "The Iliad is an ancient Greek epic poem about the Trojan War."
+    async with factory() as session:
+        session.add(
+            SummaryModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                mode="executive",
+                content=exec_summary,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/qa",
+            json={
+                "question": "summarize this document",
+                "document_ids": [doc_id],
+                "scope": "single",
+            },
+        )
+
+    assert resp.status_code == 200
+
+    # Parse SSE events
+    events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
+    assert events, "No SSE events in response"
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload.get("done") is True, f"Last event is not done: {done_payload}"
+    assert done_payload.get("answer"), f"Expected non-empty answer, got: {done_payload}"
+    assert done_payload.get("confidence") == "high", (
+        f"Expected confidence='high', got: {done_payload.get('confidence')}"
+    )
