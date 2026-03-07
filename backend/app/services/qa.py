@@ -297,6 +297,8 @@ class QAService:
                     "not_found": False,
                     "_llm_prompt": None,
                     "_system_prompt": None,
+                    "retry_attempted": False,
+                    "primary_strategy": None,
                 }
 
                 try:

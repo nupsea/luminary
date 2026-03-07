@@ -14,6 +14,17 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - litellm.ServiceUnavailableError must be caught at the asyncio.gather level, not inside each unit coro, because the semaphore pattern uses gather; individual unit errors are non-fatal but Ollama-offline is fatal-for-session
 ---
 
+## 2026-03-07T09:00:00Z - S81 - Confidence-adaptive retry
+- Implemented: confidence_gate_node + augment_node in chat_graph.py, new topology: synthesize_node → confidence_gate_node → [END | augment_node → synthesize_node → END], ChatState gains retry_attempted/primary_strategy fields, classify_node sets primary_strategy, 9 tests in test_confidence_retry.py, smoke S81.sh
+- Files changed: backend/app/types.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/tests/test_confidence_retry.py (new), scripts/smoke/S81.sh (new), scripts/ralph/prd-v2.json (S81 passes=true)
+- Learnings:
+  - LangGraph conditional edge functions cannot set state — they only return next-node strings; set primary_strategy in classify_node (which is a real node) instead
+  - confidence_gate_node is a no-op real node; all routing logic in _route_after_confidence_gate (conditional edge function)
+  - augment_node uses _route_after_confidence_gate's END sentinel: `from langgraph.graph import END` — must use END constant, not "END" string, in conditional edges map
+  - build_chat_graph() resets _compiled_graph=None at start so tests can rebuild without restarting
+  - 441 tests pass, ruff clean
+---
+
 ## 2026-03-07T08:00:00Z - S80 - V2 integration tests, performance benchmarks, and QUALITY_SCORE update (re-pass)
 - Implemented: test_v2_pipeline.py (9 tests total: 7 @pytest.mark.slow integration + 2 unit), test_v2_ingestion_perf.py (2 perf benchmarks), Makefile test-v2 target, scripts/smoke/S80.sh, QUALITY_SCORE.md (Q&A B→A), TD-011 in tech-debt-tracker.md
 - Files changed: backend/tests/test_v2_pipeline.py (updated), scripts/ralph/prd-v2.json (S80 passes=true)

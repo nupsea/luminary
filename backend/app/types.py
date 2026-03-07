@@ -73,3 +73,10 @@ class ChatState(TypedDict):
     # calls the LLM streaming to yield tokens progressively as they are generated.
     _llm_prompt: str | None
     _system_prompt: str | None
+
+    # Confidence-adaptive retry fields (S81)
+    # retry_attempted: True after augment_node runs — prevents a second retry loop.
+    # primary_strategy: node name that handled the first-pass retrieval, used by
+    #   augment_node to select the complementary strategy.
+    retry_attempted: bool
+    primary_strategy: str | None

@@ -2,14 +2,19 @@
 
 S77: skeleton with stub strategy nodes.
 S78: real implementations for all strategy nodes.
+S81: confidence-adaptive retry with augment_node + confidence_gate_node.
 
 Graph flow:
     classify_node
       → [conditional by intent]
-        → summary_node    → [conditional fallthrough] → synthesize_node → END
-        → graph_node      → [conditional fallthrough] → synthesize_node → END
-        → comparative_node → synthesize_node → END
-        → search_node      → synthesize_node → END
+        → summary_node    → [conditional fallthrough] → synthesize_node
+        → graph_node      → [conditional fallthrough] → synthesize_node
+        → comparative_node → synthesize_node
+        → search_node      → synthesize_node
+      → confidence_gate_node
+        → (high|medium confidence, OR retry_attempted=True) → END
+        → (low confidence, retry_attempted=False) → augment_node
+          → synthesize_node → confidence_gate_node → END
 
 Strategy nodes:
     summary_node     — intent='summary': fetch executive summary from DB
@@ -97,8 +102,19 @@ async def classify_node(state: ChatState) -> dict:
     except Exception:
         rewritten = question
 
+    _intent_to_strategy = {
+        "summary": "summary_node",
+        "relational": "graph_node",
+        "comparative": "comparative_node",
+    }
+    primary_strategy = _intent_to_strategy.get(intent, "search_node")
+
     logger.debug("classify_node: intent=%s confidence=%.2f", intent, confidence)
-    return {"intent": intent, "rewritten_question": rewritten}
+    return {
+        "intent": intent,
+        "rewritten_question": rewritten,
+        "primary_strategy": primary_strategy,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -582,12 +598,121 @@ async def synthesize_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# confidence_gate_node + augment_node (S81)
+# ---------------------------------------------------------------------------
+
+
+async def confidence_gate_node(state: ChatState) -> dict:
+    """No-op node; routing decision is made by _route_after_confidence_gate."""
+    return {}
+
+
+def _route_after_confidence_gate(state: ChatState) -> str:
+    """Conditional edge after confidence_gate_node.
+
+    Routes to END unless confidence is 'low' AND this is the first attempt.
+    Guarantees at most 1 retry loop.
+    """
+    confidence = state.get("confidence", "low")
+    retry_attempted = state.get("retry_attempted", False)
+    if confidence == "low" and not retry_attempted:
+        return "augment_node"
+    return END
+
+
+async def augment_node(state: ChatState) -> dict:
+    """Augment context with a complementary strategy when confidence is low.
+
+    Selects the complementary strategy based on primary_strategy:
+      search_node / factual / exploratory → Kuzu entity graph lines → section_context
+      graph_node (relational)             → hybrid search k=15 → chunks
+      summary_node                        → hybrid search k=10 → chunks
+      comparative_node                    → hybrid search k=10, no doc filter → chunks
+
+    APPENDS to existing chunks/section_context; pack_context() deduplicates.
+    Non-fatal: all errors caught and logged; returns {retry_attempted: True}.
+    """
+    primary = state.get("primary_strategy") or "search_node"
+    question = state.get("rewritten_question") or state["question"]
+    doc_ids = state.get("doc_ids") or []
+    scope = state.get("scope", "all")
+    effective_doc_ids = doc_ids if scope == "single" else None
+
+    existing_chunks: list[dict] = list(state.get("chunks") or [])
+    existing_section_context: str = state.get("section_context") or ""
+
+    new_chunks: list[dict] = []
+    new_section_lines: list[str] = []
+
+    try:
+        if primary in ("search_node", "factual", "exploratory"):
+            # Complementary: Kuzu entity graph relationships
+            entity_names = _extract_entities_from_question(question)
+            try:
+                from app.services.graph import get_graph_service  # noqa: PLC0415
+
+                conn = get_graph_service()._conn
+                for name in entity_names[:5]:
+                    new_section_lines.extend(_query_kuzu_for_entity(conn, name))
+            except Exception:
+                logger.warning("augment_node: Kuzu query failed", exc_info=True)
+
+        elif primary == "graph_node":
+            # Complementary: broader hybrid search k=15
+            retriever = get_retriever()
+            chunks = await retriever.retrieve(question, effective_doc_ids, k=15)
+            new_chunks = [_chunk_to_dict(c) for c in chunks]
+
+        elif primary == "summary_node":
+            # Complementary: hybrid search k=10
+            retriever = get_retriever()
+            chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
+            new_chunks = [_chunk_to_dict(c) for c in chunks]
+
+        elif primary == "comparative_node":
+            # Complementary: hybrid search k=10, no doc_id filter
+            retriever = get_retriever()
+            chunks = await retriever.retrieve(question, None, k=10)
+            new_chunks = [_chunk_to_dict(c) for c in chunks]
+
+    except Exception:
+        logger.warning("augment_node: augmentation failed", exc_info=True)
+        return {"retry_attempted": True}
+
+    # Append new context; pack_context() handles deduplication
+    combined_chunks = existing_chunks + new_chunks
+
+    combined_section_context = existing_section_context
+    if new_section_lines:
+        supplement = "Knowledge graph supplement:\n" + "\n".join(new_section_lines)
+        if combined_section_context:
+            combined_section_context = combined_section_context + "\n\n" + supplement
+        else:
+            combined_section_context = supplement
+
+    logger.debug(
+        "augment_node: strategy=%s added %d chunks + %d graph lines",
+        primary,
+        len(new_chunks),
+        len(new_section_lines),
+    )
+    return {
+        "chunks": combined_chunks,
+        "section_context": combined_section_context,
+        "retry_attempted": True,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Graph construction + singleton
 # ---------------------------------------------------------------------------
 
 
 def build_chat_graph() -> StateGraph:
     """Build the V2 chat StateGraph."""
+    global _compiled_graph  # noqa: PLW0603
+    _compiled_graph = None  # Reset singleton so tests can rebuild the graph
+
     g: StateGraph = StateGraph(ChatState)  # type: ignore[type-var]
 
     g.add_node("classify_node", classify_node)
@@ -596,6 +721,8 @@ def build_chat_graph() -> StateGraph:
     g.add_node("graph_node", graph_node)
     g.add_node("comparative_node", comparative_node)
     g.add_node("synthesize_node", synthesize_node)
+    g.add_node("confidence_gate_node", confidence_gate_node)
+    g.add_node("augment_node", augment_node)
 
     g.set_entry_point("classify_node")
 
@@ -623,7 +750,19 @@ def build_chat_graph() -> StateGraph:
 
     g.add_edge("comparative_node", "synthesize_node")
     g.add_edge("search_node", "synthesize_node")
-    g.add_edge("synthesize_node", END)
+
+    # synthesize_node → confidence_gate_node → (END | augment_node)
+    g.add_edge("synthesize_node", "confidence_gate_node")
+    g.add_conditional_edges(
+        "confidence_gate_node",
+        _route_after_confidence_gate,
+        {
+            "augment_node": "augment_node",
+            END: END,
+        },
+    )
+    # Retry path: augment_node → synthesize_node → confidence_gate_node → END
+    g.add_edge("augment_node", "synthesize_node")
 
     return g
 
