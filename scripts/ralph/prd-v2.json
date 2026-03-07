@@ -71,7 +71,7 @@
         "scripts/smoke/S75.sh exits 0",
         "No datetime.utcnow() calls in section_summarizer.py \u2014 use datetime.now(datetime.UTC) for created_at and any other datetime construction in this file"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S76",
@@ -94,7 +94,7 @@
         "uv run pytest tests/test_document_summary_fast_path.py exits 0",
         "scripts/smoke/S76.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S77",
@@ -127,7 +127,7 @@
         "test_summary_keyword_alone: classify_intent_heuristic('what is the summary of this book?') returns ('summary', 0.9)",
         "test_factual_question_not_relational: classify_intent_heuristic('how does the hero escape?') returns intent != 'relational'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S78",
@@ -158,7 +158,7 @@
         "test_summary_node_sets_answer_directly: mock session returns an executive summary row; assert summary_node returns dict containing non-empty 'answer' key and confidence='high'; assert synthesize_node is NOT called (0 LLM invocations)",
         "test_summary_intent_end_to_end: POST /qa with scope='single' and question='summarize this document' returns HTTP 200, done event has non-empty answer and confidence='high'"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S79",
@@ -183,7 +183,7 @@
         "uv run pytest tests/test_context_packer.py exits 0",
         "scripts/smoke/S79.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S80",
@@ -210,7 +210,7 @@
         "test_keyword_summary_word: classify_intent_heuristic('Please give me a summary of this') returns ('summary', 0.9) \u2014 unit test, no DB required",
         "test_streaming_not_buffered: with mock LLM yielding tokens one-by-one via async generator, first SSE 'token' event is yielded by stream_answer() before the mock generator has yielded all its tokens \u2014 verifies streaming is not batched"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S81",
