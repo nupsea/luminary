@@ -19,6 +19,16 @@ Started: Fri  6 Mar 2026 23:08:42 AEST
   - litellm.ServiceUnavailableError must be caught at the asyncio.gather level, not inside each unit coro, because the semaphore pattern uses gather; individual unit errors are non-fatal but Ollama-offline is fatal-for-session
 ---
 
+## 2026-03-07T08:00:00Z - S80 - V2 integration tests, performance benchmarks, and QUALITY_SCORE update
+- Implemented: test_v2_pipeline.py (7 integration tests, @pytest.mark.slow, LLM mocked), test_v2_ingestion_perf.py (2 perf benchmarks, LUMINARY_PERF_TESTS guard), Makefile test-v2 target, scripts/smoke/S80.sh, QUALITY_SCORE.md (Q&A B→A), TD-011 in tech-debt-tracker.md
+- Files changed: backend/tests/test_v2_pipeline.py (new), backend/tests/test_v2_ingestion_perf.py (new), Makefile (test-v2 target), scripts/smoke/S80.sh (new), docs/QUALITY_SCORE.md (updated), docs/exec-plans/tech-debt-tracker.md (TD-011 added)
+- Learnings:
+  - Book manifest has "The Odyssey" not "The Iliad" — use Odyssey-specific entities for relational test
+  - test_v2_pipeline.py mocks LLM at graph level: patch("app.runtime.chat_graph.get_llm_service")
+  - Performance tests use LUMINARY_PERF_TESTS env guard + pytest.mark.skipif
+  - 422 non-slow tests pass, ruff clean, all 5 V2 stories (S76-S80) complete
+---
+
 ## 2026-03-07T07:00:00Z - S79 - Pure context packer: smart context window assembly with deduplication and section grouping
 - Implemented: context_packer.py pack_context() pure function (no I/O), synthesize_node uses pack_context() instead of _build_context(), section_context capped at 1000 tokens, search_node adds section_summary as separate field
 - Files changed: backend/app/services/context_packer.py (new), backend/app/runtime/chat_graph.py (synthesize_node + search_node updated), backend/tests/test_context_packer.py (new, 7 pure unit tests), scripts/smoke/S79.sh (new)

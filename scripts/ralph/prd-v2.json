@@ -197,7 +197,7 @@
         "uv run pytest tests/test_v2_pipeline.py exits 0 (with real books ingested)",
         "scripts/smoke/S80.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }
