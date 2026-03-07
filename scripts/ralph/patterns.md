@@ -52,6 +52,12 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - search_node must NOT write a stub answer — if answer is non-empty, synthesize_node passes through and no_context flow breaks
 - Conditional edges after strategy nodes: `_route_after_strategy` checks `intent='factual'` as fallthrough signal
 - synthesize_node no-context check: not_found only when BOTH chunks and section_context are absent
+- scope routing: `exploratory + scope=all` → `summary_node` (not `search_node`). Broad questions over the full library need per-document summary synthesis; chunk retrieval is biased toward the highest-similarity document.
+- summary_node scope=all: fetches per-document executive summaries from `SummaryModel` (written during ingestion). Does NOT rely on `LibrarySummaryModel` (only written by the separate summarize-all endpoint). If no summaries exist, falls through to search with `intent='factual'`.
+- comparative_node: uses `_decompose_comparison()` (LLM call) to extract `{sides: [N names], topic: str}`. Supports N-way (not just 2-way). Each side resolved to doc_ids via `_resolve_side_to_docs()` (Kuzu entity match + SQLite title search, unioned). Retrieval runs in parallel per side via `asyncio.gather`. Results interleaved round-robin.
+- `_resolve_side_to_docs`: tries exact Kuzu entity match first, then partial match, then SQLite title contains. An entity appearing in multiple documents returns all of them. If scope_doc_ids set, intersects result.
+- SSE streaming: the `done` event payload contains `answer` (clean prose, citation JSON stripped). The frontend MUST replace `msg.text` with `payload.answer` on the done event — never leave the accumulated streamed tokens as the final displayed text. Streamed tokens include citation JSON fragments that leaked before the break triggered.
+- Log level policy: use `logger.info` at every graph node entry, routing decision, fallthrough, and final chunk count. Use `logger.debug` only for internal details. This makes the full query flow visible at INFO level without enabling DEBUG.
 
 ---
 
@@ -59,6 +65,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 - SectionSummaryModel batch lookup by (document_id, heading) using SQLAlchemy OR conditions — avoids N+1 queries
 - pack_context groups by section_id or section_heading fallback; sorts groups by max(relevance_score) desc
+- To get the latest executive summary per document across all documents, use a subquery grouped by document_id with `func.max(created_at)`, then join back to SummaryModel and DocumentModel. Do not use DISTINCT ON (not supported by SQLite).
 
 ---
 

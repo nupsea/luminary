@@ -186,7 +186,7 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
             except json.JSONDecodeError:
                 pass
 
-    citations: list[dict] = parsed.get("citations", [])
+    citations: list[dict] = [c for c in parsed.get("citations", []) if isinstance(c, dict)]
     confidence: str = parsed.get("confidence", "low")
 
     # Style B: answer is embedded in the JSON.

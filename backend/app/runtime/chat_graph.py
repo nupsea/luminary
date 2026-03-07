@@ -24,14 +24,16 @@ Strategy nodes:
 """
 
 import asyncio
+import json
 import logging
 import re
 
+import litellm
 from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, LibrarySummaryModel, SectionSummaryModel, SummaryModel
+from app.models import DocumentModel, SectionSummaryModel, SummaryModel
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
@@ -89,16 +91,32 @@ def _get_system_prompt(intent: str | None) -> str:
 async def classify_node(state: ChatState) -> dict:
     """Detect intent (heuristic + optional LLM fallback) and rewrite vague queries."""
     question = state["question"]
+    scope = state.get("scope", "all")
+    doc_ids = state.get("doc_ids") or []
+
+    logger.info(
+        "chat: question=%r scope=%s docs=%d",
+        question[:80], scope, len(doc_ids),
+    )
+
     intent, confidence = classify_intent_heuristic(question)
+    source = "heuristic"
 
     if confidence < 0.7:
-        intent = await _llm_classify_fallback(question, default=intent)
+        intent = await _llm_classify_fallback(question, scope=scope, default=intent)
+        source = "llm"
+
+    logger.info(
+        "classify_node: intent=%s confidence=%.2f source=%s",
+        intent, confidence, source,
+    )
 
     # Query rewriting via Kuzu entities — non-fatal
-    doc_ids = state.get("doc_ids") or []
     effective_doc_ids = doc_ids if state.get("scope") == "single" else None
     try:
         rewritten = await _maybe_rewrite_query(question, effective_doc_ids)
+        if rewritten != question:
+            logger.info("classify_node: query rewritten → %r", rewritten[:80])
     except Exception:
         rewritten = question
 
@@ -109,7 +127,6 @@ async def classify_node(state: ChatState) -> dict:
     }
     primary_strategy = _intent_to_strategy.get(intent, "search_node")
 
-    logger.debug("classify_node: intent=%s confidence=%.2f", intent, confidence)
     return {
         "intent": intent,
         "rewritten_question": rewritten,
@@ -123,15 +140,30 @@ async def classify_node(state: ChatState) -> dict:
 
 
 def route_node(state: ChatState) -> str:
-    """Return the next node name based on detected intent."""
+    """Return the next node name based on detected intent and scope.
+
+    Routing rules:
+      summary    → summary_node (fetch cached executive summaries)
+      relational → graph_node   (Kuzu entity traversal)
+      comparative → comparative_node (dual retrieval)
+      exploratory + scope=all → summary_node (broad cross-doc questions need
+                                 per-doc summary synthesis, not biased chunk retrieval)
+      factual / exploratory + scope=single → search_node (specific lookup)
+    """
     intent = state.get("intent") or "factual"
+    scope = state.get("scope", "all")
     if intent == "summary":
-        return "summary_node"
-    if intent == "relational":
-        return "graph_node"
-    if intent == "comparative":
-        return "comparative_node"
-    return "search_node"
+        node = "summary_node"
+    elif intent == "relational":
+        node = "graph_node"
+    elif intent == "comparative":
+        node = "comparative_node"
+    elif intent == "exploratory" and scope == "all":
+        node = "summary_node"
+    else:
+        node = "search_node"
+    logger.info("route_node: intent=%s scope=%s → %s", intent, scope, node)
+    return node
 
 
 def _route_after_strategy(state: ChatState) -> str:
@@ -150,55 +182,113 @@ def _route_after_strategy(state: ChatState) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_executive_summary(
-    doc_ids: list[str], scope: str
-) -> str | None:
-    """Return executive summary content for the given scope, or None if absent."""
+async def _fetch_single_doc_executive_summary(doc_id: str) -> str | None:
+    """Return executive summary content for a single document, or None if absent."""
     async with get_session_factory()() as session:
-        if scope == "single" and doc_ids:
-            row = await session.execute(
-                select(SummaryModel.content)
-                .where(
-                    SummaryModel.document_id == doc_ids[0],
-                    SummaryModel.mode == "executive",
-                )
-                .order_by(SummaryModel.created_at.desc())
-                .limit(1)
+        row = await session.execute(
+            select(SummaryModel.content)
+            .where(
+                SummaryModel.document_id == doc_id,
+                SummaryModel.mode == "executive",
             )
-        else:
-            row = await session.execute(
-                select(LibrarySummaryModel.content)
-                .where(LibrarySummaryModel.mode == "executive")
-                .order_by(LibrarySummaryModel.created_at.desc())
-                .limit(1)
+            .order_by(SummaryModel.created_at.desc())
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+
+
+async def _fetch_all_doc_executive_summaries() -> list[tuple[str, str]]:
+    """Return (document_title, summary_content) for every doc that has an executive summary.
+
+    Fetches the latest executive summary per document via a single joined query.
+    Returns an empty list if none exist.
+    """
+    async with get_session_factory()() as session:
+        from sqlalchemy import func  # noqa: PLC0415
+
+        # Latest created_at per document_id
+        latest_subq = (
+            select(
+                SummaryModel.document_id,
+                func.max(SummaryModel.created_at).label("max_ts"),
             )
-        result = row.scalar_one_or_none()
-    return result
+            .where(SummaryModel.mode == "executive")
+            .group_by(SummaryModel.document_id)
+            .subquery()
+        )
+        rows = await session.execute(
+            select(DocumentModel.title, SummaryModel.content)
+            .join(DocumentModel, DocumentModel.id == SummaryModel.document_id)
+            .join(
+                latest_subq,
+                (SummaryModel.document_id == latest_subq.c.document_id)
+                & (SummaryModel.created_at == latest_subq.c.max_ts),
+            )
+            .order_by(DocumentModel.title)
+        )
+        return [(row.title, row.content) for row in rows]
 
 
 async def summary_node(state: ChatState) -> dict:
-    """Fetch executive summary from DB; fall through to search if absent."""
+    """Fetch executive summary from DB; fall through to search if absent.
+
+    scope='single': fetch this document's executive summary and set answer directly
+                    (no LLM call — the cached summary IS the answer).
+    scope='all':    fetch per-document executive summaries for ALL docs in parallel,
+                    format them as section_context so synthesize_node calls the LLM
+                    to synthesize a cross-library answer with proper citations.
+    """
     doc_ids = state.get("doc_ids") or []
     scope = state.get("scope", "all")
 
-    try:
-        summary_content = await _fetch_executive_summary(doc_ids, scope)
-    except Exception:
-        logger.warning("summary_node: DB lookup failed", exc_info=True)
-        summary_content = None
+    logger.info("summary_node: scope=%s", scope)
 
-    if not summary_content:
-        # No summary available — fall through to search_node
-        logger.debug("summary_node: no executive summary found, falling through to search")
+    if scope == "single" and doc_ids:
+        try:
+            summary_content = await _fetch_single_doc_executive_summary(doc_ids[0])
+        except Exception:
+            logger.warning("summary_node: single-doc DB lookup failed", exc_info=True)
+            summary_content = None
+
+        if not summary_content:
+            logger.info(
+                "summary_node: no cached summary for doc %s — falling through to search",
+                doc_ids[0],
+            )
+            return {"intent": "factual"}
+
+        logger.info(
+            "summary_node: serving cached summary (%d chars), skipping LLM call",
+            len(summary_content),
+        )
+        return {
+            "answer": summary_content,
+            "confidence": "high",
+            "chunks": [],
+        }
+
+    # scope='all': fetch every document's executive summary and synthesize via LLM
+    try:
+        doc_summaries = await _fetch_all_doc_executive_summaries()
+    except Exception:
+        logger.warning("summary_node: all-docs DB lookup failed", exc_info=True)
+        doc_summaries = []
+
+    if not doc_summaries:
+        logger.info(
+            "summary_node: no executive summaries exist for any document"
+            " — falling through to search"
+        )
         return {"intent": "factual"}
 
-    logger.debug("summary_node: executive summary found (%d chars)", len(summary_content))
-    # Set answer directly so synthesize_node passes through (no redundant LLM call).
-    # confidence='high' because the executive summary is the authoritative answer for
-    # summary intent — no LLM generation uncertainty applies.
+    logger.info(
+        "summary_node: found %d document summaries — sending to LLM for synthesis",
+        len(doc_summaries),
+    )
+    parts = [f"[Document: {title}]\n{content}" for title, content in doc_summaries]
+    section_context = "\n\n---\n\n".join(parts)
     return {
-        "answer": summary_content,
-        "confidence": "high",
+        "section_context": section_context,
         "chunks": [],
     }
 
@@ -296,8 +386,13 @@ async def graph_node(state: ChatState) -> dict:
     except Exception:
         logger.warning("graph_node: Kuzu query failed", exc_info=True)
 
+    logger.info(
+        "graph_node: extracted %d entities, got %d graph lines",
+        len(entity_names), len(graph_lines),
+    )
+
     if not graph_lines:
-        logger.debug("graph_node: no graph results, falling through to search")
+        logger.info("graph_node: no graph results — falling through to search")
         return {"intent": "factual"}
 
     section_context = "Knowledge graph connections:\n" + "\n".join(graph_lines)
@@ -329,38 +424,8 @@ async def graph_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# comparative_node — dual retrieval with side detection + interleaving
+# comparative_node — N-way comparison with LLM decomposition + document routing
 # ---------------------------------------------------------------------------
-
-_BETWEEN_RE = re.compile(
-    r"\bbetween\s+(.+?)\s+and\s+(.+?)(?:\?|$)", re.IGNORECASE
-)
-_VS_RE = re.compile(
-    r"(.+?)\s+(?:versus|vs\.?)\s+(.+?)(?:\?|$)", re.IGNORECASE
-)
-
-
-def _detect_comparison_sides(question: str) -> tuple[str, str] | None:
-    """Return (side_a, side_b) if comparison sides can be detected, else None."""
-    m = _BETWEEN_RE.search(question)
-    if m:
-        return m.group(1).strip(), m.group(2).strip()
-    m = _VS_RE.search(question)
-    if m:
-        return m.group(1).strip(), m.group(2).strip()
-    return None
-
-
-def _interleave(a: list, b: list) -> list:
-    """Interleave two lists: [a0, b0, a1, b1, ...]."""
-    result: list = []
-    for x, y in zip(a, b):
-        result.append(x)
-        result.append(y)
-    # Append remainder from the longer list
-    result.extend(a[len(b) :])
-    result.extend(b[len(a) :])
-    return result
 
 
 def _chunk_to_dict(c: ScoredChunk) -> dict:
@@ -375,33 +440,223 @@ def _chunk_to_dict(c: ScoredChunk) -> dict:
     }
 
 
+def _round_robin(lists: list[list]) -> list:
+    """Round-robin interleave N lists: [l0[0], l1[0], l2[0], l0[1], l1[1], ...]."""
+    result: list = []
+    iters = [iter(lst) for lst in lists]
+    while True:
+        advanced = False
+        for it in iters:
+            try:
+                result.append(next(it))
+                advanced = True
+            except StopIteration:
+                pass
+        if not advanced:
+            break
+    return result
+
+
+async def _decompose_comparison(question: str) -> dict | None:
+    """LLM-decompose a comparison question into N sides and a topic.
+
+    Returns {"sides": [list of subject names], "topic": str} or None on failure.
+    Handles 2-way, 3-way, and any N-way comparisons.
+    """
+    from app.config import get_settings  # noqa: PLC0415
+
+    try:
+        model = get_settings().LITELLM_DEFAULT_MODEL
+        response = await litellm.acompletion(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Extract ALL subjects being compared and the comparison topic. "
+                        'Reply with exactly this JSON (no prose, no markdown): '
+                        '{"sides": ["subject1", "subject2", ...], '
+                        '"topic": "what is being compared"}. '
+                        "sides must have 2 or more entries. "
+                        "If you cannot extract this structure, reply: null"
+                    ),
+                },
+                {"role": "user", "content": question},
+            ],
+            temperature=0.0,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        if text.lower() == "null":
+            return None
+        parsed = json.loads(text)
+        sides = parsed.get("sides")
+        topic = parsed.get("topic")
+        if (
+            isinstance(sides, list)
+            and len(sides) >= 2
+            and all(isinstance(s, str) and s.strip() for s in sides)
+            and isinstance(topic, str)
+            and topic.strip()
+        ):
+            return {"sides": [s.strip() for s in sides], "topic": topic.strip()}
+    except Exception:
+        logger.warning("_decompose_comparison: LLM call failed", exc_info=True)
+    return None
+
+
+async def _resolve_side_to_docs(
+    side_name: str, scope_doc_ids: list[str] | None
+) -> list[str]:
+    """Resolve a comparison side (author, character, work title) to document IDs.
+
+    Resolution order (results are unioned):
+      1. Kuzu exact entity match  — Entity.name == side_name (case-insensitive)
+      2. Kuzu partial entity match — Entity.name contains side_name
+      3. SQLite document title match — title contains side_name
+
+    An entity that appears in multiple documents (e.g. an author across several
+    works) returns all of those document IDs.
+
+    If scope_doc_ids is set, results are intersected with the allowed set.
+    Returns [] if nothing matched — caller falls back to unfiltered retrieval.
+    """
+    doc_ids: set[str] = set()
+
+    # Kuzu entity → document lookup
+    try:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        conn = get_graph_service()._conn
+        r = conn.execute(
+            "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
+            " WHERE lower(e.name) = lower($name)"
+            " RETURN DISTINCT d.id",
+            {"name": side_name},
+        )
+        while r.has_next():
+            row = r.get_next()
+            if row[0]:
+                doc_ids.add(row[0])
+        if not doc_ids:
+            r = conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
+                " WHERE contains(lower(e.name), lower($name))"
+                " RETURN DISTINCT d.id LIMIT 20",
+                {"name": side_name},
+            )
+            while r.has_next():
+                row = r.get_next()
+                if row[0]:
+                    doc_ids.add(row[0])
+    except Exception:
+        logger.warning(
+            "_resolve_side_to_docs: Kuzu lookup failed for %r", side_name, exc_info=True
+        )
+
+    # Document title search — catches cases where the side name appears in a title
+    try:
+        from sqlalchemy import func  # noqa: PLC0415
+
+        async with get_session_factory()() as session:
+            rows = await session.execute(
+                select(DocumentModel.id).where(
+                    func.lower(DocumentModel.title).contains(side_name.lower())
+                )
+            )
+            for row in rows:
+                doc_ids.add(row.id)
+    except Exception:
+        logger.warning(
+            "_resolve_side_to_docs: title search failed for %r", side_name, exc_info=True
+        )
+
+    resolved = list(doc_ids)
+    if scope_doc_ids:
+        resolved = [d for d in resolved if d in scope_doc_ids]
+    return resolved
+
+
 async def comparative_node(state: ChatState) -> dict:
-    """Dual retrieval with side detection; interleaves results for structured comparison."""
+    """N-way comparative retrieval with LLM decomposition and per-side document routing.
+
+    Pipeline:
+      1. LLM extracts N subjects and a comparison topic from the question.
+      2. Each subject is resolved to its documents via entity graph + title search.
+         A subject with multiple documents (e.g. an author with several works)
+         gets all of its documents searched together.
+      3. For each subject, retrieve topic-focused chunks filtered to that subject's
+         documents. All retrievals run in parallel.
+      4. Results are round-robin interleaved across all N subjects so no single
+         subject dominates the context window.
+
+    Falls back to unfiltered k=10 retrieval if LLM decomposition fails.
+    """
     question = state["question"]
     q = state.get("rewritten_question") or question
     doc_ids = state.get("doc_ids") or []
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
-
-    sides = _detect_comparison_sides(question)
     retriever = get_retriever()
 
+    decomposed = await _decompose_comparison(question)
+
+    if decomposed:
+        sides: list[str] = decomposed["sides"]
+        topic: str = decomposed["topic"]
+
+        logger.info(
+            "comparative_node: %d sides=%s topic=%r",
+            len(sides), sides, topic,
+        )
+
+        resolved: list[list[str]] = await asyncio.gather(
+            *[_resolve_side_to_docs(side, effective_doc_ids) for side in sides]
+        )
+
+        k_per_side = max(4, 12 // len(sides))
+
+        async def _retrieve_for_side(side: str, side_docs: list[str]) -> list[dict]:
+            # If no docs resolved for this side, widen the query to include the
+            # subject name so unfiltered retrieval still finds relevant passages.
+            query = topic if side_docs else f"{side} {topic}"
+            filter_ids = side_docs or effective_doc_ids
+            try:
+                chunks = await retriever.retrieve(query, filter_ids, k=k_per_side)
+                return [_chunk_to_dict(c) for c in chunks]
+            except Exception:
+                logger.warning(
+                    "comparative_node: retrieval failed for side %r", side, exc_info=True
+                )
+                return []
+
+        per_side_chunks: list[list[dict]] = await asyncio.gather(
+            *[_retrieve_for_side(side, docs) for side, docs in zip(sides, resolved)]
+        )
+
+        interleaved = _round_robin(per_side_chunks)
+
+        side_labels = "; ".join(
+            f"{side} ({len(docs)} doc(s))" for side, docs in zip(sides, resolved)
+        )
+        section_context = f"Comparing: {side_labels} — topic: {topic}"
+
+        for side, docs in zip(sides, resolved):
+            logger.info(
+                "comparative_node: side=%r resolved to %d doc(s)", side, len(docs)
+            )
+        logger.info(
+            "comparative_node: retrieving %d chunks per side, total=%d",
+            k_per_side, len(interleaved),
+        )
+        return {"chunks": interleaved, "section_context": section_context}
+
+    # Fallback: unfiltered retrieval when LLM decomposition fails
+    logger.info("comparative_node: LLM decomposition failed — using unfiltered retrieval")
     try:
-        if sides:
-            side_a, side_b = sides
-            chunks_a, chunks_b = await asyncio.gather(
-                retriever.retrieve(side_a, effective_doc_ids, k=5),
-                retriever.retrieve(side_b, effective_doc_ids, k=5),
-            )
-            interleaved = _interleave(
-                [_chunk_to_dict(c) for c in chunks_a],
-                [_chunk_to_dict(c) for c in chunks_b],
-            )
-        else:
-            chunks = await retriever.retrieve(q, effective_doc_ids, k=10)
-            interleaved = [_chunk_to_dict(c) for c in chunks]
+        chunks = await retriever.retrieve(q, effective_doc_ids, k=10)
+        interleaved = [_chunk_to_dict(c) for c in chunks]
     except Exception:
-        logger.warning("comparative_node: retrieval failed", exc_info=True)
+        logger.warning("comparative_node: fallback retrieval failed", exc_info=True)
         interleaved = []
 
     return {
@@ -460,6 +715,11 @@ async def search_node(state: ChatState) -> dict:
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
 
+    logger.info(
+        "search_node: query=%r scope=%s filter_docs=%s",
+        q[:80], scope, len(effective_doc_ids) if effective_doc_ids else "all",
+    )
+
     chunks_dicts: list[dict] = []
     try:
         retriever = get_retriever()
@@ -503,6 +763,7 @@ async def search_node(state: ChatState) -> dict:
     except Exception:
         logger.warning("search_node: retrieval failed", exc_info=True)
 
+    logger.info("search_node: returning %d chunks", len(chunks_dicts))
     return {"chunks": chunks_dicts}
 
 
@@ -538,6 +799,7 @@ async def synthesize_node(state: ChatState) -> dict:
     """
     existing_answer = state.get("answer", "")
     if existing_answer:
+        logger.info("synthesize_node: answer already set — pass-through, skipping LLM call")
         return {}
 
     chunks_dicts = state.get("chunks") or []
@@ -547,7 +809,13 @@ async def synthesize_node(state: ChatState) -> dict:
     intent = state.get("intent")
 
     if not chunks_dicts and not section_context:
+        logger.info("synthesize_node: no context available — returning not_found")
         return {"not_found": True}
+
+    logger.info(
+        "synthesize_node: intent=%s chunks=%d section_context=%s",
+        intent, len(chunks_dicts), "yes" if section_context else "no",
+    )
 
     from app.services.context_packer import pack_context  # noqa: PLC0415
 
@@ -604,6 +872,12 @@ async def synthesize_node(state: ChatState) -> dict:
 
 async def confidence_gate_node(state: ChatState) -> dict:
     """No-op node; routing decision is made by _route_after_confidence_gate."""
+    confidence = state.get("confidence", "low")
+    retry_attempted = state.get("retry_attempted", False)
+    logger.info(
+        "confidence_gate_node: confidence=%s retry_attempted=%s",
+        confidence, retry_attempted,
+    )
     return {}
 
 
@@ -616,7 +890,9 @@ def _route_after_confidence_gate(state: ChatState) -> str:
     confidence = state.get("confidence", "low")
     retry_attempted = state.get("retry_attempted", False)
     if confidence == "low" and not retry_attempted:
+        logger.info("confidence_gate_node: low confidence, triggering augment retry")
         return "augment_node"
+    logger.info("confidence_gate_node: confidence=%s — routing to END", confidence)
     return END
 
 
@@ -637,6 +913,7 @@ async def augment_node(state: ChatState) -> dict:
     doc_ids = state.get("doc_ids") or []
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
+    logger.info("augment_node: low confidence — augmenting context (primary=%s)", primary)
 
     existing_chunks: list[dict] = list(state.get("chunks") or [])
     existing_section_context: str = state.get("section_context") or ""
@@ -690,11 +967,9 @@ async def augment_node(state: ChatState) -> dict:
         else:
             combined_section_context = supplement
 
-    logger.debug(
-        "augment_node: strategy=%s added %d chunks + %d graph lines",
-        primary,
-        len(new_chunks),
-        len(new_section_lines),
+    logger.info(
+        "augment_node: added %d chunks + %d graph lines (total chunks now %d)",
+        len(new_chunks), len(new_section_lines), len(combined_chunks),
     )
     return {
         "chunks": combined_chunks,

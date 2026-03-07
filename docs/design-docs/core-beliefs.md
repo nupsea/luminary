@@ -185,3 +185,33 @@ class _MockEmbeddingService:
 Reserve `MagicMock` for external system boundaries only (LiteLLM, httpx, SQLAlchemy internals). Domain service stubs should be plain Python classes with no mock framework dependencies.
 
 **Rationale**: `MagicMock()` confirms that the mock was called, not that the application produced correct output. Deterministic stubs let you assert exact vector dimensions, count rows in LanceDB, and verify retrieval scores. They also prevent the regression where a real service interface changes but the mock silently accepts the old call signature.
+
+---
+
+## 22. Never Implement a Code Path Against Phantom Data
+
+A code path that queries a table only populated by a separate optional story or admin action is a phantom dependency. The path compiles, tests pass (the DB is empty and the code falls through), but the user experience is broken because the required data never exists in a real installation.
+
+Rule: Every primary code path must be tested with real rows in the tables it queries. If a table is populated by a separate story, either: (a) implement the feature against data that IS guaranteed to exist after normal use — e.g. per-document SummaryModel rows written during ingestion, not a LibrarySummaryModel that requires a separate summarize-all call; or (b) mark the story explicitly blocked on the dependency story and do not mark it passes: true.
+
+**Rationale**: Silent fallthrough to a degraded code path is not graceful degradation — it is a feature that appears to work but produces wrong output.
+
+---
+
+## 23. UI Surface Inputs Must Be Mechanical Test Cases for Routing
+
+Any text shown to the user as a suggested action (sample questions, autocomplete, suggested prompts) must be asserted as test inputs for the routing or classification layer that handles them. If the chat UI shows a suggested question, there must be a test asserting it routes to the correct node with the expected intent and confidence.
+
+Rule: When writing or modifying a classifier or router, list every UI-surface example as a parametrized test case. Add new UI examples to the test at the same time they are added to the UI.
+
+**Rationale**: Keyword heuristics fail on natural language variation. Substring matching is brittle. The only mechanical guard is testing the exact strings the user will actually type — the most reliable source of which is the UI's own suggested inputs.
+
+---
+
+## 24. Scope Is a First-Class Routing Dimension, Not Just a Filter
+
+Scope (single document vs. entire library) changes which retrieval strategy is correct, not only which documents are searched. A broad question over the full library requires document-level synthesis (executive summaries per document), not chunk retrieval that is statistically biased toward whichever document has the highest vector similarity. Treating scope purely as a document_id filter is a design error.
+
+Rule: Every strategy node in the chat graph must handle scope=all and scope=single as distinct code paths. For scope=all, broad/exploratory questions route to summary_node (per-document executive summaries), not search_node (chunk retrieval). For comparative queries, each comparison subject is resolved to its own document set, and retrieval runs independently per subject.
+
+**Rationale**: k=10 chunk retrieval across an entire library does not sample documents uniformly — it concentrates on whichever document scores highest for the query. Summary synthesis reads every document equally.

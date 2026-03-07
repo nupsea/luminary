@@ -211,12 +211,22 @@ export default function Chat() {
 
             if (payload["done"] === true) {
               const not_found = payload["not_found"] === true
+              const finalAnswer = typeof payload["answer"] === "string" ? payload["answer"] : undefined
               const citations = (payload["citations"] as Citation[] | undefined) ?? []
               const confidence = (payload["confidence"] as Confidence | undefined) ?? "low"
               setMessages((m) =>
                 m.map((msg) =>
                   msg.id === assistantId
-                    ? { ...msg, isStreaming: false, citations, confidence, not_found }
+                    ? {
+                        ...msg,
+                        // Replace streamed tokens with clean parsed answer from backend.
+                        // This removes any citation JSON fragments that leaked during streaming.
+                        text: finalAnswer !== undefined ? finalAnswer : msg.text,
+                        isStreaming: false,
+                        citations,
+                        confidence,
+                        not_found,
+                      }
                     : msg,
                 ),
               )

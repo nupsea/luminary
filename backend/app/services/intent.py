@@ -22,11 +22,21 @@ _SUMMARY_KWS: frozenset[str] = frozenset(
         "overview",
         "what is this about",
         "what are the themes",
+        "what are the main",
+        "main theme",
+        "main topics",
+        "key theme",
+        "major theme",
+        "core theme",
         "main points",
         "key ideas",
         "synopsis",
         "brief me",
         "give me a summary",
+        "tell me about",
+        "what do these",
+        "across all",
+        "across my",
     }
 )
 
@@ -92,7 +102,7 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     return ("exploratory", 0.5)
 
 
-async def _llm_classify_fallback(question: str, default: str) -> str:
+async def _llm_classify_fallback(question: str, default: str, scope: str = "all") -> str:
     """Call LiteLLM to classify intent when heuristic confidence < 0.7.
 
     The model is asked to reply with exactly one of the five intent words.
@@ -102,12 +112,18 @@ async def _llm_classify_fallback(question: str, default: str) -> str:
     Args:
         question: raw user question
         default: the heuristic's best guess (used only for logging)
+        scope: 'single' (one document) or 'all' (entire library)
 
     Returns:
         intent string (one of the five valid intents)
     """
     from app.config import get_settings  # noqa: PLC0415
 
+    scope_hint = (
+        "The user is asking about their ENTIRE document library (all content)."
+        if scope == "all"
+        else "The user is asking about a SINGLE specific document."
+    )
     try:
         model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
@@ -116,8 +132,11 @@ async def _llm_classify_fallback(question: str, default: str) -> str:
                 {
                     "role": "system",
                     "content": (
+                        f"{scope_hint} "
                         "Classify the question. Reply with exactly one word: "
-                        "summary, factual, relational, comparative, or exploratory."
+                        "summary, factual, relational, comparative, or exploratory. "
+                        "Use 'summary' for broad questions about themes, topics, patterns, "
+                        "or overviews — especially when scope is the entire library."
                     ),
                 },
                 {"role": "user", "content": question},
