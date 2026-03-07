@@ -9,7 +9,7 @@ import asyncio
 import logging
 import math
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import litellm
 from sqlalchemy import select
@@ -108,7 +108,7 @@ class SectionSummarizerService:
                     heading=unit["heading"][:200],
                     content=summary_text,
                     unit_index=unit_index,
-                    created_at=datetime.utcnow(),
+                    created_at=datetime.now(UTC),
                 )
                 async with get_session_factory()() as session:
                     session.add(row)
