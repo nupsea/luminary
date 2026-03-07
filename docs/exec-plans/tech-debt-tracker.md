@@ -12,3 +12,4 @@
 | TD-008 | Raw uploaded files (~/.luminary/raw/{doc_id}.ext) are not deleted when a document is deleted — accumulates disk usage over time | low | ralph | 2026-03-01 |
 | TD-009 | `conversation` summary mode is not pre-generated during ingestion — first request triggers a full on-demand LLM call even though `_map_reduce` cache skips the map step | low | ralph | 2026-03-01 |
 | TD-010 | SQLite FK pragma not enabled — cascading deletes are implemented manually in every delete endpoint; risk of orphaned rows if a new related table is added without updating all delete paths | med | ralph | 2026-03-01 |
+| TD-011 | pack_context() uses a word-count token approximation (word_count * 1.3). Replace with tiktoken or litellm.token_counter for exact counts, especially if context windows larger than 4k are used. | low | ralph | 2026-03-07 |

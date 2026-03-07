@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all eval logs smoke
+.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
@@ -41,6 +41,10 @@ test-books-all:
 	@echo "Ingesting all 3 books once, then running all book tests..."
 	cd backend && uv run pytest tests/test_diagnostics.py tests/test_book_content.py tests/test_e2e_book.py \
 	  -v -m slow --timeout=2400
+
+test-v2:
+	@echo "Running V2 pipeline integration tests (requires 3 corpus books ingested)..."
+	cd backend && uv run pytest tests/test_v2_pipeline.py -v -m slow --timeout=1800
 
 smoke:
 	@echo "Running smoke tests (requires backend on :8000)..."

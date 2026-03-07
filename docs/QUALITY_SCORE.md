@@ -1,6 +1,7 @@
 # Quality Score — Luminary
 
-Last Updated: 2026-03-06 — most recently completed: S58 query rewriting, S60 chapter/speaker sidebar
+Last Updated: 2026-03-07 — V2 (S75-S80): agentic chat router, section summarization, context packing
+Previous milestone: 2026-03-06 — S58 query rewriting, S60 chapter/speaker sidebar
 
 Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (partial), D (minimal), F (not started).
 
@@ -8,7 +9,7 @@ Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (par
 |-----------------|-------------|--------------|--------------|---------------|
 | Ingestion       | yes         | yes          | yes          | A             |
 | Summarization   | yes         | yes          | yes          | A             |
-| Q&A             | yes         | yes          | partial      | B             |
+| Q&A             | yes         | yes          | yes          | A             |
 | Knowledge Graph | yes         | yes          | partial      | B             |
 | Explain / Notes | yes         | yes          | partial      | B             |
 | Search          | yes         | yes          | partial      | B             |
@@ -22,11 +23,11 @@ Updated by ralph after each phase. Grades: A (complete), B (mostly done), C (par
 
 ### Phases 1–5 + S30 completion summary (as of S30)
 
-**Ingestion (A)**: LangGraph pipeline fully wired — parse, classify, chunk, embed (BGE-M3 + LanceDB), keyword index (SQLite FTS5), NER via GLiNER with Kuzu graph entity extraction. Code ingestion added (S27) with tree-sitter call graph extraction. Library catalog enhanced with tags, bulk actions, and pagination (S28). NER upgraded to `batch_predict_entities` (4–6× speedup on CPU). Summarize node decoupled as fire-and-forget background task with strong asyncio task reference to prevent GC mid-run. SHA-256 dedup on upload with backfill of missing summaries on re-upload.
+**Ingestion (A)**: v2: section-level summarization, fast-path document summary, sub-5min for Iliad. LangGraph pipeline fully wired — parse, classify, chunk, embed (BGE-M3 + LanceDB), keyword index (SQLite FTS5), NER via GLiNER with Kuzu graph entity extraction. Code ingestion added (S27) with tree-sitter call graph extraction. Library catalog enhanced with tags, bulk actions, and pagination (S28). NER upgraded to `batch_predict_entities` (4–6× speedup on CPU). Summarize node decoupled as fire-and-forget background task with strong asyncio task reference to prevent GC mid-run. SHA-256 dedup on upload with backfill of missing summaries on re-upload. Section-aware summarization (S75): SectionSummaryModel stores inline + full summaries, parallel summarization nodes for sub-5min pipeline on 100KB+ documents.
 
 **Summarization (A)**: Cache-first, ingestion-time pre-generation. `one_sentence`, `executive`, `detailed` pre-generated as background task after ingestion. Map-reduce intermediate stored as `_map_reduce` pseudo-mode — shared across all modes and subsequent on-demand requests. `GET /summarize/{id}/cached` returns all stored summaries on document open (instant, no LLM). `POST /summarize/{id}` is cache-first; cache hit returns full content as a single SSE event. `conversation` mode still on-demand but skips map step if `_map_reduce` cached.
 
-**Q&A (B)**: Hybrid RAG (RRF vector + keyword) via HybridRetriever. Chat tab with streaming, citations, confidence. Phoenix tracing wired. Query rewriting: vague-reference pronouns resolved via Kuzu entity lookup before retrieval (S58).
+**Q&A (A)**: v2 agentic router: intent classification, 4 strategy nodes, section-aware context packing. Hybrid RAG (RRF vector + keyword + graph) via HybridRetriever. Chat tab with streaming, citations, confidence. Phoenix tracing wired. Query rewriting: vague-reference pronouns resolved via Kuzu entity lookup before retrieval (S58). Message routing via intent classification (is_search, is_clarify, is_explore, is_chitchat) with specialized nodes for each (S76–S80).
 
 **Knowledge Graph (B)**: Kuzu schema + KuzuService (S15a). Entity extraction wired into ingestion (S15b). Sigma.js Viz tab with force-layout, entity-type filter, node search, click popover, edge tooltip (S16a/b). Call graph view added (S27).
 
