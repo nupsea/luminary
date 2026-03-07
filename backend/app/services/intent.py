@@ -18,6 +18,7 @@ _VALID_INTENTS: frozenset[str] = frozenset(
 _SUMMARY_KWS: frozenset[str] = frozenset(
     {
         "summarize",
+        "summary",
         "overview",
         "what is this about",
         "what are the themes",
@@ -32,11 +33,9 @@ _SUMMARY_KWS: frozenset[str] = frozenset(
 _RELATIONAL_KWS: frozenset[str] = frozenset(
     {
         "how are",
-        "how does",
         "relation between",
         "connection between",
         "what is the relationship",
-        "how do",
     }
 )
 

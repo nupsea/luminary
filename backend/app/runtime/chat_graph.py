@@ -22,21 +22,17 @@ import asyncio
 import logging
 import re
 
-import litellm
 from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, LibrarySummaryModel, SectionSummaryModel, SummaryModel
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
-from app.services.llm import get_llm_service
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
     QA_SYSTEM_PROMPT,
-    _enrich_citation_titles,
     _maybe_rewrite_query,
     _should_use_summary,
-    _split_response,
 )
 from app.services.retriever import get_retriever
 from app.types import ChatState, ScoredChunk
@@ -510,11 +506,16 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
 
 
 async def synthesize_node(state: ChatState) -> dict:
-    """Call LLM with intent-appropriate prompt; parse answer/citations/confidence.
+    """Prepare LLM prompt for stream_answer() to call streaming.
 
-    Pass-through: if a strategy node already set a non-empty answer, returns {}.
+    Pass-through: if a strategy node already set a non-empty answer (e.g. summary_node
+    with a cached executive summary), returns {} so stream_answer() uses that answer.
     No-context: if both chunks and section_context are absent, returns {"not_found": True}.
-    LLM errors are re-raised so stream_answer() can surface them with correct SSE events.
+
+    True streaming design: synthesize_node prepares the prompt and system_prompt, stores
+    them in state as _llm_prompt and _system_prompt, and returns WITHOUT calling the LLM.
+    stream_answer() calls the LLM streaming and yields tokens progressively to the SSE
+    client as they are generated, rather than buffering the full response first.
     """
     existing_answer = state.get("answer", "")
     if existing_answer:
@@ -523,7 +524,6 @@ async def synthesize_node(state: ChatState) -> dict:
     chunks_dicts = state.get("chunks") or []
     section_context = state.get("section_context")
     question = state["question"]
-    model = state.get("model")
     scope = state.get("scope", "all")
     intent = state.get("intent")
 
@@ -531,21 +531,6 @@ async def synthesize_node(state: ChatState) -> dict:
         return {"not_found": True}
 
     from app.services.context_packer import pack_context  # noqa: PLC0415
-
-    # Reconstruct ScoredChunk objects for _enrich_citation_titles
-    scored_chunks = [
-        ScoredChunk(
-            chunk_id=c.get("chunk_id", ""),
-            document_id=c.get("document_id", ""),
-            text=c.get("text", ""),
-            section_heading=c.get("section_heading", ""),
-            page=c.get("page", 0),
-            score=c.get("score", 0.0),
-            source=c.get("source", "vector"),  # type: ignore[arg-type]
-        )
-        for c in chunks_dicts
-    ]
-    doc_titles = await _fetch_doc_titles_for_chunks(chunks_dicts)
 
     # Assemble chunk context using the pure context packer (dedup + section grouping)
     chunks_context = pack_context(chunks_dicts, token_budget=3000) if chunks_dicts else ""
@@ -587,30 +572,10 @@ async def synthesize_node(state: ChatState) -> dict:
     prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
     system_prompt = _get_system_prompt(intent)
 
-    llm = get_llm_service()
-    try:
-        token_gen = await llm.generate(prompt, system=system_prompt, model=model, stream=True)
-        collected: list[str] = []
-        async for token in token_gen:
-            collected.append(token)
-    except (litellm.ServiceUnavailableError, ValueError, litellm.AuthenticationError):
-        raise
-    except Exception:
-        raise
-
-    full_text = "".join(collected)
-
-    if NOT_FOUND_SENTINEL in full_text:
-        return {"not_found": True}
-
-    answer_text, citations, confidence = _split_response(full_text)
-    citations = _enrich_citation_titles(citations, scored_chunks, doc_titles, scope)
-
-    return {
-        "answer": answer_text,
-        "citations": citations,
-        "confidence": confidence,
-    }
+    # Return prompt fields for stream_answer() to call the LLM streaming directly.
+    # This enables true token-by-token streaming: the first SSE token event is sent
+    # as the LLM generates it, not after all tokens are buffered.
+    return {"_llm_prompt": prompt, "_system_prompt": system_prompt}
 
 
 # ---------------------------------------------------------------------------

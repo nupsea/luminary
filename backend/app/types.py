@@ -67,3 +67,9 @@ class ChatState(TypedDict):
     citations: list[dict]
     confidence: str  # 'high' | 'medium' | 'low'
     not_found: bool
+
+    # Internal streaming fields — set by synthesize_node, consumed by stream_answer().
+    # synthesize_node prepares the LLM prompt but does NOT call the LLM; stream_answer()
+    # calls the LLM streaming to yield tokens progressively as they are generated.
+    _llm_prompt: str | None
+    _system_prompt: str | None

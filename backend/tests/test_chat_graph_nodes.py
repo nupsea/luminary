@@ -85,6 +85,8 @@ def _make_state(**overrides) -> dict:
         "citations": [],
         "confidence": "low",
         "not_found": False,
+        "_llm_prompt": None,
+        "_system_prompt": None,
     }
     base.update(overrides)
     return base
@@ -295,22 +297,16 @@ async def test_comparative_node_interleaves_results(test_db):
 
 
 @pytest.mark.asyncio
-async def test_synthesize_node_calls_litellm(test_db):
-    """synthesize_node calls get_llm_service().generate when chunks are present."""
+async def test_synthesize_node_prepares_llm_prompt(test_db):
+    """synthesize_node prepares _llm_prompt/_system_prompt for stream_answer() streaming.
+
+    With the true-streaming design, synthesize_node does NOT call the LLM directly.
+    It returns _llm_prompt and _system_prompt so stream_answer() can call the LLM
+    streaming and yield tokens progressively to the SSE client.
+    """
     doc_id = str(uuid.uuid4())
     _engine, factory, _tmp = test_db
     await _insert_doc(factory, doc_id)
-
-    answer_tokens = ["The", " answer", " is", " here."]
-    citations_json = ' {"citations": [], "confidence": "high"}'
-    full_response = "".join(answer_tokens) + citations_json
-
-    async def _fake_gen(*_args, **_kwargs):
-        for token in [full_response]:
-            yield token
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_fake_gen())
 
     chunks = [
         {
@@ -329,8 +325,12 @@ async def test_synthesize_node_calls_litellm(test_db):
         intent="factual",
     )
 
-    with patch("app.runtime.chat_graph.get_llm_service", return_value=mock_llm):
-        result = await synthesize_node(state)
+    result = await synthesize_node(state)
 
-    mock_llm.generate.assert_called_once()
-    assert result.get("answer") or result.get("not_found")
+    # synthesize_node must return _llm_prompt and _system_prompt — no LLM call
+    assert result.get("_llm_prompt"), "Expected _llm_prompt to be set"
+    assert result.get("_system_prompt") is not None
+    assert "What is the answer?" in result["_llm_prompt"]
+    # answer should NOT be set — LLM not yet called
+    assert not result.get("answer")
+    assert not result.get("not_found")

@@ -295,6 +295,8 @@ class QAService:
                     "citations": [],
                     "confidence": "low",
                     "not_found": False,
+                    "_llm_prompt": None,
+                    "_system_prompt": None,
                 }
 
                 try:
@@ -313,7 +315,6 @@ class QAService:
                     return
 
                 root_span.set_attribute("qa.intent", result.get("intent") or "")
-                root_span.set_attribute("qa.confidence", result.get("confidence") or "")
 
                 chunks_returned = result.get("chunks") or []
 
@@ -336,21 +337,100 @@ class QAService:
                         yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
                     return
 
-            # Stream answer tokens (outside the trace span — same as V1)
-            answer_text = result.get("answer") or ""
-            for word in answer_text.split():
-                yield f'data: {json.dumps({"token": word + " "})}\n\n'
-
-            citations = result.get("citations") or []
-            confidence = result.get("confidence") or "low"
-
-            # Persist Q&A history
+            # --- Post-graph: stream answer tokens outside the trace span ---
+            #
+            # Two paths:
+            #   (A) Pass-through: a strategy node (e.g. summary_node with cached exec summary)
+            #       set state['answer'] directly.  Stream that answer word-by-word.
+            #   (B) LLM streaming: synthesize_node prepared _llm_prompt/_system_prompt.
+            #       Call the LLM streaming here so the SSE client receives tokens as they
+            #       are generated, not after the full response is buffered.
             first_doc_id = document_ids[0] if document_ids else None
+            llm_prompt = result.get("_llm_prompt")
+
+            if llm_prompt:
+                # Path B — true streaming: call LLM here, yield tokens progressively
+                system_prompt = result.get("_system_prompt") or ""
+                llm = get_llm_service()
+                try:
+                    token_gen = await llm.generate(
+                        llm_prompt, system=system_prompt, model=effective_model, stream=True
+                    )
+                except (
+                    litellm.ServiceUnavailableError,
+                    ValueError,
+                    litellm.AuthenticationError,
+                ) as exc:
+                    if isinstance(exc, ValueError):
+                        msg = "LLM provider not configured. Add your API key in Settings."
+                    elif isinstance(exc, litellm.AuthenticationError):
+                        msg = "LLM API key is invalid. Check your key in Settings."
+                    else:
+                        msg = "LLM service unavailable. If using Ollama, run: ollama serve"
+                    payload = {"error": "llm_unavailable", "message": msg, "done": True}
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    return
+
+                # Stream tokens as they arrive; stop before the citation JSON block.
+                # NOT_FOUND_SENTINEL detection prevents yielding the sentinel text as tokens.
+                collected: list[str] = []
+                full_text_so_far = ""
+                async for token in token_gen:
+                    collected.append(token)
+                    full_text_so_far += token
+                    # Stop streaming tokens once we hit the citation JSON block or sentinel
+                    if re.search(r'\{"citations"|\{"answer"', full_text_so_far):
+                        break
+                    if NOT_FOUND_SENTINEL in full_text_so_far:
+                        break
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+
+                # Drain any remaining tokens for full_text computation
+                async for token in token_gen:
+                    collected.append(token)
+
+                full_text = "".join(collected)
+
+                if NOT_FOUND_SENTINEL in full_text:
+                    await self._store_qa(question, None, [], "low", None, scope, effective_model)
+                    yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                    return
+
+                answer_text, citations, confidence = _split_response(full_text)
+
+                # Enrich citations with document titles
+                scored_chunks_for_citation = [
+                    ScoredChunk(
+                        chunk_id=c.get("chunk_id", ""),
+                        document_id=c.get("document_id", ""),
+                        text=c.get("text", ""),
+                        section_heading=c.get("section_heading", ""),
+                        page=c.get("page", 0),
+                        score=c.get("score", 0.0),
+                        source=c.get("source", "vector"),  # type: ignore[arg-type]
+                    )
+                    for c in chunks_returned
+                ]
+                chunk_doc_ids = list(
+                    {c["document_id"] for c in chunks_returned if c.get("document_id")}
+                )
+                doc_titles = await self._fetch_doc_titles(chunk_doc_ids)
+                citations = _enrich_citation_titles(
+                    citations, scored_chunks_for_citation, doc_titles, scope
+                )
+
+            else:
+                # Path A — pass-through: strategy node set answer directly
+                answer_text = result.get("answer") or ""
+                for word in answer_text.split():
+                    yield f'data: {json.dumps({"token": word + " "})}\n\n'
+                citations = result.get("citations") or []
+                confidence = result.get("confidence") or "low"
+
+            # Persist Q&A history and yield final SSE event
             qa_id = await self._store_qa(
                 question, answer_text, citations, confidence, first_doc_id, scope, effective_model
             )
-
-            # Final SSE event with citations and metadata
             final = {
                 "done": True,
                 "answer": answer_text,

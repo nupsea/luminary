@@ -119,3 +119,35 @@ def test_exploratory_for_unknown_question():
     intent, confidence = classify_intent_heuristic("Tell me something interesting.")
     assert intent == "exploratory"
     assert confidence == 0.5
+
+
+# ---------------------------------------------------------------------------
+# New ACs: 'summary' word alone, and 'how does'/'how do' not relational
+# ---------------------------------------------------------------------------
+
+
+def test_summary_keyword_alone():
+    """'summary' as a standalone word triggers intent='summary' with confidence=0.9."""
+    for question in [
+        "what is the summary of this book?",
+        "provide a summary",
+        "give me a summary",
+        "the summary of this document",
+    ]:
+        intent, conf = classify_intent_heuristic(question)
+        assert intent == "summary", f"Expected 'summary' for {question!r}, got {intent!r}"
+        assert conf == 0.9
+
+
+def test_factual_question_not_relational():
+    """Questions with 'how does'/'how do' must NOT classify as relational."""
+    factual_questions = [
+        "how does the main character escape?",
+        "how does FSRS scheduling work?",
+        "how do the gods intervene in the story?",
+    ]
+    for q in factual_questions:
+        intent, _ = classify_intent_heuristic(q)
+        assert intent != "relational", (
+            f"Expected non-relational for {q!r}, got {intent!r}"
+        )

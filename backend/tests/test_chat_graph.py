@@ -13,6 +13,9 @@
 """
 
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -64,6 +67,8 @@ def _make_initial_state(question: str) -> dict:
         "citations": [],
         "confidence": "low",
         "not_found": False,
+        "_llm_prompt": None,
+        "_system_prompt": None,
     }
 
 
@@ -139,3 +144,76 @@ def test_get_chat_graph_returns_singleton():
     g1 = get_chat_graph()
     g2 = get_chat_graph()
     assert g1 is g2
+
+
+# ---------------------------------------------------------------------------
+# test_streaming_is_progressive — true streaming AC
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_streaming_is_progressive(test_db):
+    """stream_answer() yields the first SSE 'token' event before all LLM tokens are generated.
+
+    The mock graph returns _llm_prompt in state (synthesize_node prepared the prompt).
+    The mock LLM generator tracks when each token is yielded vs when SSE events are emitted.
+    With true streaming: first SSE event arrives before last LLM token is generated.
+    """
+    order: list[str] = []
+
+    tokens_to_yield = ["Hello", " world", "!"]
+
+    async def mock_token_gen():
+        for i, tok in enumerate(tokens_to_yield):
+            order.append(f"llm_{i}")
+            await asyncio.sleep(0)  # yield control — simulates async generation
+            yield tok
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=mock_token_gen())
+
+    # Mock graph returns _llm_prompt so stream_answer() calls the LLM streaming path
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(
+        return_value={
+            "question": "What is this?",
+            "intent": "factual",
+            "not_found": False,
+            "answer": "",
+            "chunks": [],
+            "section_context": None,
+            "citations": [],
+            "confidence": "low",
+            "_llm_prompt": "test prompt",
+            "_system_prompt": "You are helpful.",
+            "doc_ids": [],
+            "scope": "all",
+            "model": None,
+            "rewritten_question": None,
+        }
+    )
+
+    from app.services.qa import get_qa_service
+
+    svc = get_qa_service()
+    sse_token_count = 0
+
+    with (
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+    ):
+        async for sse_event in svc.stream_answer("What is this?", [], "all", None):
+            if '"token"' in sse_event:
+                order.append(f"sse_{sse_token_count}")
+                sse_token_count += 1
+            if '"done"' in sse_event:
+                break
+
+    # Verify that the first SSE token event was recorded before the last LLM token
+    assert sse_token_count > 0, "No SSE token events were yielded"
+    first_sse_idx = next(i for i, e in enumerate(order) if e.startswith("sse_"))
+    last_llm_idx = max(i for i, e in enumerate(order) if e.startswith("llm_"))
+    assert first_sse_idx < last_llm_idx, (
+        f"Streaming is buffered: first SSE (idx={first_sse_idx}) came after "
+        f"last LLM token (idx={last_llm_idx}). Order: {order}"
+    )
