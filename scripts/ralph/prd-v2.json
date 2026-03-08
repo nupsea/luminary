@@ -293,7 +293,7 @@
         "scripts/smoke/S83.sh exits 0",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S84",

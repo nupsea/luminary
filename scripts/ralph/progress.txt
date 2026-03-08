@@ -109,3 +109,21 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - When a cache-first pattern exists, newly added filters must bypass the cache or the stale cached value defeats the filter. pregenerate() overwrote `section_input` with `cached_sr.content` before the fix.
   - Pure utility functions shared across two services create a directed import dependency; consider placing them in app/types/ or app/services/text_utils.py for future refactors.
 ---
+
+## 2026-03-08T01:00:00Z - S83 - Bug: Low confidence on multi-doc scope queries and missing library summary fallback
+- Implemented: summary_node checks LibrarySummaryModel for scope='all'; fires background generation + placeholder on miss. search_node reduces k=6 and applies _cap_per_document(max_per_doc=2) for scope='all'. synthesize_node appends multi-doc attribution instruction. _split_response defaults confidence='medium' for long answers without JSON block.
+- Files changed: backend/app/services/context_packer.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/tests/test_confidence_fixes.py, scripts/smoke/S83.sh
+- AC verified:
+  - summary_node scope='all' no LibrarySummaryModel returns medium+placeholder: PASS
+  - _split_response medium for >80 char answers: PASS
+  - _split_response low for short answers: PASS
+  - _cap_per_document limits chunks per doc: PASS
+  - search_node caps multi-doc chunks: PASS
+  - All 8 tests pass: PASS
+  - ruff check exits 0: PASS
+  - scripts/smoke/S83.sh exists: PASS (not verified vs live server)
+- Reviewer verdict: PASS (1 Critical fixed — unawaited coroutine in mock, fixed with coro.close() side_effect)
+- Learnings:
+  - When mocking asyncio.create_task, the coroutine argument is already created before the mock sees it; use side_effect to call coro.close() to prevent RuntimeWarning in strict CI.
+  - Patching asyncio.create_task at module level also intercepts SQLAlchemy's internal session close; prefer patching the specific function being tested (_fetch_library_executive_summary) to avoid collateral interception.
+---
