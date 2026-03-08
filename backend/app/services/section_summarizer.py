@@ -30,6 +30,32 @@ MIN_PREVIEW_LEN = 200
 MAX_UNITS = 100
 TEXT_HARD_CAP = 4000
 
+# Case-insensitive signals that indicate a metadata/legal section
+_METADATA_SIGNALS = [
+    "project gutenberg",
+    "terms of use",
+    "license",
+    "disclaimer",
+    "copyright",
+    "trademark",
+    "legal",
+    "distribution",
+    "reproduction",
+    "permitted use",
+    "electronic work",
+    "archive foundation",
+]
+
+
+def _is_metadata_section(heading: str, text: str) -> bool:
+    """Return True if this section is a metadata/legal section to be skipped.
+
+    Checks the heading and the first 500 chars of text for known signals.
+    Pure function — no I/O, no imports from other app layers.
+    """
+    combined = (heading + " " + text[:500]).lower()
+    return any(signal in combined for signal in _METADATA_SIGNALS)
+
 
 class SectionSummarizerService:
     async def generate(self, document_id: str, concurrency: int = 10) -> int:
@@ -53,7 +79,19 @@ class SectionSummarizerService:
             )
             all_sections = list(result.scalars().all())
 
-        qualifying = [s for s in all_sections if len(s.preview) >= MIN_PREVIEW_LEN]
+        # Filter metadata/legal sections before preview length check
+        non_metadata: list[SectionModel] = []
+        for s in all_sections:
+            if _is_metadata_section(s.heading, s.preview):
+                logger.debug(
+                    "Skipping metadata section: %s",
+                    s.heading,
+                    extra={"doc_id": document_id},
+                )
+            else:
+                non_metadata.append(s)
+
+        qualifying = [s for s in non_metadata if len(s.preview) >= MIN_PREVIEW_LEN]
 
         if not qualifying:
             logger.info(

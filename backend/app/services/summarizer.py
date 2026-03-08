@@ -30,6 +30,7 @@ from app.models import (
     SummaryModel,
 )
 from app.services.llm import get_llm_service
+from app.services.section_summarizer import _is_metadata_section
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,11 @@ _MARKDOWN_INSTRUCTION = (
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
     "executive": (
-        "List the 3 to 5 most important intellectual points as bullet points. "
-        "Focus on ideas, arguments, narratives, and findings — "
-        "ignore copyright notices, licensing terms, and distribution metadata. "
+        "Identify the 3 to 5 most important overarching themes, arguments, or narrative ideas "
+        "that run through the entire work. Write each as a concise bullet point. "
+        "Do NOT list individual chapter or passage summaries — synthesise across them. "
+        "Focus on ideas, arguments, character arcs, and findings. "
+        "Ignore copyright notices, licensing terms, and distribution metadata. "
         f"{_MARKDOWN_INSTRUCTION}"
     ),
     "detailed": (
@@ -229,10 +232,16 @@ class SummarizationService:
             )
             rows = list(result.scalars().all())
 
-        if len(rows) < 3:
+        # Filter out metadata/legal section summary rows
+        qualifying = [
+            row for row in rows
+            if not _is_metadata_section(row.heading, row.content)
+        ]
+
+        if len(qualifying) < 3:
             return None
 
-        parts = [f"## {row.heading}\n{row.content}" for row in rows]
+        parts = [f"## {row.heading}\n{row.content}" for row in qualifying]
         return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
@@ -353,7 +362,12 @@ class SummarizationService:
             section_input = await self._build_section_summary_input(document_id)
 
             if section_input is not None:
-                # Cache the combined section summaries as _section_reduce for reuse
+                # Cache the already-filtered section summaries as _section_reduce for
+                # reuse across modes within this pregenerate() call.
+                # NOTE: do NOT fall back to a previously cached _section_reduce row —
+                # that row may pre-date the S82 metadata filter and could contain
+                # Gutenberg/license content.  Always use the freshly filtered
+                # section_input returned by _build_section_summary_input().
                 cached_sr = await self._fetch_cached(document_id, "_section_reduce")
                 if cached_sr is None:
                     await self._store_summary(document_id, "_section_reduce", section_input)
@@ -361,8 +375,8 @@ class SummarizationService:
                         "pregenerate: stored _section_reduce",
                         extra={"document_id": document_id},
                     )
-                else:
-                    section_input = cached_sr.content
+                # section_input is already the filtered value — do not overwrite it
+                # with cached_sr.content, which could be a pre-filter cache entry.
 
                 input_text = section_input
                 logger.info(
