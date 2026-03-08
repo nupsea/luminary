@@ -171,7 +171,11 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
             break
 
     if json_start == -1:
-        return full_text.strip(), [], "low"
+        answer = full_text.strip()
+        # Default confidence based on answer length: short/empty answers are low,
+        # substantive answers without a JSON block default to medium.
+        confidence = "medium" if len(answer) > 80 else "low"
+        return answer, [], confidence
 
     # Parse the JSON block, tolerating truncation.
     parsed: dict = {}

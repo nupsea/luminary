@@ -33,7 +33,7 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, SectionSummaryModel, SummaryModel
+from app.models import DocumentModel, LibrarySummaryModel, SectionSummaryModel, SummaryModel
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
@@ -45,6 +45,10 @@ from app.services.retriever import get_retriever
 from app.types import ChatState, ScoredChunk
 
 logger = logging.getLogger(__name__)
+
+# Strong references for fire-and-forget background tasks (asyncio holds weak refs only)
+_background_tasks: set[asyncio.Task] = set()
+
 
 # ---------------------------------------------------------------------------
 # Intent-specific system prompts (used by synthesize_node)
@@ -229,6 +233,32 @@ async def _fetch_all_doc_executive_summaries() -> list[tuple[str, str]]:
         return [(row.title, row.content) for row in rows]
 
 
+async def _fetch_library_executive_summary() -> str | None:
+    """Return the most recent library-level executive summary, or None if absent."""
+    async with get_session_factory()() as session:
+        row = await session.execute(
+            select(LibrarySummaryModel.content)
+            .where(LibrarySummaryModel.mode == "executive")
+            .order_by(LibrarySummaryModel.created_at.desc())
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+
+
+async def _generate_library_summary_task() -> None:
+    """Background coroutine: trigger executive library summary generation and storage."""
+    from app.services.summarizer import get_summarization_service  # noqa: PLC0415
+
+    svc = get_summarization_service()
+    try:
+        async for _ in svc.stream_library_summary(
+            mode="executive", model=None, force_refresh=False
+        ):
+            pass  # consuming the generator triggers generation + storage
+    except Exception:
+        logger.warning("_generate_library_summary_task: failed", exc_info=True)
+
+
 async def summary_node(state: ChatState) -> dict:
     """Fetch executive summary from DB; fall through to search if absent.
 
@@ -267,29 +297,38 @@ async def summary_node(state: ChatState) -> dict:
             "chunks": [],
         }
 
-    # scope='all': fetch every document's executive summary and synthesize via LLM
+    # scope='all': use pre-computed LibrarySummaryModel if available
     try:
-        doc_summaries = await _fetch_all_doc_executive_summaries()
+        library_summary = await _fetch_library_executive_summary()
     except Exception:
-        logger.warning("summary_node: all-docs DB lookup failed", exc_info=True)
-        doc_summaries = []
+        logger.warning("summary_node: library summary DB lookup failed", exc_info=True)
+        library_summary = None
 
-    if not doc_summaries:
+    if library_summary:
         logger.info(
-            "summary_node: no executive summaries exist for any document"
-            " — falling through to search"
+            "summary_node: serving cached library summary (%d chars)",
+            len(library_summary),
         )
-        return {"intent": "factual"}
+        return {
+            "answer": library_summary,
+            "confidence": "high",
+            "chunks": [],
+        }
 
+    # No library summary yet — fire background generation and return placeholder
     logger.info(
-        "summary_node: found %d document summaries — sending to LLM for synthesis",
-        len(doc_summaries),
+        "summary_node: no library summary found — firing background generation"
     )
-    parts = [f"[Document: {title}]\n{content}" for title, content in doc_summaries]
-    section_context = "\n\n---\n\n".join(parts)
+    task = asyncio.create_task(_generate_library_summary_task())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
     return {
-        "section_context": section_context,
-        "chunks": [],
+        "answer": (
+            "The library summary is being generated. Please ask again in a moment."
+        ),
+        "confidence": "medium",
+        "not_found": False,
     }
 
 
@@ -720,10 +759,13 @@ async def search_node(state: ChatState) -> dict:
         q[:80], scope, len(effective_doc_ids) if effective_doc_ids else "all",
     )
 
+    # For library-wide queries use a tighter k to avoid scattered context
+    k = 6 if scope == "all" else 10
+
     chunks_dicts: list[dict] = []
     try:
         retriever = get_retriever()
-        chunks: list[ScoredChunk] = await retriever.retrieve(q, effective_doc_ids, k=10)
+        chunks: list[ScoredChunk] = await retriever.retrieve(q, effective_doc_ids, k=k)
 
         # Batch-fetch section summaries for all (document_id, section_heading) pairs
         pairs = [
@@ -762,6 +804,12 @@ async def search_node(state: ChatState) -> dict:
             )
     except Exception:
         logger.warning("search_node: retrieval failed", exc_info=True)
+
+    # For scope='all': cap at 2 chunks per document so no single doc dominates context
+    if scope == "all" and chunks_dicts:
+        from app.services.context_packer import _cap_per_document  # noqa: PLC0415
+
+        chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 
     logger.info("search_node: returning %d chunks", len(chunks_dicts))
     return {"chunks": chunks_dicts}
@@ -858,6 +906,16 @@ async def synthesize_node(state: ChatState) -> dict:
 
     prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
     system_prompt = _get_system_prompt(intent)
+
+    # For library-wide factual/exploratory queries, instruct the LLM to attribute sources
+    if scope == "all" and intent in ("factual", "exploratory"):
+        system_prompt = (
+            system_prompt
+            + "\n\nThe user is asking about their entire library. "
+            "Answer using only the provided passages. "
+            "If the passages come from multiple documents, synthesise across them. "
+            "Be explicit about which document each point comes from."
+        )
 
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent

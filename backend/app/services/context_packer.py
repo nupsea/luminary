@@ -57,6 +57,28 @@ def _lcs_ratio(a: str, b: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# _cap_per_document — per-doc diversity cap
+# ---------------------------------------------------------------------------
+
+
+def _cap_per_document(chunks: list[dict], max_per_doc: int = 2) -> list[dict]:
+    """Return at most max_per_doc chunks per document_id, preserving order.
+
+    Pure function — no I/O.  Used by search_node when scope='all' to prevent
+    a single document from dominating the context window.
+    """
+    counts: dict[str, int] = {}
+    result: list[dict] = []
+    for chunk in chunks:
+        doc_id = chunk.get("document_id") or ""
+        count = counts.get(doc_id, 0)
+        if count < max_per_doc:
+            result.append(chunk)
+            counts[doc_id] = count + 1
+    return result
+
+
+# ---------------------------------------------------------------------------
 # pack_context — main public function
 # ---------------------------------------------------------------------------
 
