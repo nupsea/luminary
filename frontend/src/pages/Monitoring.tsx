@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react"
 import { X as XIcon } from "lucide-react"
+import { toast } from "sonner"
 import {
   Bar,
   BarChart,
@@ -99,6 +100,18 @@ interface LLMSettings {
   active_model: string
 }
 
+interface EvalResultItem {
+  dataset: string
+  run_at: string
+  hit_rate_5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  context_precision: number | null
+  context_recall: number | null
+  answer_relevancy: number | null
+  passed_thresholds: boolean | null
+}
+
 interface PhoenixUrl {
   url: string
   enabled: boolean
@@ -178,6 +191,21 @@ async function fetchPhoenixUrl(): Promise<PhoenixUrl> {
   const res = await fetch(`${API_BASE}/monitoring/phoenix-url`)
   if (!res.ok) throw new Error("phoenix-url failed")
   return res.json() as Promise<PhoenixUrl>
+}
+
+async function fetchEvalResults(): Promise<EvalResultItem[]> {
+  const res = await fetch(`${API_BASE}/evals/results`)
+  if (!res.ok) throw new Error("evals/results failed")
+  return res.json() as Promise<EvalResultItem[]>
+}
+
+async function triggerEvalRun(dataset: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/evals/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset }),
+  })
+  if (!res.ok) throw new Error(`evals/run failed: ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -535,6 +563,124 @@ function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// EvalPanel — RAGAS eval results from /evals/results with threshold coloring
+// ---------------------------------------------------------------------------
+
+const EVAL_THRESHOLDS: Record<string, number> = {
+  hit_rate_5: 0.60,
+  mrr: 0.45,
+  faithfulness: 0.65,
+  context_precision: 0.65,
+}
+
+function scoreColor(value: number | null, metricKey: string): string {
+  if (value === null) return "text-muted-foreground"
+  const threshold = EVAL_THRESHOLDS[metricKey]
+  if (threshold === undefined) return "text-foreground"
+  if (value >= threshold) return "text-green-700 dark:text-green-400 font-semibold"
+  if (value >= threshold * 0.75) return "text-amber-600 dark:text-amber-400 font-semibold"
+  return "text-muted-foreground"
+}
+
+function EvalPanel() {
+  const [state, setState] = useState<SectionState<EvalResultItem[]>>(initSection([]))
+  const [runningDatasets, setRunningDatasets] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    let cancelled = false
+    fetchEvalResults()
+      .then((d) => {
+        if (!cancelled) setState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] EvalPanel fetch failed", e)
+        if (!cancelled) setState({ loading: false, data: [], error: true })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function handleRunEval(dataset: string) {
+    setRunningDatasets((prev) => new Set(prev).add(dataset))
+    triggerEvalRun(dataset)
+      .then(() => {
+        toast.success(`Eval run started for dataset: ${dataset}`)
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] EvalPanel run failed", dataset, e)
+        toast.error(`Failed to start eval for dataset: ${dataset}`)
+      })
+      .finally(() => {
+        setRunningDatasets((prev) => {
+          const next = new Set(prev)
+          next.delete(dataset)
+          return next
+        })
+      })
+  }
+
+  if (state.loading) {
+    return <SectionSkeleton rows={3} />
+  }
+  if (state.error) {
+    return <SectionErrorCard name="RAGAS Eval Results" />
+  }
+  if (state.data.length === 0) {
+    return <EmptyState message="No eval results yet. Run evals/run_eval.py to populate." />
+  }
+
+  return (
+    <div className="overflow-auto rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-secondary/50">
+            <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Dataset</th>
+            <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Run At</th>
+            <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">HR@5</th>
+            <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">MRR</th>
+            <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Faithfulness</th>
+            <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Ctx Precision</th>
+            <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {state.data.map((item) => (
+            <tr key={item.dataset} className="border-b border-border last:border-0">
+              <td className="px-4 py-2 font-medium text-foreground">{item.dataset}</td>
+              <td className="px-4 py-2 text-xs text-muted-foreground">
+                {item.run_at ? new Date(item.run_at).toLocaleString() : "—"}
+              </td>
+              <td className={`px-4 py-2 text-right ${scoreColor(item.hit_rate_5, "hit_rate_5")}`}>
+                {item.hit_rate_5 !== null ? item.hit_rate_5.toFixed(3) : "—"}
+              </td>
+              <td className={`px-4 py-2 text-right ${scoreColor(item.mrr, "mrr")}`}>
+                {item.mrr !== null ? item.mrr.toFixed(3) : "—"}
+              </td>
+              <td className={`px-4 py-2 text-right ${scoreColor(item.faithfulness, "faithfulness")}`}>
+                {item.faithfulness !== null ? item.faithfulness.toFixed(3) : "—"}
+              </td>
+              <td className={`px-4 py-2 text-right ${scoreColor(item.context_precision, "context_precision")}`}>
+                {item.context_precision !== null ? item.context_precision.toFixed(3) : "—"}
+              </td>
+              <td className="px-4 py-2 text-center">
+                <button
+                  onClick={() => handleRunEval(item.dataset)}
+                  disabled={runningDatasets.has(item.dataset)}
+                  className="rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                >
+                  {runningDatasets.has(item.dataset) ? "Starting..." : "Run Eval"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Monitoring page
 // ---------------------------------------------------------------------------
 
@@ -819,7 +965,16 @@ export default function Monitoring() {
         )}
       </section>
 
-      {/* 7. Eval Runs */}
+      {/* 7a. RAGAS Eval Results — from /evals/results */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">RAGAS Eval Results</h2>
+        <p className="text-xs text-muted-foreground">
+          Latest result per dataset. Green = meets threshold, amber = close, grey = below. Click Run Eval to trigger a background eval run.
+        </p>
+        <EvalPanel />
+      </section>
+
+      {/* 7b. Eval Runs (legacy /monitoring/evals) */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Eval Runs</h2>
         {evalRunsState.loading ? (

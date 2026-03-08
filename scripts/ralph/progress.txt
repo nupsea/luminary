@@ -127,3 +127,31 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - When mocking asyncio.create_task, the coroutine argument is already created before the mock sees it; use side_effect to call coro.close() to prevent RuntimeWarning in strict CI.
   - Patching asyncio.create_task at module level also intercepts SQLAlchemy's internal session close; prefer patching the specific function being tested (_fetch_library_executive_summary) to avoid collateral interception.
 ---
+
+## 2026-03-08T00:00:00+11:00 - S85 - Feature: RAGAS eval results panel in Monitoring tab with backend trigger endpoint
+- Implemented: GET /evals/results endpoint reading scores_history.jsonl, POST /evals/run firing background subprocess, EvalPanel component in Monitoring.tsx with threshold coloring and Run Eval button per row
+- Files changed:
+  - backend/app/routers/evals.py (new)
+  - backend/tests/test_evals_router.py (new)
+  - backend/app/main.py (evals_router registered)
+  - frontend/src/pages/Monitoring.tsx (EvalPanel added)
+  - scripts/smoke/S85.sh (new)
+- AC verified:
+  - GET /evals/results HTTP 200 with [] when file absent: PASS
+  - GET /evals/results latest per dataset: PASS
+  - POST /evals/run HTTP 202 with background asyncio.to_thread: PASS
+  - POST /evals/run invalid dataset HTTP 422: PASS
+  - evals router registered with prefix='/evals': PASS
+  - EvalPanel renders HR@5, MRR, Faithfulness, Context Precision columns: PASS
+  - Scores coloured green/amber/grey by threshold: PASS (>= threshold = green, >= 75% = amber, below = grey)
+  - Run Eval button calls POST /evals/run + sonner toast: PASS
+  - Loading/error/empty states: PASS
+  - All 4 pytest tests pass: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - scripts/smoke/S85.sh present: PASS
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed -- coroutine leak in test monkeypatch, fixed with coro.close())
+- Learnings:
+  - For test stubs that discard a coroutine arg, use `lambda coro: coro.close()` not `lambda coro: None` to avoid RuntimeWarning in strict CI.
+  - JSONL deduplication by max timestamp: simple string comparison works for ISO timestamps.
+---
