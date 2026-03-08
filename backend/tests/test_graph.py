@@ -124,6 +124,39 @@ def test_empty_graph_for_unknown_document(graph_svc: KuzuService):
     assert data == {"nodes": [], "edges": []}
 
 
+def test_get_entities_by_type_for_document(graph_svc: KuzuService):
+    """get_entities_by_type_for_document groups canonical names by entity type."""
+    graph_svc.upsert_entity("e1", "sherlock holmes", "PERSON")
+    graph_svc.upsert_entity("e2", "dr. watson", "PERSON")
+    graph_svc.upsert_entity("e3", "baker street", "PLACE")
+    graph_svc.upsert_document("d1", "Test Doc", "book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_mention("e3", "d1")
+
+    result = graph_svc.get_entities_by_type_for_document("d1")
+
+    assert set(result.get("PERSON", [])) == {"sherlock holmes", "dr. watson"}
+    assert set(result.get("PLACE", [])) == {"baker street"}
+
+
+def test_get_entities_by_type_for_document_empty(graph_svc: KuzuService):
+    """Returns empty dict for unknown document_id."""
+    result = graph_svc.get_entities_by_type_for_document("nonexistent")
+    assert result == {}
+
+
+def test_upsert_entity_writes_aliases(graph_svc: KuzuService):
+    """upsert_entity stores aliases as pipe-delimited string in fresh S86 schema."""
+    graph_svc.upsert_entity("e1", "sherlock holmes", "PERSON", aliases=["holmes", "mr. holmes"])
+
+    result = graph_svc._conn.execute("MATCH (e:Entity {id: 'e1'}) RETURN e.aliases")
+    assert result.has_next()
+    aliases_val = result.get_next()[0]
+    # aliases column present in fresh DB (S86 schema); value is pipe-delimited
+    assert aliases_val == "holmes|mr. holmes"
+
+
 # ---------------------------------------------------------------------------
 # Integration tests via FastAPI TestClient
 # ---------------------------------------------------------------------------

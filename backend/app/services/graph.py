@@ -1,11 +1,14 @@
 """KuzuService: Kuzu embedded graph database for entity relationship storage.
 
 Schema:
-  Nodes: Entity(id, name, type, frequency), Document(id, title, content_type)
+  Nodes: Entity(id, name, type, frequency, aliases), Document(id, title, content_type)
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
          RELATED_TO(Entity->Entity, relation_label, confidence),
          CALLS(Entity->Entity, document_id)  — function call graph for code documents
+
+Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
+not have this column; aliases writes are wrapped in try/except for graceful degradation.
 """
 
 import logging
@@ -41,7 +44,7 @@ class KuzuService:
         stmts = [
             # Node tables
             "CREATE NODE TABLE IF NOT EXISTS Entity("
-            "id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64)",
+            "id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64, aliases STRING)",
             "CREATE NODE TABLE IF NOT EXISTS Document("
             "id STRING PRIMARY KEY, title STRING, content_type STRING)",
             # Edge tables
@@ -61,9 +64,25 @@ class KuzuService:
     # Upsert helpers
     # -------------------------------------------------------------------------
 
-    def upsert_entity(self, entity_id: str, name: str, entity_type: str) -> None:
-        """Create or update an Entity node."""
-        # Check if entity exists
+    def upsert_entity(
+        self,
+        entity_id: str,
+        name: str,
+        entity_type: str,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """Create or update an Entity node.
+
+        Args:
+            entity_id:   UUID primary key.
+            name:        Canonical surface form (lowercase).
+            entity_type: GLiNER entity type label.
+            aliases:     Non-canonical surface forms that resolved to this entity.
+                         Written as a pipe-delimited string in the `aliases` column.
+                         Silently skipped on databases that pre-date S86 (no column).
+        """
+        aliases_str = "|".join(aliases) if aliases else ""
+
         result = self._conn.execute(
             "MATCH (e:Entity {id: $id}) RETURN e.frequency",
             {"id": entity_id},
@@ -76,11 +95,55 @@ class KuzuService:
                 " SET e.frequency = $freq, e.name = $name, e.type = $type",
                 {"id": entity_id, "freq": freq, "name": name, "type": entity_type},
             )
+            if aliases_str:
+                try:
+                    self._conn.execute(
+                        "MATCH (e:Entity {id: $id}) SET e.aliases = $a",
+                        {"id": entity_id, "a": aliases_str},
+                    )
+                except Exception:
+                    logger.debug("aliases column absent on Entity, skipping aliases update")
         else:
-            self._conn.execute(
-                "CREATE (:Entity {id: $id, name: $name, type: $type, frequency: 1})",
-                {"id": entity_id, "name": name, "type": entity_type},
+            try:
+                self._conn.execute(
+                    "CREATE (:Entity {id: $id, name: $name, type: $type,"
+                    " frequency: 1, aliases: $a})",
+                    {"id": entity_id, "name": name, "type": entity_type, "a": aliases_str},
+                )
+            except Exception:
+                # Fallback for databases that pre-date the aliases column (S86).
+                self._conn.execute(
+                    "CREATE (:Entity {id: $id, name: $name, type: $type, frequency: 1})",
+                    {"id": entity_id, "name": name, "type": entity_type},
+                )
+
+    def get_entities_by_type_for_document(self, document_id: str) -> dict[str, list[str]]:
+        """Return existing canonical names grouped by entity type for *document_id*.
+
+        Used by the disambiguation pipeline to populate the initial lookup pool
+        before calling canonicalize_batch on newly extracted entities.
+
+        Returns an empty dict on any Kuzu error (non-fatal).
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                " RETURN e.name, e.type",
+                {"did": document_id},
             )
+            by_type: dict[str, list[str]] = {}
+            while result.has_next():
+                row = result.get_next()
+                name, etype = row[0], row[1]
+                if name and etype:
+                    by_type.setdefault(etype, []).append(name)
+            return by_type
+        except Exception:
+            logger.debug(
+                "get_entities_by_type_for_document failed, returning empty",
+                exc_info=True,
+            )
+            return {}
 
     def upsert_document(self, doc_id: str, title: str, content_type: str) -> None:
         """Create or update a Document node."""

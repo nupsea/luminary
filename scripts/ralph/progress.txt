@@ -155,3 +155,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - For test stubs that discard a coroutine arg, use `lambda coro: coro.close()` not `lambda coro: None` to avoid RuntimeWarning in strict CI.
   - JSONL deduplication by max timestamp: simple string comparison works for ISO timestamps.
 ---
+
+## 2026-03-08T01:00:00+11:00 - S86 - Feature: Entity disambiguation -- canonical name normalisation before Kuzu upsert
+- Implemented: EntityDisambiguator service (pure Python, no I/O), KuzuService extended with aliases column and get_entities_by_type_for_document, entity_extract_node calls canonicalize_batch before Kuzu MERGE
+- Files changed:
+  - backend/app/services/entity_disambiguator.py (new)
+  - backend/app/services/graph.py (aliases column, upsert_entity signature, get_entities_by_type_for_document)
+  - backend/app/workflows/ingestion.py (entity_extract_node)
+  - backend/tests/test_entity_disambiguator.py (new)
+  - backend/tests/test_graph.py (3 new tests added)
+  - scripts/smoke/S86.sh (new)
+- AC verified:
+  - entity_disambiguator.py with _strip_honorifics, find_canonical, canonicalize_batch: PASS
+  - _HONORIFICS correct, sr not included: PASS
+  - find_canonical Rule A/B/C ordering: PASS
+  - Longer name wins on substring: PASS
+  - canonicalize_batch called in entity_extract_node before Kuzu MERGE: PASS
+  - Kuzu MERGE uses canonical name, aliases written as pipe-delimited string: PASS
+  - All 5 pytest tests pass: PASS
+  - scripts/smoke/S86.sh present: PASS
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed -- order-dependency in canonicalize_batch resolved with two-pass algorithm; 3 graph tests added for High issue)
+- Learnings:
+  - Two-pass canonicalize_batch needed: Pass 1 stabilises pool by promoting longer canonicals and evicting shorter ones. Pass 2 resolves results against stable pool. Single-pass produces order-dependent results.
+  - Kuzu CREATE NODE TABLE IF NOT EXISTS adds aliases column to new DBs only; existing DBs degrade gracefully via try/except on aliases writes.
+---

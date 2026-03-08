@@ -363,7 +363,7 @@
         "scripts/smoke/S86.sh exits 0",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S87",

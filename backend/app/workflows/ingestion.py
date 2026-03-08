@@ -693,16 +693,33 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 if row:
                     graph.upsert_document(doc_id, row.title or "", row.content_type or "notes")
 
+            # Disambiguate: collapse surface-form variants to canonical names
+            # before writing to Kuzu (e.g. "Mr. Holmes" -> "sherlock holmes").
+            from app.services.entity_disambiguator import canonicalize_batch  # noqa: PLC0415
+
+            entity_tuples = [(ent["name"], ent["type"]) for ent in entities]
+            existing_by_type = graph.get_entities_by_type_for_document(doc_id)
+            canonical_triples = canonicalize_batch(entity_tuples, existing_by_type)
+
+            alias_map: dict[str, list[str]] = {}
+            canonical_entities = []
+            for (canonical, etype, original), ent in zip(canonical_triples, entities):
+                canonical_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{canonical}"))
+                if original != canonical:
+                    alias_map.setdefault(canonical_id, []).append(original)
+                canonical_entities.append({**ent, "id": canonical_id, "name": canonical})
+
             # Upsert entities and add mentions; re-raise on Kuzu failure when
             # entities were successfully extracted (data loss must not be silent).
             try:
-                for ent in entities:
-                    graph.upsert_entity(ent["id"], ent["name"], ent["type"])
+                for ent in canonical_entities:
+                    aliases = alias_map.get(ent["id"])
+                    graph.upsert_entity(ent["id"], ent["name"], ent["type"], aliases=aliases)
                     graph.add_mention(ent["id"], doc_id)
 
                 # Co-occurrence: entities sharing the same chunk
                 chunk_entities: dict[str, list[str]] = {}
-                for ent in entities:
+                for ent in canonical_entities:
                     chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
 
                 for chunk_ent_ids in chunk_entities.values():
