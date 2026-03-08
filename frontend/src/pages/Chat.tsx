@@ -161,10 +161,24 @@ export default function Chat() {
     try {
       const effectiveDocId = selectedDocId ?? activeDocumentId
       const documentIds = scope === "single" && effectiveDocId ? [effectiveDocId] : null
+
+      // Collect last 6 completed messages (3 exchanges) as conversation history.
+      // Excludes the current streaming placeholder and not_found messages.
+      const historySlice = messages
+        .filter((m) => !m.isStreaming && !m.not_found && m.text)
+        .slice(-6)
+        .map((m) => ({ role: m.role, content: m.text }))
+
       const res = await fetch(`${API_BASE}/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, document_ids: documentIds, scope, model: model || null }),
+        body: JSON.stringify({
+          question,
+          document_ids: documentIds,
+          scope,
+          model: model || null,
+          messages: historySlice.length > 0 ? historySlice : undefined,
+        }),
       })
       if (!res.ok || !res.body) throw new Error("QA request failed")
 

@@ -43,7 +43,7 @@ _REWRITE_SYSTEM = (
 
 
 async def _maybe_rewrite_query(
-    question: str, document_ids: list[str] | None
+    question: str, document_ids: list[str] | None, prior_context: str | None = None
 ) -> str:
     """Return a (possibly rewritten) query with vague references resolved.
 
@@ -52,6 +52,8 @@ async def _maybe_rewrite_query(
     - document_ids is None (all-docs scope) → returns question unchanged.
     - Kuzu returns 0 entities → returns question unchanged.
     - LLM fails → logs warning and returns question unchanged (non-fatal).
+    - prior_context: last user turn from conversation history — prepended to the
+      rewrite prompt so the LLM can resolve vague follow-up pronouns.
     """
     if VAGUE_REF_RE.search(question) is None:
         return question
@@ -70,6 +72,8 @@ async def _maybe_rewrite_query(
             f"Question: {question}\n"
             f"Available names: {', '.join(entity_names)}"
         )
+        if prior_context:
+            prompt = f"Prior exchange:\n{prior_context}\n\n{prompt}"
         result = await llm.generate(prompt, system=_REWRITE_SYSTEM, stream=False)
         rewritten = str(result).strip()
         if rewritten:
@@ -260,6 +264,7 @@ class QAService:
         document_ids: list[str] | None,
         scope: str,
         model: str | None,
+        conversation_history: list[dict] | None = None,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -303,6 +308,7 @@ class QAService:
                     "_system_prompt": None,
                     "retry_attempted": False,
                     "primary_strategy": None,
+                    "conversation_history": conversation_history or [],
                 }
 
                 try:

@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke
+.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
@@ -54,6 +54,9 @@ eval:
 	@echo "Running retrieval quality evals (backend must be running on :8000)..."
 	cd evals && uv run python run_eval.py --dataset book --assert-thresholds
 	cd evals && uv run python run_eval.py --dataset paper --assert-thresholds
+
+luminary:
+	bash scripts/luminary.sh
 
 logs:
 	bash scripts/dev-logs.sh

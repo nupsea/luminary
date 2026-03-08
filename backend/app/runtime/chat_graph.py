@@ -116,9 +116,17 @@ async def classify_node(state: ChatState) -> dict:
     )
 
     # Query rewriting via Kuzu entities — non-fatal
+    # Supply last user turn from history as prior_context so vague follow-ups
+    # like "Are there no similarities?" can be grounded without a Kuzu lookup.
     effective_doc_ids = doc_ids if state.get("scope") == "single" else None
+    history = state.get("conversation_history") or []
+    prior_context: str | None = None
+    for msg in reversed(history):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            prior_context = msg.get("content")
+            break
     try:
-        rewritten = await _maybe_rewrite_query(question, effective_doc_ids)
+        rewritten = await _maybe_rewrite_query(question, effective_doc_ids, prior_context)
         if rewritten != question:
             logger.info("classify_node: query rewritten → %r", rewritten[:80])
     except Exception:
@@ -904,7 +912,37 @@ async def synthesize_node(state: ChatState) -> dict:
         except Exception:
             logger.warning("synthesize_node: failed to fetch executive summary", exc_info=True)
 
-    prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
+    # Inject conversation history before retrieval context.
+    # Cap at ~385 words (~500 tokens) to protect the retrieval context budget.
+    # Most-recent messages are kept when trimming is needed.
+    conversation_history = state.get("conversation_history") or []
+    history_block = ""
+    if conversation_history:
+        all_lines: list[str] = []
+        for msg in conversation_history:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            label = "User" if role == "user" else "Assistant"
+            all_lines.append(f"{label}: {content}")
+        # Keep as many lines as fit within the word cap, prioritising recent turns.
+        lines_to_include: list[str] = []
+        word_count = 0
+        for line in reversed(all_lines):
+            words = len(line.split())
+            if word_count + words > 385:
+                break
+            lines_to_include.insert(0, line)
+            word_count += words
+        if lines_to_include:
+            history_block = (
+                "Prior conversation (most recent last):\n"
+                + "\n".join(lines_to_include)
+            )
+
+    if history_block:
+        prompt = f"{history_block}\n\nContext:\n\n{context}\n\nQuestion: {question}"
+    else:
+        prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
     system_prompt = _get_system_prompt(intent)
 
     # For library-wide factual/exploratory queries, instruct the LLM to attribute sources

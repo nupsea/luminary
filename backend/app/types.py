@@ -74,6 +74,9 @@ class ChatState(TypedDict):
     _llm_prompt: str | None
     _system_prompt: str | None
 
+    # Sliding-window conversation history (last N turns, role/content dicts)
+    conversation_history: list[dict]
+
     # Confidence-adaptive retry fields (S81)
     # retry_attempted: True after augment_node runs — prevents a second retry loop.
     # primary_strategy: node name that handled the first-pass retrieval, used by
