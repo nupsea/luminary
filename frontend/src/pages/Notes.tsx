@@ -18,9 +18,10 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
+import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteEditorDialog } from "@/components/NoteEditorDialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -99,19 +100,6 @@ async function createNote(payload: {
     body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
-
-async function patchNote(
-  id: string,
-  data: { content?: string; tags?: string[]; group_name?: string },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
   return res.json() as Promise<Note>
 }
 
@@ -243,112 +231,18 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
 }
 
 // ---------------------------------------------------------------------------
-// NoteEditorTabs — Write / Preview tab editor for note content
-// ---------------------------------------------------------------------------
-
-interface NoteEditorTabsProps {
-  value: string
-  onChange: (v: string) => void
-  onSave: () => void
-  onCancel: () => void
-  isPending: boolean
-}
-
-function NoteEditorTabs({ value, onChange, onSave, onCancel, isPending }: NoteEditorTabsProps) {
-  const [tab, setTab] = useState<"write" | "preview">("write")
-  const taRef = useRef<HTMLTextAreaElement>(null)
-
-  const adjustHeight = useCallback(() => {
-    const ta = taRef.current
-    if (!ta) return
-    ta.style.height = "auto"
-    ta.style.height = `${ta.scrollHeight}px`
-  }, [])
-
-  useEffect(() => {
-    if (tab === "write") adjustHeight()
-  }, [value, tab, adjustHeight])
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
-        <button
-          onClick={() => setTab("write")}
-          className={`rounded px-2.5 py-1 font-medium transition-colors ${
-            tab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Write
-        </button>
-        <button
-          onClick={() => setTab("preview")}
-          className={`rounded px-2.5 py-1 font-medium transition-colors ${
-            tab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Preview
-        </button>
-      </div>
-      {tab === "write" ? (
-        <textarea
-          ref={taRef}
-          value={value}
-          onChange={(e) => { onChange(e.target.value); adjustHeight() }}
-          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-2 py-1.5 font-mono text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      ) : (
-        <div className="min-h-[200px] rounded border border-border bg-background px-2 py-2">
-          {value ? (
-            <MarkdownRenderer>{value}</MarkdownRenderer>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
-          )}
-        </div>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={onSave}
-          disabled={!value.trim() || isPending}
-          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Check size={11} />
-          Save
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// NoteCard
+// NoteCard — card view; editing is delegated to NoteEditorDialog
 // ---------------------------------------------------------------------------
 
 interface NoteCardProps {
   note: Note
-  onUpdated: () => void
+  onEdit: () => void
   onDeleted: () => void
 }
 
-function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
-  const [editing, setEditing] = useState(false)
+function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
-  const [content, setContent] = useState(note.content)
   const qc = useQueryClient()
-
-  const saveMut = useMutation({
-    mutationFn: () => patchNote(note.id, { content }),
-    onSuccess: () => {
-      setEditing(false)
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      onUpdated()
-    },
-  })
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -369,14 +263,14 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
           <span className="rounded-full bg-muted px-2 py-0.5">{note.group_name}</span>
         )}
         <button
-          onClick={() => { setEditing((v) => !v); setConfirming(false) }}
+          onClick={() => { onEdit(); setConfirming(false) }}
           className="hover:text-foreground"
           title="Edit"
         >
           <Pencil size={12} />
         </button>
         <button
-          onClick={() => { setConfirming((v) => !v); setEditing(false) }}
+          onClick={() => setConfirming((v) => !v)}
           className="hover:text-destructive"
           title="Delete"
         >
@@ -404,27 +298,11 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Content */}
-      {editing ? (
-        <div className="flex flex-col gap-2">
-          {/* Write / Preview tabs */}
-          <NoteEditorTabs
-            value={content}
-            onChange={setContent}
-            onSave={() => saveMut.mutate()}
-            onCancel={() => { setEditing(false); setContent(note.content) }}
-            isPending={saveMut.isPending}
-          />
+      {/* Content — click to open editor dialog */}
+      {!confirming && (
+        <div className="cursor-pointer" onClick={onEdit}>
+          <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
         </div>
-      ) : (
-        !confirming && (
-          <div
-            className="cursor-pointer"
-            onClick={() => setEditing(true)}
-          >
-            <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
-          </div>
-        )
       )}
 
       {/* Tags */}
@@ -458,30 +336,8 @@ export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const [showCreate, setShowCreate] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
-  const [editingContent, setEditingContent] = useState("")
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
-
-  const inlineEditMut = useMutation({
-    // Receive values explicitly so the mutationFn never closes over stale state.
-    // Calling mutate() with no args (old pattern) would capture editingNote=null
-    // from the initial render, causing a runtime TypeError on the ! assertion.
-    mutationFn: ({ id, content }: { id: string; content: string }) =>
-      patchNote(id, { content }),
-    onSuccess: () => {
-      setEditingNote(null)
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-    },
-  })
-
-  useEffect(() => {
-    if (editingNote) {
-      setEditingContent(editingNote.content)
-      inlineEditMut.reset()
-    }
-    // inlineEditMut.reset is stable; editingNote drives all changes here
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingNote])
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
 
@@ -542,6 +398,7 @@ export default function NotesPage() {
               <TableHead>Group</TableHead>
               <TableHead>Created At</TableHead>
               <TableHead>Document</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -552,6 +409,7 @@ export default function NotesPage() {
                 <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-8" /></TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -602,6 +460,7 @@ export default function NotesPage() {
             <TableHead>Group</TableHead>
             <TableHead>Created At</TableHead>
             <TableHead>Document</TableHead>
+            <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -626,6 +485,15 @@ export default function NotesPage() {
               <TableCell className="text-xs text-muted-foreground">
                 {note.document_id ? (docTitleMap[note.document_id] ?? note.document_id) : "Standalone"}
               </TableCell>
+              <TableCell>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setEditingNote(note) }}
+                  className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent"
+                  title="Edit"
+                >
+                  <Pencil size={12} />
+                </button>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -638,7 +506,7 @@ export default function NotesPage() {
           <NoteCard
             key={note.id}
             note={note}
-            onUpdated={handleRefetch}
+            onEdit={() => setEditingNote(note)}
             onDeleted={handleRefetch}
           />
         ))}
@@ -737,35 +605,17 @@ export default function NotesPage() {
         )}
 
         {panelContent}
-
-        {editingNote && (
-          <div className="mt-4 rounded-lg border border-border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-sm font-medium text-foreground">Edit Note</span>
-              <button
-                onClick={() => { setEditingNote(null); setEditingContent("") }}
-                className="text-muted-foreground hover:text-foreground"
-                title="Close"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <NoteEditorTabs
-              key={editingNote.id}
-              value={editingContent}
-              onChange={setEditingContent}
-              onSave={() => {
-                if (editingNote) inlineEditMut.mutate({ id: editingNote.id, content: editingContent })
-              }}
-              onCancel={() => { setEditingNote(null); setEditingContent("") }}
-              isPending={inlineEditMut.isPending}
-            />
-            {inlineEditMut.isError && (
-              <p className="mt-2 text-xs text-red-600">Failed to save. Please try again.</p>
-            )}
-          </div>
-        )}
       </div>
+
+      {/* NoteEditorDialog — rendered once at page level */}
+      <NoteEditorDialog
+        note={editingNote}
+        onClose={() => setEditingNote(null)}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          setEditingNote(null)
+        }}
+      />
     </div>
   )
 }

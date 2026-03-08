@@ -180,3 +180,34 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - Two-pass canonicalize_batch needed: Pass 1 stabilises pool by promoting longer canonicals and evicting shorter ones. Pass 2 resolves results against stable pool. Single-pass produces order-dependent results.
   - Kuzu CREATE NODE TABLE IF NOT EXISTS adds aliases column to new DBs only; existing DBs degrade gracefully via try/except on aliases writes.
 ---
+
+## 2026-03-08T02:00:00+11:00 - S87 - Feature: Notes focused editor dialog with side-by-side Write/Preview
+- Implemented: NoteEditorDialog component (Radix UI Dialog, two-column Write/Preview, Ctrl+S shortcut, Loader2 spinner, inline error), dialog.tsx shadcn wrapper, Notes.tsx refactored to remove NoteEditorTabs and inline editor, NoteCard simplified to use onEdit prop, Actions column added to list view
+- Files changed:
+  - frontend/src/components/ui/dialog.tsx (new)
+  - frontend/src/components/NoteEditorDialog.tsx (new)
+  - frontend/src/pages/Notes.tsx (NoteCard, NoteEditorTabs removed, Actions column, NoteEditorDialog rendered at page level)
+  - frontend/package.json (@radix-ui/react-dialog added)
+  - scripts/smoke/S87.sh (new)
+- AC verified:
+  - NoteEditorDialog.tsx with two-column Write/Preview: PASS
+  - Write pane monospace textarea, controlled state: PASS
+  - Preview pane MarkdownRenderer real-time updates: PASS
+  - Ctrl+S / Cmd+S triggers save: PASS
+  - Save disabled when unchanged, Loader2 when pending: PASS
+  - onSaved then close on success; inline error on failure: PASS
+  - Tags and group_name read-only below Write pane: PASS
+  - List view TableRow onClick -> setEditingNote: PASS
+  - Actions column with Pencil button per list row: PASS
+  - NoteCard uses onEdit prop, NoteEditorTabs removed: PASS
+  - Delete confirmation flow preserved: PASS
+  - NoteEditorDialog at page level: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - npm run build exits 0: PASS
+  - scripts/smoke/S87.sh present: PASS
+- Reviewer verdict: PASS (no critical issues; added DialogDescription for accessibility)
+- Learnings:
+  - @radix-ui/react-dialog must be installed before creating dialog.tsx shadcn wrapper
+  - Always export DialogDescription from dialog.tsx to prevent Radix accessibility console warnings
+  - NoteCard.tsx does not exist as a separate file -- it is inline in Notes.tsx
+---
