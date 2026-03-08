@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
+import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -457,8 +457,31 @@ type FilterState =
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const [showCreate, setShowCreate] = useState(false)
+  const [editingNote, setEditingNote] = useState<Note | null>(null)
+  const [editingContent, setEditingContent] = useState("")
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
+
+  const inlineEditMut = useMutation({
+    // Receive values explicitly so the mutationFn never closes over stale state.
+    // Calling mutate() with no args (old pattern) would capture editingNote=null
+    // from the initial render, causing a runtime TypeError on the ! assertion.
+    mutationFn: ({ id, content }: { id: string; content: string }) =>
+      patchNote(id, { content }),
+    onSuccess: () => {
+      setEditingNote(null)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+    },
+  })
+
+  useEffect(() => {
+    if (editingNote) {
+      setEditingContent(editingNote.content)
+      inlineEditMut.reset()
+    }
+    // inlineEditMut.reset is stable; editingNote drives all changes here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingNote])
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
 
@@ -488,7 +511,6 @@ export default function NotesPage() {
   } = useQuery({
     queryKey: ["notes", groupParam, tagParam],
     queryFn: () => fetchNotes(undefined, groupParam, tagParam),
-    staleTime: 10_000,
     gcTime: 60_000,
   })
 
@@ -587,9 +609,7 @@ export default function NotesPage() {
             <TableRow
               key={note.id}
               className="cursor-pointer"
-              onClick={() => {
-                /* open note editor — same as clicking NoteCard */
-              }}
+              onClick={() => setEditingNote(note)}
             >
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
                 {note.content.slice(0, 60)}
@@ -717,6 +737,34 @@ export default function NotesPage() {
         )}
 
         {panelContent}
+
+        {editingNote && (
+          <div className="mt-4 rounded-lg border border-border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-medium text-foreground">Edit Note</span>
+              <button
+                onClick={() => { setEditingNote(null); setEditingContent("") }}
+                className="text-muted-foreground hover:text-foreground"
+                title="Close"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <NoteEditorTabs
+              key={editingNote.id}
+              value={editingContent}
+              onChange={setEditingContent}
+              onSave={() => {
+                if (editingNote) inlineEditMut.mutate({ id: editingNote.id, content: editingContent })
+              }}
+              onCancel={() => { setEditingNote(null); setEditingContent("") }}
+              isPending={inlineEditMut.isPending}
+            />
+            {inlineEditMut.isError && (
+              <p className="mt-2 text-xs text-red-600">Failed to save. Please try again.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

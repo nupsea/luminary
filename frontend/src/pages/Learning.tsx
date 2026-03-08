@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -137,8 +137,11 @@ function LibraryOverview() {
   const [error, setError] = useState<string | null>(null)
   const [notEnough, setNotEnough] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const generatedModes = useRef(new Set<LibraryOverviewMode>())
 
   async function generate(mode: LibraryOverviewMode, forceRefresh = false) {
+    if (generatedModes.current.has(mode) && !forceRefresh) return
+    generatedModes.current.add(mode)
     setError(null)
     setNotEnough(false)
     setStreaming((s) => ({ ...s, [mode]: true }))
@@ -187,6 +190,7 @@ function LibraryOverview() {
         }
       }
     } catch {
+      generatedModes.current.delete(mode)
       setStreaming((s) => ({ ...s, [mode]: false }))
       setError("Failed to generate library overview.")
     }
