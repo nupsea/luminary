@@ -311,7 +311,7 @@
         "npm run build exits 0",
         "scripts/smoke/S84.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S85",
