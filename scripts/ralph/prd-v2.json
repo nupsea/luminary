@@ -441,7 +441,7 @@
         "scripts/smoke/S89.sh exits 0 (step 3: grep prose dist/assets/*.css confirms typography plugin output present in built CSS)",
         "No backend files changed"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S90",

@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/table"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
+import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
@@ -468,7 +469,7 @@ export default function NotesPage() {
                 }}
               >
                 <div className="text-sm text-foreground line-clamp-3">
-                  {result.content.slice(0, 150)}
+                  {stripMarkdown(result.content).slice(0, 150)}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {result.tags.map((t) => (
@@ -576,7 +577,7 @@ export default function NotesPage() {
               onClick={() => setEditingNote(note)}
             >
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
-                {note.content.slice(0, 60)}
+                {stripMarkdown(note.content).slice(0, 60)}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {note.tags.length > 0 ? note.tags.join(", ") : "—"}
