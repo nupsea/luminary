@@ -1,0 +1,230 @@
+# Ralph Progress Log
+Started: Fri  6 Mar 2026 23:08:42 AEST
+---
+
+## Codebase Patterns
+Patterns are now maintained in `scripts/ralph/patterns.md` — read that file instead of this section.
+
+## 2026-03-06T13:20:05Z - S75 - SectionSummaryModel + parallel section summarization node
+- Implemented: SectionSummaryModel (models.py + db_init.py), SectionSummarizerService (section_summarizer.py), section_summarize_node wired into ingestion graph (entity_extract → section_summarize → summarize), GET /summarize/{id}/sections endpoint
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/section_summarizer.py, backend/app/workflows/ingestion.py, backend/app/routers/summarize.py, backend/tests/test_section_summarizer.py, scripts/smoke/S75.sh
+- Learnings:
+  - Settings uses LITELLM_DEFAULT_MODEL not default_model
+  - pytest runs from /Users/sethurama/DEV/LM/learning-mate/backend (not repo root)
+  - litellm.ServiceUnavailableError must be caught at the asyncio.gather level, not inside each unit coro, because the semaphore pattern uses gather; individual unit errors are non-fatal but Ollama-offline is fatal-for-session
+---
+
+## 2026-03-07T09:00:00Z - S81 - Confidence-adaptive retry
+- Implemented: confidence_gate_node + augment_node in chat_graph.py, new topology: synthesize_node → confidence_gate_node → [END | augment_node → synthesize_node → END], ChatState gains retry_attempted/primary_strategy fields, classify_node sets primary_strategy, 9 tests in test_confidence_retry.py, smoke S81.sh
+- Files changed: backend/app/types.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/tests/test_confidence_retry.py (new), scripts/smoke/S81.sh (new), scripts/ralph/prd-v2.json (S81 passes=true)
+- Learnings:
+  - LangGraph conditional edge functions cannot set state — they only return next-node strings; set primary_strategy in classify_node (which is a real node) instead
+  - confidence_gate_node is a no-op real node; all routing logic in _route_after_confidence_gate (conditional edge function)
+  - augment_node uses _route_after_confidence_gate's END sentinel: `from langgraph.graph import END` — must use END constant, not "END" string, in conditional edges map
+  - build_chat_graph() resets _compiled_graph=None at start so tests can rebuild without restarting
+  - 441 tests pass, ruff clean
+---
+
+## 2026-03-07T08:00:00Z - S80 - V2 integration tests, performance benchmarks, and QUALITY_SCORE update (re-pass)
+- Implemented: test_v2_pipeline.py (9 tests total: 7 @pytest.mark.slow integration + 2 unit), test_v2_ingestion_perf.py (2 perf benchmarks), Makefile test-v2 target, scripts/smoke/S80.sh, QUALITY_SCORE.md (Q&A B→A), TD-011 in tech-debt-tracker.md
+- Files changed: backend/tests/test_v2_pipeline.py (updated), scripts/ralph/prd-v2.json (S80 passes=true)
+- Learnings:
+  - LLM mock patch must be at app.services.qa.get_llm_service (not app.runtime.chat_graph.get_llm_service) — LLM call is in qa.py after S77 streaming refactor
+  - _make_mock_llm uses side_effect (not return_value) to create a fresh async generator per call — avoids exhausted generator on multiple calls
+  - Module-level pytestmark=slow excluded pure unit tests from default CI; fix: individual @pytest.mark.slow decorators on DB-dependent tests only
+  - stream_answer is a method on QAService, not a standalone function — import get_qa_service() and call qa.stream_answer(...)
+  - 430 non-slow tests pass, ruff clean
+---
+
+## 2026-03-07T07:00:00Z - S79 - Pure context packer: smart context window assembly with deduplication and section grouping
+- Implemented: context_packer.py pack_context() pure function (no I/O), synthesize_node uses pack_context() instead of _build_context(), section_context capped at 1000 tokens, search_node adds section_summary as separate field
+- Files changed: backend/app/services/context_packer.py (new), backend/app/runtime/chat_graph.py (synthesize_node + search_node updated), backend/tests/test_context_packer.py (new, 7 pure unit tests), scripts/smoke/S79.sh (new)
+- Learnings:
+  - pack_context groups by section_id or section_heading fallback; sorts groups by max(relevance_score) desc
+  - LCS DP with row-rolling optimization (_LCS_CHAR_LIMIT=300 for O(n²) performance)
+  - dedup_ratio=1.0 disables deduplication (always include all chunks within budget)
+  - 426 tests pass, ruff clean
+---
+
+## 2026-03-07T06:00:00Z - S78 - Strategy nodes: summary_lookup, graph_traversal, comparative, search with section augmentation
+- Implemented: summary_node (DB executive summary fetch → fallthrough), graph_node (Kuzu entity traversal + hybrid retrieval supplement → fallthrough on error), comparative_node (dual retrieval + interleave), search_node (hybrid retrieval + SectionSummaryModel batch-lookup + text augmentation), synthesize_node (intent-aware prompts + section_context), conditional fallthrough edges
+- Files changed: backend/app/runtime/chat_graph.py (major rewrite), backend/tests/test_chat_graph.py (updated for new summary_node behavior), backend/tests/test_chat_graph_nodes.py (new, 6 tests), scripts/smoke/S78.sh (new)
+- Learnings:
+  - Lazy import `get_graph_service` inside graph_node: patch at source (`app.services.graph.get_graph_service`) not destination module
+  - SectionSummaryModel batch lookup by (document_id, heading) using sqlalchemy OR conditions — avoids N+1 queries
+  - Conditional edges after strategy nodes: _route_after_strategy checks intent='factual' as fallthrough signal
+  - synthesize_node no-context check: not_found only when BOTH chunks and section_context are absent
+  - 419 tests pass, ruff clean
+---
+
+## 2026-03-07T05:00:00Z - S77 - ChatState TypedDict + LangGraph chat router skeleton with intent classifier
+- Implemented: IntentType + ChatState TypedDict (app/types.py), intent classifier service (app/services/intent.py), LangGraph StateGraph (app/runtime/chat_graph.py) with classify_node/route_node/stub strategy nodes/search_node/synthesize_node, qa.py migrated to graph.ainvoke, test_qa.py rewritten with graph-level mocking, test_intent_classifier.py (7 tests), test_chat_graph.py (4 tests), smoke S77.sh
+- Files changed: backend/app/types.py, backend/app/services/qa.py, backend/tests/test_qa.py (modified); backend/app/runtime/__init__.py, backend/app/runtime/chat_graph.py, backend/app/services/intent.py, backend/tests/test_chat_graph.py, backend/tests/test_intent_classifier.py, scripts/smoke/S77.sh (new)
+- Learnings:
+  - search_node must NOT write stub answer — if answer non-empty, synthesize_node passes through and no_context flow breaks
+  - qa.py helpers (_split_response, _build_context, etc.) stay at module level — chat_graph.py imports them directly from app.services.qa
+  - Lazy import: `from app.runtime.chat_graph import get_chat_graph  # noqa: PLC0415` inside stream_answer() avoids circular import
+  - test_qa.py: mock at graph level with `patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph)` where mock_graph.ainvoke is AsyncMock
+  - 413 tests pass, ruff clean
+---
+
+## 2026-03-07T00:00:00Z - S76 - Document summary fast-path using section summaries
+- Implemented: pregenerate() fast-path (already in summarizer.py from prior work), invalidate_section_reduce_cache() call at start of SectionSummarizerService.generate(), 4 pytest tests (fast path 3 LLM calls, slow path >3, _section_reduce cached row, <3 units falls back), smoke script S76.sh
+- Files changed: backend/app/services/summarizer.py (ruff import sort fix), backend/app/services/section_summarizer.py (invalidation call), backend/tests/test_document_summary_fast_path.py (new), scripts/smoke/S76.sh (new)
+- Learnings:
+  - Mock get_llm_service (not litellm.acompletion directly) when testing SummarizationService.pregenerate() — avoids tracing/telemetry complications
+  - Lazy import pattern for cross-service calls: `from app.services.summarizer import get_summarization_service  # noqa: PLC0415` inside the method body
+  - Fast path assertion: exactly 3 generate calls (one per mode); slow path with 3×3000-token chunks: >3 calls (map-reduce + modes)
+---
+
+## 2026-03-07T08:30:00Z - S75 - SectionSummaryModel + parallel section summarization node (fix)
+- Implemented: Fixed datetime.utcnow() → datetime.now(UTC) in section_summarizer.py (line 111) — final AC blocker
+- Files changed: backend/app/services/section_summarizer.py
+- AC verified: all 15 ACs PASS including "No datetime.utcnow() calls in section_summarizer.py"
+- Reviewer verdict: PASS (no Critical items)
+- Learnings:
+  - datetime.now(UTC) requires importing UTC from datetime module: `from datetime import UTC, datetime`
+  - The SQLAlchemy utcnow() warning in tests is from the third-party library (non-actionable)
+---
+
+## 2026-03-08T00:00:00Z - S82 - Bug: Key Points tab shows per-passage summaries instead of thematic key points
+- Implemented: Added _is_metadata_section() pure function to section_summarizer.py; applied in generate() before preview length check; updated _build_section_summary_input() in summarizer.py to filter metadata rows and return None when <3 non-metadata rows remain; updated MODE_INSTRUCTIONS['executive'] to instruct synthesis over listing; wrote 9 tests in test_summary_quality.py; smoke test S82.sh.
+- Files changed: backend/app/services/section_summarizer.py, backend/app/services/summarizer.py, backend/tests/test_summary_quality.py, scripts/smoke/S82.sh
+- AC verified:
+  - _is_metadata_section() pure function in section_summarizer.py: PASS
+  - generate() skips metadata sections before preview length check: PASS
+  - _build_section_summary_input() filters metadata rows: PASS
+  - _build_section_summary_input() returns None when <3 non-metadata rows: PASS
+  - MODE_INSTRUCTIONS['executive'] updated to synthesise overarching themes: PASS
+  - test_metadata_section_filtered_in_generate passes: PASS
+  - test_metadata_section_filtered_in_build_input passes: PASS
+  - test_build_input_returns_none_when_only_metadata passes: PASS
+  - test_is_metadata_section_true_for_gutenberg passes: PASS
+  - test_is_metadata_section_false_for_content passes: PASS
+  - uv run pytest tests/test_summary_quality.py exits 0: PASS (9/9)
+  - scripts/smoke/S82.sh exists: PASS (not verified against live server)
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed — stale _section_reduce cache bypass removed from pregenerate())
+- Learnings:
+  - When a cache-first pattern exists, newly added filters must bypass the cache or the stale cached value defeats the filter. pregenerate() overwrote `section_input` with `cached_sr.content` before the fix.
+  - Pure utility functions shared across two services create a directed import dependency; consider placing them in app/types/ or app/services/text_utils.py for future refactors.
+---
+
+## 2026-03-08T01:00:00Z - S83 - Bug: Low confidence on multi-doc scope queries and missing library summary fallback
+- Implemented: summary_node checks LibrarySummaryModel for scope='all'; fires background generation + placeholder on miss. search_node reduces k=6 and applies _cap_per_document(max_per_doc=2) for scope='all'. synthesize_node appends multi-doc attribution instruction. _split_response defaults confidence='medium' for long answers without JSON block.
+- Files changed: backend/app/services/context_packer.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/tests/test_confidence_fixes.py, scripts/smoke/S83.sh
+- AC verified:
+  - summary_node scope='all' no LibrarySummaryModel returns medium+placeholder: PASS
+  - _split_response medium for >80 char answers: PASS
+  - _split_response low for short answers: PASS
+  - _cap_per_document limits chunks per doc: PASS
+  - search_node caps multi-doc chunks: PASS
+  - All 8 tests pass: PASS
+  - ruff check exits 0: PASS
+  - scripts/smoke/S83.sh exists: PASS (not verified vs live server)
+- Reviewer verdict: PASS (1 Critical fixed — unawaited coroutine in mock, fixed with coro.close() side_effect)
+- Learnings:
+  - When mocking asyncio.create_task, the coroutine argument is already created before the mock sees it; use side_effect to call coro.close() to prevent RuntimeWarning in strict CI.
+  - Patching asyncio.create_task at module level also intercepts SQLAlchemy's internal session close; prefer patching the specific function being tested (_fetch_library_executive_summary) to avoid collateral interception.
+---
+
+## 2026-03-08T00:00:00+11:00 - S85 - Feature: RAGAS eval results panel in Monitoring tab with backend trigger endpoint
+- Implemented: GET /evals/results endpoint reading scores_history.jsonl, POST /evals/run firing background subprocess, EvalPanel component in Monitoring.tsx with threshold coloring and Run Eval button per row
+- Files changed:
+  - backend/app/routers/evals.py (new)
+  - backend/tests/test_evals_router.py (new)
+  - backend/app/main.py (evals_router registered)
+  - frontend/src/pages/Monitoring.tsx (EvalPanel added)
+  - scripts/smoke/S85.sh (new)
+- AC verified:
+  - GET /evals/results HTTP 200 with [] when file absent: PASS
+  - GET /evals/results latest per dataset: PASS
+  - POST /evals/run HTTP 202 with background asyncio.to_thread: PASS
+  - POST /evals/run invalid dataset HTTP 422: PASS
+  - evals router registered with prefix='/evals': PASS
+  - EvalPanel renders HR@5, MRR, Faithfulness, Context Precision columns: PASS
+  - Scores coloured green/amber/grey by threshold: PASS (>= threshold = green, >= 75% = amber, below = grey)
+  - Run Eval button calls POST /evals/run + sonner toast: PASS
+  - Loading/error/empty states: PASS
+  - All 4 pytest tests pass: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - scripts/smoke/S85.sh present: PASS
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed -- coroutine leak in test monkeypatch, fixed with coro.close())
+- Learnings:
+  - For test stubs that discard a coroutine arg, use `lambda coro: coro.close()` not `lambda coro: None` to avoid RuntimeWarning in strict CI.
+  - JSONL deduplication by max timestamp: simple string comparison works for ISO timestamps.
+---
+
+## 2026-03-08T01:00:00+11:00 - S86 - Feature: Entity disambiguation -- canonical name normalisation before Kuzu upsert
+- Implemented: EntityDisambiguator service (pure Python, no I/O), KuzuService extended with aliases column and get_entities_by_type_for_document, entity_extract_node calls canonicalize_batch before Kuzu MERGE
+- Files changed:
+  - backend/app/services/entity_disambiguator.py (new)
+  - backend/app/services/graph.py (aliases column, upsert_entity signature, get_entities_by_type_for_document)
+  - backend/app/workflows/ingestion.py (entity_extract_node)
+  - backend/tests/test_entity_disambiguator.py (new)
+  - backend/tests/test_graph.py (3 new tests added)
+  - scripts/smoke/S86.sh (new)
+- AC verified:
+  - entity_disambiguator.py with _strip_honorifics, find_canonical, canonicalize_batch: PASS
+  - _HONORIFICS correct, sr not included: PASS
+  - find_canonical Rule A/B/C ordering: PASS
+  - Longer name wins on substring: PASS
+  - canonicalize_batch called in entity_extract_node before Kuzu MERGE: PASS
+  - Kuzu MERGE uses canonical name, aliases written as pipe-delimited string: PASS
+  - All 5 pytest tests pass: PASS
+  - scripts/smoke/S86.sh present: PASS
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed -- order-dependency in canonicalize_batch resolved with two-pass algorithm; 3 graph tests added for High issue)
+- Learnings:
+  - Two-pass canonicalize_batch needed: Pass 1 stabilises pool by promoting longer canonicals and evicting shorter ones. Pass 2 resolves results against stable pool. Single-pass produces order-dependent results.
+  - Kuzu CREATE NODE TABLE IF NOT EXISTS adds aliases column to new DBs only; existing DBs degrade gracefully via try/except on aliases writes.
+---
+
+## 2026-03-08T02:00:00+11:00 - S87 - Feature: Notes focused editor dialog with side-by-side Write/Preview
+- Implemented: NoteEditorDialog component (Radix UI Dialog, two-column Write/Preview, Ctrl+S shortcut, Loader2 spinner, inline error), dialog.tsx shadcn wrapper, Notes.tsx refactored to remove NoteEditorTabs and inline editor, NoteCard simplified to use onEdit prop, Actions column added to list view
+- Files changed:
+  - frontend/src/components/ui/dialog.tsx (new)
+  - frontend/src/components/NoteEditorDialog.tsx (new)
+  - frontend/src/pages/Notes.tsx (NoteCard, NoteEditorTabs removed, Actions column, NoteEditorDialog rendered at page level)
+  - frontend/package.json (@radix-ui/react-dialog added)
+  - scripts/smoke/S87.sh (new)
+- AC verified:
+  - NoteEditorDialog.tsx with two-column Write/Preview: PASS
+  - Write pane monospace textarea, controlled state: PASS
+  - Preview pane MarkdownRenderer real-time updates: PASS
+  - Ctrl+S / Cmd+S triggers save: PASS
+  - Save disabled when unchanged, Loader2 when pending: PASS
+  - onSaved then close on success; inline error on failure: PASS
+  - Tags and group_name read-only below Write pane: PASS
+  - List view TableRow onClick -> setEditingNote: PASS
+  - Actions column with Pencil button per list row: PASS
+  - NoteCard uses onEdit prop, NoteEditorTabs removed: PASS
+  - Delete confirmation flow preserved: PASS
+  - NoteEditorDialog at page level: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - npm run build exits 0: PASS
+  - scripts/smoke/S87.sh present: PASS
+- Reviewer verdict: PASS (no critical issues; added DialogDescription for accessibility)
+- Learnings:
+  - @radix-ui/react-dialog must be installed before creating dialog.tsx shadcn wrapper
+  - Always export DialogDescription from dialog.tsx to prevent Radix accessibility console warnings
+  - NoteCard.tsx does not exist as a separate file -- it is inline in Notes.tsx
+---
+
+## 2026-03-10T00:00:00 - S89 - Bug: Notes markdown rendering -- headings and emphasis unstyled, code blocks uncolored
+- Implemented: Added @tailwindcss/typography plugin so prose-* Tailwind classes take effect; added highlight.js/styles/github.css import for code block syntax colors
+- Files changed: frontend/package.json, frontend/package-lock.json, frontend/tailwind.config.cjs, frontend/src/index.css, scripts/smoke/S89.sh
+- AC verified:
+  - @tailwindcss/typography added to devDependencies: PASS
+  - tailwind.config.cjs plugins array updated: PASS
+  - highlight.js/styles/github.css import added to index.css: PASS
+  - npm run build exits 0: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - scripts/smoke/S89.sh exits 0: PASS
+  - No backend files changed: PASS
+- Reviewer verdict: PASS (reviewer flagged dark theme mismatch -- fixed to github.css light theme)
+- Learnings:
+  - highlight.js/styles/github-dark.css is wrong for a light-mode app; use github.css for the default light theme
+  - @tailwindcss/typography belongs in devDependencies for Vite/PostCSS builds (build-time only)
+---
