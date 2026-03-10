@@ -110,6 +110,30 @@ async function deleteNote(id: string): Promise<void> {
   if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
 }
 
+async function patchNote(
+  id: string,
+  data: { content?: string; tags?: string[]; group_name?: string },
+): Promise<Note> {
+  const res = await fetch(`${API_BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
+  return res.json() as Promise<Note>
+}
+
+async function fetchSuggestedTags(id: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
+    if (!res.ok) return []
+    const data = (await res.json()) as { tags: string[] }
+    return data.tags ?? []
+  } catch {
+    return []
+  }
+}
+
 interface NoteSearchItem {
   note_id: string
   content: string
@@ -168,11 +192,22 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
           .filter(Boolean),
         document_id: docId || null,
       }),
-    onSuccess: () => {
+    onSuccess: (created: Note) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       void qc.invalidateQueries({ queryKey: ["notes-groups"] })
       onCreated()
       onClose()
+      // Fire-and-forget: suggest tags and silently patch the new note
+      void fetchSuggestedTags(created.id).then(async (suggestions) => {
+        if (suggestions.length > 0) {
+          try {
+            await patchNote(created.id, { tags: suggestions })
+            void qc.invalidateQueries({ queryKey: ["notes"] })
+          } catch {
+            // Non-fatal -- note exists without tags
+          }
+        }
+      })
     },
   })
 

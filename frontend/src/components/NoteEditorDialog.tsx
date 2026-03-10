@@ -5,16 +5,19 @@
  *   Left:  full-height monospace textarea (Write pane)
  *   Right: real-time MarkdownRenderer (Preview pane)
  *
- * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when isSaved=false).
- * Tags and group_name displayed read-only below the Write pane.
+ * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when not yet saved).
+ * Tags section is editable: chips with X to remove, inline input to add.
  *
  * After save:
- *   - If suggest-tags returns tags: stay open, show chips; Done closes dialog.
- *   - If suggest-tags returns empty or fails: close immediately (no regression).
+ *   - isFetchingTags=true shows 'Suggesting tags...' with Loader2
+ *   - If suggest-tags returns novel tags: dashed-border chips shown
+ *   - If suggest-tags returns []: 'No suggestions available' shown briefly (2s)
+ *   - Dialog NEVER auto-closes -- user always closes via Done or Cancel
+ *   - AbortController cancels in-flight fetch when dialog closes
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Loader2, Tag } from "lucide-react"
+import { Loader2, Tag, X } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import {
@@ -60,9 +63,12 @@ async function patchNote(
   return res.json() as Promise<Note>
 }
 
-async function fetchSuggestedTags(id: string): Promise<string[]> {
+async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
+    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, {
+      method: "POST",
+      signal,
+    })
     if (!res.ok) return []
     const data = (await res.json()) as { tags: string[] }
     return data.tags ?? []
@@ -83,21 +89,28 @@ interface NoteEditorDialogProps {
 
 export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogProps) {
   const [content, setContent] = useState(note?.content ?? "")
+  const [editTags, setEditTags] = useState<string[]>(note?.tags ?? [])
+  const [tagInput, setTagInput] = useState("")
   const [isSaved, setIsSaved] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
+  const [noSuggestionsMsg, setNoSuggestionsMsg] = useState(false)
   const [savedNote, setSavedNote] = useState<Note | null>(null)
   const qc = useQueryClient()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   // Re-initialise state when note changes (new note selected)
   useEffect(() => {
     if (note) {
       setContent(note.content)
+      setEditTags(note.tags ?? [])
+      setTagInput("")
       setIsSaved(false)
       setSuggestedTags([])
       setSavedNote(null)
       setIsFetchingTags(false)
+      setNoSuggestionsMsg(false)
       saveMut.reset()
     }
     // saveMut.reset is stable; note drives initialisation
@@ -111,27 +124,35 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     }
   }, [note])
 
+  function handleClose() {
+    abortRef.current?.abort()
+    onClose()
+  }
+
   const saveMut = useMutation({
-    mutationFn: (newContent: string) => patchNote(note!.id, { content: newContent }),
-    onSuccess: async (updated) => {
+    mutationFn: () => patchNote(note!.id, { content, tags: editTags }),
+    onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       setSavedNote(updated)
       setIsSaved(true)
 
-      // Fetch tag suggestions; close immediately if none
+      // Fire suggest-tags with AbortController; abort any in-flight fetch first
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
       setIsFetchingTags(true)
-      const suggestions = await fetchSuggestedTags(updated.id)
-      setIsFetchingTags(false)
 
-      // Filter out tags the note already has
-      const novel = suggestions.filter((t) => !updated.tags.includes(t))
-      if (novel.length > 0) {
-        setSuggestedTags(novel)
-        // Stay open to show chips
-      } else {
-        onSaved(updated)
-        onClose()
-      }
+      void fetchSuggestedTags(updated.id, controller.signal).then((suggestions) => {
+        if (controller.signal.aborted) return
+        setIsFetchingTags(false)
+        const novel = suggestions.filter((t) => !updated.tags.includes(t))
+        if (novel.length > 0) {
+          setSuggestedTags(novel)
+        } else {
+          setNoSuggestionsMsg(true)
+          setTimeout(() => setNoSuggestionsMsg(false), 2000)
+        }
+      })
     },
   })
 
@@ -142,10 +163,25 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     },
     onSuccess: (updated) => {
       setSavedNote(updated)
+      setEditTags(updated.tags)
       void qc.invalidateQueries({ queryKey: ["notes"] })
       setSuggestedTags((prev) => prev.filter((t) => !updated.tags.includes(t)))
     },
   })
+
+  function commitTagInput() {
+    const trimmed = tagInput.trim().replace(/,+$/, "").trim()
+    if (trimmed && !editTags.includes(trimmed)) {
+      setEditTags((prev) => [...prev, trimmed])
+      setIsSaved(false)
+    }
+    setTagInput("")
+  }
+
+  const isOpen = note !== null
+  const unchanged =
+    content === (note?.content ?? "") &&
+    JSON.stringify([...editTags].sort()) === JSON.stringify([...(note?.tags ?? [])].sort())
 
   // Ctrl+S / Cmd+S shortcut -- only active when isSaved=false
   useEffect(() => {
@@ -153,25 +189,23 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault()
-        if (!isSaved && !saveMut.isPending && content !== note!.content) {
-          saveMut.mutate(content)
+        if (!isSaved && !saveMut.isPending && !unchanged) {
+          saveMut.mutate()
         }
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [note, content, saveMut, isSaved])
-
-  const isOpen = note !== null
-  const unchanged = content === (note?.content ?? "")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note, saveMut, isSaved, unchanged])
 
   function handleDone() {
     onSaved(savedNote ?? note!)
-    onClose()
+    handleClose()
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose() }}>
       <DialogContent className="flex h-[80vh] w-[90vw] max-w-5xl flex-col rounded-lg border border-border p-0 gap-0">
         <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle className="text-base font-semibold text-foreground">
@@ -197,25 +231,49 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
               className="flex-1 resize-none bg-background px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
               placeholder="Write your note in Markdown..."
             />
-            {/* Read-only tags and group below write pane */}
-            {note && (note.tags.length > 0 || note.group_name) && (
-              <div className="shrink-0 flex flex-wrap items-center gap-2 border-t border-border px-4 py-2">
-                {note.group_name && (
+            {/* Editable tags section below write pane */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                {note?.group_name && (
                   <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                     {note.group_name}
                   </span>
                 )}
-                {(savedNote?.tags ?? note.tags).map((t) => (
+                {editTags.map((t) => (
                   <span
                     key={t}
                     className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                   >
                     <Tag size={9} />
                     {t}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditTags((prev) => prev.filter((x) => x !== t))
+                        setIsSaved(false)
+                      }}
+                      className="ml-0.5 hover:text-foreground"
+                      aria-label={`Remove tag ${t}`}
+                    >
+                      <X size={9} />
+                    </button>
                   </span>
                 ))}
               </div>
-            )}
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault()
+                    commitTagInput()
+                  }
+                }}
+                placeholder="Add tag..."
+                className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+              />
+            </div>
           </div>
 
           {/* Preview pane */}
@@ -235,20 +293,27 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
 
         {/* Footer */}
         <DialogFooter className="shrink-0 flex-col items-stretch gap-2 border-t border-border px-6 py-3">
-          {/* Suggestion chips row -- shown after save when tags are available */}
-          {isSaved && (isFetchingTags || suggestedTags.length > 0) && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">Suggested tags:</span>
-              {isFetchingTags ? (
-                <Loader2 size={11} className="animate-spin text-muted-foreground" />
-              ) : (
-                <>
+          {/* Tag suggestion area -- shown after save */}
+          {isSaved && (
+            <>
+              {isFetchingTags && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 size={11} className="animate-spin" />
+                  <span>Suggesting tags...</span>
+                </div>
+              )}
+              {!isFetchingTags && noSuggestionsMsg && (
+                <p className="text-xs text-muted-foreground">No suggestions available</p>
+              )}
+              {!isFetchingTags && suggestedTags.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Suggested tags:</span>
                   {suggestedTags.map((tag) => (
                     <button
                       key={tag}
                       onClick={() => addTagMut.mutate(tag)}
                       disabled={addTagMut.isPending}
-                      className="flex items-center gap-0.5 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+                      className="flex items-center gap-0.5 rounded-full border border-dashed border-border bg-muted px-2 py-0.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
                     >
                       <Tag size={9} />
                       {tag}
@@ -260,9 +325,9 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                   >
                     Dismiss
                   </button>
-                </>
+                </div>
               )}
-            </div>
+            </>
           )}
 
           {/* Action row */}
@@ -283,13 +348,13 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
               ) : (
                 <>
                   <button
-                    onClick={onClose}
+                    onClick={handleClose}
                     className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={() => saveMut.mutate(content)}
+                    onClick={() => saveMut.mutate()}
                     disabled={unchanged || saveMut.isPending}
                     className="flex items-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
                   >

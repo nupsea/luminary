@@ -8,7 +8,7 @@ Covers:
   - POST /notes/nonexistent-id/suggest-tags returns 404
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -147,3 +147,19 @@ def test_suggest_tags_endpoint_200_for_long_content(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["tags"] == ["reading", "notes"]
+
+
+def test_suggest_tags_api_returns_empty_not_503(client):
+    """Offline Ollama path: suggest-tags endpoint returns HTTP 200 with tags=[], not 503."""
+    create = client.post("/notes", json={"content": "x" * 25, "tags": []})
+    assert create.status_code == 201
+    note_id = create.json()["id"]
+
+    mock_tagger = MagicMock()
+    mock_tagger.suggest_tags = AsyncMock(return_value=[])
+
+    with patch("app.services.note_tagger.get_note_tagger", return_value=mock_tagger):
+        resp = client.post(f"/notes/{note_id}/suggest-tags")
+
+    assert resp.status_code == 200
+    assert resp.json()["tags"] == []
