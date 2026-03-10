@@ -78,18 +78,25 @@ _MAP_BATCH_TOKENS = 3_000
 # Modes pre-generated at ingestion time
 PREGENERATE_MODES = ("one_sentence", "executive", "detailed")
 
+_METADATA_IGNORE = (
+    "Ignore any copyright notices, licensing terms, distribution metadata, "
+    "publisher boilerplate, or digitisation project information. "
+    "Focus only on the intellectual and narrative content of the works."
+)
+
 # System prompts for library-level synthesis
 LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
-    "one_sentence": "Synthesize all documents in one sentence of at most 30 words.",
+    "one_sentence": (
+        f"Synthesize all documents in one sentence of at most 30 words. {_METADATA_IGNORE}"
+    ),
     "executive": (
         "List the 5-7 key themes across all documents as bullet points. "
-        "Focus on intellectual content, ideas, arguments, and narratives — "
-        "ignore copyright notices, licensing terms, and distribution metadata. "
-        f"Note connections between them. {_MARKDOWN_INSTRUCTION}"
+        "Focus on intellectual content, ideas, arguments, and narratives. "
+        f"Note connections between them. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
     ),
     "detailed": (
         "Write a structured overview: main themes, key documents, "
-        f"and how they relate to each other. {_MARKDOWN_INSTRUCTION}"
+        f"and how they relate to each other. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
     ),
 }
 
@@ -168,6 +175,12 @@ class SummarizationService:
         subsequent calls (e.g. on-demand detailed/conversation) skip the expensive
         map step entirely.
         """
+        # Strip metadata/legal chunks (license preambles, copyright notices, etc.)
+        # before any further processing so they never pollute the summary input.
+        filtered = [c for c in chunks if not _is_metadata_section("", c.text)]
+        if filtered:
+            chunks = filtered
+
         total_tokens = sum(c.token_count or len(c.text) // 4 for c in chunks)
         if total_tokens <= MAP_TOKEN_THRESHOLD:
             return "\n\n".join(c.text for c in chunks)
@@ -283,9 +296,20 @@ class SummarizationService:
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
 
-            # No cached version — run LLM generation
-            chunks = await self._fetch_chunks(document_id)
-            input_text = await self._build_input_text(document_id, chunks, model)
+            # No cached version — prefer section summary fast path (metadata already
+            # filtered by SectionSummarizerService).  Fall back to chunk map-reduce only
+            # when section summaries are absent (old V1 documents, ingestion failures).
+            section_input = await self._build_section_summary_input(document_id)
+            if section_input is not None:
+                input_text = section_input
+                logger.info(
+                    "stream_summary: using section summary fast path (%d chars)",
+                    len(input_text),
+                    extra={"document_id": document_id, "mode": mode},
+                )
+            else:
+                chunks = await self._fetch_chunks(document_id)
+                input_text = await self._build_input_text(document_id, chunks, model)
 
             llm = get_llm_service()
             system = _build_system_prompt(mode)
@@ -552,12 +576,20 @@ class SummarizationService:
             # Fetch executive summaries per document
             exec_summaries = await self._fetch_all_executive_summaries()
 
-            if len(exec_summaries) < 2:
+            if len(exec_summaries) == 0:
                 yield (
                     'data: {"error": "not_enough_summaries", '
-                    '"message": "Ingest at least 2 documents to generate a library overview.", '
+                    '"message": "Ingest at least one document to generate a library overview.", '
                     '"done": true}\n\n'
                 )
+                return
+
+            if len(exec_summaries) == 1:
+                # Single-document library: serve that document's executive summary directly
+                doc_id, content = next(iter(exec_summaries.items()))
+                summary_id = await self._store_library_summary(mode, content)
+                yield f'data: {json.dumps({"token": content})}\n\n'
+                yield f'data: {json.dumps({"done": True, "summary_id": summary_id, "cached": False})}\n\n'
                 return
 
             # Fetch document titles
@@ -570,11 +602,27 @@ class SummarizationService:
                 )
                 titles = {row.id: row.title for row in rows}
 
-            # Build input text ordered by title
+            # Build input text ordered by title.
+            # Per-document source priority:
+            #   1. _build_section_summary_input() — section summaries already have
+            #      metadata/legal sections filtered out; use this as the primary source.
+            #   2. Cached executive summary — fallback for pre-V2 docs without section
+            #      summaries.
+            # Cap each document's contribution to MAX_WORDS_PER_DOC so the total
+            # input stays within the context budget of local Ollama models (~8 K tokens).
+            MAX_WORDS_PER_DOC = 250
             ordered = sorted(doc_ids, key=lambda did: titles.get(did, ""))
-            parts = [
-                f"## {titles.get(did, did)}\n{exec_summaries[did]}" for did in ordered
-            ]
+            parts: list[str] = []
+            for did in ordered:
+                section_input = await self._build_section_summary_input(did)
+                raw_text = section_input or exec_summaries.get(did, "")
+                words = raw_text.split()
+                doc_text = (
+                    " ".join(words[:MAX_WORDS_PER_DOC])
+                    if len(words) > MAX_WORDS_PER_DOC
+                    else raw_text
+                )
+                parts.append(f"## {titles.get(did, did)}\n{doc_text}")
 
             # Cross-doc entities from Kuzu (non-fatal)
             entity_names = self._get_cross_doc_entities()

@@ -122,35 +122,26 @@ async function deleteDocument(id: string): Promise<void> {
 // LibraryOverview — holistic summary across all ingested documents
 // ---------------------------------------------------------------------------
 
-type LibraryOverviewMode = "one_sentence" | "executive" | "detailed"
-
-const LIBRARY_MODES: { mode: LibraryOverviewMode; label: string }[] = [
-  { mode: "one_sentence", label: "One sentence" },
-  { mode: "executive", label: "Key themes" },
-  { mode: "detailed", label: "Detailed" },
-]
-
 function LibraryOverview() {
-  const [activeMode, setActiveMode] = useState<LibraryOverviewMode>("executive")
-  const [summaries, setSummaries] = useState<Partial<Record<LibraryOverviewMode, string>>>({})
-  const [streaming, setStreaming] = useState<Partial<Record<LibraryOverviewMode, boolean>>>({})
+  const [summary, setSummary] = useState<string>("")
+  const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notEnough, setNotEnough] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
-  const generatedModes = useRef(new Set<LibraryOverviewMode>())
+  const generated = useRef(false)
 
-  async function generate(mode: LibraryOverviewMode, forceRefresh = false) {
-    if (generatedModes.current.has(mode) && !forceRefresh) return
-    generatedModes.current.add(mode)
+  async function generate(forceRefresh = false) {
+    if (generated.current && !forceRefresh) return
+    generated.current = true
     setError(null)
     setNotEnough(false)
-    setStreaming((s) => ({ ...s, [mode]: true }))
-    setSummaries((s) => ({ ...s, [mode]: "" }))
+    setIsStreaming(true)
+    setSummary("")
     try {
       const res = await fetch(`${API_BASE}/summarize/all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, model: null, force_refresh: forceRefresh }),
+        body: JSON.stringify({ mode: "executive", model: null, force_refresh: forceRefresh }),
       })
       if (!res.ok || !res.body) throw new Error("Failed")
       const reader = res.body.getReader()
@@ -167,21 +158,21 @@ function LibraryOverview() {
             try {
               const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
               if (typeof payload["token"] === "string") {
-                setSummaries((s) => ({ ...s, [mode]: (s[mode] ?? "") + payload["token"] }))
+                setSummary((s) => s + payload["token"])
               }
               if (payload["error"] === "not_enough_summaries") {
                 setNotEnough(true)
-                setStreaming((s) => ({ ...s, [mode]: false }))
+                setIsStreaming(false)
               } else if (payload["error"] === "llm_unavailable") {
                 setError(
                   typeof payload["message"] === "string"
                     ? payload["message"]
                     : "Ollama is not running. Start it with: ollama serve",
                 )
-                setStreaming((s) => ({ ...s, [mode]: false }))
+                setIsStreaming(false)
               }
               if (payload["done"] === true) {
-                setStreaming((s) => ({ ...s, [mode]: false }))
+                setIsStreaming(false)
               }
             } catch {
               // skip malformed SSE event
@@ -190,14 +181,11 @@ function LibraryOverview() {
         }
       }
     } catch {
-      generatedModes.current.delete(mode)
-      setStreaming((s) => ({ ...s, [mode]: false }))
+      generated.current = false
+      setIsStreaming(false)
       setError("Failed to generate library overview.")
     }
   }
-
-  const currentSummary = summaries[activeMode]
-  const isStreaming = streaming[activeMode] ?? false
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -216,24 +204,6 @@ function LibraryOverview() {
       </button>
       {!collapsed && (
         <div className="border-t border-border px-4 pb-4 pt-3">
-          {/* Mode tabs */}
-          <div className="mb-3 flex gap-1 rounded-md bg-muted p-1">
-            {LIBRARY_MODES.map((m) => (
-              <button
-                key={m.mode}
-                onClick={() => setActiveMode(m.mode)}
-                className={cn(
-                  "flex-1 rounded py-1.5 text-xs font-medium transition-colors",
-                  activeMode === m.mode
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {/* Content */}
           {error && (
             <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {error}
@@ -241,23 +211,23 @@ function LibraryOverview() {
           )}
           {notEnough ? (
             <p className="text-sm text-muted-foreground">
-              Ingest at least 2 documents to get a library overview.
+              Ingest at least one document to get a library overview.
             </p>
-          ) : isStreaming && !currentSummary ? (
+          ) : isStreaming && !summary ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 size={14} className="animate-spin" />
               Summarizing...
             </div>
-          ) : currentSummary ? (
+          ) : summary ? (
             <div className="space-y-2">
               <div>
-                <MarkdownRenderer>{currentSummary}</MarkdownRenderer>
+                <MarkdownRenderer>{summary}</MarkdownRenderer>
                 {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
               </div>
               {!isStreaming && (
                 <button
                   title="Regenerate summary (uses LLM — may take a moment)"
-                  onClick={() => void generate(activeMode, true)}
+                  onClick={() => void generate(true)}
                   className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
                 >
                   <RefreshCw size={12} />
@@ -271,7 +241,7 @@ function LibraryOverview() {
                 Generate a holistic summary across all your documents.
               </p>
               <button
-                onClick={() => void generate(activeMode)}
+                onClick={() => void generate()}
                 className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               >
                 Generate

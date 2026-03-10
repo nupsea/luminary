@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Send, X } from "lucide-react"
+import { Send, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -139,6 +139,11 @@ export default function Chat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  function clearConversation() {
+    setMessages([])
+    setQaError(null)
+  }
 
   function autoResize() {
     const ta = textareaRef.current
@@ -281,13 +286,13 @@ export default function Chat() {
         {/* Scope selector */}
         <div className="flex items-center rounded-md border border-border">
           <button
-            onClick={() => setScope("single")}
+            onClick={() => { if (scope !== "single") { setScope("single"); clearConversation() } }}
             className={`rounded-l-md px-3 py-1.5 text-xs font-medium transition-colors ${scope === "single" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"}`}
           >
             This document
           </button>
           <button
-            onClick={() => setScope("all")}
+            onClick={() => { if (scope !== "all") { setScope("all"); clearConversation() } }}
             className={`rounded-r-md px-3 py-1.5 text-xs font-medium transition-colors ${scope === "all" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"}`}
           >
             All my content
@@ -298,7 +303,7 @@ export default function Chat() {
         {scope === "single" && (
           <select
             value={effectiveDocId ?? ""}
-            onChange={(e) => setSelectedDocId(e.target.value || null)}
+            onChange={(e) => { setSelectedDocId(e.target.value || null); clearConversation() }}
             className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[220px]"
           >
             <option value="">Select a document…</option>
@@ -306,6 +311,18 @@ export default function Chat() {
               <option key={doc.id} value={doc.id}>{doc.title}</option>
             ))}
           </select>
+        )}
+
+        {/* Clear conversation button — only shown when there are messages */}
+        {messages.length > 0 && !isStreaming && (
+          <button
+            onClick={clearConversation}
+            className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            title="Clear conversation"
+          >
+            <Trash2 size={13} />
+            Clear
+          </button>
         )}
 
         {/* Model selector */}

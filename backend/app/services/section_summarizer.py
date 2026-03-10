@@ -27,7 +27,9 @@ _SYSTEM_PROMPT = (
 )
 
 MIN_PREVIEW_LEN = 200
-MAX_UNITS = 100
+# 30 units per document: enough thematic coverage while keeping Ollama call count
+# manageable (100 was causing >30 min ingestion times on local hardware).
+MAX_UNITS = 30
 TEXT_HARD_CAP = 4000
 
 # Case-insensitive signals that indicate a metadata/legal section

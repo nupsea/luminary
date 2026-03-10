@@ -15,63 +15,80 @@ _VALID_INTENTS: frozenset[str] = frozenset(
 )
 
 # Keyword sets — order matters: checked top to bottom, first match wins.
+# These are hints only; the LLM classifier handles ambiguous cases (threshold < 0.9).
 _SUMMARY_KWS: frozenset[str] = frozenset(
     {
-        "summarize",
-        "summary",
-        "overview",
-        "what is this about",
-        "what are the themes",
-        "what are the main",
-        "main theme",
-        "main topics",
-        "key theme",
-        "major theme",
-        "core theme",
-        "main points",
-        "key ideas",
-        "synopsis",
-        "brief me",
-        "give me a summary",
-        "tell me about",
-        "what do these",
-        "across all",
-        "across my",
+        # Explicit summary requests
+        "summarize", "summary", "synopsis", "overview", "outline",
+        "give me a summary", "give an overview", "brief me",
+        # Theme/topic breadth
+        "what are the themes", "what are the main", "what is this about",
+        "main theme", "main topics", "main points", "main ideas",
+        "key theme", "key ideas", "key takeaways", "key points",
+        "major theme", "core theme", "central theme",
+        "major topics", "important topics",
+        # Big-picture language
+        "big picture", "high level", "high-level",
+        "across all", "across my",
+        # Common phrasings
+        "what does this book", "what does this document", "what is the book about",
+        "what is the document about", "what covers",
     }
 )
 
 _RELATIONAL_KWS: frozenset[str] = frozenset(
     {
-        "how are",
-        "relation between",
-        "connection between",
-        "what is the relationship",
+        # Explicit relationship words
+        "relation between", "relationship between", "connection between",
+        "what is the relationship", "what connects", "what links",
+        # "related to" / "connected to"
+        "related to", "connected to", "associated with",
+        "link between", "ties between", "bond between",
+        "interaction between",
+        # How-phrased relational queries
+        "how are", "how is", "how do",
+        "how does", "how did",
     }
 )
 
 _COMPARATIVE_KWS: frozenset[str] = frozenset(
     {
-        "compare",
-        "difference between",
-        "how is",
-        "different",
-        "versus",
-        "vs.",
-        "similarities",
+        # Explicit comparison
+        "compare", "comparison", "compare and contrast", "contrast",
+        # Difference
+        "difference between", "differences between", "what distinguishes",
+        "how do they differ", "how are they different",
+        # Similarity
+        "similarities between", "what do they have in common", "in common",
+        "alike", "similar to",
+        # Versus
+        "versus", "vs.", "vs ",
+        # Better/worse
+        "better than", "worse than", "superior to", "inferior to",
     }
 )
 
 _FACTUAL_KWS: frozenset[str] = frozenset(
     {
-        "explain",
-        "what does",
-        "who is",
-        "where is",
-        "when did",
-        "which",
-        "list all",
-        "how many",
-        "what happened",
+        # Who
+        "who is", "who was", "who are", "who were", "who did",
+        # What
+        "what is", "what was", "what are", "what were",
+        "what does", "what did", "what happened", "what happens",
+        # Where / When
+        "where is", "where was", "where are",
+        "when did", "when was", "when is", "when does",
+        # How (quantitative)
+        "how many", "how much", "how long", "how often", "how old",
+        # Lists and definitions
+        "list all", "list the", "name all", "name the",
+        "define", "definition of",
+        # Description and explanation
+        "describe", "explain", "what is the meaning", "what does it mean",
+        # Examples
+        "give an example", "examples of", "what are examples",
+        # Which / other specifiers
+        "which", "what year", "what time",
     }
 )
 
@@ -80,11 +97,11 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """Pure function — no imports from other app layers.
 
     Keyword-match rules in priority order (first match wins):
-      summary    confidence=0.9
-      relational confidence=0.85
-      comparative confidence=0.85
-      factual    confidence=0.8
-      exploratory confidence=0.5 (catch-all)
+      summary    confidence=0.9  — bypasses LLM classifier (threshold=0.9)
+      relational confidence=0.85 — falls through to LLM classifier as a hint
+      comparative confidence=0.85 — falls through to LLM classifier as a hint
+      factual    confidence=0.8  — falls through to LLM classifier as a hint
+      exploratory confidence=0.5 (catch-all) — falls through to LLM classifier
 
     Returns:
         (intent_str, confidence_float)

@@ -144,6 +144,20 @@ QA_SYSTEM_PROMPT = (
     '"confidence":"high|medium|low"}'
 )
 
+# Used only for factual intent: falls back to general knowledge with a disclaimer
+# when the document doesn't contain the answer.
+QA_FACTUAL_SYSTEM_PROMPT = (
+    "You are a knowledgeable learning assistant. "
+    "Prefer the provided context when answering. "
+    "If the answer is not in the provided context, answer from your general knowledge "
+    "and begin that part of your answer with: 'This is not covered in your documents, but: '. "
+    f"Only respond exactly: {NOT_FOUND_SENTINEL} if you have no knowledge of the topic whatsoever. "
+    "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
+    "Then on a new line write this JSON: "
+    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
+    '"confidence":"high|medium|low"}'
+)
+
 
 def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str:
     """Format retrieved chunks as a numbered context block."""
@@ -197,19 +211,23 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     citations: list[dict] = [c for c in parsed.get("citations", []) if isinstance(c, dict)]
     confidence: str = parsed.get("confidence", "low")
 
+    def _strip_json_preamble(text: str) -> str:
+        """Remove trailing lines that are JSON label preambles, not answer content."""
+        lines = text.split("\n")
+        while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
+            lines.pop()
+        return "\n".join(lines).strip()
+
     # Style B: answer is embedded in the JSON.
     if "answer" in parsed and isinstance(parsed["answer"], str):
-        return parsed["answer"].strip(), citations, confidence
+        return _strip_json_preamble(parsed["answer"].strip()), citations, confidence
 
     # Style A: prose precedes the JSON block.
     prose = full_text[:json_start].strip()
     # Strip any trailing lines that are format labels, not answer content.
     # LLMs sometimes echo instruction fragments (e.g. "JSON:", "Here is the JSON:",
     # "ONLY JSON (no prose ...):") — these always contain the word "json".
-    lines = prose.split("\n")
-    while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
-        lines.pop()
-    return "\n".join(lines).strip(), citations, confidence
+    return _strip_json_preamble(prose), citations, confidence
 
 
 class QAService:
@@ -404,9 +422,15 @@ class QAService:
                 full_text = "".join(collected)
 
                 if NOT_FOUND_SENTINEL in full_text:
-                    await self._store_qa(question, None, [], "low", None, scope, effective_model)
-                    yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
-                    return
+                    sentinel_pos = full_text.index(NOT_FOUND_SENTINEL)
+                    prose_before = full_text[:sentinel_pos].strip()
+                    if not prose_before:
+                        # True not-found: sentinel at the start of response
+                        await self._store_qa(question, None, [], "low", None, scope, effective_model)
+                        yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                        return
+                    # LLM appended sentinel after a real answer — use the prose portion
+                    full_text = prose_before
 
                 answer_text, citations, confidence = _split_response(full_text)
 

@@ -37,6 +37,7 @@ from app.models import DocumentModel, LibrarySummaryModel, SectionSummaryModel, 
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
+    QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
     _maybe_rewrite_query,
     _should_use_summary,
@@ -65,14 +66,22 @@ _RELATIONAL_SYSTEM = (
     "and the supporting passages provided. Name the entities clearly. "
     "Use Markdown to show relationships between entities. "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
-    'Then on a new line write this JSON: {"citations":[],"confidence":"high|medium|low"}'
+    "Do not speculate. "
+    "Write your answer as Markdown prose. "
+    "Then on a new line write this JSON: "
+    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
+    '"confidence":"high|medium|low"}'
 )
 
 _COMPARATIVE_SYSTEM = (
     "You are a knowledge assistant. Compare the two subjects using the provided passages. "
     "Structure your answer as: **Subject A:** ... **Subject B:** ... "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
-    'Then on a new line write this JSON: {"citations":[],"confidence":"high|medium|low"}'
+    "Do not speculate. "
+    "Write your answer as Markdown prose. "
+    "Then on a new line write this JSON: "
+    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
+    '"confidence":"high|medium|low"}'
 )
 
 
@@ -84,6 +93,8 @@ def _get_system_prompt(intent: str | None) -> str:
         return _RELATIONAL_SYSTEM
     if intent == "comparative":
         return _COMPARATIVE_SYSTEM
+    if intent == "factual":
+        return QA_FACTUAL_SYSTEM_PROMPT
     return QA_SYSTEM_PROMPT
 
 
@@ -106,7 +117,7 @@ async def classify_node(state: ChatState) -> dict:
     intent, confidence = classify_intent_heuristic(question)
     source = "heuristic"
 
-    if confidence < 0.7:
+    if confidence < 0.9:
         intent = await _llm_classify_fallback(question, scope=scope, default=intent)
         source = "llm"
 
@@ -296,12 +307,14 @@ async def summary_node(state: ChatState) -> dict:
             return {"intent": "factual"}
 
         logger.info(
-            "summary_node: serving cached summary (%d chars), skipping LLM call",
+            "summary_node: passing cached summary (%d chars) as context for LLM tailoring",
             len(summary_content),
         )
+        # Pass as section_context rather than answer so synthesize_node calls the LLM
+        # to answer the specific question.  Returning the full executive summary as
+        # `answer` bypasses the LLM and gives every question the same cached text.
         return {
-            "answer": summary_content,
-            "confidence": "high",
+            "section_context": f"[Document Summary]\n{summary_content}",
             "chunks": [],
         }
 
@@ -323,7 +336,26 @@ async def summary_node(state: ChatState) -> dict:
             "chunks": [],
         }
 
-    # No library summary yet — fire background generation and return placeholder
+    # No library summary yet — check how many docs exist before deciding what to do
+    try:
+        all_summaries = await _fetch_all_doc_executive_summaries()
+    except Exception:
+        logger.warning("summary_node: all-doc summaries lookup failed", exc_info=True)
+        all_summaries = []
+
+    if len(all_summaries) == 1:
+        # Single-document library: skip the cross-library path and serve that doc's summary
+        title, content = all_summaries[0]
+        logger.info(
+            "summary_node: single-doc library — serving '%s' summary as section_context",
+            title,
+        )
+        return {
+            "section_context": f"[Document Summary: {title}]\n{content}",
+            "chunks": [],
+        }
+
+    # Multiple docs but no cached library summary yet — fire background generation
     logger.info(
         "summary_node: no library summary found — firing background generation"
     )
