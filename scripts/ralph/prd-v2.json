@@ -513,7 +513,7 @@
         "npx tsc --noEmit exits 0",
         "scripts/smoke/S92.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S93",
