@@ -17,6 +17,8 @@ from app.main import app
 from app.services.note_search import _rrf_merge, _sanitize_fts_query
 from app.types import NoteSearchResult
 
+pytest_plugins = ["conftest_books"]
+
 # ---------------------------------------------------------------------------
 # Unit tests (pure functions — no I/O)
 # ---------------------------------------------------------------------------
@@ -161,3 +163,28 @@ def test_fts_sync_on_delete(client):
     miss = client.get("/notes/search", params={"q": "Luminiferous ether"})
     assert miss.status_code == 200
     assert note_id not in [r["note_id"] for r in miss.json()["results"]]
+
+
+# ---------------------------------------------------------------------------
+# Slow integration test (requires all_books_ingested fixture)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_alice_note_search_slow(all_books_ingested):
+    """Hybrid search with a real Alice note returns the note in top-3 results."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as c:
+        content = "In Wonderland the Cheshire Cat can disappear leaving only its grin"
+        create = c.post("/notes", json={"content": content, "tags": []})
+        assert create.status_code == 201
+        note_id = create.json()["id"]
+
+        resp = c.get("/notes/search", params={"q": "Cheshire Cat disappear"})
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        top3_ids = [r["note_id"] for r in results[:3]]
+        assert note_id in top3_ids, f"Note not in top-3: {[r['note_id'] for r in results]}"
