@@ -1,8 +1,10 @@
 """CRUD endpoints for notes.
 
-Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes/groups.
+Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes/groups,
+        GET /notes/search.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -16,6 +18,8 @@ from app.database import get_db
 from app.models import NoteModel
 
 logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -71,6 +75,22 @@ class SuggestedTagsResponse(BaseModel):
     tags: list[str]
 
 
+class NoteSearchItem(BaseModel):
+    note_id: str
+    content: str
+    tags: list[str]
+    group_name: str | None
+    document_id: str | None
+    score: float
+    source: str  # "fts" | "vector" | "both"
+
+
+class NoteSearchResponse(BaseModel):
+    query: str
+    results: list[NoteSearchItem]
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -87,6 +107,59 @@ def _to_response(note: NoteModel) -> NoteResponse:
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
+
+
+async def _fts_insert(
+    note_id: str, content: str, document_id: str | None, session: AsyncSession
+) -> None:
+    await session.execute(
+        text("INSERT INTO notes_fts(note_id, content, document_id) VALUES (:nid, :content, :doc)"),
+        {"nid": note_id, "content": content, "doc": document_id or ""},
+    )
+
+
+async def _fts_delete_rows(note_id: str, session: AsyncSession) -> None:
+    """Delete FTS5 rows for a note_id using rowid-based deletion (reliable for FTS5)."""
+    rows = (
+        await session.execute(
+            text("SELECT rowid FROM notes_fts WHERE note_id = :nid"),
+            {"nid": note_id},
+        )
+    ).fetchall()
+    for (rowid,) in rows:
+        await session.execute(
+            text("DELETE FROM notes_fts WHERE rowid = :rowid"),
+            {"rowid": rowid},
+        )
+
+
+async def _fts_update(
+    note_id: str, content: str, document_id: str | None, session: AsyncSession
+) -> None:
+    await _fts_delete_rows(note_id, session)
+    await session.execute(
+        text("INSERT INTO notes_fts(note_id, content, document_id) VALUES (:nid, :content, :doc)"),
+        {"nid": note_id, "content": content, "doc": document_id or ""},
+    )
+
+
+async def _fts_delete(note_id: str, session: AsyncSession) -> None:
+    await _fts_delete_rows(note_id, session)
+
+
+async def _embed_and_store_note(note_id: str, content: str, document_id: str | None) -> None:
+    """Embed note content and upsert vector. Non-fatal if embedding model unavailable."""
+    try:
+        from app.services.embedder import get_embedding_service  # noqa: PLC0415
+        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+        loop = asyncio.get_event_loop()
+        embedder = get_embedding_service()
+        vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])
+        get_lancedb_service().upsert_note_vector(note_id, document_id, content, vector)
+        logger.debug("Note vector stored note_id=%s", note_id)
+    except Exception as exc:
+        logger.warning("_embed_and_store_note failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +184,41 @@ async def create_note(
         updated_at=datetime.utcnow(),
     )
     session.add(note)
+    await _fts_insert(note.id, note.content, note.document_id, session)
     await session.commit()
     await session.refresh(note)
+    task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note)
+
+
+@router.get("/search", response_model=NoteSearchResponse)
+async def search_notes(
+    q: str = Query(..., min_length=1),
+    k: int = Query(default=10, ge=1, le=50),
+) -> NoteSearchResponse:
+    """Hybrid FTS + semantic search over notes. Returns 422 if q is empty."""
+    from app.services.note_search import get_note_search_service  # noqa: PLC0415
+
+    results = await get_note_search_service().search(q, k=k)
+    return NoteSearchResponse(
+        query=q,
+        results=[
+            NoteSearchItem(
+                note_id=r.note_id,
+                content=r.content,
+                tags=r.tags,
+                group_name=r.group_name,
+                document_id=r.document_id,
+                score=round(r.score, 6),
+                source=r.source,
+            )
+            for r in results
+        ],
+        total=len(results),
+    )
 
 
 @router.get("/groups", response_model=GroupsResponse)
@@ -188,8 +292,12 @@ async def _apply_note_update(
         note.group_name = req.group_name
     note.updated_at = datetime.utcnow()
 
+    await _fts_update(note.id, note.content, note.document_id, session)
     await session.commit()
     await session.refresh(note)
+    task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(note)
 
@@ -225,8 +333,12 @@ async def delete_note(
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
 
+    await _fts_delete(note_id, session)
     await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
     await session.commit()
+    from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+    get_lancedb_service().delete_note_vector(note_id)
     logger.info("Deleted note", extra={"note_id": note_id})
 
 

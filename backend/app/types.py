@@ -83,3 +83,19 @@ class ChatState(TypedDict):
     #   augment_node to select the complementary strategy.
     retry_attempted: bool
     primary_strategy: str | None
+
+
+# ---------------------------------------------------------------------------
+# Notes search (S91)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class NoteSearchResult:
+    note_id: str
+    content: str
+    tags: list[str]
+    group_name: str | None
+    document_id: str | None
+    score: float
+    source: Literal["fts", "vector", "both"]

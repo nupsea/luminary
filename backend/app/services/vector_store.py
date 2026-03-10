@@ -23,6 +23,17 @@ SCHEMA = pa.schema(
     ]
 )
 
+NOTE_TABLE_NAME = "note_vectors"
+
+NOTE_SCHEMA = pa.schema(
+    [
+        pa.field("note_id", pa.string()),
+        pa.field("document_id", pa.string()),
+        pa.field("content", pa.string()),
+        pa.field("vector", pa.list_(pa.float32(), 1024)),
+    ]
+)
+
 
 class LanceDBService:
     def __init__(self) -> None:
@@ -69,6 +80,39 @@ class LanceDBService:
         table = self._get_table()
         table.delete(f"document_id = '{document_id}'")
         logger.info("Deleted vectors for document %s from LanceDB", document_id)
+
+    def _get_note_table(self) -> Any:
+        self._connect()
+        existing = self._db.list_tables().tables
+        if NOTE_TABLE_NAME in existing:
+            return self._db.open_table(NOTE_TABLE_NAME)
+        return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
+
+    def upsert_note_vector(
+        self, note_id: str, document_id: str | None, content: str, vector: list[float]
+    ) -> None:
+        """Upsert a single note embedding keyed on note_id."""
+        table = self._get_note_table()
+        table.merge_insert("note_id").when_matched_update_all().when_not_matched_insert_all().execute(
+            [
+                {
+                    "note_id": note_id,
+                    "document_id": document_id or "",
+                    "content": content,
+                    "vector": vector,
+                }
+            ]
+        )
+        logger.debug("Upserted note vector note_id=%s", note_id)
+
+    def delete_note_vector(self, note_id: str) -> None:
+        """Delete the vector for the given note_id."""
+        try:
+            table = self._get_note_table()
+            table.delete(f"note_id = '{note_id}'")
+            logger.debug("Deleted note vector note_id=%s", note_id)
+        except Exception as exc:
+            logger.warning("delete_note_vector failed for note_id=%s: %s", note_id, exc)
 
 
 _lancedb_service: LanceDBService | None = None

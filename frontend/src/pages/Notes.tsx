@@ -18,10 +18,11 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
+import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteEditorDialog } from "@/components/NoteEditorDialog"
+import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -106,6 +107,29 @@ async function createNote(payload: {
 async function deleteNote(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
   if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
+}
+
+interface NoteSearchItem {
+  note_id: string
+  content: string
+  tags: string[]
+  group_name: string | null
+  document_id: string | null
+  score: number
+  source: string
+}
+
+interface NoteSearchResponse {
+  query: string
+  results: NoteSearchItem[]
+  total: number
+}
+
+async function fetchNoteSearch(q: string, k = 10): Promise<NoteSearchResponse> {
+  const params = new URLSearchParams({ q, k: String(k) })
+  const res = await fetch(`${API_BASE}/notes/search?${params.toString()}`)
+  if (!res.ok) throw new Error(`GET /notes/search failed: ${res.status}`)
+  return res.json() as Promise<NoteSearchResponse>
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +360,8 @@ export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const [showCreate, setShowCreate] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
   const notesView = useAppStore((s) => s.notesView)
@@ -370,6 +396,20 @@ export default function NotesPage() {
     gcTime: 60_000,
   })
 
+  const {
+    data: searchData,
+    isLoading: searchLoading,
+    isError: searchError,
+    refetch: refetchSearch,
+  } = useQuery({
+    queryKey: ["notes-search", debouncedQuery],
+    queryFn: () => fetchNoteSearch(debouncedQuery),
+    enabled: debouncedQuery.trim().length > 0,
+    staleTime: 10_000,
+  })
+
+  const isSearchMode = debouncedQuery.trim().length > 0
+
   useEffect(() => {
     if (!notesLoading) {
       const elapsed = Date.now() - mountTime.current
@@ -387,7 +427,72 @@ export default function NotesPage() {
   // Determine right panel content
   let panelContent: React.ReactNode
 
-  if (notesLoading) {
+  if (isSearchMode) {
+    if (searchLoading) {
+      panelContent = (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-lg" />
+          ))}
+        </div>
+      )
+    } else if (searchError) {
+      panelContent = (
+        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="flex-1">Search failed</span>
+          <button
+            onClick={() => void refetchSearch()}
+            className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+          >
+            Retry
+          </button>
+        </div>
+      )
+    } else if (!searchData || searchData.results.length === 0) {
+      panelContent = (
+        <div className="flex flex-col items-center gap-3 py-20 text-center">
+          <p className="text-sm text-muted-foreground">No notes matching &ldquo;{debouncedQuery}&rdquo;</p>
+        </div>
+      )
+    } else {
+      panelContent = (
+        <div className="flex flex-col gap-3">
+          {searchData.results.map((result) => {
+            const matchedNote = noteList.find((n) => n.id === result.note_id)
+            return (
+              <div
+                key={result.note_id}
+                className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 cursor-pointer hover:bg-accent/50"
+                onClick={() => {
+                  if (matchedNote) setEditingNote(matchedNote)
+                }}
+              >
+                <div className="text-sm text-foreground line-clamp-3">
+                  {result.content.slice(0, 150)}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {result.tags.map((t) => (
+                    <span
+                      key={t}
+                      className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                    >
+                      <Tag size={9} />
+                      {t}
+                    </span>
+                  ))}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {result.source === "both" ? "FTS + Semantic" : result.source === "vector" ? "Semantic" : "FTS"}
+                    {" · "}
+                    {result.score.toFixed(4)}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )
+    }
+  } else if (notesLoading) {
     panelContent =
       notesView === "list" ? (
         <Table>
@@ -583,6 +688,24 @@ export default function NotesPage() {
                 : `#${filter.name}`}
           </h2>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search notes..."
+                className="rounded border border-border bg-background px-3 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-48 pr-7"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  title="Clear search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
             <ViewToggle value={notesView} onChange={setNotesView} />
             <button
               onClick={() => setShowCreate((v) => !v)}
