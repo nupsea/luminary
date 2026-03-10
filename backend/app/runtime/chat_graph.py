@@ -147,6 +147,7 @@ async def classify_node(state: ChatState) -> dict:
         "summary": "summary_node",
         "relational": "graph_node",
         "comparative": "comparative_node",
+        "notes": "notes_node",
     }
     primary_strategy = _intent_to_strategy.get(intent, "search_node")
 
@@ -175,7 +176,9 @@ def route_node(state: ChatState) -> str:
     """
     intent = state.get("intent") or "factual"
     scope = state.get("scope", "all")
-    if intent == "summary":
+    if intent == "notes":
+        node = "notes_node"
+    elif intent == "summary":
         node = "summary_node"
     elif intent == "relational":
         node = "graph_node"
@@ -856,6 +859,34 @@ async def search_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# notes_node — search user notes and pass context to synthesize_node
+# ---------------------------------------------------------------------------
+
+
+async def notes_node(state: ChatState) -> dict:
+    """Search user notes via NoteSearchService and format context for synthesize_node."""
+    q = state.get("rewritten_question") or state["question"]
+    logger.info("notes_node: query=%r", q[:80])
+
+    from app.services.note_search import get_note_search_service  # noqa: PLC0415
+
+    try:
+        results = await get_note_search_service().search(q, k=5)
+    except Exception:
+        logger.warning("notes_node: search failed", exc_info=True)
+        results = []
+
+    if not results:
+        logger.info("notes_node: no note results for query=%r", q[:50])
+        return {"chunks": [], "section_context": None}
+
+    note_lines = ["[From your notes] " + r.content for r in results]
+    section_context = "\n\n".join(note_lines)
+    logger.info("notes_node: found %d notes, ctx_len=%d", len(results), len(section_context))
+    return {"chunks": [], "section_context": section_context}
+
+
+# ---------------------------------------------------------------------------
 # synthesize_node — intent-aware LLM call
 # ---------------------------------------------------------------------------
 
@@ -1032,6 +1063,7 @@ async def augment_node(state: ChatState) -> dict:
       graph_node (relational)             → hybrid search k=15 → chunks
       summary_node                        → hybrid search k=10 → chunks
       comparative_node                    → hybrid search k=10, no doc filter → chunks
+      notes_node                          → broader note search k=10 → section_context
 
     APPENDS to existing chunks/section_context; pack_context() deduplicates.
     Non-fatal: all errors caught and logged; returns {retry_attempted: True}.
@@ -1080,6 +1112,17 @@ async def augment_node(state: ChatState) -> dict:
             chunks = await retriever.retrieve(question, None, k=10)
             new_chunks = [_chunk_to_dict(c) for c in chunks]
 
+        elif primary == "notes_node":
+            # Complementary: broader note search k=10
+            from app.services.note_search import get_note_search_service  # noqa: PLC0415
+
+            try:
+                extra_results = await get_note_search_service().search(question, k=10)
+                for r in extra_results:
+                    new_section_lines.append("[From your notes] " + r.content)
+            except Exception:
+                logger.warning("augment_node: note search failed", exc_info=True)
+
     except Exception:
         logger.warning("augment_node: augmentation failed", exc_info=True)
         return {"retry_attempted": True}
@@ -1119,6 +1162,7 @@ def build_chat_graph() -> StateGraph:
     g: StateGraph = StateGraph(ChatState)  # type: ignore[type-var]
 
     g.add_node("classify_node", classify_node)
+    g.add_node("notes_node", notes_node)
     g.add_node("summary_node", summary_node)
     g.add_node("search_node", search_node)
     g.add_node("graph_node", graph_node)
@@ -1133,6 +1177,7 @@ def build_chat_graph() -> StateGraph:
         "classify_node",
         route_node,
         {
+            "notes_node": "notes_node",
             "summary_node": "summary_node",
             "graph_node": "graph_node",
             "comparative_node": "comparative_node",
@@ -1151,6 +1196,7 @@ def build_chat_graph() -> StateGraph:
             },
         )
 
+    g.add_edge("notes_node", "synthesize_node")
     g.add_edge("comparative_node", "synthesize_node")
     g.add_edge("search_node", "synthesize_node")
 

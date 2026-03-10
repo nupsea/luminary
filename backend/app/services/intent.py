@@ -11,11 +11,19 @@ import litellm
 logger = logging.getLogger(__name__)
 
 _VALID_INTENTS: frozenset[str] = frozenset(
-    {"summary", "factual", "relational", "comparative", "exploratory"}
+    {"summary", "factual", "relational", "comparative", "exploratory", "notes"}
 )
 
 # Keyword sets — order matters: checked top to bottom, first match wins.
 # These are hints only; the LLM classifier handles ambiguous cases (threshold < 0.9).
+_NOTES_KWS: frozenset[str] = frozenset(
+    {
+        "my notes", "i wrote", "i noted", "i have noted",
+        "according to my notes", "in my notes", "from my notes",
+        "what did i note", "what have i noted", "what i wrote",
+    }
+)
+
 _SUMMARY_KWS: frozenset[str] = frozenset(
     {
         # Explicit summary requests
@@ -108,6 +116,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """
     q = question.lower()
 
+    if any(kw in q for kw in _NOTES_KWS):
+        return ("notes", 0.95)
     if any(kw in q for kw in _SUMMARY_KWS):
         return ("summary", 0.9)
     if any(kw in q for kw in _RELATIONAL_KWS):
@@ -151,7 +161,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                     "content": (
                         f"{scope_hint} "
                         "Classify the question. Reply with exactly one word: "
-                        "summary, factual, relational, comparative, or exploratory. "
+                        "summary, factual, relational, comparative, exploratory, or notes. "
+                        "Use 'notes' for questions about the user's personal notes or annotations. "
                         "Use 'summary' for broad questions about themes, topics, patterns, "
                         "or overviews — especially when scope is the entire library."
                     ),
