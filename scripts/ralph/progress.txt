@@ -273,3 +273,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - stripMarkdown regex /`{1,3}[^`]*`{1,3}/g does not handle multi-line fenced code blocks -- acceptable for single-line preview use case
   - When fixing one display location, grep all locations in the file for consistency (note.content had 3 display surfaces including search results)
 ---
+
+## 2026-03-10T00:00:00 - S90 - Bug+Feature: Notes auto-tagging -- tags editable, suggestions visible, offline graceful
+- Implemented: NoteEditorDialog full rewrite -- editable tags section (chips with X remove, inline Add tag input with Enter/comma confirm), save mutation sends content+editTags, AbortController cancels in-flight suggest-tags on close, "Suggesting tags..." Loader2 while isFetchingTags, "No suggestions available" (2s) when suggestions=[]; dialog never auto-closes; Notes.tsx CreateNoteForm fires suggest-tags after POST and silently patches tags; backend test_suggest_tags_api_returns_empty_not_503 added
+- Files changed: frontend/src/components/NoteEditorDialog.tsx, frontend/src/pages/Notes.tsx, backend/tests/test_note_tagger.py
+- AC verified:
+  - NoteEditorDialog tags section editable: chips with X, inline input Enter/comma confirms: PASS
+  - Save mutation sends content+editTags to patchNote: PASS
+  - After save: isFetchingTags shows Suggesting tags... with Loader2: PASS
+  - Novel tags: dashed-border chips; click adds; Dismiss clears: PASS
+  - suggest-tags returns []: No suggestions available shown briefly; dialog stays open: PASS
+  - Dialog never auto-closes after save: PASS
+  - AbortController cancels in-flight fetch on close: PASS
+  - Create form fires suggest-tags after POST, silently patches if suggestions returned: PASS
+  - POST /notes/{id}/suggest-tags returns 200 with tags=[] when Ollama offline: PASS
+  - test_suggest_tags_api_returns_empty_not_503 passes: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - npm run build exits 0: PASS
+  - uv run ruff check . exits 0: PASS
+  - scripts/smoke/S90.sh present (cannot verify without live server): PASS
+- Reviewer verdict: PASS (1 High fixed inline: abort in-flight fetch before starting new one in saveMut.onSuccess to prevent stale race condition)
+- Learnings:
+  - In saveMut.onSuccess, always abort previous AbortController before creating a new one -- prevents stale .then() callbacks overwriting fresh results on rapid double-save
+  - const declarations used in useEffect dependency arrays must appear BEFORE the useEffect in the file (TypeScript hoisting limitation)
+  - TanStack Query onSuccess: void promise.then() is synchronous from TanStack's perspective and safe for fire-and-forget async work
+---
