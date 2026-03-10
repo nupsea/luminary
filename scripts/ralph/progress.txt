@@ -298,3 +298,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - const declarations used in useEffect dependency arrays must appear BEFORE the useEffect in the file (TypeScript hoisting limitation)
   - TanStack Query onSuccess: void promise.then() is synchronous from TanStack's perspective and safe for fire-and-forget async work
 ---
+
+## 2026-03-11T00:00:00 - S91 - Feature: Notes full-text and semantic search
+- Implemented: Pre-existing implementation verified complete: db_init.py NOTES_FTS5_DDL, notes.py _fts_insert/_fts_update/_fts_delete/_embed_and_store_note helpers, vector_store.py NOTE_TABLE_NAME/NOTE_SCHEMA/upsert_note_vector/delete_note_vector, note_search.py NoteSearchService (FTS5+semantic+RRF), GET /notes/search endpoint, Notes.tsx debounced search bar, ARCHITECTURE.md updated. Added missing test_alice_note_search_slow + pytest_plugins to test_note_search.py
+- Files changed: backend/tests/test_note_search.py
+- AC verified:
+  - notes_fts FTS5 virtual table in db_init.py: PASS
+  - FTS5 sync on create/update/delete in notes.py: PASS
+  - LanceDBService: NOTE_TABLE_NAME, NOTE_SCHEMA, upsert/delete_note_vector: PASS
+  - Note embedding fire_and_forget on create/update; delete_note_vector on delete: PASS
+  - note_search.py NoteSearchService with FTS+semantic+RRF: PASS
+  - GET /notes/search?q= returns 422: PASS
+  - GET /notes/search?q=keyword returns NoteSearchResponse: PASS
+  - Notes.tsx: debounced search bar, search mode, loading/error/empty states: PASS
+  - test_fts_finds_exact_match, test_fts_sync_on_delete, test_fts_sync_on_update pass: PASS (9 non-slow tests pass)
+  - test_alice_note_search_slow added, marked @pytest.mark.slow: PASS (not verified without slow run)
+  - docs/ARCHITECTURE.md updated with notes_fts and note_vectors: PASS
+  - uv run pytest tests/test_note_search.py exits 0: PASS (9 tests)
+  - npx tsc --noEmit exits 0: PASS
+  - uv run ruff check . exits 0: PASS
+  - scripts/smoke/S91.sh present: PASS
+- Reviewer verdict: PASS (no Critical items; pre-existing test_search_endpoint_200 has stale 'semantic' param that has no effect -- noted as Low)
+- Learnings:
+  - Default addopts = "-m 'not slow and not e2e'" means slow tests auto-excluded; pytest_plugins = ["conftest_books"] must be added to any test file using all_books_ingested fixture
+  - TestClient(app) inside a slow test with all_books_ingested works because DATA_DIR env var stays set during fixture yield -- lifespan recreates engine against same DB file
+---

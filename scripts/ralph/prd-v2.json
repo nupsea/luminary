@@ -488,7 +488,7 @@
         "uv run ruff check . exits 0",
         "scripts/smoke/S91.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S92",
