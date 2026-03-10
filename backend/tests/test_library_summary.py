@@ -174,7 +174,7 @@ async def test_library_summary_cached_on_second_call(test_db):
 
 @pytest.mark.asyncio
 async def test_library_summary_error_when_fewer_than_2_docs(test_db):
-    """Fewer than 2 docs with executive summaries → error event not_enough_summaries."""
+    """Exactly 1 doc with executive summary → serves single doc summary directly."""
     _engine, factory, tmp_path = test_db
 
     doc_id = str(uuid.uuid4())
@@ -190,9 +190,14 @@ async def test_library_summary_error_when_fewer_than_2_docs(test_db):
 
     assert resp.status_code == 200
     events = _parse_sse_events(resp.text)
-    assert len(events) == 1
-    assert events[0]["error"] == "not_enough_summaries"
-    assert events[0]["done"] is True
+    token_events = [e for e in events if "token" in e]
+    done_events = [e for e in events if e.get("done") is True]
+
+    assert len(token_events) == 1
+    assert token_events[0]["token"] == "Only one summary here."
+    assert len(done_events) == 1
+    assert done_events[0].get("cached") is False
+    assert "summary_id" in done_events[0]
     mock_llm.generate.assert_not_called()
 
 

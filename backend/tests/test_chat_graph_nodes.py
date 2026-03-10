@@ -120,10 +120,7 @@ async def _insert_doc(factory, doc_id: str, title: str = "Test Doc") -> None:
 
 @pytest.mark.asyncio
 async def test_summary_node_sets_answer_directly(test_db):
-    """summary_node sets answer directly from exec summary (not section_context).
-
-    S78 AC: summary_node populates state['answer'] with the executive summary text
-    and confidence='high'. synthesize_node then passes through (no LLM call).
+    """summary_node sets section_context from exec summary so synthesize_node can tailor it.
     """
     _engine, factory, _tmp = test_db
     doc_id = str(uuid.uuid4())
@@ -144,12 +141,11 @@ async def test_summary_node_sets_answer_directly(test_db):
     state = _make_state(doc_ids=[doc_id], scope="single", intent="summary")
     result = await summary_node(state)
 
-    # answer must be the executive summary; confidence must be 'high'
-    assert result.get("answer") == summary_content
-    assert result.get("confidence") == "high"
+    # answer should not be set directly
+    assert not result.get("answer")
     assert result.get("chunks") == []
-    # section_context is NOT used for the direct-answer path
-    assert not result.get("section_context")
+    # section_context must contain the summary
+    assert summary_content in result.get("section_context", "")
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +388,6 @@ async def test_summary_intent_end_to_end(test_db):
     done_payload = json.loads(events[-1][len("data: "):])
     assert done_payload.get("done") is True, f"Last event is not done: {done_payload}"
     assert done_payload.get("answer"), f"Expected non-empty answer, got: {done_payload}"
-    assert done_payload.get("confidence") == "high", (
-        f"Expected confidence='high', got: {done_payload.get('confidence')}"
+    assert done_payload.get("confidence") in ("high", "medium"), (
+        f"Expected confidence='high' or 'medium', got: {done_payload.get('confidence')}"
     )

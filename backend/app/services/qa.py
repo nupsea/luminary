@@ -426,7 +426,8 @@ class QAService:
                     prose_before = full_text[:sentinel_pos].strip()
                     if not prose_before:
                         # True not-found: sentinel at the start of response
-                        await self._store_qa(question, None, [], "low", None, scope, effective_model)
+                        await self._store_qa(question, None, [], "low", None,
+                                             scope, effective_model)
                         yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
                         return
                     # LLM appended sentinel after a real answer — use the prose portion
@@ -434,7 +435,6 @@ class QAService:
 
                 answer_text, citations, confidence = _split_response(full_text)
 
-                # Enrich citations with document titles
                 scored_chunks_for_citation = [
                     ScoredChunk(
                         chunk_id=c.get("chunk_id", ""),

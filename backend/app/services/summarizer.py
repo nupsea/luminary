@@ -589,7 +589,8 @@ class SummarizationService:
                 doc_id, content = next(iter(exec_summaries.items()))
                 summary_id = await self._store_library_summary(mode, content)
                 yield f'data: {json.dumps({"token": content})}\n\n'
-                yield f'data: {json.dumps({"done": True, "summary_id": summary_id, "cached": False})}\n\n'
+                yield f'data: {json.dumps({"done": True, "summary_id": summary_id, 
+                                            "cached": False})}\n\n'
                 return
 
             # Fetch document titles
