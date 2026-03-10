@@ -67,6 +67,10 @@ class GroupsResponse(BaseModel):
     tags: list[TagInfo]
 
 
+class SuggestedTagsResponse(BaseModel):
+    tags: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -224,3 +228,21 @@ async def delete_note(
     await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
     await session.commit()
     logger.info("Deleted note", extra={"note_id": note_id})
+
+
+@router.post("/{note_id}/suggest-tags", response_model=SuggestedTagsResponse)
+async def suggest_tags(
+    note_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> SuggestedTagsResponse:
+    """Return LLM-suggested tags for an existing note. Always HTTP 200 when note exists."""
+    result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+    note = result.scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
+
+    tags = await get_note_tagger().suggest_tags(note.content)
+    logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
+    return SuggestedTagsResponse(tags=tags)

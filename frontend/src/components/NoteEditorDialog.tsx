@@ -1,12 +1,16 @@
 /**
- * NoteEditorDialog — focused Write + Preview dialog for note editing.
+ * NoteEditorDialog -- focused Write + Preview dialog for note editing.
  *
  * Opens when `note` prop is non-null. Two-column layout:
  *   Left:  full-height monospace textarea (Write pane)
  *   Right: real-time MarkdownRenderer (Preview pane)
  *
- * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save.
+ * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when isSaved=false).
  * Tags and group_name displayed read-only below the Write pane.
+ *
+ * After save:
+ *   - If suggest-tags returns tags: stay open, show chips; Done closes dialog.
+ *   - If suggest-tags returns empty or fails: close immediately (no regression).
  */
 
 import { useEffect, useRef, useState } from "react"
@@ -56,6 +60,17 @@ async function patchNote(
   return res.json() as Promise<Note>
 }
 
+async function fetchSuggestedTags(id: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
+    if (!res.ok) return []
+    const data = (await res.json()) as { tags: string[] }
+    return data.tags ?? []
+  } catch {
+    return []
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -68,13 +83,21 @@ interface NoteEditorDialogProps {
 
 export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogProps) {
   const [content, setContent] = useState(note?.content ?? "")
+  const [isSaved, setIsSaved] = useState(false)
+  const [suggestedTags, setSuggestedTags] = useState<string[]>([])
+  const [isFetchingTags, setIsFetchingTags] = useState(false)
+  const [savedNote, setSavedNote] = useState<Note | null>(null)
   const qc = useQueryClient()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Re-initialise content when note changes (new note selected)
+  // Re-initialise state when note changes (new note selected)
   useEffect(() => {
     if (note) {
       setContent(note.content)
+      setIsSaved(false)
+      setSuggestedTags([])
+      setSavedNote(null)
+      setIsFetchingTags(false)
       saveMut.reset()
     }
     // saveMut.reset is stable; note drives initialisation
@@ -90,30 +113,62 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
 
   const saveMut = useMutation({
     mutationFn: (newContent: string) => patchNote(note!.id, { content: newContent }),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
-      onSaved(updated)
-      onClose()
+      setSavedNote(updated)
+      setIsSaved(true)
+
+      // Fetch tag suggestions; close immediately if none
+      setIsFetchingTags(true)
+      const suggestions = await fetchSuggestedTags(updated.id)
+      setIsFetchingTags(false)
+
+      // Filter out tags the note already has
+      const novel = suggestions.filter((t) => !updated.tags.includes(t))
+      if (novel.length > 0) {
+        setSuggestedTags(novel)
+        // Stay open to show chips
+      } else {
+        onSaved(updated)
+        onClose()
+      }
     },
   })
 
-  // Ctrl+S / Cmd+S shortcut
+  const addTagMut = useMutation({
+    mutationFn: (tag: string) => {
+      const current = savedNote?.tags ?? note!.tags
+      return patchNote(note!.id, { tags: [...current, tag] })
+    },
+    onSuccess: (updated) => {
+      setSavedNote(updated)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      setSuggestedTags((prev) => prev.filter((t) => !updated.tags.includes(t)))
+    },
+  })
+
+  // Ctrl+S / Cmd+S shortcut -- only active when isSaved=false
   useEffect(() => {
     if (!note) return
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault()
-        if (!saveMut.isPending && content !== note!.content) {
+        if (!isSaved && !saveMut.isPending && content !== note!.content) {
           saveMut.mutate(content)
         }
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [note, content, saveMut])
+  }, [note, content, saveMut, isSaved])
 
   const isOpen = note !== null
   const unchanged = content === (note?.content ?? "")
+
+  function handleDone() {
+    onSaved(savedNote ?? note!)
+    onClose()
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -135,7 +190,10 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             <textarea
               ref={textareaRef}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => {
+                setContent(e.target.value)
+                setIsSaved(false)
+              }}
               className="flex-1 resize-none bg-background px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
               placeholder="Write your note in Markdown..."
             />
@@ -147,7 +205,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                     {note.group_name}
                   </span>
                 )}
-                {note.tags.map((t) => (
+                {(savedNote?.tags ?? note.tags).map((t) => (
                   <span
                     key={t}
                     className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
@@ -176,27 +234,71 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
         </div>
 
         {/* Footer */}
-        <DialogFooter className="shrink-0 flex-row items-center justify-between border-t border-border px-6 py-3">
-          <div className="flex-1">
-            {saveMut.isError && (
-              <p className="text-xs text-red-600">Failed to save. Please try again.</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => saveMut.mutate(content)}
-              disabled={unchanged || saveMut.isPending}
-              className="flex items-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saveMut.isPending && <Loader2 size={11} className="animate-spin" />}
-              Save
-            </button>
+        <DialogFooter className="shrink-0 flex-col items-stretch gap-2 border-t border-border px-6 py-3">
+          {/* Suggestion chips row -- shown after save when tags are available */}
+          {isSaved && (isFetchingTags || suggestedTags.length > 0) && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Suggested tags:</span>
+              {isFetchingTags ? (
+                <Loader2 size={11} className="animate-spin text-muted-foreground" />
+              ) : (
+                <>
+                  {suggestedTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => addTagMut.mutate(tag)}
+                      disabled={addTagMut.isPending}
+                      className="flex items-center gap-0.5 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+                    >
+                      <Tag size={9} />
+                      {tag}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setSuggestedTags([])}
+                    className="text-xs text-muted-foreground underline hover:text-foreground"
+                  >
+                    Dismiss
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Action row */}
+          <div className="flex flex-row items-center justify-between">
+            <div className="flex-1">
+              {saveMut.isError && (
+                <p className="text-xs text-red-600">Failed to save. Please try again.</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {isSaved ? (
+                <button
+                  onClick={handleDone}
+                  className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Done
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={onClose}
+                    className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => saveMut.mutate(content)}
+                    disabled={unchanged || saveMut.isPending}
+                    className="flex items-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {saveMut.isPending && <Loader2 size={11} className="animate-spin" />}
+                    Save
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </DialogFooter>
       </DialogContent>

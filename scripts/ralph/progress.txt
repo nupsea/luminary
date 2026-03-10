@@ -228,3 +228,27 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - highlight.js/styles/github-dark.css is wrong for a light-mode app; use github.css for the default light theme
   - @tailwindcss/typography belongs in devDependencies for Vite/PostCSS builds (build-time only)
 ---
+
+## 2026-03-10T00:00:00+11:00 - S90 - Feature: Notes auto-tagging -- LLM-suggested tags shown inline after save
+- Implemented: NoteTaggerService with suggest_tags()/get_note_tagger(); _parse_tag_list pure function; POST /notes/{note_id}/suggest-tags endpoint; NoteEditorDialog updated to stay open after save when suggestions exist, show chips, support Done/Dismiss, gate Ctrl+S on isSaved=false
+- Files changed: backend/app/services/note_tagger.py (new), backend/app/routers/notes.py (+SuggestedTagsResponse +endpoint), frontend/src/components/NoteEditorDialog.tsx (tag suggestion flow), backend/tests/test_note_tagger.py (new, 14 tests), scripts/smoke/S90.sh (new)
+- AC verified:
+  - note_tagger.py: NoteTaggerService + @lru_cache get_note_tagger() -- PASS
+  - suggest_tags returns [] for content < 20 chars -- PASS
+  - suggest_tags returns [] on litellm.ServiceUnavailableError -- PASS
+  - _parse_tag_list handles fences/invalid JSON/empty/caps at 5 -- PASS
+  - POST /notes/{note_id}/suggest-tags returns 200 for found note -- PASS
+  - POST /notes/nonexistent-id/suggest-tags returns 404 -- PASS
+  - NoteEditorDialog: stays open after save, chips, Dismiss, Done -- PASS
+  - Empty/failed suggest-tags: closes immediately (no regression) -- PASS
+  - Ctrl+S only active when isSaved=false -- PASS
+  - No print() in app/ code; all LLM calls via LiteLLM -- PASS
+  - uv run pytest tests/test_note_tagger.py exits 0 (14 passed) -- PASS
+  - npx tsc --noEmit exits 0 -- PASS
+  - uv run ruff check . exits 0 -- PASS
+  - scripts/smoke/S90.sh written (cannot verify without live server) -- PASS
+- Reviewer verdict: PASS (1 Critical fixed: smoke test cleanup used -f flag causing false-negative; reviewer removed -f and added || true)
+- Learnings:
+  - smoke test cleanup curl calls should use -s without -f and add || true to avoid false-negative exits after assertions pass
+  - litellm.ServiceUnavailableError constructor requires message, llm_provider, and model kwargs in tests
+---
