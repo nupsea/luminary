@@ -1,10 +1,11 @@
 """Flashcard generation service — LLM-based QA flashcard generation."""
 
+import asyncio
 import json
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import select, text
@@ -140,6 +141,40 @@ def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
 
     logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
     return []
+
+
+GAP_FLASHCARD_SYSTEM = (
+    "You are a learning assistant. Generate exactly ONE flashcard for the given knowledge gap. "
+    'Output ONLY a JSON object with two keys: {"front": "...", "back": "..."} '
+    "where 'front' is the question and 'back' is a concise answer. "
+    "Write no explanation, preamble, or markdown fences. Output only the JSON object."
+)
+
+GAP_FLASHCARD_USER_TMPL = (
+    'Knowledge gap: "{gap}"\n\n'
+    'Generate one flashcard as JSON: {{"front": "question", "back": "answer"}}'
+)
+
+
+def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
+    """Parse a single {front, back} JSON object from LLM response for one gap."""
+    raw = raw.strip()
+    raw = re.sub(r"^```[^\n]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+    raw = raw.strip()
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(raw[start : end + 1])
+            if isinstance(data, dict) and data.get("front") and data.get("back"):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    logger.warning("Gap flashcard JSON parse failed for gap %r: %r", gap[:50], raw[:200])
+    return None
 
 
 class FlashcardService:
@@ -305,6 +340,61 @@ class FlashcardService:
                 await session.refresh(card)
 
         return flashcards
+
+    async def generate_from_gaps(
+        self,
+        gaps: list[str],
+        document_id: str,
+        session: AsyncSession,
+    ) -> tuple[int, list[str]]:
+        """Generate one flashcard per gap using bounded LLM concurrency (semaphore=5).
+
+        Skips gaps whose LLM response cannot be parsed.
+        Raises litellm.ServiceUnavailableError if Ollama is unreachable.
+        Returns (created_count, card_ids).
+        """
+        llm = get_llm_service()
+        semaphore = asyncio.Semaphore(5)
+
+        async def _generate_one(gap: str) -> FlashcardModel | None:
+            async with semaphore:
+                prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
+                raw = await llm.generate(prompt, system=GAP_FLASHCARD_SYSTEM, stream=False)
+                item = _parse_gap_flashcard(raw, gap)
+                if item is None:
+                    return None
+                now = datetime.now(UTC)
+                return FlashcardModel(
+                    id=str(uuid.uuid4()),
+                    document_id=document_id if document_id else None,
+                    chunk_id=None,
+                    source="gap",
+                    question=item["front"].strip(),
+                    answer=item["back"].strip(),
+                    source_excerpt=gap,
+                    fsrs_state="new",
+                    fsrs_stability=0.0,
+                    fsrs_difficulty=0.0,
+                    due_date=now,
+                    reps=0,
+                    lapses=0,
+                    created_at=now,
+                )
+
+        results = await asyncio.gather(*[_generate_one(g) for g in gaps])
+        cards = [r for r in results if r is not None]
+        ids: list[str] = []
+        for card in cards:
+            session.add(card)
+            ids.append(card.id)
+        if cards:
+            await session.commit()
+            logger.info(
+                "generate_from_gaps: created %d flashcards from %d gaps",
+                len(cards),
+                len(gaps),
+            )
+        return len(cards), ids
 
 
 _flashcard_service: FlashcardService | None = None

@@ -968,6 +968,7 @@ async def notes_gap_node(state: ChatState) -> dict:
             "gaps": report["gaps"],
             "covered": report["covered"],
             "query_used": report["query_used"],
+            "document_id": document_id,
         }
         logger.info(
             "notes_gap_node: gaps=%d covered=%d", len(report["gaps"]), len(report["covered"])

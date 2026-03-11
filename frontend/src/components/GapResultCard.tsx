@@ -1,4 +1,8 @@
-import { CheckCircle2, XCircle } from "lucide-react"
+import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { useState } from "react"
+import { Link } from "react-router-dom"
+
+const API_BASE = "http://localhost:8000"
 
 export interface GapCardData {
   type: string
@@ -6,13 +10,21 @@ export interface GapCardData {
   gaps: string[]
   covered: string[]
   query_used?: string
+  document_id?: string
 }
 
 interface GapResultCardProps {
   data: GapCardData
+  documentId?: string
 }
 
-export function GapResultCard({ data }: GapResultCardProps) {
+type ButtonState = "idle" | "loading" | "done" | "error"
+
+export function GapResultCard({ data, documentId }: GapResultCardProps) {
+  const [btnState, setBtnState] = useState<ButtonState>("idle")
+  const [createdCount, setCreatedCount] = useState(0)
+  const [errorMsg, setErrorMsg] = useState("")
+
   if (data.error) {
     return (
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -31,6 +43,37 @@ export function GapResultCard({ data }: GapResultCardProps) {
         No analysis available. Ask about a document with linked notes.
       </div>
     )
+  }
+
+  const effectiveDocId = data.document_id ?? documentId ?? ""
+
+  async function handleGenerateFlashcards() {
+    setBtnState("loading")
+    setErrorMsg("")
+    try {
+      const res = await fetch(`${API_BASE}/flashcards/from-gaps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gaps: data.gaps, document_id: effectiveDocId }),
+      })
+      if (res.status === 503) {
+        setErrorMsg("Ollama is unavailable. Start it with: ollama serve")
+        setBtnState("error")
+        return
+      }
+      if (!res.ok) {
+        const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
+        setErrorMsg(detail)
+        setBtnState("error")
+        return
+      }
+      const body = (await res.json()) as { created: number }
+      setCreatedCount(body.created)
+      setBtnState("done")
+    } catch {
+      setErrorMsg("Request failed. Please try again.")
+      setBtnState("error")
+    }
   }
 
   return (
@@ -73,13 +116,35 @@ export function GapResultCard({ data }: GapResultCardProps) {
         </div>
       )}
 
-      <button
-        disabled
-        title="Coming in next update"
-        className="mt-1 w-fit rounded-md border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground opacity-50 cursor-not-allowed"
-      >
-        Generate Flashcards for these Gaps
-      </button>
+      {btnState === "done" ? (
+        <div className="flex items-center gap-2 text-sm text-green-700">
+          <CheckCircle2 size={14} className="shrink-0 text-green-500" />
+          <span>{createdCount} flashcard{createdCount !== 1 ? "s" : ""} added to your deck.</span>
+          <Link to="/study" className="ml-1 underline text-blue-600 hover:text-blue-800">
+            Go to Study
+          </Link>
+        </div>
+      ) : (
+        <>
+          {btnState === "error" && (
+            <p className="text-xs text-red-600">{errorMsg}</p>
+          )}
+          <button
+            disabled={!hasGaps || btnState === "loading"}
+            onClick={handleGenerateFlashcards}
+            className={`mt-1 flex w-fit items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs ${
+              !hasGaps
+                ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-50"
+                : btnState === "loading"
+                  ? "cursor-not-allowed border-border bg-muted text-muted-foreground"
+                  : "border-border bg-background text-foreground hover:bg-muted"
+            }`}
+          >
+            {btnState === "loading" && <Loader2 size={12} className="animate-spin" />}
+            {btnState === "loading" ? "Generating..." : btnState === "error" ? "Retry" : "Generate Flashcards for these Gaps"}
+          </button>
+        </>
+      )}
     </div>
   )
 }

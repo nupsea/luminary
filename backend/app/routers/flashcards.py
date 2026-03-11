@@ -2,6 +2,7 @@
 
 Routes:
   POST /flashcards/generate            — LLM-generate cards for a document
+  POST /flashcards/from-gaps           — one LLM flashcard per gap string (S97)
   GET  /flashcards/{document_id}/export/csv — CSV download
   GET  /flashcards/{document_id}       — list cards ordered by created_at desc
   PUT  /flashcards/{card_id}           — update question/answer, sets is_user_edited
@@ -19,7 +20,7 @@ from typing import Literal
 import litellm
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +44,15 @@ class FlashcardGenerateRequest(BaseModel):
     scope: Literal["full", "section"] = "full"
     section_heading: str | None = None
     count: int = 10
+
+
+class FromGapsRequest(BaseModel):
+    gaps: list[str] = Field(min_length=1)
+    document_id: str = ""
+
+
+class FromGapsResponse(BaseModel):
+    created: int
 
 
 class FlashcardUpdateRequest(BaseModel):
@@ -134,6 +144,35 @@ async def generate_flashcards(
         extra={"document_id": req.document_id, "count": len(cards)},
     )
     return [_to_response(c) for c in cards]
+
+
+@router.post("/from-gaps", response_model=FromGapsResponse, status_code=200)
+async def generate_from_gaps(
+    req: FromGapsRequest,
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> FromGapsResponse:
+    """Generate one LLM-authored flashcard per knowledge gap (S97).
+
+    Raises 422 when gaps is empty. Raises 503 when Ollama is unreachable.
+    """
+    try:
+        created, _ = await service.generate_from_gaps(
+            gaps=req.gaps,
+            document_id=req.document_id,
+            session=session,
+        )
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unreachable. Start it with: ollama serve",
+        ) from exc
+    logger.info("generate_from_gaps: created %d cards", created)
+    return FromGapsResponse(created=created)
 
 
 def _cards_to_csv(cards: list[FlashcardModel], document_title: str) -> str:

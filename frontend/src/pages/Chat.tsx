@@ -491,7 +491,7 @@ export default function Chat() {
                   }`}
                 >
                   {msg.type === "card" && msg.cardData !== undefined ? (
-                    <GapResultCard data={msg.cardData} />
+                    <GapResultCard data={msg.cardData} documentId={effectiveDocId ?? undefined} />
                   ) : msg.not_found ? (
                     <p className="text-sm text-blue-600">
                       This information was not found in the selected content.
