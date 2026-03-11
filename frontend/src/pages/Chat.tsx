@@ -70,6 +70,60 @@ const EXAMPLE_QUESTIONS = [
   "What conclusions are drawn?",
 ]
 
+export function getContextualSuggestions(dueCount: number): string[] {
+  const pills: string[] = []
+  if (dueCount > 0) pills.push(`Review my ${dueCount} due flashcards`)
+  pills.push("Find gaps in my notes")
+  pills.push("Summarize this for me")
+  pills.push("Quiz me on the key concepts")
+  return pills.slice(0, 3)
+}
+
+interface ChatSuggestionsProps {
+  activeDocumentId: string
+  onSuggest: (text: string) => void
+}
+
+function ChatSuggestions({ activeDocumentId, onSuggest }: ChatSuggestionsProps) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["due-pills", activeDocumentId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/study/due?document_id=${encodeURIComponent(activeDocumentId)}`)
+      if (!res.ok) throw new Error("Failed to fetch due cards")
+      return res.json() as Promise<unknown[]>
+    },
+    staleTime: 60_000,
+  })
+
+  if (isError) return null
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
+        <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />
+        <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />
+      </div>
+    )
+  }
+
+  const dueCount = (data ?? []).length
+  const suggestions = getContextualSuggestions(dueCount)
+
+  return (
+    <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
+      {suggestions.map((s) => (
+        <button
+          key={s}
+          onClick={() => onSuggest(s)}
+          className="truncate max-w-[200px] rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function buildModelOptions(settings: LLMSettings | undefined): string[] {
   if (!settings) return []
   // Cloud mode: backend handles routing via get_effective_routing(); no model selector needed.
@@ -459,6 +513,14 @@ export default function Chat() {
           </div>
         )}
       </div>
+
+      {/* Contextual suggestion pills — only shown before conversation starts */}
+      {messages.length === 0 && activeDocumentId && (
+        <ChatSuggestions
+          activeDocumentId={activeDocumentId}
+          onSuggest={(text) => void sendMessage(text)}
+        />
+      )}
 
       {/* Input area */}
       <div className="border-t border-border px-6 py-4">
