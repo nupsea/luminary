@@ -33,26 +33,26 @@ if [ -z "$NOTE_ID" ]; then
   exit 1
 fi
 
-# 3. POST /chat/stream with a notes_gap query and no document_id (scope=all).
+# 3. POST /qa with a notes_gap query and no document_id (scope=all).
 #    Expect __card__ SSE event with an error field (no document selected).
-STREAM_BODY='{"query":"find gaps in my notes","document_ids":[],"scope":"all"}'
+STREAM_BODY='{"question":"find gaps in my notes","document_ids":[],"scope":"all","model":null}'
 
-SSE_OUTPUT=$(curl -s -X POST "${BASE}/chat/stream" \
+SSE_OUTPUT=$(curl -s -X POST "${BASE}/qa" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -d "$STREAM_BODY" \
   --max-time 15)
 
 if [ -z "$SSE_OUTPUT" ]; then
-  echo "FAIL: /chat/stream returned empty response"
+  echo "FAIL: /qa returned empty response"
   exit 1
 fi
 
 # Expect a "card" key in the SSE data
 if echo "$SSE_OUTPUT" | grep -q '"card"'; then
-  echo "PASS: S96 -- /chat/stream emits card SSE event for notes_gap intent"
+  echo "PASS: S96 -- /qa emits card SSE event for notes_gap intent"
 else
-  echo "FAIL: /chat/stream did not emit a card event for notes_gap query"
+  echo "FAIL: /qa did not emit a card event for notes_gap query"
   echo "Response was:"
   echo "$SSE_OUTPUT"
   exit 1

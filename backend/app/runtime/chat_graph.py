@@ -906,8 +906,6 @@ async def notes_gap_node(state: ChatState) -> dict:
     Routes directly to END (bypasses synthesize/confidence nodes -- card answers
     are fully formed by this node and have no confidence to retry).
     """
-    import json  # noqa: PLC0415
-
     logger.info("notes_gap_node: starting gap detection")
     doc_ids = state.get("doc_ids") or []
     document_id = doc_ids[0] if len(doc_ids) == 1 else None
@@ -923,7 +921,7 @@ async def notes_gap_node(state: ChatState) -> dict:
             "gaps": [],
             "covered": [],
         }
-        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     try:
         from sqlalchemy import select  # noqa: PLC0415
@@ -944,7 +942,7 @@ async def notes_gap_node(state: ChatState) -> dict:
             "gaps": [],
             "covered": [],
         }
-        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     if not note_ids:
         logger.info("notes_gap_node: no notes for document %s -- returning error card", document_id)
@@ -957,7 +955,7 @@ async def notes_gap_node(state: ChatState) -> dict:
             "gaps": [],
             "covered": [],
         }
-        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     try:
         import litellm as _litellm  # noqa: PLC0415
@@ -974,7 +972,7 @@ async def notes_gap_node(state: ChatState) -> dict:
         logger.info(
             "notes_gap_node: gaps=%d covered=%d", len(report["gaps"]), len(report["covered"])
         )
-        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     except Exception as exc:
         if isinstance(exc, (_litellm.ServiceUnavailableError, _litellm.APIConnectionError)):
@@ -988,7 +986,7 @@ async def notes_gap_node(state: ChatState) -> dict:
             "gaps": [],
             "covered": [],
         }
-        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
 
 # ---------------------------------------------------------------------------
