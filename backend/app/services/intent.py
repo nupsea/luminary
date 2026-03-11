@@ -12,11 +12,24 @@ logger = logging.getLogger(__name__)
 
 _VALID_INTENTS: frozenset[str] = frozenset(
     {"summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap",
-     "socratic"}
+     "socratic", "teach_back"}
 )
 
 # Keyword sets — order matters: checked top to bottom, first match wins.
 # These are hints only; the LLM classifier handles ambiguous cases (threshold < 0.9).
+_TEACH_BACK_KWS: frozenset[str] = frozenset(
+    {
+        "let me explain",
+        "i think this means",
+        "i understand this as",
+        "my understanding is",
+        "in my own words",
+        "i believe that",
+        "if i understand correctly",
+        "here is my understanding",
+    }
+)
+
 _SOCRATIC_KWS: frozenset[str] = frozenset(
     {
         "quiz me",
@@ -137,10 +150,14 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """Pure function — no imports from other app layers.
 
     Keyword-match rules in priority order (first match wins):
-      summary    confidence=0.9  — bypasses LLM classifier (threshold=0.9)
-      relational confidence=0.85 — falls through to LLM classifier as a hint
+      teach_back  confidence=0.95 — bypasses LLM classifier (threshold=0.9)
+      socratic    confidence=0.95 — bypasses LLM classifier
+      notes_gap   confidence=0.95 — bypasses LLM classifier
+      notes       confidence=0.95 — bypasses LLM classifier
+      summary     confidence=0.9  — bypasses LLM classifier
+      relational  confidence=0.85 — falls through to LLM classifier as a hint
       comparative confidence=0.85 — falls through to LLM classifier as a hint
-      factual    confidence=0.8  — falls through to LLM classifier as a hint
+      factual     confidence=0.8  — falls through to LLM classifier as a hint
       exploratory confidence=0.5 (catch-all) — falls through to LLM classifier
 
     Returns:
@@ -148,6 +165,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """
     q = question.lower()
 
+    if any(kw in q for kw in _TEACH_BACK_KWS):
+        return ("teach_back", 0.95)
     if any(kw in q for kw in _SOCRATIC_KWS):
         return ("socratic", 0.95)
     if any(kw in q for kw in _NOTES_GAP_KWS):
@@ -198,7 +217,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                         f"{scope_hint} "
                         "Classify the question. Reply with exactly one word: "
                         "summary, factual, relational, comparative, "
-                        "exploratory, notes, notes_gap, or socratic. "
+                        "exploratory, notes, notes_gap, socratic, or teach_back. "
+                        "Use 'teach_back' for first-person explanations (user is explaining). "
                         "Use 'socratic' for requests to be quizzed or tested. "
                         "Use 'notes_gap' for questions asking to compare notes against "
                         "a book or find gaps. "

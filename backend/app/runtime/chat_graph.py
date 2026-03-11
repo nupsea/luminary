@@ -149,6 +149,7 @@ async def classify_node(state: ChatState) -> dict:
         "comparative": "comparative_node",
         "notes": "notes_node",
         "socratic": "socratic_node",
+        "teach_back": "teach_back_node",
     }
     primary_strategy = _intent_to_strategy.get(intent, "search_node")
 
@@ -177,7 +178,9 @@ def route_node(state: ChatState) -> str:
     """
     intent = state.get("intent") or "factual"
     scope = state.get("scope", "all")
-    if intent == "socratic":
+    if intent == "teach_back":
+        node = "teach_back_node"
+    elif intent == "socratic":
         node = "socratic_node"
     elif intent == "notes_gap":
         node = "notes_gap_node"
@@ -1101,6 +1104,118 @@ async def socratic_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# teach_back_node — evaluate user's explanation, return structured feedback card
+# ---------------------------------------------------------------------------
+
+_TEACH_BACK_SYSTEM = (
+    "You are a learning coach. The learner explained a concept in their own words. "
+    "Identify: (a) what they got right, (b) specific misconceptions (things stated that are "
+    "factually wrong), (c) important gaps (key aspects not mentioned). "
+    "Be specific -- name exact concepts. Do not re-explain the whole topic. "
+    "Structure response as JSON: "
+    '{"correct": ["..."], "misconceptions": ["..."], "gaps": ["..."], '
+    '"encouragement": "one sentence of genuine encouragement"}'
+)
+
+
+async def teach_back_node(state: ChatState) -> dict:
+    """Evaluate the user's explanation against authoritative passages.
+
+    (1) Retrieves k=5 chunks relevant to the explanation.
+    (2) Calls LiteLLM (non-streaming) with a learning coach prompt.
+    (3) Parses JSON response; on parse failure returns fallback card.
+    (4) On Ollama offline: returns card with 'error' field.
+
+    Routes directly to END -- card answers bypass synthesize/confidence nodes.
+    """
+    doc_ids = state.get("doc_ids") or []
+    document_id = doc_ids[0] if doc_ids else None
+    question = state["question"]
+
+    logger.info("teach_back_node: document_id=%s", document_id)
+
+    # Use first 150 chars of the explanation as retrieval query
+    retrieval_query = question[:150]
+
+    chunks_retrieved: list[ScoredChunk] = []
+    try:
+        retriever = get_retriever()
+        filter_ids = [document_id] if document_id else None
+        chunks_retrieved = await retriever.retrieve(retrieval_query, filter_ids, k=5)
+    except Exception:
+        logger.warning("teach_back_node: retrieval failed", exc_info=True)
+
+    passages = "\n---\n".join(c.text for c in chunks_retrieved[:5])[:3000]
+    user_msg = (
+        f"LEARNER EXPLANATION:\n{question}\n\n"
+        f"AUTHORITATIVE PASSAGES:\n{passages}"
+    )
+
+    fallback_card = {
+        "type": "teach_back_result",
+        "correct": [],
+        "misconceptions": [],
+        "gaps": [],
+        "encouragement": "I had trouble analyzing your explanation. Try rephrasing.",
+        "error_detail": "Could not parse evaluation",
+        "document_id": document_id or "",
+    }
+
+    try:
+        from app.config import get_settings  # noqa: PLC0415
+
+        model = get_settings().LITELLM_DEFAULT_MODEL
+        response = await litellm.acompletion(
+            model=model,
+            messages=[
+                {"role": "system", "content": _TEACH_BACK_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+        )
+        text = (response.choices[0].message.content or "").strip()
+
+        # Strip optional markdown code fences
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[: text.rfind("```")]
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("teach_back_node: JSON parse failed, using fallback")
+            return {"answer": "__card__" + json.dumps(fallback_card), "chunks": []}
+
+        card = {
+            "type": "teach_back_result",
+            "correct": parsed.get("correct") or [],
+            "misconceptions": parsed.get("misconceptions") or [],
+            "gaps": parsed.get("gaps") or [],
+            "encouragement": parsed.get("encouragement") or "Good effort!",
+            "document_id": document_id or "",
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    except litellm.ServiceUnavailableError:
+        logger.warning("teach_back_node: Ollama unreachable")
+        card = {
+            "type": "teach_back_result",
+            "correct": [],
+            "misconceptions": [],
+            "gaps": [],
+            "encouragement": "",
+            "document_id": document_id or "",
+            "error": "Ollama is unreachable. Start it with: ollama serve",
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    except Exception:
+        logger.warning("teach_back_node: LLM call failed", exc_info=True)
+        return {"answer": "__card__" + json.dumps(fallback_card), "chunks": []}
+
+
+# ---------------------------------------------------------------------------
 # synthesize_node — intent-aware LLM call
 # ---------------------------------------------------------------------------
 
@@ -1379,6 +1494,7 @@ def build_chat_graph() -> StateGraph:
     g.add_node("notes_node", notes_node)
     g.add_node("notes_gap_node", notes_gap_node)
     g.add_node("socratic_node", socratic_node)
+    g.add_node("teach_back_node", teach_back_node)
     g.add_node("summary_node", summary_node)
     g.add_node("search_node", search_node)
     g.add_node("graph_node", graph_node)
@@ -1393,6 +1509,7 @@ def build_chat_graph() -> StateGraph:
         "classify_node",
         route_node,
         {
+            "teach_back_node": "teach_back_node",
             "socratic_node": "socratic_node",
             "notes_gap_node": "notes_gap_node",
             "notes_node": "notes_node",
@@ -1414,7 +1531,8 @@ def build_chat_graph() -> StateGraph:
             },
         )
 
-    # socratic_node and notes_gap_node route to END -- card answers skip synthesize/confidence retry
+    # card nodes route to END -- card answers skip synthesize/confidence retry
+    g.add_edge("teach_back_node", END)
     g.add_edge("socratic_node", END)
     g.add_edge("notes_gap_node", END)
     g.add_edge("notes_node", "synthesize_node")

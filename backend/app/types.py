@@ -40,7 +40,7 @@ class ScoredChunk:
 
 IntentType = Literal[
     "summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap",
-    "socratic",
+    "socratic", "teach_back",
 ]
 
 

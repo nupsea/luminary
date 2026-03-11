@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge"
 import { GapResultCard } from "@/components/GapResultCard"
 import type { GapCardData } from "@/components/GapResultCard"
 import { QuizQuestionCard } from "@/components/QuizQuestionCard"
+import { TeachBackResultCard } from "@/components/TeachBackResultCard"
+import type { TeachBackCardData } from "@/components/TeachBackResultCard"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
@@ -42,7 +44,7 @@ interface QuizCardData {
   error?: string
 }
 
-type AnyCardData = GapCardData | QuizCardData
+type AnyCardData = GapCardData | QuizCardData | TeachBackCardData
 
 interface ChatMessage {
   id: string
@@ -510,6 +512,8 @@ export default function Chat() {
                         error={(msg.cardData as QuizCardData).error}
                         onSubmit={sendMessage}
                       />
+                    ) : msg.cardData.type === "teach_back_result" ? (
+                      <TeachBackResultCard data={msg.cardData as TeachBackCardData} />
                     ) : (
                       <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
                     )
