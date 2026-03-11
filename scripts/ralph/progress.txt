@@ -373,3 +373,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - __card__ prefix protocol: 8-char prefix, graph node returns answer="__card__"+json.dumps(card), SSE loop emits card + done events, no token events, directly to END (bypass synthesize/confidence)
   - notes_gap_node requires doc_ids with exactly 1 element; scope=all returns error card (correct UX)
 ---
+
+## 2026-03-11T00:00:00Z - S97 - One-Click Bridge: generate flashcards from gap card in chat
+- Implemented: POST /flashcards/from-gaps endpoint; FlashcardService.generate_from_gaps with Semaphore(5); GapResultCard state machine (idle/loading/done/error); document_id propagated through chat_graph card payload
+- Files changed: backend/app/services/flashcard.py, backend/app/routers/flashcards.py, backend/app/runtime/chat_graph.py, frontend/src/components/GapResultCard.tsx, frontend/src/pages/Chat.tsx, backend/tests/test_from_gaps.py, scripts/smoke/S97.sh
+- AC verified:
+  - POST /flashcards/from-gaps accepts {gaps, document_id} where document_id defaults to '': PASS
+  - 422 when gaps is empty list; 200 with created count on success: PASS
+  - generate_from_gaps uses asyncio.Semaphore(5): PASS
+  - Malformed LLM JSON: logs warning, skips, does not raise: PASS
+  - Ollama offline: HTTP 503 with 'Ollama is unreachable. Start it with: ollama serve': PASS
+  - FlashcardModel rows inserted with source='gap', FSRS defaults, datetime.now(UTC): PASS
+  - GapResultCard idle/loading/done/error states: PASS
+  - Button disabled when gaps.length === 0: PASS
+  - 503 renders inline Ollama error: PASS
+  - All named tests pass (5/5): PASS
+  - ruff passes: PASS
+  - tsc passes: PASS
+  - scripts/smoke/S97.sh: PASS
+- Reviewer verdict: PASS (no Critical items; <a> → <Link> fixed; smoke test extended to cover success/503 path)
+- Learnings:
+  - GAP constants and helpers placed before class definition (consistent with FLASHCARD_SYSTEM/USER_TMPL pattern)
+  - Use datetime.now(UTC) not datetime.utcnow() for new code in Python 3.13
+  - asyncio.gather without return_exceptions=True propagates ServiceUnavailableError to router correctly for 503 handling
+  - document_id must be embedded in the __card__ JSON payload so GapResultCard can call /flashcards/from-gaps without needing it from props
+---
