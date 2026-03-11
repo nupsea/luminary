@@ -1,7 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Send, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
+import { GapResultCard } from "@/components/GapResultCard"
+import type { GapCardData } from "@/components/GapResultCard"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
@@ -34,6 +37,8 @@ interface ChatMessage {
   id: string
   role: "user" | "assistant"
   text: string
+  type?: "text" | "card"
+  cardData?: GapCardData
   citations?: Citation[]
   confidence?: Confidence
   not_found?: boolean
@@ -134,6 +139,7 @@ function buildModelOptions(settings: LLMSettings | undefined): string[] {
 
 export default function Chat() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const [searchParams] = useSearchParams()
   const qc = useQueryClient()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
@@ -160,6 +166,14 @@ export default function Chat() {
       setSelectedDocId((prev) => prev ?? activeDocumentId)
     }
   }, [activeDocumentId])
+
+  // Pre-fill input from ?q= query param (e.g. from Notes "Compare with Book" button)
+  useEffect(() => {
+    const prefill = searchParams.get("q")
+    if (prefill) {
+      setInput(prefill)
+    }
+  }, [searchParams])
 
   const { data: llmSettings, isLoading: llmLoading, isError: llmError } = useQuery({
     queryKey: ["llm-settings"],
@@ -256,6 +270,19 @@ export default function Chat() {
           if (!line.startsWith("data: ")) continue
           try {
             const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
+
+            // __card__ protocol: a card event replaces the streaming placeholder with a card message.
+            // No token events follow a card event -- the done event closes the stream.
+            if (payload["card"] !== undefined) {
+              const cardData = payload["card"] as GapCardData
+              setMessages((m) =>
+                m.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, type: "card" as const, cardData, isStreaming: false, text: "" }
+                    : msg,
+                ),
+              )
+            }
 
             if (typeof payload["token"] === "string") {
               const token = payload["token"] as string
@@ -463,7 +490,9 @@ export default function Chat() {
                       : "border border-border bg-white text-foreground shadow-sm"
                   }`}
                 >
-                  {msg.not_found ? (
+                  {msg.type === "card" && msg.cardData !== undefined ? (
+                    <GapResultCard data={msg.cardData} />
+                  ) : msg.not_found ? (
                     <p className="text-sm text-blue-600">
                       This information was not found in the selected content.
                     </p>

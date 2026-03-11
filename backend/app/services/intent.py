@@ -11,11 +11,29 @@ import litellm
 logger = logging.getLogger(__name__)
 
 _VALID_INTENTS: frozenset[str] = frozenset(
-    {"summary", "factual", "relational", "comparative", "exploratory", "notes"}
+    {"summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap"}
 )
 
 # Keyword sets — order matters: checked top to bottom, first match wins.
 # These are hints only; the LLM classifier handles ambiguous cases (threshold < 0.9).
+_NOTES_GAP_KWS: frozenset[str] = frozenset(
+    {
+        "find gaps in my notes",
+        "gaps in my notes",
+        "what am i missing",
+        "what am i missing from",
+        "compare my notes",
+        "compare notes with",
+        "notes vs book",
+        "gaps between my notes",
+        "missing from my notes",
+        "what have i missed",
+        "notes against the book",
+        "notes versus the book",
+        "my notes vs",
+    }
+)
+
 _NOTES_KWS: frozenset[str] = frozenset(
     {
         "my notes", "i wrote", "i noted", "i have noted",
@@ -116,6 +134,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """
     q = question.lower()
 
+    if any(kw in q for kw in _NOTES_GAP_KWS):
+        return ("notes_gap", 0.95)
     if any(kw in q for kw in _NOTES_KWS):
         return ("notes", 0.95)
     if any(kw in q for kw in _SUMMARY_KWS):
@@ -161,7 +181,10 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                     "content": (
                         f"{scope_hint} "
                         "Classify the question. Reply with exactly one word: "
-                        "summary, factual, relational, comparative, exploratory, or notes. "
+                        "summary, factual, relational, comparative, "
+                        "exploratory, notes, or notes_gap. "
+                        "Use 'notes_gap' for questions asking to compare notes against "
+                        "a book or find gaps. "
                         "Use 'notes' for questions about the user's personal notes or annotations. "
                         "Use 'summary' for broad questions about themes, topics, patterns, "
                         "or overviews — especially when scope is the entire library."

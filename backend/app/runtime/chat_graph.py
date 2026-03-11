@@ -176,7 +176,9 @@ def route_node(state: ChatState) -> str:
     """
     intent = state.get("intent") or "factual"
     scope = state.get("scope", "all")
-    if intent == "notes":
+    if intent == "notes_gap":
+        node = "notes_gap_node"
+    elif intent == "notes":
         node = "notes_node"
     elif intent == "summary":
         node = "summary_node"
@@ -887,6 +889,109 @@ async def notes_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# notes_gap_node — detect gaps between user notes and a book via chat intent
+# ---------------------------------------------------------------------------
+
+
+async def notes_gap_node(state: ChatState) -> dict:
+    """Detect gaps between the user's notes and a book document.
+
+    Fetches notes for doc_ids[0], calls GapDetectorService.detect_gaps, and
+    sets state['answer'] to the __card__ sentinel string so stream_answer()
+    emits a structured card SSE event instead of streaming text tokens.
+
+    All error cases (no document, no notes, Ollama offline) return a __card__
+    with an 'error' field -- never raise to the SSE stream.
+
+    Routes directly to END (bypasses synthesize/confidence nodes -- card answers
+    are fully formed by this node and have no confidence to retry).
+    """
+    import json  # noqa: PLC0415
+
+    logger.info("notes_gap_node: starting gap detection")
+    doc_ids = state.get("doc_ids") or []
+    document_id = doc_ids[0] if len(doc_ids) == 1 else None
+
+    if not document_id:
+        logger.info("notes_gap_node: no single document_id in state -- returning error card")
+        card = {
+            "type": "gap_result",
+            "error": (
+                "Please select a specific document to compare against your notes. "
+                "Switch to 'This document' scope and choose a book."
+            ),
+            "gaps": [],
+            "covered": [],
+        }
+        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+
+    try:
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.database import get_session_factory  # noqa: PLC0415
+        from app.models import NoteModel  # noqa: PLC0415
+
+        async with get_session_factory()() as session:
+            rows = (await session.execute(
+                select(NoteModel.id).where(NoteModel.document_id == document_id)
+            )).fetchall()
+            note_ids = [r[0] for r in rows]
+    except Exception:
+        logger.warning("notes_gap_node: note fetch failed", exc_info=True)
+        card = {
+            "type": "gap_result",
+            "error": "Could not fetch notes. Please try again.",
+            "gaps": [],
+            "covered": [],
+        }
+        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+
+    if not note_ids:
+        logger.info("notes_gap_node: no notes for document %s -- returning error card", document_id)
+        card = {
+            "type": "gap_result",
+            "error": (
+                "No notes linked to this document. "
+                "Create notes for this document first, then ask again."
+            ),
+            "gaps": [],
+            "covered": [],
+        }
+        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+
+    try:
+        import litellm as _litellm  # noqa: PLC0415
+
+        from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
+
+        report = await get_gap_detector().detect_gaps(note_ids, document_id)
+        card = {
+            "type": "gap_result",
+            "gaps": report["gaps"],
+            "covered": report["covered"],
+            "query_used": report["query_used"],
+        }
+        logger.info(
+            "notes_gap_node: gaps=%d covered=%d", len(report["gaps"]), len(report["covered"])
+        )
+        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+
+    except Exception as exc:
+        if isinstance(exc, (_litellm.ServiceUnavailableError, _litellm.APIConnectionError)):
+            error_msg = "Ollama is not running. Start it with: ollama serve"
+        else:
+            error_msg = "Gap analysis failed. Please try again."
+        logger.warning("notes_gap_node: detect_gaps failed: %s", exc, exc_info=True)
+        card = {
+            "type": "gap_result",
+            "error": error_msg,
+            "gaps": [],
+            "covered": [],
+        }
+        return {"answer": "__card__" + json.dumps(card), "context_chunks": []}
+
+
+# ---------------------------------------------------------------------------
 # synthesize_node — intent-aware LLM call
 # ---------------------------------------------------------------------------
 
@@ -1163,6 +1268,7 @@ def build_chat_graph() -> StateGraph:
 
     g.add_node("classify_node", classify_node)
     g.add_node("notes_node", notes_node)
+    g.add_node("notes_gap_node", notes_gap_node)
     g.add_node("summary_node", summary_node)
     g.add_node("search_node", search_node)
     g.add_node("graph_node", graph_node)
@@ -1177,6 +1283,7 @@ def build_chat_graph() -> StateGraph:
         "classify_node",
         route_node,
         {
+            "notes_gap_node": "notes_gap_node",
             "notes_node": "notes_node",
             "summary_node": "summary_node",
             "graph_node": "graph_node",
@@ -1196,6 +1303,8 @@ def build_chat_graph() -> StateGraph:
             },
         )
 
+    # notes_gap_node routes directly to END -- card answers skip synthesize/confidence retry
+    g.add_edge("notes_gap_node", END)
     g.add_edge("notes_node", "synthesize_node")
     g.add_edge("comparative_node", "synthesize_node")
     g.add_edge("search_node", "synthesize_node")

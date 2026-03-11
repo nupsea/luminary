@@ -38,7 +38,9 @@ class ScoredChunk:
 # Chat Router types (V2 agentic chat — S77+)
 # ---------------------------------------------------------------------------
 
-IntentType = Literal["summary", "factual", "relational", "comparative", "exploratory", "notes"]
+IntentType = Literal[
+    "summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap"
+]
 
 
 class ChatState(TypedDict):

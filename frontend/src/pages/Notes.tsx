@@ -20,6 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -396,6 +397,7 @@ type FilterState =
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
+  const navigate = useNavigate()
   const [showCreate, setShowCreate] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
@@ -748,7 +750,7 @@ export default function NotesPage() {
             </div>
             <ViewToggle value={notesView} onChange={setNotesView} />
             <button
-              onClick={() => setShowGapDetect(true)}
+              onClick={() => navigate("/chat?q=Find+gaps+in+my+notes")}
               className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
               title="Compare notes with a book to find gaps"
             >
