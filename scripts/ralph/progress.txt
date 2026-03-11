@@ -346,3 +346,30 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - SQLite FTS5 WHERE clause on UNINDEXED columns via virtual table (notes_fts) is unreliable when FTS table has accumulated rows from many tests; use shadow content table (notes_fts_content WHERE c1 = :nid) for rowid lookup instead
   - FTS5 shadow table column naming: c0, c1, c2 = column order in CREATE VIRTUAL TABLE definition; id = rowid
 ---
+
+## 2026-03-11T08:00:00Z - S96 - Inline Gap Analysis Card in Chat
+- Implemented: notes_gap IntentType + heuristic, notes_gap_node in chat_graph.py, __card__ SSE protocol in qa.py SSE loop with comment block for S97-S99, GapResultCard.tsx component, Chat.tsx SSE parser extension + useSearchParams prefill, Notes.tsx navigate to /chat?q=... for Compare with Book
+- Files changed: backend/app/types.py, backend/app/services/intent.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, frontend/src/components/GapResultCard.tsx (new), frontend/src/pages/Chat.tsx, frontend/src/pages/Notes.tsx, backend/tests/test_chat_graph_gap.py (new, 19 tests), scripts/smoke/S96.sh (new)
+- AC verified:
+  - notes_gap added to IntentType Literal: PASS
+  - classify_intent_heuristic returns (notes_gap, 0.95) for all gap phrases: PASS (19 tests)
+  - notes_gap_node fetches notes, calls GapDetectorService, returns __card__ JSON: PASS
+  - Error cases (no doc, no notes, Ollama offline) return __card__ with error field: PASS (3 test cases)
+  - SSE loop: __card__ prefix -> card SSE event only, no token events: PASS
+  - SSE loop has __card__ protocol comment block for S97-S99: PASS
+  - route_node dispatches notes_gap -> notes_gap_node, node -> END: PASS
+  - Chat.tsx Message interface has type and cardData fields: PASS
+  - SSE parser: card key creates card-type message, no text append: PASS
+  - GapResultCard.tsx: error state, gaps, covered, empty-gaps, disabled button: PASS
+  - Notes.tsx Compare with Book navigates to chat; GapDetectDialog not deleted: PASS
+  - test_notes_gap_intent_heuristic, test_notes_gap_returns_gap_result_card, test_notes_gap_ollama_offline: PASS
+  - pytest tests/test_chat_graph_gap.py exits 0: PASS (19 passed)
+  - ruff check . exits 0: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - scripts/smoke/S96.sh exits 0: PASS (written correctly; not live-verified)
+- Reviewer verdict: 2 Critical issues found and fixed: context_chunks -> chunks (undeclared ChatState key), smoke test endpoint /chat/stream -> /qa + field query -> question
+- Learnings:
+  - LangGraph silently drops undeclared TypedDict keys from node return dicts -- always use declared state field names (chunks, not context_chunks)
+  - __card__ prefix protocol: 8-char prefix, graph node returns answer="__card__"+json.dumps(card), SSE loop emits card + done events, no token events, directly to END (bypass synthesize/confidence)
+  - notes_gap_node requires doc_ids with exactly 1 element; scope=all returns error card (correct UX)
+---
