@@ -398,3 +398,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - asyncio.gather without return_exceptions=True propagates ServiceUnavailableError to router correctly for 503 handling
   - document_id must be embedded in the __card__ JSON payload so GapResultCard can call /flashcards/from-gaps without needing it from props
 ---
+
+## 2026-03-11T00:00:00Z - S98 - Socratic Quiz Mode: chat generates targeted recall questions from active document
+- Implemented: 'socratic' IntentType, _SOCRATIC_KWS heuristic (confidence=0.95, first rule), socratic_node (retrieve k=5, LiteLLM non-streaming, Q:/CONTEXT: parse, fallback+offline handling), route_node/build_chat_graph wiring, QuizQuestionCard.tsx (border-l-4 blue, Quiz badge, textarea, submit), Chat.tsx card dispatch by type, 16 backend tests
+- Files changed: backend/app/types.py, backend/app/services/intent.py, backend/app/runtime/chat_graph.py, backend/tests/test_chat_graph_socratic.py, frontend/src/components/QuizQuestionCard.tsx, frontend/src/pages/Chat.tsx, scripts/smoke/S98.sh
+- AC verified:
+  - 'socratic' added to IntentType Literal; existing intents unchanged: PASS
+  - classify_intent_heuristic returns ('socratic', 0.95) for all listed phrases: PASS
+  - No false positive: 'what is the main theme?' does not return 'socratic': PASS
+  - socratic_node retrieves 5 chunks, generates Q+CONTEXT via LiteLLM, returns __card__ JSON: PASS
+  - Parse fallback: malformed LLM response yields default question, no exception: PASS
+  - Ollama offline: card with error field returned, no exception propagates: PASS
+  - No changes to SSE loop: PASS
+  - QuizQuestionCard.tsx: border-l-4 blue, Quiz chip, question text, textarea, Submit button: PASS
+  - Submit: appends 'My answer: {text}' as new chat message; card becomes read-only: PASS
+  - Error prop: amber inline error, Textarea and button hidden: PASS
+  - test_socratic_node_returns_card, test_socratic_parse_fallback, test_socratic_ollama_offline pass: PASS
+  - uv run pytest tests/test_chat_graph_socratic.py exits 0 (16/16): PASS
+  - uv run ruff check . exits 0: PASS
+  - npx tsc --noEmit exits 0: PASS
+  - scripts/smoke/S98.sh present (not verified without live server): PASS
+- Reviewer verdict: PASS (contextHint rendered in post-submit state, applied inline)
+- Learnings:
+  - When a node does a local import (from app.config import get_settings), patch at the source (app.config.get_settings) not the consuming module
+  - Badge variant must match the codebase's custom badge.tsx -- shadcn secondary/destructive variants don't exist; valid: default|gray|blue|indigo|green
+---
