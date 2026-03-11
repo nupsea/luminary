@@ -423,3 +423,27 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - When a node does a local import (from app.config import get_settings), patch at the source (app.config.get_settings) not the consuming module
   - Badge variant must match the codebase's custom badge.tsx -- shadcn secondary/destructive variants don't exist; valid: default|gray|blue|indigo|green
 ---
+
+## 2026-03-11T00:00:00Z - S99 - Teach It Back Mode: user explains a concept, AI evaluates and surfaces misconceptions
+- Implemented: 'teach_back' IntentType; _TEACH_BACK_KWS heuristic (confidence=0.95, first rule); teach_back_node (retrieve k=5, LiteLLM non-streaming, JSON parse with fenced-JSON stripping, fallback+offline handling); route_node/build_chat_graph wiring; TeachBackResultCard.tsx (encouragement, three conditional sections, Add Gaps button with idle/loading/done/error state machine); Chat.tsx dispatch for teach_back_result type
+- Files changed: backend/app/types.py, backend/app/services/intent.py, backend/app/runtime/chat_graph.py, backend/tests/test_chat_graph_teach_back.py, frontend/src/components/TeachBackResultCard.tsx, frontend/src/pages/Chat.tsx, scripts/smoke/S99.sh
+- AC verified:
+  - 'teach_back' added to IntentType Literal; existing intents unchanged: PASS
+  - classify_intent_heuristic returns ('teach_back', 0.95) for all listed first-person phrases: PASS
+  - No false positive: 'explain X to me' does not return 'teach_back': PASS
+  - teach_back_node retrieves 5 chunks, calls LiteLLM (non-streaming), returns '__card__' JSON: PASS
+  - Malformed LLM JSON: fallback card with encouragement text returned; no exception raised: PASS
+  - Ollama offline: card with error field; no exception propagates: PASS
+  - No changes to SSE loop: PASS
+  - POST /flashcards/from-gaps endpoint from S97 used as-is: PASS
+  - TeachBackResultCard.tsx: encouragement, three conditional sections, [Add Gaps] button: PASS
+  - [Add Gaps] button: idle/loading/done/error state machine; disabled when gaps empty; 503 inline: PASS
+  - All named tests pass (15/15): PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - scripts/smoke/S99.sh present (not verified without live server): PASS
+- Reviewer verdict: PASS after Critical fix -- fenced-JSON strip did not call .strip() after split, causing trailing newline before closing ``` to break endswith() check; applied .strip() on both halves; added test_teach_back_fenced_json_parsed
+- Learnings:
+  - After stripping markdown code fences, always call .strip() on both the header-removed text AND the closing-fence-removed text -- trailing newlines from LLM output cause endswith("```") to evaluate False
+  - Cover fenced-JSON in tests for every node that parses LLM JSON (plain + fenced variants)
+---
