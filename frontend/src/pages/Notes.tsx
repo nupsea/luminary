@@ -20,6 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteEditorDialog } from "@/components/NoteEditorDialog"
@@ -398,6 +399,7 @@ export default function NotesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
+  const [showGapDetect, setShowGapDetect] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
@@ -746,6 +748,13 @@ export default function NotesPage() {
             </div>
             <ViewToggle value={notesView} onChange={setNotesView} />
             <button
+              onClick={() => setShowGapDetect(true)}
+              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+              title="Compare notes with a book to find gaps"
+            >
+              Compare with Book
+            </button>
+            <button
               onClick={() => setShowGenerateFlashcards(true)}
               className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
               title="Generate flashcards from notes"
@@ -790,6 +799,12 @@ export default function NotesPage() {
         open={showGenerateFlashcards}
         onClose={() => setShowGenerateFlashcards(false)}
         availableTags={(groups?.tags ?? []).map((t) => t.name)}
+      />
+
+      {/* GapDetectDialog */}
+      <GapDetectDialog
+        open={showGapDetect}
+        onClose={() => setShowGapDetect(false)}
       />
     </div>
   )

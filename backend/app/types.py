@@ -99,3 +99,14 @@ class NoteSearchResult:
     document_id: str | None
     score: float
     source: Literal["fts", "vector", "both"]
+
+
+# ---------------------------------------------------------------------------
+# Gap detection (S94)
+# ---------------------------------------------------------------------------
+
+
+class GapReport(TypedDict):
+    gaps: list[str]
+    covered: list[str]
+    query_used: str

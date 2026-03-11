@@ -407,6 +407,61 @@ async def list_note_flashcards(
     return [NoteFlashcardItem.model_validate(c) for c in cards]
 
 
+class GapDetectRequest(BaseModel):
+    note_ids: list[str] = []
+    document_id: str
+
+
+class GapDetectResponse(BaseModel):
+    gaps: list[str]
+    covered: list[str]
+    query_used: str
+
+
+@router.post("/gap-detect", response_model=GapDetectResponse)
+async def gap_detect(
+    req: GapDetectRequest,
+    session: AsyncSession = Depends(get_db),
+) -> GapDetectResponse:
+    """Identify book concepts absent from the user's notes."""
+    if not req.note_ids:
+        raise HTTPException(status_code=422, detail="note_ids must be non-empty")
+
+    import litellm  # noqa: PLC0415
+
+    from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
+
+    try:
+        report = await get_gap_detector().detect_gaps(
+            note_ids=req.note_ids,
+            document_id=req.document_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Start it with: ollama serve",
+        ) from exc
+
+    logger.info(
+        "gap_detect: doc=%s gaps=%d covered=%d",
+        req.document_id,
+        len(report["gaps"]),
+        len(report["covered"]),
+    )
+    return GapDetectResponse(
+        gaps=report["gaps"],
+        covered=report["covered"],
+        query_used=report["query_used"],
+    )
+
+
 @router.post("/{note_id}/suggest-tags", response_model=SuggestedTagsResponse)
 async def suggest_tags(
     note_id: str,
