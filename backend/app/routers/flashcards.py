@@ -57,8 +57,9 @@ class ReviewRequest(BaseModel):
 
 class FlashcardResponse(BaseModel):
     id: str
-    document_id: str
-    chunk_id: str
+    document_id: str | None
+    chunk_id: str | None
+    source: str = "document"
     question: str
     answer: str
     source_excerpt: str
@@ -84,6 +85,7 @@ def _to_response(card: FlashcardModel) -> FlashcardResponse:
         id=card.id,
         document_id=card.document_id,
         chunk_id=card.chunk_id,
+        source=card.source if card.source else "document",
         question=card.question,
         answer=card.answer,
         source_excerpt=card.source_excerpt,

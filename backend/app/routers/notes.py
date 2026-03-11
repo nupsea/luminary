@@ -342,6 +342,71 @@ async def delete_note(
     logger.info("Deleted note", extra={"note_id": note_id})
 
 
+class NoteFlashcardGenerateRequest(BaseModel):
+    tag: str | None = None
+    note_ids: list[str] | None = None
+    count: int = 5
+
+
+class NoteFlashcardItem(BaseModel):
+    id: str
+    question: str
+    answer: str
+    source_excerpt: str
+    source: str
+
+    model_config = {"from_attributes": True}
+
+
+@router.post("/flashcards/generate", response_model=list[NoteFlashcardItem], status_code=201)
+async def generate_note_flashcards(
+    req: NoteFlashcardGenerateRequest,
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteFlashcardItem]:
+    """Generate flashcards from user notes scoped by tag or explicit note IDs."""
+    import litellm  # noqa: PLC0415
+
+    from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
+
+    try:
+        cards = await get_flashcard_service().generate_from_notes(
+            tag=req.tag,
+            note_ids=req.note_ids,
+            count=req.count,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Start it with: ollama serve",
+        ) from exc
+
+    logger.info("Generated %d note flashcards tag=%s", len(cards), req.tag)
+    return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
+@router.get("/flashcards", response_model=list[NoteFlashcardItem])
+async def list_note_flashcards(
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteFlashcardItem]:
+    """Return all flashcards generated from notes (source='note'), newest first."""
+    from app.models import FlashcardModel  # noqa: PLC0415
+
+    result = await session.execute(
+        select(FlashcardModel)
+        .where(FlashcardModel.source == "note")
+        .order_by(FlashcardModel.created_at.desc())
+    )
+    cards = list(result.scalars().all())
+    return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
 @router.post("/{note_id}/suggest-tags", response_model=SuggestedTagsResponse)
 async def suggest_tags(
     note_id: str,

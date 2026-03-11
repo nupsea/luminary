@@ -20,6 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteEditorDialog } from "@/components/NoteEditorDialog"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -396,6 +397,7 @@ export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const [showCreate, setShowCreate] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
+  const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
@@ -744,6 +746,13 @@ export default function NotesPage() {
             </div>
             <ViewToggle value={notesView} onChange={setNotesView} />
             <button
+              onClick={() => setShowGenerateFlashcards(true)}
+              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+              title="Generate flashcards from notes"
+            >
+              Generate Flashcards
+            </button>
+            <button
               onClick={() => setShowCreate((v) => !v)}
               className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
               title="New note"
@@ -774,6 +783,13 @@ export default function NotesPage() {
           void qc.invalidateQueries({ queryKey: ["notes"] })
           setEditingNote(null)
         }}
+      />
+
+      {/* GenerateFlashcardsDialog */}
+      <GenerateFlashcardsDialog
+        open={showGenerateFlashcards}
+        onClose={() => setShowGenerateFlashcards(false)}
+        availableTags={(groups?.tags ?? []).map((t) => t.name)}
       />
     </div>
   )

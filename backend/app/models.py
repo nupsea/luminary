@@ -77,8 +77,10 @@ class FlashcardModel(Base):
     __tablename__ = "flashcards"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(String, nullable=False)
-    chunk_id: Mapped[str] = mapped_column(String, nullable=False)
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 'document' for book-chunk cards, 'note' for note-sourced cards
+    source: Mapped[str] = mapped_column(String, nullable=False, default="document")
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     source_excerpt: Mapped[str] = mapped_column(Text, nullable=False)

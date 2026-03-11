@@ -7,10 +7,10 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, FlashcardModel, SectionModel
+from app.models import ChunkModel, FlashcardModel, NoteModel, SectionModel
 from app.services.llm import get_llm_service
 from app.telemetry import trace_chain
 
@@ -195,6 +195,96 @@ class FlashcardService:
                 id=str(uuid.uuid4()),
                 document_id=document_id,
                 chunk_id=first_chunk_id,
+                question=question,
+                answer=answer,
+                source_excerpt=source_excerpt,
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=now,
+                reps=0,
+                lapses=0,
+                created_at=now,
+            )
+            session.add(card)
+            flashcards.append(card)
+
+        if flashcards:
+            await session.commit()
+            for card in flashcards:
+                await session.refresh(card)
+
+        return flashcards
+
+
+    async def generate_from_notes(
+        self,
+        tag: str | None,
+        note_ids: list[str] | None,
+        count: int,
+        session: AsyncSession,
+    ) -> list[FlashcardModel]:
+        """Generate flashcards from user notes scoped by tag or explicit note IDs.
+
+        Raises ValueError if neither tag nor note_ids is provided.
+        Returns [] if no matching notes are found.
+        """
+        if not tag and not note_ids:
+            raise ValueError("Must provide tag or note_ids")
+
+        llm = get_llm_service()
+
+        if note_ids:
+            result = await session.execute(
+                select(NoteModel).where(NoteModel.id.in_(note_ids))
+            )
+            notes = list(result.scalars().all())
+        else:
+            result = await session.execute(
+                select(NoteModel).where(
+                    text(
+                        "EXISTS (SELECT 1 FROM json_each(notes.tags)"
+                        " WHERE json_each.value = :tag)"
+                    ).bindparams(tag=tag)
+                )
+            )
+            notes = list(result.scalars().all())
+
+        if not notes:
+            return []
+
+        combined_text = "\n\n".join(n.content for n in notes)[:_CHUNK_CHAR_LIMIT]
+        if not combined_text:
+            return []
+
+        prompt = FLASHCARD_USER_TMPL.format(count=count, text=combined_text)
+
+        with trace_chain(
+            "flashcard.generate_from_notes",
+            input_value=f"tag={tag} note_ids={note_ids} count={count}",
+        ) as span:
+            span.set_attribute("flashcard.source", "note")
+            span.set_attribute("flashcard.requested_count", count)
+
+            raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
+            cards_data = _parse_llm_response(raw, "notes")
+            span.set_attribute("flashcard.generated_count", len(cards_data))
+
+        now = datetime.utcnow()
+        flashcards: list[FlashcardModel] = []
+        for item in cards_data:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question", "")).strip()
+            answer = str(item.get("answer", "")).strip()
+            source_excerpt = str(item.get("source_excerpt", "")).strip()
+            if not question or not answer:
+                continue
+            card = FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=None,
+                chunk_id=None,
+                source="note",
                 question=question,
                 answer=answer,
                 source_excerpt=source_excerpt,
