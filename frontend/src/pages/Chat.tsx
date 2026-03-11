@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Send, Trash2, X } from "lucide-react"
+import { Loader2, Send, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -56,6 +56,12 @@ interface ChatMessage {
   confidence?: Confidence
   not_found?: boolean
   isStreaming?: boolean
+}
+
+interface ConfusionSignal {
+  concept: string
+  count: number
+  last_asked: string
 }
 
 interface CloudProvider {
@@ -142,6 +148,83 @@ function ChatSuggestions({ activeDocumentId, onSuggest }: ChatSuggestionsProps) 
   )
 }
 
+type AddButtonState = "idle" | "loading" | "done" | "error"
+
+function ConfusionBanner({
+  signal,
+  onDismiss,
+  onAdded,
+}: {
+  signal: ConfusionSignal
+  onDismiss: () => void
+  onAdded: () => void
+}) {
+  const [addState, setAddState] = useState<AddButtonState>("idle")
+  const [addError, setAddError] = useState<string | null>(null)
+
+  async function handleAdd() {
+    setAddState("loading")
+    setAddError(null)
+    try {
+      const res = await fetch(`${API_BASE}/flashcards/from-gaps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gaps: [signal.concept], document_id: "" }),
+      })
+      if (res.status === 503) {
+        setAddError("Ollama is unavailable. Start it with: ollama serve")
+        setAddState("error")
+        return
+      }
+      if (!res.ok) {
+        setAddError("Failed to add flashcard. Please try again.")
+        setAddState("error")
+        return
+      }
+      setAddState("done")
+      onAdded()
+    } catch {
+      setAddError("Network error. Please try again.")
+      setAddState("error")
+    }
+  }
+
+  return (
+    <div className="mx-6 mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+      <span className="text-xs text-amber-800 dark:text-amber-200">
+        You have asked about &ldquo;{signal.concept}&rdquo; {signal.count} times. Add it to your flashcards?
+      </span>
+      <div className="ml-3 flex shrink-0 items-center gap-2">
+        {addError ? (
+          <span className="text-xs text-red-600">{addError}</span>
+        ) : null}
+        {addState !== "done" && (
+          <button
+            onClick={() => void handleAdd()}
+            disabled={addState === "loading"}
+            className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900"
+          >
+            {addState === "loading" ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : addState === "error" ? (
+              "Retry"
+            ) : (
+              "Add to Flashcards"
+            )}
+          </button>
+        )}
+        <button
+          onClick={onDismiss}
+          className="rounded p-0.5 text-amber-600 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
+          aria-label="Dismiss"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function buildModelOptions(settings: LLMSettings | undefined): string[] {
   if (!settings) return []
   // Cloud mode: backend handles routing via get_effective_routing(); no model selector needed.
@@ -162,6 +245,7 @@ export default function Chat() {
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
   const [qaError, setQaError] = useState<string | null>(null)
+  const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const mountTime = useRef(Date.now())
@@ -193,6 +277,16 @@ export default function Chat() {
     queryFn: fetchLLMSettings,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+  })
+
+  const { data: confusionSignals } = useQuery<ConfusionSignal[]>({
+    queryKey: ["confusion-signals"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/chat/confusion-signals`)
+      if (!res.ok) throw new Error("Failed to fetch confusion signals")
+      return res.json() as Promise<ConfusionSignal[]>
+    },
+    staleTime: 300_000,
   })
 
   const modelOptions = buildModelOptions(llmSettings)
@@ -453,6 +547,22 @@ export default function Chat() {
           </button>
         </div>
       )}
+
+      {/* Confusion nudge banners -- one per un-dismissed signal with count >= 3 */}
+      {(confusionSignals ?? [])
+        .filter((s) => s.count >= 3 && !dismissedSignals.has(s.concept))
+        .map((signal) => (
+          <ConfusionBanner
+            key={signal.concept}
+            signal={signal}
+            onDismiss={() => {
+              setDismissedSignals((prev) => new Set([...prev, signal.concept]))
+            }}
+            onAdded={() => {
+              setDismissedSignals((prev) => new Set([...prev, signal.concept]))
+            }}
+          />
+        ))}
 
       {/* Message list */}
       <div className="flex-1 overflow-auto px-6 py-4">

@@ -17,6 +17,7 @@ from app.config import Settings, get_settings
 from app.database import get_db, get_engine
 from app.db_init import create_all_tables
 from app.models import SettingsModel
+from app.routers.chat_meta import router as chat_meta_router
 from app.routers.documents import router as documents_router
 from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
@@ -98,6 +99,7 @@ app.add_middleware(
 )
 
 
+app.include_router(chat_meta_router)
 app.include_router(documents_router)
 app.include_router(evals_router)
 app.include_router(explain_router)
