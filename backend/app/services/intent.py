@@ -11,11 +11,25 @@ import litellm
 logger = logging.getLogger(__name__)
 
 _VALID_INTENTS: frozenset[str] = frozenset(
-    {"summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap"}
+    {"summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap",
+     "socratic"}
 )
 
 # Keyword sets — order matters: checked top to bottom, first match wins.
 # These are hints only; the LLM classifier handles ambiguous cases (threshold < 0.9).
+_SOCRATIC_KWS: frozenset[str] = frozenset(
+    {
+        "quiz me",
+        "test me",
+        "ask me a question",
+        "ask me questions",
+        "socratic mode",
+        "give me a question",
+        "question me",
+        "what should i know",
+    }
+)
+
 _NOTES_GAP_KWS: frozenset[str] = frozenset(
     {
         "find gaps in my notes",
@@ -134,6 +148,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """
     q = question.lower()
 
+    if any(kw in q for kw in _SOCRATIC_KWS):
+        return ("socratic", 0.95)
     if any(kw in q for kw in _NOTES_GAP_KWS):
         return ("notes_gap", 0.95)
     if any(kw in q for kw in _NOTES_KWS):
@@ -182,12 +198,13 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                         f"{scope_hint} "
                         "Classify the question. Reply with exactly one word: "
                         "summary, factual, relational, comparative, "
-                        "exploratory, notes, or notes_gap. "
+                        "exploratory, notes, notes_gap, or socratic. "
+                        "Use 'socratic' for requests to be quizzed or tested. "
                         "Use 'notes_gap' for questions asking to compare notes against "
                         "a book or find gaps. "
                         "Use 'notes' for questions about the user's personal notes or annotations. "
                         "Use 'summary' for broad questions about themes, topics, patterns, "
-                        "or overviews — especially when scope is the entire library."
+                        "or overviews -- especially when scope is the entire library."
                     ),
                 },
                 {"role": "user", "content": question},

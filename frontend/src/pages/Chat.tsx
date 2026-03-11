@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { GapResultCard } from "@/components/GapResultCard"
 import type { GapCardData } from "@/components/GapResultCard"
+import { QuizQuestionCard } from "@/components/QuizQuestionCard"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
@@ -33,12 +34,22 @@ interface Citation {
 
 type Confidence = "high" | "medium" | "low"
 
+interface QuizCardData {
+  type: "quiz_question"
+  question: string
+  context_hint: string
+  document_id: string
+  error?: string
+}
+
+type AnyCardData = GapCardData | QuizCardData
+
 interface ChatMessage {
   id: string
   role: "user" | "assistant"
   text: string
   type?: "text" | "card"
-  cardData?: GapCardData
+  cardData?: AnyCardData
   citations?: Citation[]
   confidence?: Confidence
   not_found?: boolean
@@ -274,7 +285,7 @@ export default function Chat() {
             // __card__ protocol: a card event replaces the streaming placeholder with a card message.
             // No token events follow a card event -- the done event closes the stream.
             if (payload["card"] !== undefined) {
-              const cardData = payload["card"] as GapCardData
+              const cardData = payload["card"] as AnyCardData
               setMessages((m) =>
                 m.map((msg) =>
                   msg.id === assistantId
@@ -491,7 +502,17 @@ export default function Chat() {
                   }`}
                 >
                   {msg.type === "card" && msg.cardData !== undefined ? (
-                    <GapResultCard data={msg.cardData} documentId={effectiveDocId ?? undefined} />
+                    msg.cardData.type === "quiz_question" ? (
+                      <QuizQuestionCard
+                        question={(msg.cardData as QuizCardData).question}
+                        contextHint={(msg.cardData as QuizCardData).context_hint}
+                        documentId={(msg.cardData as QuizCardData).document_id}
+                        error={(msg.cardData as QuizCardData).error}
+                        onSubmit={sendMessage}
+                      />
+                    ) : (
+                      <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
+                    )
                   ) : msg.not_found ? (
                     <p className="text-sm text-blue-600">
                       This information was not found in the selected content.

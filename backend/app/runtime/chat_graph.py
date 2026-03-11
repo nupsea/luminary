@@ -148,6 +148,7 @@ async def classify_node(state: ChatState) -> dict:
         "relational": "graph_node",
         "comparative": "comparative_node",
         "notes": "notes_node",
+        "socratic": "socratic_node",
     }
     primary_strategy = _intent_to_strategy.get(intent, "search_node")
 
@@ -176,7 +177,9 @@ def route_node(state: ChatState) -> str:
     """
     intent = state.get("intent") or "factual"
     scope = state.get("scope", "all")
-    if intent == "notes_gap":
+    if intent == "socratic":
+        node = "socratic_node"
+    elif intent == "notes_gap":
         node = "notes_gap_node"
     elif intent == "notes":
         node = "notes_node"
@@ -991,6 +994,113 @@ async def notes_gap_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# socratic_node — generate a Socratic recall question from document chunks
+# ---------------------------------------------------------------------------
+
+
+async def socratic_node(state: ChatState) -> dict:
+    """Generate one targeted recall question from document chunks.
+
+    (1) Retrieves k=5 chunks (filtered to doc_ids[0] when available).
+    (2) Calls LiteLLM (non-streaming) with a Socratic tutor prompt.
+    (3) Parses exactly two lines: 'Q: ...' and 'CONTEXT: ...'.
+    (4) On parse failure: returns fallback question (no exception raised).
+    (5) On Ollama offline: returns card with 'error' field (no exception raised).
+
+    Returns state['answer'] = '__card__' + JSON so the existing SSE protocol
+    in stream_answer() handles delivery without any changes (S96 contract).
+    Routes directly to END — card answers bypass synthesize/confidence nodes.
+    """
+    doc_ids = state.get("doc_ids") or []
+    document_id = doc_ids[0] if doc_ids else None
+
+    logger.info("socratic_node: document_id=%s", document_id)
+
+    # Retrieve k=5 chunks
+    chunks_retrieved: list[ScoredChunk] = []
+    try:
+        retriever = get_retriever()
+        filter_ids = [document_id] if document_id else None
+        chunks_retrieved = await retriever.retrieve(
+            "key concept important idea", filter_ids, k=5
+        )
+    except Exception:
+        logger.warning("socratic_node: retrieval failed", exc_info=True)
+
+    if not chunks_retrieved:
+        card = {
+            "type": "quiz_question",
+            "question": "What are the main ideas in this material?",
+            "context_hint": "See the document content.",
+            "document_id": document_id or "",
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    passages = "\n---\n".join(c.text for c in chunks_retrieved[:5])
+
+    system_msg = (
+        "You are a Socratic tutor. Given passages from a learning document, "
+        "generate ONE targeted recall question testing a specific fact, name, or concept. "
+        "Format your response as exactly two lines:\n"
+        "Q: {the question}\n"
+        "CONTEXT: {1-2 sentence answer from the passages}\n"
+        "Output nothing else."
+    )
+
+    try:
+        from app.config import get_settings  # noqa: PLC0415
+
+        model = get_settings().LITELLM_DEFAULT_MODEL
+        response = await litellm.acompletion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": f"Passages:\n{passages}"},
+            ],
+            temperature=0.7,
+        )
+        text = (response.choices[0].message.content or "").strip()
+
+        q_text = "What are the main ideas in this material?"
+        context_text = "See the document content."
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("Q:"):
+                q_text = stripped[2:].strip()
+            elif stripped.startswith("CONTEXT:"):
+                context_text = stripped[8:].strip()
+
+        card = {
+            "type": "quiz_question",
+            "question": q_text,
+            "context_hint": context_text,
+            "document_id": document_id or "",
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    except litellm.ServiceUnavailableError:
+        logger.warning("socratic_node: Ollama unreachable")
+        card = {
+            "type": "quiz_question",
+            "question": "Quiz unavailable",
+            "context_hint": "",
+            "document_id": document_id or "",
+            "error": "Ollama is unreachable. Start it with: ollama serve",
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    except Exception:
+        logger.warning("socratic_node: LLM call failed", exc_info=True)
+        card = {
+            "type": "quiz_question",
+            "question": "What are the main ideas in this material?",
+            "context_hint": "See the document content.",
+            "document_id": document_id or "",
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+
+# ---------------------------------------------------------------------------
 # synthesize_node — intent-aware LLM call
 # ---------------------------------------------------------------------------
 
@@ -1268,6 +1378,7 @@ def build_chat_graph() -> StateGraph:
     g.add_node("classify_node", classify_node)
     g.add_node("notes_node", notes_node)
     g.add_node("notes_gap_node", notes_gap_node)
+    g.add_node("socratic_node", socratic_node)
     g.add_node("summary_node", summary_node)
     g.add_node("search_node", search_node)
     g.add_node("graph_node", graph_node)
@@ -1282,6 +1393,7 @@ def build_chat_graph() -> StateGraph:
         "classify_node",
         route_node,
         {
+            "socratic_node": "socratic_node",
             "notes_gap_node": "notes_gap_node",
             "notes_node": "notes_node",
             "summary_node": "summary_node",
@@ -1302,7 +1414,8 @@ def build_chat_graph() -> StateGraph:
             },
         )
 
-    # notes_gap_node routes directly to END -- card answers skip synthesize/confidence retry
+    # socratic_node and notes_gap_node route to END -- card answers skip synthesize/confidence retry
+    g.add_edge("socratic_node", END)
     g.add_edge("notes_gap_node", END)
     g.add_edge("notes_node", "synthesize_node")
     g.add_edge("comparative_node", "synthesize_node")
