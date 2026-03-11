@@ -230,3 +230,55 @@ def test_route_node_teach_back():
     state = _make_minimal_state(intent="teach_back", scope="all")
     result = route_node(state)
     assert result == "teach_back_node"
+
+
+# ---------------------------------------------------------------------------
+# (g) Fenced JSON: LLM wraps response in ```json ... ``` block -> parsed correctly
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_teach_back_fenced_json_parsed():
+    """LLM responses wrapped in ```json\\n{...}\\n``` must be parsed, not fall back."""
+    chunks = [_make_chunk("The earth orbits the sun due to gravity.")]
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=chunks)
+
+    fenced = (
+        "```json\n"
+        + json.dumps({
+            "correct": ["Gravity keeps the earth in orbit"],
+            "misconceptions": [],
+            "gaps": ["Elliptical orbit shape not mentioned"],
+            "encouragement": "Good start!",
+        })
+        + "\n```\n"  # trailing newline before closing fence (common LLM output)
+    )
+
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = fenced
+
+    mock_acompletion = AsyncMock(return_value=mock_response)
+    with (
+        patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
+        patch("app.runtime.chat_graph.litellm.acompletion", new=mock_acompletion),
+        patch("app.config.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.LITELLM_DEFAULT_MODEL = "ollama/test"
+        state = _make_minimal_state(
+            question="my understanding is that gravity keeps the earth orbiting",
+            doc_ids=["doc1"],
+        )
+        result = await teach_back_node(state)
+
+    assert "answer" in result
+    answer = result["answer"]
+    assert answer.startswith("__card__"), f"Expected __card__ prefix, got: {answer!r}"
+    card = json.loads(answer[8:])
+    assert card["type"] == "teach_back_result"
+    assert card["correct"] == ["Gravity keeps the earth in orbit"]
+    assert card["gaps"] == ["Elliptical orbit shape not mentioned"]
+    # Must NOT contain error_detail from fallback card
+    assert "error_detail" not in card

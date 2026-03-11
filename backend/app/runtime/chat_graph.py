@@ -1177,9 +1177,9 @@ async def teach_back_node(state: ChatState) -> dict:
 
         # Strip optional markdown code fences
         if text.startswith("```"):
-            text = text.split("\n", 1)[-1]
+            text = text.split("\n", 1)[-1].strip()
             if text.endswith("```"):
-                text = text[: text.rfind("```")]
+                text = text[: text.rfind("```")].strip()
 
         try:
             parsed = json.loads(text)
