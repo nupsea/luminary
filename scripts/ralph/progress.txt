@@ -447,3 +447,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - After stripping markdown code fences, always call .strip() on both the header-removed text AND the closing-fence-removed text -- trailing newlines from LLM output cause endswith("```") to evaluate False
   - Cover fenced-JSON in tests for every node that parses LLM JSON (plain + fenced variants)
 ---
+
+## 2026-03-12T00:00:00Z - S100 - Confusion Detection Nudge: repeated questions surface a flashcard suggestion
+- Implemented: ConfusionDetectorService.detect() (DB-only, tokenizes qa_history, stopword filter, threshold logic), GET /chat/confusion-signals endpoint in chat_meta.py (already registered in main.py), ConfusionBanner in Chat.tsx (amber styling, dismiss state, Loader2 add flow, 503 inline error+retry), useQuery with staleTime=300_000
+- Files changed: backend/app/services/confusion_detector.py, backend/app/routers/chat_meta.py, backend/tests/test_confusion_detector.py, frontend/src/pages/Chat.tsx, scripts/smoke/S100.sh
+- AC verified:
+  - ConfusionDetectorService.detect queries qa_history in lookback window, tokenizes, counts non-stopword terms: PASS
+  - _STOPWORDS is module-level frozenset constant: PASS
+  - Returns top 3 signals ordered by count desc; [] when total rows < threshold: PASS
+  - GET /chat/confusion-signals returns list[ConfusionSignalResponse]; HTTP 200 on empty DB: PASS
+  - POST /flashcards/from-gaps used with document_id='' (S97 endpoint, not recreated): PASS
+  - Chat.tsx: confusion query on mount staleTime=300_000; banner shown only when count >= 3: PASS
+  - ConfusionBanner: amber styling, concept+count text, [Add to Flashcards] and dismiss X: PASS
+  - Dismiss: component-state Set<string>; no localStorage: PASS
+  - [Add to Flashcards]: Loader2 while loading; on success auto-dismisses; on 503 inline error + retry: PASS
+  - Loading/error for query: no banner (silent fail): PASS
+  - All 5 named tests pass: PASS
+  - uv run pytest tests/test_confusion_detector.py exits 0 (5/5): PASS
+  - ruff check exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - scripts/smoke/S100.sh present (not verified without live server): PASS
+- Reviewer verdict: PASS (no Critical items; redundant client-side count >= 3 filter noted as Low, harmless)
+- Learnings:
+  - DB-only services (no LLM) should guard against threshold before tokenizing; check len(rows) < threshold early to short-circuit
+  - chat_meta.py router was pre-registered in main.py -- always grep main.py before creating a new router file
+---
