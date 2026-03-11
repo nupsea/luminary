@@ -472,3 +472,29 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - DB-only services (no LLM) should guard against threshold before tokenizing; check len(rows) < threshold early to short-circuit
   - chat_meta.py router was pre-registered in main.py -- always grep main.py before creating a new router file
 ---
+
+## 2026-03-12T00:00:00Z - S101 - Study Session Planner: pre-session agenda from FSRS state, gaps, and document progress
+- Implemented: SessionPlanItem/SessionPlanResponse Pydantic models, _build_session_plan() pure function (review<=10min, max 2 gap items, 1 read item, capped at 5), GET /study/session-plan endpoint with Query(ge=5,le=120); modified getContextualSuggestions to always include '__plan__' as 4th (guard Quiz pill behind dueCount===0); ChatSuggestionsProps.onPlan; slide-up panel with max-height/opacity transition (not hidden class); useQuery enabled=showPlanPanel; 9 backend tests; smoke test
+- Files changed: backend/app/routers/study.py, backend/tests/test_session_planner.py, frontend/src/pages/Chat.tsx, scripts/smoke/S101.sh
+- AC verified:
+  - GET /study/session-plan?minutes=20: ge=5, le=120; 422 outside bounds: PASS
+  - SessionPlanResponse/SessionPlanItem Pydantic models in study.py: PASS
+  - _build_session_plan: review (capped at 10 min), up to 2 gap items, 1 read item, capped at 5: PASS
+  - Empty inputs returns items=[]: PASS
+  - ChatSuggestions: '__plan__Plan my session' as 4th item: PASS
+  - Pill onClick: '__plan__' prefix -> openSessionPlan(); display text strips prefix: PASS
+  - Panel: slide-up CSS transition (max-height/opacity), above input, not modal: PASS
+  - Panel items: BookOpen/AlertTriangle/BookMarked icons, title, minute badge, action button: PASS
+  - Action button: window.location.href = item.action_target: PASS
+  - Panel fetch enabled only when showPlanPanel=true: PASS
+  - Loading: 3 skeleton rows; Error: inline + retry; Empty: 'You are all caught up!': PASS
+  - 9 tests pass: PASS
+  - ruff check exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - scripts/smoke/S101.sh present (not verified without live server): PASS
+- Reviewer verdict: PASS after 2 Critical fixes -- (1) CSS 'hidden' class prevents transition: switched to max-h-0/opacity-0/pointer-events-none toggle; (2) '__plan__' pill dropped when dueCount>0 due to 5->4 slice: guard 'Quiz' pill behind dueCount===0 so plan pill always at position 3
+- Learnings:
+  - Never combine 'translate-y-full hidden' for slide-up animations -- 'hidden' (display:none) prevents CSS transitions; use max-height + opacity instead to keep element in DOM
+  - When building a pill array that must always include a specific item, verify array length bounds under all input conditions before slice(); guard other optional items to ensure the required pill survives
+  - DocumentModel.last_accessed_at is the sort column for "recently accessed docs" -- not updated_at (which doesn't exist on DocumentModel)
+---
