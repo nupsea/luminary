@@ -15,8 +15,9 @@ import logging
 import math
 import uuid
 from datetime import date, datetime, timedelta
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     ChunkModel,
+    DocumentModel,
     FlashcardModel,
     MisconceptionModel,
     ReviewEventModel,
@@ -209,6 +211,73 @@ _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
 
 
 # ---------------------------------------------------------------------------
+# Session plan models and pure builder
+# ---------------------------------------------------------------------------
+
+
+class SessionPlanItem(BaseModel):
+    type: Literal["review", "gap", "read"]
+    title: str
+    minutes: int
+    action_label: str
+    action_target: str
+
+
+class SessionPlanResponse(BaseModel):
+    total_minutes: int
+    items: list[SessionPlanItem]
+
+
+def _build_session_plan(
+    due_count: int,
+    gap_areas: list[str],
+    recent_doc_titles: list[tuple[str, str]],
+    budget_minutes: int,
+) -> list[SessionPlanItem]:
+    """Assemble a prioritized study agenda from available data.
+
+    Pure function -- no I/O. All inputs are explicit parameters.
+    """
+    items: list[SessionPlanItem] = []
+
+    if due_count > 0:
+        items.append(
+            SessionPlanItem(
+                type="review",
+                title=f"{due_count} flashcards due for review",
+                minutes=min(10, max(5, due_count // 2)),
+                action_label="Start Review",
+                action_target="/study",
+            )
+        )
+
+    for gap_area in gap_areas[:2]:
+        items.append(
+            SessionPlanItem(
+                type="gap",
+                title=f"Weak area: {gap_area}",
+                minutes=5,
+                action_label="Study Gaps",
+                action_target="/study",
+            )
+        )
+
+    if recent_doc_titles:
+        doc_id, doc_title = recent_doc_titles[0]
+        items.append(
+            SessionPlanItem(
+                type="read",
+                title=f"Continue: {doc_title}",
+                minutes=5,
+                action_label="Open Document",
+                action_target=f"/learning?document_id={doc_id}",
+            )
+        )
+
+    return items[:5]
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -228,6 +297,69 @@ async def get_due_cards(
     result = await session.execute(stmt)
     cards = result.scalars().all()
     return [_to_response(c) for c in cards]
+
+
+@router.get("/session-plan", response_model=SessionPlanResponse)
+async def get_session_plan(
+    minutes: int = Query(default=20, ge=5, le=120),
+    session: AsyncSession = Depends(get_db),
+) -> SessionPlanResponse:
+    """Return a prioritized study agenda for the given time budget.
+
+    DB-only -- no LLM. Due count, gap areas, and recent docs assembled
+    and passed to the pure _build_session_plan() function.
+    """
+    now = datetime.utcnow()
+
+    # (a) Count all due flashcards (no document filter)
+    due_stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
+    due_result = await session.execute(due_stmt)
+    due_count = len(due_result.scalars().all())
+
+    # (b) Fetch gap area titles across all documents (max 2 distinct non-null headings)
+    weak_stmt = (
+        select(FlashcardModel)
+        .where(FlashcardModel.fsrs_stability < _GAP_STABILITY_THRESHOLD)
+        .where(FlashcardModel.reps > _GAP_MIN_REPS)
+    )
+    weak_result = await session.execute(weak_stmt)
+    weak_cards = list(weak_result.scalars().all())
+
+    gap_area_titles: list[str] = []
+    if weak_cards:
+        chunk_ids = [c.chunk_id for c in weak_cards]
+        chunk_stmt = (
+            select(ChunkModel, SectionModel.heading)
+            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
+            .where(ChunkModel.id.in_(chunk_ids))
+        )
+        chunk_rows = await session.execute(chunk_stmt)
+        seen: set[str] = set()
+        for _chunk, heading in chunk_rows:
+            if heading and heading not in seen and len(gap_area_titles) < 2:
+                seen.add(heading)
+                gap_area_titles.append(heading)
+
+    # (c) Fetch recently accessed complete documents
+    docs_stmt = (
+        select(DocumentModel)
+        .where(DocumentModel.stage == "complete")
+        .order_by(DocumentModel.last_accessed_at.desc())
+        .limit(3)
+    )
+    docs_result = await session.execute(docs_stmt)
+    docs = docs_result.scalars().all()
+    recent_docs = [(d.id, d.title) for d in docs]
+
+    items = _build_session_plan(due_count, gap_area_titles, recent_docs, minutes)
+    logger.debug(
+        "session-plan assembled: due=%d gaps=%d docs=%d items=%d",
+        due_count,
+        len(gap_area_titles),
+        len(recent_docs),
+        len(items),
+    )
+    return SessionPlanResponse(total_minutes=minutes, items=items)
 
 
 @router.get("/gaps/{document_id}", response_model=list[GapResult])

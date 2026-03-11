@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2, Send, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, Loader2, Send, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -64,6 +64,19 @@ interface ConfusionSignal {
   last_asked: string
 }
 
+interface SessionPlanItem {
+  type: "review" | "gap" | "read"
+  title: string
+  minutes: number
+  action_label: string
+  action_target: string
+}
+
+interface SessionPlanResponse {
+  total_minutes: number
+  items: SessionPlanItem[]
+}
+
 interface CloudProvider {
   name: string
   available: boolean
@@ -95,20 +108,25 @@ const EXAMPLE_QUESTIONS = [
 ]
 
 export function getContextualSuggestions(dueCount: number): string[] {
+  // The plan pill must always appear as the 4th item per S101 AC.
+  // When dueCount > 0 the due-review pill occupies slot 0, so we drop
+  // "Quiz me on the key concepts" to keep total at 4.
   const pills: string[] = []
   if (dueCount > 0) pills.push(`Review my ${dueCount} due flashcards`)
   pills.push("Find gaps in my notes")
   pills.push("Summarize this for me")
-  pills.push("Quiz me on the key concepts")
-  return pills.slice(0, 3)
+  if (dueCount === 0) pills.push("Quiz me on the key concepts")
+  pills.push("__plan__Plan my session")
+  return pills.slice(0, 4)
 }
 
 interface ChatSuggestionsProps {
   activeDocumentId: string
   onSuggest: (text: string) => void
+  onPlan: () => void
 }
 
-function ChatSuggestions({ activeDocumentId, onSuggest }: ChatSuggestionsProps) {
+function ChatSuggestions({ activeDocumentId, onSuggest, onPlan }: ChatSuggestionsProps) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["due-pills", activeDocumentId],
     queryFn: async () => {
@@ -135,15 +153,19 @@ function ChatSuggestions({ activeDocumentId, onSuggest }: ChatSuggestionsProps) 
 
   return (
     <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-      {suggestions.map((s) => (
-        <button
-          key={s}
-          onClick={() => onSuggest(s)}
-          className="truncate max-w-[200px] rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-        >
-          {s}
-        </button>
-      ))}
+      {suggestions.map((s) => {
+        const isPlan = s.startsWith("__plan__")
+        const displayText = isPlan ? s.slice(8) : s
+        return (
+          <button
+            key={s}
+            onClick={() => { if (isPlan) { onPlan() } else { onSuggest(s) } }}
+            className="truncate max-w-[200px] rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          >
+            {displayText}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -246,6 +268,7 @@ export default function Chat() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [qaError, setQaError] = useState<string | null>(null)
   const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
+  const [showPlanPanel, setShowPlanPanel] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const mountTime = useRef(Date.now())
@@ -287,6 +310,22 @@ export default function Chat() {
       return res.json() as Promise<ConfusionSignal[]>
     },
     staleTime: 300_000,
+  })
+
+  const {
+    data: sessionPlan,
+    isLoading: planLoading,
+    isError: planError,
+    refetch: refetchPlan,
+  } = useQuery<SessionPlanResponse>({
+    queryKey: ["session-plan"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/study/session-plan?minutes=20`)
+      if (!res.ok) throw new Error("Failed to fetch session plan")
+      return res.json() as Promise<SessionPlanResponse>
+    },
+    enabled: showPlanPanel,
+    staleTime: 60_000,
   })
 
   const modelOptions = buildModelOptions(llmSettings)
@@ -683,8 +722,74 @@ export default function Chat() {
         <ChatSuggestions
           activeDocumentId={activeDocumentId}
           onSuggest={(text) => void sendMessage(text)}
+          onPlan={() => setShowPlanPanel(true)}
         />
       )}
+
+      {/* Session plan slide-up panel — positioned above the input area */}
+      <div
+        className={`border-t border-border bg-background transition-[max-height,opacity] duration-300 ease-in-out overflow-hidden ${showPlanPanel ? "max-h-96 opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}
+      >
+        {/* Panel header */}
+        <div className="flex items-center justify-between border-b border-border px-6 py-3">
+          <span className="text-sm font-medium">
+            Your study plan ({sessionPlan?.total_minutes ?? 20} min)
+          </span>
+          <button
+            onClick={() => setShowPlanPanel(false)}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+            aria-label="Close plan panel"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        {/* Panel body */}
+        <div className="px-6 py-3">
+          {planLoading ? (
+            <div className="flex flex-col gap-2">
+              <div className="h-10 animate-pulse rounded bg-muted" />
+              <div className="h-10 animate-pulse rounded bg-muted" />
+              <div className="h-10 animate-pulse rounded bg-muted" />
+            </div>
+          ) : planError ? (
+            <div className="flex items-center gap-3 text-sm text-destructive">
+              <span>Could not load your study plan. Try again.</span>
+              <button
+                onClick={() => void refetchPlan()}
+                className="rounded border border-destructive px-2 py-0.5 text-xs hover:bg-destructive/10"
+              >
+                Retry
+              </button>
+            </div>
+          ) : !sessionPlan || sessionPlan.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No study tasks found. You are all caught up!</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {sessionPlan.items.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    {item.type === "review" ? (
+                      <BookOpen size={14} className="shrink-0 text-blue-500" />
+                    ) : item.type === "gap" ? (
+                      <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                    ) : (
+                      <BookMarked size={14} className="shrink-0 text-green-500" />
+                    )}
+                    <span className="text-sm">{item.title}</span>
+                    <span className="rounded bg-muted px-1 text-xs text-muted-foreground">{item.minutes} min</span>
+                  </div>
+                  <button
+                    onClick={() => { window.location.href = item.action_target }}
+                    className="ml-3 shrink-0 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  >
+                    {item.action_label}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Input area */}
       <div className="border-t border-border px-6 py-4">
