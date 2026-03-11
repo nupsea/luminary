@@ -119,10 +119,17 @@ async def _fts_insert(
 
 
 async def _fts_delete_rows(note_id: str, session: AsyncSession) -> None:
-    """Delete FTS5 rows for a note_id using rowid-based deletion (reliable for FTS5)."""
+    """Delete FTS5 rows for a note_id.
+
+    Queries the FTS5 shadow content table (notes_fts_content) directly instead
+    of the FTS5 virtual table, because WHERE clauses on UNINDEXED columns in FTS5
+    virtual tables are unreliable when the table has accumulated many rows across
+    a long session. The shadow table is a plain SQLite table and filters correctly.
+    Column mapping: c0=content, c1=note_id, c2=document_id.
+    """
     rows = (
         await session.execute(
-            text("SELECT rowid FROM notes_fts WHERE note_id = :nid"),
+            text("SELECT id FROM notes_fts_content WHERE c1 = :nid"),
             {"nid": note_id},
         )
     ).fetchall()
