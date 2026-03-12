@@ -824,7 +824,7 @@
         "Unit test: pack_context() token count for a 500-word English passage is within 5% of tiktoken cl100k_base reference",
         "Existing context packer tests pass; uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S106",

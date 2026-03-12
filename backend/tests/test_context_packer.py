@@ -1,6 +1,4 @@
-"""Pure unit tests for app/services/context_packer.py (S79).
-
-All tests are pure — no DB, no mocks, no imports from repos or models.
+"""Unit tests for app/services/context_packer.py.
 
 (a) test_sections_ordered_by_relevance
 (b) test_deduplication_skips_similar_chunks
@@ -9,7 +7,10 @@ All tests are pure — no DB, no mocks, no imports from repos or models.
 (e) test_empty_chunks_returns_empty_string
 (f) test_no_section_id_chunks_handled
 (g) test_dedup_ratio_1_includes_all
+(h) test_token_count_accuracy_vs_tiktoken  [S105]
 """
+
+import tiktoken
 
 from app.services.context_packer import _token_estimate, pack_context
 
@@ -191,4 +192,56 @@ def test_dedup_ratio_1_includes_all():
     count = result.count(identical_text)
     assert count == 2, (
         f"With dedup_ratio=1.0, both identical chunks should appear. Got count={count}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (h) test_token_count_accuracy_vs_tiktoken  [S105]
+# ---------------------------------------------------------------------------
+
+
+def test_token_count_accuracy_vs_tiktoken():
+    """_token_estimate() via litellm.token_counter is within 5% of tiktoken cl100k_base.
+
+    Uses a ~500-word English passage.  litellm delegates to tiktoken for
+    gpt-3.5-turbo (cl100k_base), so counts should match exactly.
+    """
+    # ~500 English words covering common prose vocabulary
+    passage = (
+        "The expedition set out at dawn, crossing the narrow bridge that spanned "
+        "the river before climbing steadily through dense forest. The trail was "
+        "poorly marked, and the guide consulted his map at every fork. By midday "
+        "they had reached the first ridge and could see the distant peaks wrapped "
+        "in cloud. The wind picked up, carrying the smell of rain. Each member of "
+        "the group adjusted their pack and pressed on without complaint. The oldest "
+        "traveller, a botanist named Dr. Elsa Venn, paused periodically to examine "
+        "specimens she found among the rocks. She recorded her observations in a "
+        "small waterproof notebook she carried in her breast pocket. The younger "
+        "members found her slow but none dared suggest she hurry. By late afternoon "
+        "the rain had arrived in earnest, turning the path to mud. They made camp "
+        "beneath a limestone overhang and cooked a simple meal over a gas burner. "
+        "The conversation around the flame ranged from the best route for tomorrow "
+        "to the merits of various boot brands. After dark the rain eased and a few "
+        "stars appeared between the moving clouds. The guide wrote his daily log by "
+        "torchlight while the others read or slept. Tomorrow they would attempt the "
+        "final ascent. The summit, according to the map, was only four kilometres "
+        "away as the crow flies, but the terrain would add at least three hours to "
+        "any estimate. Dr. Venn was optimistic. She had climbed this range before, "
+        "thirty years ago, and remembered it as beautiful and unforgiving in equal "
+        "measure. The others deferred to her experience, trusting her calm certainty "
+        "over the guide's more cautious assessment. Sleep came quickly once the "
+        "torches went out and the last murmur of conversation faded into the dark. "
+        "The mountain waited, patient and indifferent, as it always had."
+    )
+    model = "gpt-3.5-turbo"
+    litellm_count = _token_estimate(passage, model=model)
+
+    enc = tiktoken.get_encoding("cl100k_base")
+    tiktoken_count = len(enc.encode(passage))
+
+    tolerance = 0.05  # 5%
+    ratio = abs(litellm_count - tiktoken_count) / max(tiktoken_count, 1)
+    assert ratio <= tolerance, (
+        f"litellm count {litellm_count} differs from tiktoken {tiktoken_count} "
+        f"by {ratio:.1%} (> {tolerance:.0%})"
     )

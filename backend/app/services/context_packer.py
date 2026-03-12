@@ -1,24 +1,28 @@
-"""Pure context packer for the V2 agentic chat router (S79).
+"""Context packer for the V2 agentic chat router (S79).
 
 pack_context() assembles retrieved chunks into a context string that:
   - Groups chunks by section_id (or section_heading when section_id absent)
   - Orders section groups by highest relevance_score descending
   - Emits the section summary once per section group (if provided)
   - Deduplicates near-duplicate chunks using LCS character similarity
-  - Respects a strict token budget (estimated as word_count * 1.3)
+  - Respects a strict token budget (exact count via litellm.token_counter)
 
-This is a PURE FUNCTION — no imports from repos, models, or external services.
 All I/O happens in the caller (synthesize_node in chat_graph.py).
 """
 
+import litellm
 
 # ---------------------------------------------------------------------------
-# Token estimate — fast approximation, no tokenizer dependency
+# Token count — exact via litellm.token_counter (wraps tiktoken, graceful fallback)
 # ---------------------------------------------------------------------------
 
-def _token_estimate(text: str) -> int:
-    """Estimate token count: word_count * 1.3, rounded up."""
-    return int(len(text.split()) * 1.3 + 0.5)
+def _token_estimate(text: str, model: str = "gpt-3.5-turbo") -> int:
+    """Return exact token count for text using litellm.token_counter.
+
+    Falls back gracefully for unknown/Ollama models via litellm's internal
+    tiktoken fallback.  Uses model='gpt-3.5-turbo' (cl100k_base) by default.
+    """
+    return litellm.token_counter(model=model, text=text)
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,7 @@ def pack_context(
     chunks: list[dict],
     token_budget: int = 3000,
     dedup_ratio: float = 0.8,
+    model: str = "gpt-3.5-turbo",
 ) -> str:
     """Assemble retrieved chunks into a context string within token_budget.
 
@@ -97,9 +102,10 @@ def pack_context(
             section_heading (str | None)
             section_summary (str | None) — emitted once as a section header if provided
             relevance_score (float)   — 'score' is also accepted as a fallback key
-        token_budget: Maximum estimated tokens for the output string.
+        token_budget: Maximum token budget for the output string.
         dedup_ratio: LCS ratio above which a chunk is considered a near-duplicate
                      and skipped.  1.0 disables deduplication.
+        model: Model name passed to litellm.token_counter for exact token counting.
 
     Returns:
         Assembled context string.  Empty string if chunks is empty.
@@ -166,7 +172,7 @@ def pack_context(
             header_parts.append(summary)
         if header_parts:
             header = "\n".join(header_parts) + "\n"
-            header_tokens = _token_estimate(header)
+            header_tokens = _token_estimate(header, model=model)
             if total_tokens + header_tokens <= token_budget:
                 parts.append(header)
                 total_tokens += header_tokens
@@ -186,7 +192,7 @@ def pack_context(
                     continue
 
             chunk_str = f"---\n{chunk_text}\n"
-            chunk_tokens = _token_estimate(chunk_str)
+            chunk_tokens = _token_estimate(chunk_str, model=model)
 
             if total_tokens + chunk_tokens > token_budget:
                 # Enforce at least the first chunk (truncated if needed)

@@ -1,10 +1,11 @@
 import asyncio
-import sqlite3
 from pathlib import Path
-from app.config import get_settings
-from app.db_init import create_all_tables
-from app.database import get_engine, make_engine
+
 from sqlalchemy import text
+
+from app.database import make_engine
+from app.db_init import create_all_tables
+
 
 async def check():
     engine = make_engine("sqlite+aiosqlite:///test_fts.db")

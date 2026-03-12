@@ -734,3 +734,19 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - SearchResult.text_excerpt is a 200-char UI preview; eval pipeline needs the full chunk text -- add a text field alongside text_excerpt rather than changing the existing field
   - passed flag in scores_history.jsonl must always reflect threshold compliance, not just when --assert-thresholds CLI flag is set
 ---
+
+## 2026-03-13T00:00:00Z - S105 - Tech Debt TD-003 and TD-011: bundle splitting + exact token counting
+- Implemented: (1) Made ProgressDashboard lazy-loaded in Study.tsx via React.lazy + Suspense so Recharts stays out of the initial Study chunk. (2) Replaced word_count*1.3 approximation in context_packer.py with litellm.token_counter() for exact token counting. Added tiktoken as explicit dev dep. Created smoke test.
+- Files changed: frontend/src/pages/Study.tsx, backend/app/services/context_packer.py, backend/tests/test_context_packer.py, backend/pyproject.toml, backend/uv.lock, scripts/smoke/S105.sh, scripts/ralph/prd-v2.json
+- AC verified:
+  - vite build produces no chunk size warning (all chunks <= 500KB): PASS -- largest chunk 350.49 kB
+  - Viz and Monitoring pages verified as React.lazy(); ProgressDashboard wrapped in React.lazy() + Suspense: PASS
+  - context_packer.py pack_context() uses litellm.token_counter() instead of word_count * 1.3: PASS
+  - Unit test: pack_context() token count within 5% of tiktoken cl100k_base reference: PASS (exact match for gpt-3.5-turbo)
+  - Existing context packer tests pass; uv run ruff check . exits 0: PASS (8/8 tests pass)
+- Reviewer verdict: PASS (Critical fixed: tiktoken added as explicit dev dep)
+- Learnings:
+  - React.lazy with named exports: use .then(m => ({ default: m.ExportName })) pattern
+  - litellm.token_counter(model, text) matches tiktoken exactly for gpt-3.5-turbo (cl100k_base)
+  - Vite automatically splits lazy components into separate chunks; ProgressDashboard got its own 5.53 kB chunk
+---

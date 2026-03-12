@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import {
   Check,
   ChevronDown,
@@ -29,7 +29,10 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
-import { ProgressDashboard } from "@/components/ProgressDashboard"
+// ProgressDashboard is Recharts-heavy — lazy-load so Recharts stays out of the initial Study chunk
+const ProgressDashboard = lazy(() =>
+  import("@/components/ProgressDashboard").then((m) => ({ default: m.ProgressDashboard }))
+)
 
 // ---------------------------------------------------------------------------
 // Document list for the in-tab picker
@@ -791,10 +794,12 @@ export default function Study() {
         }}
       />
 
-      {/* Progress dashboard (S23b) */}
+      {/* Progress dashboard (S23b) — Recharts loaded lazily via dynamic import */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Progress</h2>
-        <ProgressDashboard documentId={activeDocumentId} />
+        <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>
+          <ProgressDashboard documentId={activeDocumentId} />
+        </Suspense>
       </section>
       </>
       )}
