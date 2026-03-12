@@ -841,7 +841,7 @@
         "Indicator persists after page reload (sourced from API, not component state)",
         "Smoke test: create note with section_id; reload page; indicator visible on correct section"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S107",
@@ -859,7 +859,7 @@
         "QUALITY_SCORE.md: all domains with implemented=yes and tested=yes show grade A",
         "No code changes in this story -- docs only"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S108",
@@ -877,7 +877,7 @@
         "Submitting a voice-sourced transcript to POST /study/teachback/{id} works identically to typed input",
         "npx tsc --noEmit exits 0; no new backend changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S109",

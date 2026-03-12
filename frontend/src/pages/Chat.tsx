@@ -15,6 +15,59 @@ import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
 
+// ---------------------------------------------------------------------------
+// ExploreConnectionsChips — graph-derived entity-pair suggestions (S109)
+// ---------------------------------------------------------------------------
+
+interface ExplorationSuggestion {
+  text: string
+  entity_names: string[]
+}
+
+interface ExploreConnectionsChipsProps {
+  documentId: string
+  onSuggest: (text: string) => void
+}
+
+function ExploreConnectionsChips({ documentId, onSuggest }: ExploreConnectionsChipsProps) {
+  const { data, isLoading, isError } = useQuery<ExplorationSuggestion[]>({
+    queryKey: ["explorations", documentId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/chat/explorations?document_id=${encodeURIComponent(documentId)}`)
+      if (!res.ok) throw new Error("Failed to fetch explorations")
+      return res.json() as Promise<ExplorationSuggestion[]>
+    },
+    staleTime: 120_000,
+  })
+
+  if (isError) return null
+  if (isLoading) {
+    return (
+      <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
+        <span className="text-xs text-muted-foreground">Explore connections:</span>
+        <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
+        <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
+      </div>
+    )
+  }
+  if (!data || data.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border px-6 py-3">
+      <span className="text-xs text-muted-foreground">Explore connections:</span>
+      {data.map((s) => (
+        <button
+          key={s.text}
+          onClick={() => onSuggest(s.text)}
+          className="truncate max-w-[240px] rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
+        >
+          {s.text}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface DocListItem {
   id: string
   title: string
@@ -734,6 +787,14 @@ export default function Chat() {
           activeDocumentId={activeDocumentId}
           onSuggest={(text) => void sendMessage(text)}
           onPlan={() => setShowPlanPanel(true)}
+        />
+      )}
+
+      {/* Graph-derived exploration chips — scope=single, document selected, chat empty (S109) */}
+      {messages.length === 0 && scope === "single" && effectiveDocId && (
+        <ExploreConnectionsChips
+          documentId={effectiveDocId}
+          onSuggest={(text) => void sendMessage(text)}
         />
       )}
 

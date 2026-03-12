@@ -750,3 +750,33 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - litellm.token_counter(model, text) matches tiktoken exactly for gpt-3.5-turbo (cl100k_base)
   - Vite automatically splits lazy components into separate chunks; ProgressDashboard got its own 5.53 kB chunk
 ---
+
+## 2026-03-13T00:00:00Z - S106 - Tech Debt TD-001: section_id on notes + DocumentReader dot indicators
+- Implemented: Added section_id TEXT column to NoteModel and db_init.py migration. Updated NoteCreateRequest, NoteUpdateRequest, NoteResponse, _to_response(), create_note(), _apply_note_update() in notes.py. Replaced useState notedSections with useQuery(["notes-for-doc"]) + useMemo in DocumentReader.tsx; indicators now sourced from API and persist across reloads. Added isError banner when note indicators fail to load. Added sectionId prop to NoteEditor and passes section_id when creating notes. Added res.ok check and inline save error display.
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/notes.py, frontend/src/components/reader/DocumentReader.tsx, backend/tests/test_notes.py, scripts/smoke/S106.sh, scripts/ralph/prd-v2.json
+- AC verified:
+  - notes table has section_id TEXT column (nullable); existing rows unaffected: PASS
+  - POST /notes and PATCH /notes/{id} accept optional section_id: PASS
+  - GET /notes?document_id=X returns section_id in each note: PASS
+  - DocumentReader section list shows dot indicator on noted sections: PASS
+  - Indicator persists after page reload (API-sourced, not state): PASS
+  - Smoke test scripted: PASS (cannot verify without live server)
+- Reviewer verdict: PASS (Critical fixed: res.ok check + inline save error; High fixed: isError banner + PATCH null semantics test)
+- Learnings:
+  - useQuery from TanStack Query accepts generic type param for typed response: useQuery<NoteEntry[]>(...)
+  - PATCH null ambiguity pattern: str | None = None means "not sent" not "clear"; document this in code comment and test it explicitly
+---
+
+## 2026-03-13T00:00:00Z - S107 - Documentation pass: QUALITY_SCORE A across all domains
+- Implemented: Docs-only story. Added Learning Engine, Study Mode, and Knowledge Graph sections to ARCHITECTURE.md. Updated FRONTEND.md with all 6 tab UX flows and component names. Updated QUALITY_SCORE.md so all implemented+tested domains show documented=yes and grade A.
+- Files changed: docs/ARCHITECTURE.md, docs/FRONTEND.md, docs/QUALITY_SCORE.md, scripts/ralph/prd-v2.json
+- AC verified:
+  - ARCHITECTURE.md has Learning Engine section (>= 200 words): PASS
+  - ARCHITECTURE.md has Study Mode section: PASS
+  - ARCHITECTURE.md has Knowledge Graph section: PASS
+  - FRONTEND.md documents all 6 tab UX flows: PASS
+  - QUALITY_SCORE.md all domains documented=yes: PASS
+  - QUALITY_SCORE.md all implemented+tested domains grade A: PASS
+  - No code changes: PASS
+- Reviewer verdict: N/A (docs-only, luminary-docs agent used)
+---

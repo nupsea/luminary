@@ -207,6 +207,55 @@ class KuzuService:
                 {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
             )
 
+    def add_relation(
+        self, entity_id_a: str, entity_id_b: str, relation_label: str, confidence: float = 1.0
+    ) -> None:
+        """Create a RELATED_TO edge from entity_id_a to entity_id_b.
+
+        Idempotent: if the edge already exists, it is left unchanged.
+        """
+        result = self._conn.execute(
+            "MATCH (a:Entity {id: $aid})-[r:RELATED_TO]->(b:Entity {id: $bid}) RETURN r.confidence",
+            {"aid": entity_id_a, "bid": entity_id_b},
+        )
+        if not result.has_next():
+            self._conn.execute(
+                "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                " CREATE (a)-[:RELATED_TO {relation_label: $rl, confidence: $conf}]->(b)",
+                {"aid": entity_id_a, "bid": entity_id_b, "rl": relation_label, "conf": confidence},
+            )
+
+    def get_related_entity_pairs_for_document(
+        self, document_id: str, limit: int = 5
+    ) -> list[tuple[str, str, str, float]]:
+        """Return entity pairs connected by RELATED_TO edges for a given document.
+
+        Returns list of (name_a, name_b, relation_label, confidence), ordered by
+        confidence descending, capped at *limit*.  Returns [] if no edges exist
+        or on any Kuzu error.
+        """
+        try:
+            result = self._conn.execute(
+                f"MATCH (e1:Entity)-[:MENTIONED_IN]->(d:Document {{id: $did}}),"
+                f" (e2:Entity)-[:MENTIONED_IN]->(d),"
+                f" (e1)-[r:RELATED_TO]->(e2)"
+                f" RETURN e1.name, e2.name, r.relation_label, r.confidence"
+                f" ORDER BY r.confidence DESC LIMIT {int(limit)}",
+                {"did": document_id},
+            )
+            pairs: list[tuple[str, str, str, float]] = []
+            while result.has_next():
+                row = result.get_next()
+                name_a, name_b, label, conf = row[0], row[1], row[2], row[3]
+                if name_a and name_b:
+                    pairs.append((name_a, name_b, label or "", float(conf or 0.0)))
+            return pairs
+        except Exception:
+            logger.debug(
+                "get_related_entity_pairs_for_document failed, returning empty", exc_info=True
+            )
+            return []
+
     # -------------------------------------------------------------------------
     # Delete
     # -------------------------------------------------------------------------
