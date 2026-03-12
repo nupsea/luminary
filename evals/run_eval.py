@@ -23,14 +23,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from datasets import Dataset
-from ragas import evaluate
-from ragas.metrics import (
-    answer_relevancy,
-    context_precision,
-    context_recall,
-    faithfulness,
-)
+
+# ragas and datasets are heavy optional dependencies used only for LLM-based scoring.
+# They are imported lazily inside main() so that this module can be imported by
+# backend unit tests (which run in a venv that does not include ragas/datasets).
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
@@ -159,7 +155,12 @@ def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]
 
 
 def search_chunks(backend_url: str, question: str, document_id: str | None) -> list[str]:
-    """Run GET /search and return a list of chunk texts (up to top 5)."""
+    """Run GET /search and return a list of chunk texts (up to top 5).
+
+    Uses the ``text`` field (full chunk text, up to 2000 chars) returned by the
+    search API.  The legacy ``text_excerpt`` field is only 200 chars and is
+    intended for UI display -- it is too short for context-hint substring matching.
+    """
     params: dict[str, str] = {"q": question}
     try:
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=30.0)
@@ -393,6 +394,15 @@ def main() -> None:
     }
     if args.model:
         try:
+            from datasets import Dataset  # noqa: PLC0415 -- lazy import, see module docstring
+            from ragas import evaluate  # noqa: PLC0415
+            from ragas.metrics import (  # noqa: PLC0415
+                answer_relevancy,
+                context_precision,
+                context_recall,
+                faithfulness,
+            )
+
             dataset_hf = Dataset.from_list(
                 [
                     {
@@ -426,18 +436,19 @@ def main() -> None:
         **ragas_scores,
     }
 
-    # Check quality gates
-    violations: list[str] = []
-    if args.assert_thresholds:
-        if hr5 < THRESHOLDS["hit_rate_5"]:
-            violations.append(f"HR@5 {hr5:.4f} < {THRESHOLDS['hit_rate_5']}")
-        if mrr < THRESHOLDS["mrr"]:
-            violations.append(f"MRR {mrr:.4f} < {THRESHOLDS['mrr']}")
-        faith = ragas_scores.get("faithfulness")
-        if args.model and faith is not None and faith < THRESHOLDS["faithfulness"]:
-            violations.append(f"Faithfulness {faith:.4f} < {THRESHOLDS['faithfulness']}")
+    # Always evaluate threshold compliance so scores_history.jsonl accurately
+    # reflects quality.  The --assert-thresholds flag only controls exit code.
+    threshold_violations: list[str] = []
+    if hr5 < THRESHOLDS["hit_rate_5"]:
+        threshold_violations.append(f"HR@5 {hr5:.4f} < {THRESHOLDS['hit_rate_5']}")
+    if mrr < THRESHOLDS["mrr"]:
+        threshold_violations.append(f"MRR {mrr:.4f} < {THRESHOLDS['mrr']}")
+    faith = ragas_scores.get("faithfulness")
+    if args.model and faith is not None and faith < THRESHOLDS["faithfulness"]:
+        threshold_violations.append(f"Faithfulness {faith:.4f} < {THRESHOLDS['faithfulness']}")
 
-    passed = len(violations) == 0
+    passed = len(threshold_violations) == 0
+    violations = threshold_violations if args.assert_thresholds else []
 
     # Persist run to local history file
     append_history(args.dataset, args.model or "no-llm", metrics, passed)
