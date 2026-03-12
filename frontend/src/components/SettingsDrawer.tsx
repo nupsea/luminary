@@ -293,7 +293,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                   <label className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                     API Key
                     {hasKeyForProvider ? (
-                      <span className="text-green-600">Key configured</span>
+                      <span className="text-green-600">saved securely</span>
                     ) : (
                       <span className="text-amber-600">Key not set</span>
                     )}
