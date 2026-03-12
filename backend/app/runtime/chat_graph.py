@@ -1081,7 +1081,7 @@ async def socratic_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except litellm.ServiceUnavailableError:
+    except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
         logger.warning("socratic_node: Ollama unreachable")
         card = {
             "type": "quiz_question",

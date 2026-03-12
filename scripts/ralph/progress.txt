@@ -567,3 +567,29 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - asyncio.gather without return_exceptions=True abandons sibling tasks when one raises; always use return_exceptions=True when gathering concurrent LLM calls and re-raise Ollama errors afterward
 ---
+
+## 2026-03-12T00:00:00Z - S98 - Socratic Quiz Mode: chat generates targeted recall questions from active document
+- Implemented: 'socratic' intent in classifier, socratic_node in chat_graph.py, QuizQuestionCard.tsx, 17 tests in test_chat_graph_socratic.py, smoke test S98.sh. Added loading skeleton in Chat.tsx for card SSE events in flight.
+- Files changed: backend/tests/test_chat_graph_socratic.py (added 'Quiz me on the key concepts' parametrized case), backend/app/runtime/chat_graph.py (APIConnectionError catch + loading skeleton in Chat.tsx)
+- AC verified:
+  - 'socratic' in IntentType Literal: PASS
+  - classify_intent_heuristic returns ('socratic', 0.95) for all _SOCRATIC_KWS phrases: PASS (17 cases)
+  - Parametrized test includes 'Quiz me on the key concepts': PASS (added)
+  - No false positive 'what is the main theme?': PASS
+  - socratic_node: 5 chunks, LiteLLM, __card__ JSON: PASS
+  - Parse fallback: default question, no exception: PASS
+  - Ollama offline: error card with 'ollama serve' message, no exception: PASS
+  - No SSE loop changes: PASS
+  - QuizQuestionCard.tsx: border-l-4 blue, Quiz chip, textarea, submit: PASS
+  - Submit: appends 'My answer:' message, card read-only: PASS
+  - Error prop: amber inline error, textarea/button hidden: PASS
+  - Loading skeleton: PASS (fixed by reviewer)
+  - 17 test_chat_graph_socratic.py tests pass: PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - scripts/smoke/S98.sh exists: PASS
+- Reviewer verdict: PASS after 1 Critical fix (loading skeleton for card SSE events) and 1 High fix (APIConnectionError added to socratic_node offline handler)
+- Learnings:
+  - Per invariant #21, every suggestion pill label must appear as a parametrized test case in the intent classifier tests
+  - socratic_node offline handler needed both ServiceUnavailableError AND APIConnectionError, matching notes_gap_node pattern
+---

@@ -68,6 +68,7 @@ def _make_chunk(text: str = "Sample passage content.") -> ScoredChunk:
 @pytest.mark.parametrize("phrase", [
     "quiz me",
     "quiz me on this",
+    "Quiz me on the key concepts",  # exact S95 pill label — must route to socratic
     "test me",
     "test me on this chapter",
     "ask me a question",

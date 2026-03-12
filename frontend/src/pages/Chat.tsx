@@ -674,6 +674,14 @@ export default function Chat() {
                     </p>
                   ) : msg.role === "user" ? (
                     <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
+                  ) : msg.isStreaming && msg.text === "" ? (
+                    // Skeleton shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
+                    // or before the first token of a streamed text response arrives.
+                    <div className="flex flex-col gap-2">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-4 w-64" />
+                      <Skeleton className="h-4 w-40" />
+                    </div>
                   ) : (
                     <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
                       [&_ol]:text-sm [&_ol]:my-1 [&_ol]:pl-5 [&_ol]:list-decimal
