@@ -643,3 +643,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - Per invariant #21, every string visible in UI that feeds into a classifier/filter (EXAMPLE_QUESTIONS, suggestion pills) must appear as a parametrized test case
   - UI-surface words like "drawn" (from "conclusions are drawn"), "plan", "session" are app-specific noise that sklearn's ENGLISH_STOP_WORDS doesn't cover; they belong in _APP_STOPWORDS
 ---
+
+## 2026-03-12T00:00:00Z - S101 - Study Session Planner: pre-session agenda from FSRS state, gaps, and document progress
+- Implemented: GET /study/session-plan endpoint, SessionPlanItem/SessionPlanResponse models, _build_session_plan pure function, __plan__ pill in Chat.tsx, slide-up session plan panel, 9 tests, smoke S101.sh
+- Files changed: frontend/src/pages/Chat.tsx (navigate() fix by reviewer)
+- AC verified:
+  - GET /study/session-plan ge=5, le=120, 422 outside bounds: PASS
+  - SessionPlanResponse and SessionPlanItem Pydantic models: PASS
+  - _build_session_plan: review cap 10min, 2 gap items, 1 read item, 5 total cap: PASS
+  - Empty inputs returns items=[]: PASS
+  - getContextualSuggestions appends '__plan__Plan my session' as 4th item: PASS
+  - Pill onClick __plan__ prefix triggers setShowPlanPanel(true): PASS
+  - Slide-up CSS transition max-h-0 -> max-h-96: PASS
+  - Panel items: type icon, title, minute badge, action button: PASS
+  - Action button uses React Router navigate() (fixed by reviewer): PASS
+  - Panel fetch enabled only when showPlanPanel=true: PASS
+  - Loading skeleton 3 rows; Error inline + retry; Empty 'You are all caught up!': PASS
+  - S95 test_suggestion_pills_route_correctly still passes: PASS
+  - 9 tests pass: PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - smoke/S101.sh exists: PASS
+- Reviewer verdict: PASS after 1 Critical fix -- action button used window.location.href instead of React Router navigate() (full page reload destroys React state)
+- Learnings:
+  - Panel action navigation in SPA must use React Router navigate() not window.location.href to preserve component state (active document, scope, chat history)
+---

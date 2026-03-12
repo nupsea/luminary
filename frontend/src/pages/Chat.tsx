@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, BookMarked, BookOpen, Loader2, Send, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { GapResultCard } from "@/components/GapResultCard"
 import type { GapCardData } from "@/components/GapResultCard"
@@ -257,6 +257,7 @@ function buildModelOptions(settings: LLMSettings | undefined): string[] {
 
 export default function Chat() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -789,7 +790,7 @@ export default function Chat() {
                     <span className="rounded bg-muted px-1 text-xs text-muted-foreground">{item.minutes} min</span>
                   </div>
                   <button
-                    onClick={() => { window.location.href = item.action_target }}
+                    onClick={() => { navigate(item.action_target) }}
                     className="ml-3 shrink-0 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   >
                     {item.action_label}

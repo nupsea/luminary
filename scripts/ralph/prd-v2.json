@@ -759,7 +759,7 @@
         "npx tsc --noEmit exits 0",
         "scripts/smoke/S101.sh exits 0"
       ],
-      "passes": false
+      "passes": true
     }
   ],
   "regressionBaseline": "423 tests pass on branch ralph/luminary-v2 before re-implementation begins (run: uv run pytest --ignore=tests/test_v2_pipeline.py --ignore=tests/test_v2_ingestion_perf.py --ignore=tests/test_ingestion_perf.py --ignore=tests/test_performance.py). After each story, the test count must be >= 423. Any drop is a regression -- stop and fix before marking passes:true."
