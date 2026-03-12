@@ -2,48 +2,22 @@
 
 ConfusionDetectorService.detect:
   1. Query qa_history within lookback window.
-  2. Tokenize each question (lowercase, split on non-alphanumeric, remove stopwords).
-  3. Count term frequencies; track the most-recent created_at per term.
-  4. Return top 3 terms with count >= threshold as ConfusionSignal, ordered by count desc.
+  2. Format each question as a chunk dict for GLiNER entity extraction.
+  3. Extract named entities; count distinct questions per entity name.
+  4. Return top 3 entities with distinct-question count >= threshold, ordered by count desc.
 """
 
 import logging
-import re
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import TypedDict
 
-from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ner import get_entity_extractor
+
 logger = logging.getLogger(__name__)
-
-# Base: sklearn's 318 English function words.
-# Extended with app-specific noise: UI suggestion verbs (summarize, quiz, compare),
-# generic learning vocabulary (themes, findings, concepts), and document-structural
-# words (book, chapter, section).  These are content words that carry no signal
-# about what the *learner* is confused about -- they appear in every question.
-# Per core-belief #23: UI surface inputs must be tested against the classifier
-# that handles them; this list must cover every word in Chat.tsx EXAMPLE_QUESTIONS.
-_APP_STOPWORDS: frozenset[str] = frozenset(
-    {
-        # UI suggestion verbs (appear in Chat.tsx EXAMPLE_QUESTIONS / pill labels)
-        "summarize", "summary", "quiz", "compare", "list", "review", "help",
-        "plan", "find",
-        # Generic learning vocabulary
-        "main", "key", "themes", "theme", "findings", "finding",
-        "conclusions", "conclusion", "drawn",  # "conclusions are drawn" pattern
-        "ideas", "idea", "concepts", "concept",
-        "points", "point", "topics", "topic",
-        "session",  # "plan my session" pill label
-        # Document-structural words
-        "book", "chapter", "text", "section", "passage", "document", "doc",
-        "content", "read", "reading", "notes", "note", "gaps", "gap",
-    }
-)
-
-_STOPWORDS: frozenset[str] = frozenset(ENGLISH_STOP_WORDS) | _APP_STOPWORDS
 
 
 class ConfusionSignal(TypedDict):
@@ -59,7 +33,7 @@ class ConfusionDetectorService:
         lookback_days: int = 30,
         threshold: int = 3,
     ) -> list[ConfusionSignal]:
-        """Return terms asked >= threshold times in the lookback window.
+        """Return entities asked about in >= threshold distinct questions in the lookback window.
 
         Uses string comparison against SQLite's stored datetime format
         (YYYY-MM-DD HH:MM:SS.ffffff) by formatting the cutoff without timezone.
@@ -69,7 +43,7 @@ class ConfusionDetectorService:
         )
         result = await session.execute(
             text(
-                "SELECT question, created_at FROM qa_history"
+                "SELECT id, question, created_at FROM qa_history"
                 " WHERE created_at >= :cutoff ORDER BY created_at DESC"
             ),
             {"cutoff": cutoff},
@@ -79,24 +53,39 @@ class ConfusionDetectorService:
         if len(rows) < threshold:
             return []
 
-        term_counts: dict[str, int] = {}
-        term_last_asked: dict[str, str] = {}
+        # Format each question as a chunk dict. All questions share the same document_id
+        # so GLiNER's frequency filter (>= 30 chunks) counts cross-question appearances.
+        chunks = [
+            {"id": str(row_id), "document_id": "__confusion_detection__", "text": question}
+            for row_id, question, created_at in rows
+        ]
+        id_to_created_at: dict[str, str] = {
+            str(row_id): str(created_at) for row_id, question, created_at in rows
+        }
 
-        for question, created_at in rows:
-            tokens = re.split(r"[^a-z0-9]+", question.lower())
-            for token in tokens:
-                if not token or token in _STOPWORDS:
-                    continue
-                if token not in term_counts:
-                    # Rows are DESC by created_at -- first encounter is most recent.
-                    term_last_asked[token] = str(created_at)
-                    term_counts[token] = 0
-                term_counts[token] += 1
+        try:
+            entities = get_entity_extractor().extract(chunks, content_type="general")
+        except Exception as exc:
+            logger.warning("GLiNER extraction failed during confusion detection: %s", exc)
+            return []
+
+        # Count distinct questions (chunk_ids) per entity name.
+        entity_questions: dict[str, set[str]] = {}
+        for ent in entities:
+            name = ent["name"]
+            chunk_id = ent["chunk_id"]
+            if name not in entity_questions:
+                entity_questions[name] = set()
+            entity_questions[name].add(chunk_id)
 
         signals: list[ConfusionSignal] = [
-            ConfusionSignal(concept=term, count=count, last_asked=term_last_asked[term])
-            for term, count in term_counts.items()
-            if count >= threshold
+            ConfusionSignal(
+                concept=name,
+                count=len(qids),
+                last_asked=max(id_to_created_at.get(cid, "") for cid in qids),
+            )
+            for name, qids in entity_questions.items()
+            if len(qids) >= threshold
         ]
         signals.sort(key=lambda s: s["count"], reverse=True)
         return signals[:3]
