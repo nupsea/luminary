@@ -13,19 +13,34 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import TypedDict
 
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-_STOPWORDS: frozenset[str] = frozenset(
+# Base: sklearn's 318 English function words.
+# Extended with app-specific noise: UI suggestion verbs (summarize, quiz, compare),
+# generic learning vocabulary (themes, findings, concepts), and document-structural
+# words (book, chapter, section).  These are content words that carry no signal
+# about what the *learner* is confused about -- they appear in every question.
+# Per core-belief #23: UI surface inputs must be tested against the classifier
+# that handles them; this list must cover every word in Chat.tsx EXAMPLE_QUESTIONS.
+_APP_STOPWORDS: frozenset[str] = frozenset(
     {
-        "what", "is", "the", "a", "an", "how", "does", "who", "where", "when", "why",
-        "do", "did", "are", "was", "were", "which", "in", "on", "at", "to", "for",
-        "of", "and", "or", "not", "i", "me", "my", "this", "that", "it", "its",
-        "with", "from", "by", "about", "can", "tell", "explain", "describe",
+        # UI suggestion verbs (appear in Chat.tsx EXAMPLE_QUESTIONS / pill labels)
+        "summarize", "summary", "quiz", "compare", "list", "review", "help",
+        # Generic learning vocabulary
+        "main", "key", "themes", "theme", "findings", "finding",
+        "conclusions", "conclusion", "ideas", "idea", "concepts", "concept",
+        "points", "point", "topics", "topic",
+        # Document-structural words
+        "book", "chapter", "text", "section", "passage", "document", "doc",
+        "content", "read", "reading", "notes", "note", "gaps", "gap",
     }
 )
+
+_STOPWORDS: frozenset[str] = frozenset(ENGLISH_STOP_WORDS) | _APP_STOPWORDS
 
 
 class ConfusionSignal(TypedDict):
