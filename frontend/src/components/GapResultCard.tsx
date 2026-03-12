@@ -5,7 +5,7 @@ import { Link } from "react-router-dom"
 const API_BASE = "http://localhost:8000"
 
 export interface GapCardData {
-  type: string
+  type: "gap_result"
   error?: string
   gaps: string[]
   covered: string[]

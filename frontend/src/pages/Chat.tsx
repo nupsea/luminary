@@ -663,8 +663,10 @@ export default function Chat() {
                       />
                     ) : msg.cardData.type === "teach_back_result" ? (
                       <TeachBackResultCard data={msg.cardData as TeachBackCardData} />
-                    ) : (
+                    ) : msg.cardData.type === "gap_result" ? (
                       <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Unknown card type</p>
                     )
                   ) : msg.not_found ? (
                     <p className="text-sm text-blue-600">
