@@ -79,8 +79,10 @@ class FlashcardModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # 'document' for book-chunk cards, 'note' for note-sourced cards
+    # 'document' for book-chunk cards, 'note' for note-sourced cards, 'gap' for gap-bridge cards
     source: Mapped[str] = mapped_column(String, nullable=False, default="document")
+    # Logical deck name; 'gaps' for cards created via POST /flashcards/from-gaps (S97)
+    deck: Mapped[str] = mapped_column(String, nullable=False, default="default")
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     source_excerpt: Mapped[str] = mapped_column(Text, nullable=False)

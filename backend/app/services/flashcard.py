@@ -369,6 +369,7 @@ class FlashcardService:
                     document_id=document_id if document_id else None,
                     chunk_id=None,
                     source="gap",
+                    deck="gaps",
                     question=item["front"].strip(),
                     answer=item["back"].strip(),
                     source_excerpt=gap,

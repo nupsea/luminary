@@ -169,3 +169,55 @@ async def test_generate_from_gaps_skips_malformed_llm():
 
     assert len(cards) == 1
     assert cards[0].question == "Valid question?"
+
+
+@pytest.mark.asyncio
+async def test_gap_card_to_flashcards():
+    """End-to-end: POST /flashcards/from-gaps inserts FlashcardModel rows with deck='gaps'."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.database import make_engine
+    from app.db_init import create_all_tables
+    from app.models import FlashcardModel
+    from app.services.flashcard import get_flashcard_service
+
+    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    await create_all_tables(engine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    gaps = ["Newton's first law", "photosynthesis"]
+    responses = [
+        '{"front": "What is Newton\'s first law?", "back": "An object at rest stays at rest"}',
+        '{"front": "What is photosynthesis?", "back": "Converting light to glucose"}',
+    ]
+    call_idx = 0
+
+    async def _mock_generate(prompt, system=None, stream=False):
+        nonlocal call_idx
+        resp = responses[call_idx % len(responses)]
+        call_idx += 1
+        return resp
+
+    svc = get_flashcard_service()
+    async with factory() as session:
+        with patch("app.services.llm.LLMService.generate", side_effect=_mock_generate):
+            count, ids = await svc.generate_from_gaps(
+                gaps=gaps,
+                document_id="doc-e2e",
+                session=session,
+            )
+
+    assert count == 2
+    assert len(ids) == 2
+
+    async with factory() as session:
+        from sqlalchemy import select
+
+        result = await session.execute(
+            select(FlashcardModel).where(FlashcardModel.deck == "gaps")
+        )
+        cards = result.scalars().all()
+
+    assert len(cards) == 2
+    assert all(c.deck == "gaps" for c in cards)
+    assert all(c.source == "gap" for c in cards)

@@ -55,6 +55,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE documents ADD COLUMN chapter_count INTEGER",
             "ALTER TABLE documents ADD COLUMN conversation_metadata JSON",
             "ALTER TABLE flashcards ADD COLUMN source TEXT NOT NULL DEFAULT 'document'",
+            "ALTER TABLE flashcards ADD COLUMN deck TEXT NOT NULL DEFAULT 'default'",
         ]:
             try:
                 await conn.execute(text(ddl))
