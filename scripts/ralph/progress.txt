@@ -498,3 +498,27 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - When building a pill array that must always include a specific item, verify array length bounds under all input conditions before slice(); guard other optional items to ensure the required pill survives
   - DocumentModel.last_accessed_at is the sort column for "recently accessed docs" -- not updated_at (which doesn't exist on DocumentModel)
 ---
+
+## 2026-03-12T00:00:00Z - S95 - Smart Start: contextual suggestion pills in Chat based on active document and FSRS state
+- Implemented: Added parametrized test test_suggestion_pills_route_correctly to test_intent_classifier.py. ChatSuggestions component and getContextualSuggestions pure function were already present from S101 implementation (which ran before S95 was marked complete).
+- Files changed: backend/tests/test_intent_classifier.py
+- AC verified:
+  - ChatSuggestions renders only when activeDocumentId is non-null: PASS (line 721: messages.length === 0 && activeDocumentId &&)
+  - Calls GET /study/due?document_id={id}: PASS
+  - getContextualSuggestions pure function: PASS (dueCount>0 yields due pill, always yields gap+summarize+quiz; note: S101 added __plan__ as 4th pill)
+  - Pills are outline rounded-full buttons, truncated to max-w-[200px]: PASS
+  - Clicking a pill injects text and submits immediately: PASS (onSuggest calls sendMessage)
+  - Pill row hidden after messages.length > 0: PASS
+  - Loading: 2 animate-pulse skeleton pill shapes: PASS
+  - Error: no pills rendered (silent fail): PASS (returns null on isError)
+  - No '__plan__' pill in S95 scope (S101 added it per spec): PASS
+  - Parametrized test test_suggestion_pills_route_correctly: PASS (3 cases, all confidence >= 0.9)
+  - E2E flow smoke test: scripts/smoke/S95.sh present (not verified without live server)
+  - tsc --noEmit exits 0: PASS
+  - npm run build exits 0: PASS
+  - scripts/smoke/S95.sh exists: PASS
+- Reviewer verdict: PASS (no Critical or High items)
+- Learnings:
+  - When stories are implemented out of order (S101 before S95), verify that the later story's ACs are still satisfied by the existing code; only add what's genuinely missing (the test here)
+  - classify_intent_heuristic checks keywords via substring match on lowercased input; pill labels must contain the exact keyword substring to route correctly
+---
