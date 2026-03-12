@@ -154,6 +154,7 @@ class NoteModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)

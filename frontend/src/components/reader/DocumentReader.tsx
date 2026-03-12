@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
@@ -24,17 +24,25 @@ async function fetchDocument(id: string): Promise<DocumentDetail> {
 // Note API
 // ---------------------------------------------------------------------------
 
+// Minimal note shape used for the section indicator (section_id only)
+interface NoteEntry {
+  id: string
+  section_id: string | null
+}
+
 async function createNote(data: {
   document_id: string
+  section_id: string | undefined
   content: string
   tags: string[]
   group_name: string | null
 }): Promise<void> {
-  await fetch(`${API_BASE}/notes`, {
+  const res = await fetch(`${API_BASE}/notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   })
+  if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -43,15 +51,17 @@ async function createNote(data: {
 
 interface NoteEditorProps {
   documentId: string
+  sectionId: string
   onSaved: () => void
   onCancel: () => void
 }
 
-function NoteEditor({ documentId, onSaved, onCancel }: NoteEditorProps) {
+function NoteEditor({ documentId, sectionId, onSaved, onCancel }: NoteEditorProps) {
   const [content, setContent] = useState("")
   const [tagInput, setTagInput] = useState("")
   const [tags, setTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   function addTag(input: string) {
     const t = input.trim()
@@ -62,9 +72,12 @@ function NoteEditor({ documentId, onSaved, onCancel }: NoteEditorProps) {
   async function handleSave() {
     if (!content.trim()) return
     setSaving(true)
+    setSaveError(null)
     try {
-      await createNote({ document_id: documentId, content, tags, group_name: null })
+      await createNote({ document_id: documentId, section_id: sectionId, content, tags, group_name: null })
       onSaved()
+    } catch {
+      setSaveError("Failed to save note. Please try again.")
     } finally {
       setSaving(false)
     }
@@ -72,6 +85,9 @@ function NoteEditor({ documentId, onSaved, onCancel }: NoteEditorProps) {
 
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-md border border-primary/40 bg-background p-2">
+      {saveError && (
+        <p className="text-xs text-destructive">{saveError}</p>
+      )}
       <textarea
         autoFocus
         value={content}
@@ -428,7 +444,23 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [notedSections, setNotedSections] = useState<Set<string>>(new Set())
+
+  // Fetch notes for this document so dot indicators persist across reloads (S106)
+  const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
+    queryKey: ["notes-for-doc", documentId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/notes?document_id=${encodeURIComponent(documentId)}`)
+      if (!res.ok) throw new Error("Failed to fetch notes")
+      return res.json() as Promise<NoteEntry[]>
+    },
+    staleTime: 30_000,
+  })
+
+  // Derive the set of section IDs that have at least one note
+  const notedSections = useMemo(
+    () => new Set((docNotes ?? []).map((n) => n.section_id).filter((id): id is string => id !== null && id !== undefined)),
+    [docNotes],
+  )
 
   function handleExplain(text: string, mode: ExplainMode) {
     setSheetText(text)
@@ -500,6 +532,9 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
 
           {/* Section list — relative for FloatingToolbar positioning */}
           <div ref={sectionListRef} className="relative flex-1 overflow-auto px-6 pb-6">
+            {notesError && (
+              <p className="mb-2 text-xs text-muted-foreground">Note indicators unavailable — could not load notes.</p>
+            )}
             <FloatingToolbar containerRef={sectionListRef} onExplain={handleExplain} />
             {doc.sections.length === 0 ? (
               <p className="text-sm text-muted-foreground">No sections detected.</p>
@@ -543,8 +578,8 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
                       {editorOpen && (
                         <NoteEditor
                           documentId={documentId}
+                          sectionId={section.id}
                           onSaved={() => {
-                            setNotedSections((prev) => new Set([...prev, section.id]))
                             setOpenNoteEditor(null)
                             void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
                           }}

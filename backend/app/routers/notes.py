@@ -33,6 +33,7 @@ router = APIRouter(prefix="/notes", tags=["notes"])
 class NoteCreateRequest(BaseModel):
     document_id: str | None = None
     chunk_id: str | None = None
+    section_id: str | None = None
     content: str
     tags: list[str] = []
     group_name: str | None = None
@@ -42,12 +43,15 @@ class NoteUpdateRequest(BaseModel):
     content: str | None = None
     tags: list[str] | None = None
     group_name: str | None = None
+    # section_id=None means "field not sent" (PATCH semantics — cannot clear via PATCH)
+    section_id: str | None = None
 
 
 class NoteResponse(BaseModel):
     id: str
     document_id: str | None
     chunk_id: str | None
+    section_id: str | None
     content: str
     tags: list[str]
     group_name: str | None
@@ -102,6 +106,7 @@ def _to_response(note: NoteModel) -> NoteResponse:
         id=note.id,
         document_id=note.document_id,
         chunk_id=note.chunk_id,
+        section_id=note.section_id,
         content=note.content,
         tags=note.tags or [],
         group_name=note.group_name,
@@ -186,6 +191,7 @@ async def create_note(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
         chunk_id=req.chunk_id,
+        section_id=req.section_id,
         content=req.content,
         tags=req.tags,
         group_name=req.group_name,
@@ -299,6 +305,8 @@ async def _apply_note_update(
         note.tags = req.tags
     if req.group_name is not None:
         note.group_name = req.group_name
+    if req.section_id is not None:
+        note.section_id = req.section_id
     note.updated_at = datetime.now(UTC)
 
     await _fts_update(note.id, note.content, note.document_id, session)
