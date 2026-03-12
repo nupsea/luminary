@@ -684,3 +684,35 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - SQLAlchemy column defaults must be callables; datetime.now(UTC) needs lambda wrapper
   - ruff UP017 prefers datetime.UTC alias over timezone.utc
 ---
+
+## 2026-03-12T12:00:00Z - S103 - Tech Debt TD-006: async classify_node and graceful 503 on Ollama unreachable in chat graph
+- Implemented: (1) Added type=error to llm_unavailable SSE payloads in qa.py (both graph exception handler and Path B streaming); (2) Updated Ollama offline message to 'Ollama is unreachable. Start it with: ollama serve'; (3) Added litellm.APIConnectionError to Path B caught exceptions; (4) Restructured Path B try/except to cover lazy _token_stream async generator iteration; (5) Added 2 new tests covering ServiceUnavailableError and APIConnectionError offline scenarios; (6) Smoke test scripts/smoke/S103.sh
+- Files changed: backend/app/services/qa.py, backend/tests/test_qa.py, scripts/smoke/S103.sh
+- AC verified:
+  - grep -r 'litellm.completion(' backend/app/runtime/ returns no results: PASS
+  - Test: mock litellm.acompletion to raise ServiceUnavailableError; POST /qa returns SSE with type=error and message containing 'Ollama is unreachable': PASS
+  - No HTTP 500 returned; SSE closes cleanly after error event: PASS
+  - All existing chat graph tests pass (72 tests): PASS
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (no Critical items; 2 High items fixed inline: added APIConnectionError test, fixed AC[1] in prd-v2.json)
+- Learnings:
+  - _token_stream() is a lazy async generator: litellm.acompletion is NOT called at generator creation time (await llm.generate(..., stream=True)), but during the first __anext__ call (first async for iteration). The try/except must cover BOTH the generate() call AND all subsequent iteration loops.
+  - When catching LLM errors in Path B streaming, initialize the collected list BEFORE the try block so the variable is available after the try/except for normal-path processing.
+---
+
+## 2026-03-12T00:00:00 - S104 - Tech Debt TD-004: migrate API keys from plaintext SQLite to OS keychain via keyring
+- Implemented: keyring dependency added; settings_service rewritten to store __keychain__ sentinel in SQLite and raw key in OS keychain; load auto-migrates legacy XOR-encrypted entries; get_effective_routing uses raw cache value (no XOR decrypt); SettingsDrawer shows 'saved securely'; 14 tests; smoke test S104.sh
+- Files changed: backend/app/services/settings_service.py, backend/pyproject.toml, backend/tests/test_settings.py, frontend/src/components/SettingsDrawer.tsx, scripts/smoke/S104.sh
+- AC verified:
+  - uv add keyring; keyring listed in pyproject.toml dependencies: PASS
+  - SettingsService.set() for *_api_key fields writes '__keychain__' sentinel to SQLite: PASS (test_api_key_stored_as_keychain_sentinel)
+  - SettingsService.get() returns keychain value when SQLite shows '__keychain__' sentinel: PASS (test_load_resolves_keychain_sentinel)
+  - Existing plaintext key in SQLite is auto-migrated to keychain on first read: PASS (test_legacy_xor_key_migrated_on_load)
+  - Test using keyring's mock backend: assert SQLite row is '__keychain__' after set(); assert get() returns original value: PASS
+  - Settings page UI shows 'saved securely' for key fields that have been stored: PASS (SettingsDrawer.tsx)
+- Reviewer verdict: PASS (1 High fixed inline: added warning log for unknown-format DB values; 2 edge case tests added: stale sentinel, unknown format)
+- Learnings:
+  - keyring.core._keyring_backend = None resets to system default after test; use keyring.set_keyring() with a priority=100 InMemoryKeyring to isolate tests from OS keychain
+  - XOR-encrypted hex vs raw API key is reliably distinguishable: API keys always contain non-hex chars (dashes, 'sk-', 'AIza'); bytes.fromhex() fails on them
+  - Cache stores raw (decrypted) values for API key fields after S104; get_effective_routing() no longer needs to call decrypt_setting()
+---

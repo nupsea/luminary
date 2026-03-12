@@ -791,7 +791,7 @@
         "All existing chat graph tests pass",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S104",
@@ -808,7 +808,7 @@
         "Test using keyring's mock backend: assert SQLite row is '__keychain__' after set(); assert get() returns original value",
         "Settings page UI shows 'saved securely' for key fields that have been stored"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S105",
