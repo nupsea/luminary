@@ -102,6 +102,18 @@ async def test_patch_llm_settings_persists_mode(test_db):
     assert svc_module._cache["cloud_provider"] == "anthropic"
 
 
+async def test_patch_llm_settings_rejects_unknown_fields(test_db):
+    """PATCH /settings/llm returns 422 for unknown field names (extra='forbid')."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.patch(
+            "/settings/llm",
+            json={"mode": "cloud", "rogue_field": "x"},
+        )
+    assert resp.status_code == 422
+
+
 async def test_api_key_stored_encrypted_not_plaintext(test_db):
     """Saving an API key encrypts it; raw plaintext must not appear in the DB."""
     engine, factory = test_db

@@ -7,7 +7,7 @@ Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -187,8 +187,8 @@ async def create_note(
         content=req.content,
         tags=req.tags,
         group_name=req.group_name,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
@@ -297,7 +297,7 @@ async def _apply_note_update(
         note.tags = req.tags
     if req.group_name is not None:
         note.group_name = req.group_name
-    note.updated_at = datetime.utcnow()
+    note.updated_at = datetime.now(UTC)
 
     await _fts_update(note.id, note.content, note.document_id, session)
     await session.commit()

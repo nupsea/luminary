@@ -14,7 +14,7 @@ import json
 import logging
 import math
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -289,7 +289,7 @@ async def get_due_cards(
     session: AsyncSession = Depends(get_db),
 ) -> list[FlashcardResponse]:
     """Return flashcards whose due_date is now or in the past."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
     if document_id:
         stmt = stmt.where(FlashcardModel.document_id == document_id)
@@ -309,7 +309,7 @@ async def get_session_plan(
     DB-only -- no LLM. Due count, gap areas, and recent docs assembled
     and passed to the pure _build_session_plan() function.
     """
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # (a) Count all due flashcards (no document filter)
     due_stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
@@ -402,7 +402,7 @@ async def start_session(
     sess = StudySessionModel(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
         cards_reviewed=0,
         cards_correct=0,
         mode=req.mode,
@@ -438,7 +438,7 @@ async def end_session(
     cards_reviewed = len(events)
     cards_correct = sum(1 for e in events if e.is_correct)
 
-    sess.ended_at = datetime.utcnow()
+    sess.ended_at = datetime.now(UTC)
     sess.cards_reviewed = cards_reviewed
     sess.cards_correct = cards_correct
     await db.commit()
@@ -545,7 +545,7 @@ async def get_study_stats(
     db: AsyncSession = Depends(get_db),
 ) -> StudyStatsResponse:
     """Return progress statistics for a document."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # --- All flashcards for the document ---
     cards_result = await db.execute(
@@ -658,7 +658,7 @@ async def get_study_history(
     db: AsyncSession = Depends(get_db),
 ) -> list[DailyHistoryItem]:
     """Return daily study activity for the last N days."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     stmt = select(StudySessionModel).where(
         StudySessionModel.started_at >= cutoff,
         StudySessionModel.ended_at.is_not(None),
@@ -748,7 +748,7 @@ async def _generate_correction_flashcard(
         fsrs_state="new",
         fsrs_stability=0.0,
         fsrs_difficulty=0.0,
-        due_date=datetime.utcnow(),
+        due_date=datetime.now(UTC),
         reps=0,
         lapses=0,
     )
@@ -764,7 +764,7 @@ async def _get_due_for_session(
     document_id: str, session: AsyncSession
 ) -> list[FlashcardModel]:
     """Return all due-or-new flashcards for a document, ordered by due_date."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     stmt = (
         select(FlashcardModel)
         .where(

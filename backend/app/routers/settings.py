@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -40,6 +40,8 @@ class LLMSettingsResponse(BaseModel):
 
 
 class LLMSettingsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: str | None = None
     provider: str | None = None
     model: str | None = None

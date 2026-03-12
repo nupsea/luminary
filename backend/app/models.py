@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.sqlite import JSON
@@ -31,8 +31,8 @@ class DocumentModel(Base):
     chapter_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Speaker roster and timeline for conversation documents (set during ingestion).
     conversation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class SectionModel(Base):
@@ -59,7 +59,7 @@ class ChunkModel(Base):
     page_number: Mapped[int] = mapped_column(Integer, default=0)
     speaker: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class SummaryModel(Base):
@@ -70,7 +70,7 @@ class SummaryModel(Base):
     # one_sentence|executive|detailed|conversation
     mode: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class FlashcardModel(Base):
@@ -94,7 +94,7 @@ class FlashcardModel(Base):
     reps: Mapped[int] = mapped_column(Integer, default=0)
     lapses: Mapped[int] = mapped_column(Integer, default=0)
     last_review: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class StudySessionModel(Base):
@@ -102,7 +102,7 @@ class StudySessionModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cards_reviewed: Mapped[int] = mapped_column(Integer, default=0)
     cards_correct: Mapped[int] = mapped_column(Integer, default=0)
@@ -118,7 +118,7 @@ class ReviewEventModel(Base):
     flashcard_id: Mapped[str] = mapped_column(String, nullable=False)
     rating: Mapped[str] = mapped_column(String, nullable=False)  # again|hard|good|easy
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class TeachbackResultModel(Base):
@@ -131,7 +131,7 @@ class TeachbackResultModel(Base):
     correct_points: Mapped[list] = mapped_column(JSON, default=list)
     missing_points: Mapped[list] = mapped_column(JSON, default=list)
     misconceptions: Mapped[list] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class MisconceptionModel(Base):
@@ -144,7 +144,7 @@ class MisconceptionModel(Base):
     # misconception|incomplete|unrelated|memory_lapse
     error_type: Mapped[str] = mapped_column(String, nullable=False)
     correction_note: Mapped[str] = mapped_column(Text, nullable=False)
-    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class NoteModel(Base):
@@ -156,8 +156,8 @@ class NoteModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class QAHistoryModel(Base):
@@ -171,7 +171,7 @@ class QAHistoryModel(Base):
     citations: Mapped[list] = mapped_column(JSON, default=list)
     confidence: Mapped[str] = mapped_column(String, nullable=False)  # high|medium|low
     model_used: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class LibrarySummaryModel(Base):
@@ -181,7 +181,7 @@ class LibrarySummaryModel(Base):
     # one_sentence|executive|detailed
     mode: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class SectionSummaryModel(Base):
@@ -193,7 +193,7 @@ class SectionSummaryModel(Base):
     heading: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     unit_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class SettingsModel(Base):
@@ -208,7 +208,7 @@ class EvalRunModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_name: Mapped[str] = mapped_column(String, nullable=False)
-    run_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    run_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     hit_rate_5: Mapped[float | None] = mapped_column(Float, nullable=True)
     mrr: Mapped[float | None] = mapped_column(Float, nullable=True)
     faithfulness: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -39,6 +39,18 @@ _parser = DocumentParser()
 _ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx"})
 
 
+def _delete_raw_file(document_id: str) -> None:
+    """Remove any raw uploaded file matching ~/.luminary/raw/{doc_id}.*"""
+    settings = get_settings()
+    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
+    for match in raw_dir.glob(f"{document_id}.*"):
+        try:
+            match.unlink()
+            logger.info("Deleted raw file %s", match)
+        except OSError:
+            logger.warning("Failed to delete raw file %s", match)
+
+
 def _safe_tags(raw: object) -> list[str]:
     """Deserialize tags regardless of how they were stored.
 
@@ -540,6 +552,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
             get_graph_service().delete_document(document_id)
         except Exception:
             logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
+        _delete_raw_file(document_id)
         deleted.append(document_id)
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
     return {"deleted": deleted, "count": len(deleted)}
@@ -634,6 +647,7 @@ async def delete_document(document_id: str):
     except Exception:
         logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
 
+    _delete_raw_file(document_id)
     logger.info("Deleted document %s", document_id)
 
 

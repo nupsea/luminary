@@ -217,7 +217,7 @@ class FlashcardService:
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         flashcards: list[FlashcardModel] = []
         for item in cards_data:
             if not isinstance(item, dict):
@@ -306,7 +306,7 @@ class FlashcardService:
             cards_data = _parse_llm_response(raw, "notes")
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         flashcards: list[FlashcardModel] = []
         for item in cards_data:
             if not isinstance(item, dict):

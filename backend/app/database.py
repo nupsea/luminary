@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -20,9 +21,17 @@ def _get_db_url() -> str:
     return f"sqlite+aiosqlite:///{data_dir}/luminary.db"
 
 
+def _enable_sqlite_fk(dbapi_connection, connection_record):  # noqa: ARG001
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def make_engine(db_url: str | None = None):
     url = db_url or _get_db_url()
-    return create_async_engine(url, echo=False)
+    engine = create_async_engine(url, echo=False)
+    event.listen(engine.sync_engine, "connect", _enable_sqlite_fk)
+    return engine
 
 
 _engine = None
