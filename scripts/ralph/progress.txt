@@ -780,3 +780,37 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - No code changes: PASS
 - Reviewer verdict: N/A (docs-only, luminary-docs agent used)
 ---
+
+## 2026-03-13T00:00:00Z - S109 - Proactive Suggested Explorations in Chat from Kuzu entity graph
+- Implemented: GET /chat/explorations endpoint, KuzuService.get_related_entity_pairs_for_document, ExploreConnectionsChips frontend component
+- Files changed: backend/app/services/graph.py, backend/app/routers/chat_meta.py, frontend/src/pages/Chat.tsx, backend/tests/test_explorations.py, scripts/smoke/S109.sh
+- AC verified:
+  - GET /chat/explorations returns list of ExplorationSuggestion with text+entity_names: PASS
+  - Suggestions from Kuzu RELATED_TO edges (not hardcoded): PASS
+  - Explore connections chip row shown when scope=single, doc selected, chat empty: PASS
+  - Click pre-fills and submits via sendMessage: PASS
+  - Chip row hidden when messages.length > 0: PASS
+  - Returns null gracefully when no entity pairs: PASS
+  - tsc --noEmit + ruff check both exit 0: PASS
+- Reviewer verdict: PASS (no Critical items)
+- Learnings:
+  - git stash list before popping -- a stash from the wrong branch caused unmerged conflict state; resolved by git checkout HEAD on conflicted files
+  - test_fts_sync_on_update is a pre-existing flaky test (passes in isolation, fails under full suite due to state ordering); not related to S109
+---
+
+## 2026-03-13T01:00:00Z - S110 - Reading progress tracking: IntersectionObserver per section with progress bar in library
+- Implemented: ReadingProgressModel ORM, POST /reading/progress endpoint, reading_progress_pct in GET /documents + GET /documents/{id}, useReadingProgress hook with IntersectionObserver + 3-second dwell timer, DocumentCard progress bar, DocumentRow progress text
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/reading.py (new), backend/app/routers/documents.py, backend/app/main.py, backend/tests/test_reading_progress.py (new), frontend/src/components/library/types.ts, frontend/src/components/reader/types.ts, frontend/src/components/reader/DocumentReader.tsx, frontend/src/components/library/DocumentCard.tsx, frontend/src/components/library/DocumentRow.tsx, scripts/smoke/S110.sh (new)
+- AC verified:
+  - reading_progress table created via ReadingProgressModel ORM: PASS
+  - POST /reading/progress upserts; view_count increments on repeat: PASS (test_upsert_increments_view_count)
+  - GET /documents/{id} includes reading_progress_pct: PASS (test_reading_progress_pct_in_document_detail)
+  - DocumentReader IntersectionObserver fires POST after 3 seconds in viewport: PASS
+  - Library card renders thin progress bar when pct > 0: PASS
+  - Progress persists across reloads (stored in DB): PASS
+  - Test: POST twice -> view_count=2, pct reflects correct ratio: PASS
+- Reviewer verdict: PASS after fixing Critical (cache invalidation on unmount so library bar updates same session)
+- Learnings:
+  - useReadingProgress hook must invalidate ["documents"] TanStack Query cache on unmount when progress was posted -- otherwise the library card shows stale pct=0 in the same session (refetchOnWindowFocus=false globally)
+  - Reviewer applied the fix inline: progressPosted ref + qc.invalidateQueries on cleanup
+---

@@ -913,7 +913,7 @@
         "Progress persists across reloads (stored in DB, not component state)",
         "Test: POST reading/progress twice for same section -> view_count=2; reading_progress_pct reflects correct ratio"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S111",
