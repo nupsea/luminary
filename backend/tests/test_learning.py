@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -53,7 +53,7 @@ def _make_card(
     fsrs_state: str = "learning",
     **kwargs,
 ) -> FlashcardModel:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     defaults = {
         "id": card_id or str(uuid.uuid4()),
         "document_id": doc_id or str(uuid.uuid4()),

@@ -2,7 +2,7 @@
 
 import math
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -51,7 +51,7 @@ def _make_card(
     reps: int = 3,
     **kwargs,
 ) -> FlashcardModel:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     defaults = {
         "id": str(uuid.uuid4()),
         "document_id": doc_id,
@@ -146,7 +146,7 @@ async def test_stats_avg_retention(test_db):
     """avg_retention uses e^(-days_since_review / stability)."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # 1 card: reviewed 2 days ago, stability=10 → retention = e^(-2/10) ≈ 0.8187
     async with factory() as session:
@@ -175,7 +175,7 @@ async def test_stats_current_streak(test_db):
     """current_streak counts consecutive days back from today/yesterday."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     async with factory() as session:
         # Sessions on today, yesterday, and 2 days ago → streak = 3
@@ -204,7 +204,7 @@ async def test_stats_total_study_time(test_db):
     """total_study_time_minutes sums session durations."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     async with factory() as session:
         # Two 30-minute sessions → total = 60 minutes
@@ -282,7 +282,7 @@ async def test_history_daily_aggregation(test_db):
     """GET /study/history groups sessions by day."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     async with factory() as session:
         # Two sessions today
@@ -327,7 +327,7 @@ async def test_history_respects_days_filter(test_db):
     """GET /study/history?days=7 excludes sessions older than 7 days."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     async with factory() as session:
         # Recent session (2 days ago)

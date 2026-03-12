@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -77,7 +77,7 @@ def _make_chunk(chunk_id: str | None = None, doc_id: str = "doc-1", **kwargs) ->
 
 
 def _make_flashcard(card_id: str | None = None, doc_id: str = "doc-1", **kwargs) -> FlashcardModel:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     defaults = {
         "id": card_id or str(uuid.uuid4()),
         "document_id": doc_id,

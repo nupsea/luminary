@@ -4,7 +4,7 @@ All tests use isolated in-memory SQLite (same pattern as test_flashcards.py).
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import litellm
@@ -61,7 +61,7 @@ def _make_card(doc_id: str, question: str = "Q?", answer: str = "A.") -> Flashca
         due_date=None,
         reps=0,
         lapses=0,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
         is_user_edited=False,
     )
 
@@ -208,7 +208,7 @@ async def test_due_date_updated(test_db):
                 due_date=None,
                 reps=0,
                 lapses=0,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
                 is_user_edited=False,
             )
         )

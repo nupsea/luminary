@@ -1,7 +1,7 @@
 """Tests for FSRS spaced repetition service and study session endpoints."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -51,7 +51,7 @@ def _make_card(
     **kwargs,
 ) -> FlashcardModel:
     """Helper to create a FlashcardModel with sensible defaults."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     defaults = {
         "id": card_id or str(uuid.uuid4()),
         "document_id": doc_id or str(uuid.uuid4()),
@@ -91,7 +91,7 @@ async def test_schedule_good_sets_future_due_date_and_positive_stability(test_db
 
     assert updated.fsrs_stability > 0
     assert updated.due_date is not None
-    assert updated.due_date > datetime.utcnow()
+    assert updated.due_date > datetime.now(UTC)
     assert updated.reps == 1
     assert updated.lapses == 0
     assert updated.last_review is not None
@@ -175,7 +175,7 @@ async def test_schedule_easy_sets_review_state(test_db):
 async def test_get_due_cards_returns_only_past_due(test_db):
     """GET /study/due returns only cards with due_date <= now."""
     _, factory, _ = test_db
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     past_card = _make_card(due_offset_seconds=-60)          # overdue
     future_card = _make_card(due_offset_seconds=3600)       # not yet due
 
