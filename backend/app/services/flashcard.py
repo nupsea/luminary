@@ -8,6 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
+import litellm
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -382,7 +383,21 @@ class FlashcardService:
                     created_at=now,
                 )
 
-        results = await asyncio.gather(*[_generate_one(g) for g in gaps])
+        raw_results = await asyncio.gather(
+            *[_generate_one(g) for g in gaps], return_exceptions=True
+        )
+        # Re-raise Ollama-offline errors so the router can map them to 503.
+        # Any other unexpected exception is logged and skipped (same policy as malformed JSON).
+        for exc in raw_results:
+            if isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+                raise exc
+            if isinstance(exc, BaseException):
+                logger.warning(
+                    "generate_from_gaps: unexpected error for a gap, skipping: %s", exc
+                )
+        results: list[FlashcardModel | None] = [
+            r for r in raw_results if not isinstance(r, BaseException)
+        ]
         cards = [r for r in results if r is not None]
         ids: list[str] = []
         for card in cards:

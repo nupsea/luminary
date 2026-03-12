@@ -545,3 +545,25 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - When completing a discriminated union, narrow all member type fields to string literals (not 'string') -- then the exhaustive else branch on 'never' can't reference .type, so use a plain fallback without property access
 ---
+
+## 2026-03-12T00:00:00Z - S97 - One-Click Bridge: generate flashcards from gap card in chat with no forms
+- Implemented: POST /flashcards/from-gaps endpoint, generate_from_gaps() service method with asyncio.Semaphore(5), GapResultCard button state machine (idle/loading/done/error), 6 tests in test_from_gaps.py, smoke test S97.sh
+- Files changed: backend/app/routers/flashcards.py, backend/app/services/flashcard.py, frontend/src/components/GapResultCard.tsx, backend/tests/test_from_gaps.py, scripts/smoke/S97.sh
+- AC verified:
+  - POST /flashcards/from-gaps accepts {gaps: list[str], document_id: str=""}: PASS
+  - 422 on empty gaps list; 200 with {created: int}: PASS
+  - asyncio.Semaphore(5) with return_exceptions=True: PASS
+  - Malformed LLM JSON logs warning, skips, no raise: PASS
+  - Ollama offline -> HTTP 503 with exact message: PASS
+  - FlashcardModel deck='gaps', FSRS defaults, datetime.now(UTC): PASS
+  - GapResultCard idle->loading->done/error state machine: PASS
+  - Button disabled when gaps.length === 0: PASS
+  - 503 renders inline Ollama message: PASS
+  - All 6 test_from_gaps.py tests pass: PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - scripts/smoke/S97.sh exists: PASS
+- Reviewer verdict: PASS after 1 Critical fix -- asyncio.gather missing return_exceptions=True caused abandoned tasks on Ollama offline; fixed to return_exceptions=True with explicit re-raise loop
+- Learnings:
+  - asyncio.gather without return_exceptions=True abandons sibling tasks when one raises; always use return_exceptions=True when gathering concurrent LLM calls and re-raise Ollama errors afterward
+---
