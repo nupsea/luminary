@@ -485,7 +485,111 @@ async def test_qa_ollama_offline(test_db):
     assert len(data_lines) == 1
     payload = json.loads(data_lines[0][len("data: "):])
     assert payload["error"] == "llm_unavailable"
+    assert payload["type"] == "error"
     assert payload["done"] is True
+
+
+@pytest.mark.asyncio
+async def test_s103_ollama_offline_sse_type_error(test_db):
+    """S103: litellm.acompletion raises ServiceUnavailableError during Path B streaming.
+
+    POST /qa must return HTTP 200 (SSE) with a single data event where:
+    - type == 'error'
+    - message contains 'Ollama is unreachable'
+    - done == True
+    No HTTP 500 must be returned; the SSE connection closes cleanly.
+    """
+    import litellm as _litellm
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    # Graph returns a state that requires Path B (LLM streaming): _llm_prompt is set.
+    result_with_prompt = {
+        "answer": "",
+        "citations": [],
+        "confidence": "low",
+        "not_found": False,
+        "chunks": [],
+        "_llm_prompt": "Answer the question.",
+        "_system_prompt": "",
+        "intent": "factual",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result_with_prompt)
+
+    # Simulate Ollama offline: acompletion raises ServiceUnavailableError.
+    offline_error = _litellm.ServiceUnavailableError(
+        message="Connection refused", llm_provider="ollama", model="ollama/mistral"
+    )
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("litellm.acompletion", new=AsyncMock(side_effect=offline_error)),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/qa",
+                json={"question": "What is this about?", "document_ids": [doc_id]},
+            )
+
+    assert resp.status_code == 200, "Must return 200 (SSE), not 500"
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+    data_lines = [ln for ln in resp.text.splitlines() if ln.startswith("data: ")]
+    assert len(data_lines) == 1, f"Expected 1 error event, got: {data_lines}"
+    payload = json.loads(data_lines[0][len("data: "):])
+    assert payload.get("type") == "error", f"Expected type='error', got: {payload}"
+    assert "Ollama is unreachable" in payload.get("message", ""), payload
+    assert payload.get("done") is True
+
+
+@pytest.mark.asyncio
+async def test_s103_api_connection_error_sse_type_error(test_db):
+    """S103: litellm.acompletion raises APIConnectionError during Path B streaming.
+
+    APIConnectionError fires when the TCP connection is refused outright (as opposed
+    to ServiceUnavailableError when the server returns 503). Both should yield the
+    same type=error SSE event.
+    """
+    import litellm as _litellm
+
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    result_with_prompt = {
+        "answer": "",
+        "citations": [],
+        "confidence": "low",
+        "not_found": False,
+        "chunks": [],
+        "_llm_prompt": "Answer the question.",
+        "_system_prompt": "",
+        "intent": "factual",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result_with_prompt)
+
+    conn_error = _litellm.APIConnectionError(
+        message="Connection refused", llm_provider="ollama", model="ollama/mistral"
+    )
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("litellm.acompletion", new=AsyncMock(side_effect=conn_error)),
+    ):
+        svc = QAService()
+        events = [e async for e in svc.stream_answer("What is this?", [doc_id], "single", None)]
+
+    data_lines = [e for e in events if e.startswith("data: ")]
+    assert len(data_lines) == 1
+    payload = json.loads(data_lines[0][len("data: "):])
+    assert payload.get("type") == "error"
+    assert "Ollama is unreachable" in payload.get("message", "")
+    assert payload.get("done") is True
 
 
 @pytest.mark.asyncio

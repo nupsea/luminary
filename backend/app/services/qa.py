@@ -339,8 +339,13 @@ class QAService:
                     elif isinstance(exc, litellm.AuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
                     else:
-                        msg = "LLM service unavailable. If using Ollama, run: ollama serve"
-                    payload = {"error": "llm_unavailable", "message": msg, "done": True}
+                        msg = "Ollama is unreachable. Start it with: ollama serve"
+                    payload = {
+                        "type": "error",
+                        "error": "llm_unavailable",
+                        "message": msg,
+                        "done": True,
+                    }
                     yield f"data: {json.dumps(payload)}\n\n"
                     return
 
@@ -409,14 +414,38 @@ class QAService:
 
             if llm_prompt:
                 # Path B — true streaming: call LLM here, yield tokens progressively
+                #
+                # _token_stream() is a lazy async generator: litellm.acompletion is not
+                # called until iteration begins. The try/except must therefore cover both
+                # the generate() call AND the subsequent iteration loops.
                 system_prompt = result.get("_system_prompt") or ""
                 llm = get_llm_service()
+                collected: list[str] = []
                 try:
                     token_gen = await llm.generate(
                         llm_prompt, system=system_prompt, model=effective_model, stream=True
                     )
+
+                    # Stream tokens as they arrive; stop before the citation JSON block.
+                    # NOT_FOUND_SENTINEL detection prevents yielding sentinel text as tokens.
+                    full_text_so_far = ""
+                    async for token in token_gen:
+                        collected.append(token)
+                        full_text_so_far += token
+                        # Stop streaming tokens once we hit the citation JSON block or sentinel
+                        if re.search(r'\{"citations"|\{"answer"', full_text_so_far):
+                            break
+                        if NOT_FOUND_SENTINEL in full_text_so_far:
+                            break
+                        yield f"data: {json.dumps({'token': token})}\n\n"
+
+                    # Drain any remaining tokens for full_text computation
+                    async for token in token_gen:
+                        collected.append(token)
+
                 except (
                     litellm.ServiceUnavailableError,
+                    litellm.APIConnectionError,
                     ValueError,
                     litellm.AuthenticationError,
                 ) as exc:
@@ -425,28 +454,15 @@ class QAService:
                     elif isinstance(exc, litellm.AuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
                     else:
-                        msg = "LLM service unavailable. If using Ollama, run: ollama serve"
-                    payload = {"error": "llm_unavailable", "message": msg, "done": True}
+                        msg = "Ollama is unreachable. Start it with: ollama serve"
+                    payload = {
+                        "type": "error",
+                        "error": "llm_unavailable",
+                        "message": msg,
+                        "done": True,
+                    }
                     yield f"data: {json.dumps(payload)}\n\n"
                     return
-
-                # Stream tokens as they arrive; stop before the citation JSON block.
-                # NOT_FOUND_SENTINEL detection prevents yielding the sentinel text as tokens.
-                collected: list[str] = []
-                full_text_so_far = ""
-                async for token in token_gen:
-                    collected.append(token)
-                    full_text_so_far += token
-                    # Stop streaming tokens once we hit the citation JSON block or sentinel
-                    if re.search(r'\{"citations"|\{"answer"', full_text_so_far):
-                        break
-                    if NOT_FOUND_SENTINEL in full_text_so_far:
-                        break
-                    yield f"data: {json.dumps({'token': token})}\n\n"
-
-                # Drain any remaining tokens for full_text computation
-                async for token in token_gen:
-                    collected.append(token)
 
                 full_text = "".join(collected)
 

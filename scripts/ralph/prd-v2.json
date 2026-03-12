@@ -786,7 +786,7 @@
       "description": "CONTEXT: classify_node and other nodes in runtime/chat_graph.py make synchronous litellm.completion() calls inside an async ASGI context (TD-006). If Ollama is unreachable, the exception escapes the graph executor and can crash the ASGI worker rather than returning a structured error to the client. USER JOURNEY: User sends a chat message while Ollama is stopped -> the SSE stream emits a JSON event {\"type\": \"error\", \"message\": \"Ollama is unreachable. Start it with: ollama serve\"} and closes cleanly -- no 500, no silent hang. IMPLEMENTATION: Replace every litellm.completion() call in runtime/ with await litellm.acompletion(). Wrap the top-level graph execution in the /chat/stream handler with try/except for litellm.ServiceUnavailableError and emit a structured SSE error event. Apply the same pattern to any other runtime/ graph that calls LiteLLM (ingestion summarize node, etc.).",
       "acceptanceCriteria": [
         "grep -r 'litellm.completion(' backend/app/runtime/ returns no results -- all replaced with await litellm.acompletion()",
-        "Test: mock litellm.acompletion to raise ServiceUnavailableError; POST /chat/stream returns a valid SSE event with type=error and message containing 'Ollama is unreachable'",
+        "Test: mock litellm.acompletion to raise ServiceUnavailableError; POST /qa returns a valid SSE event with type=error and message containing Ollama is unreachable",
         "No HTTP 500 returned when Ollama is unreachable; SSE connection closes cleanly after error event",
         "All existing chat graph tests pass",
         "uv run ruff check . exits 0"
