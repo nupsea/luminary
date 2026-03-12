@@ -5,9 +5,9 @@
   "v2Philosophy": {
     "theme": "The system becomes an agent that reasons about HOW to answer, not a pipeline that always retrieves and generates.",
     "principles": [
-      "Hierarchical knowledge: ingestion builds a three-level summary pyramid \u2014 section \u2192 document \u2192 library. Every level is pre-computed and stored. Nothing expensive is ever recomputed when inputs have not changed (Core Belief #18).",
+      "Hierarchical knowledge: ingestion builds a three-level summary pyramid — section → document → library. Every level is pre-computed and stored. Nothing expensive is ever recomputed when inputs have not changed (Core Belief #18).",
       "Agentic chat: the QA pipeline is a LangGraph graph, not a linear function. A classifier node decides the retrieval strategy before any retrieval happens. The graph is the explicit, versioned contract for how questions are answered.",
-      "Performance budget: ingestion of a large book (Iliad, ~3300 chunks, ~2100 sections) must complete \u2014 including section summaries \u2014 in under 15 minutes on commodity hardware. This is achieved through bounded parallelism, not sequential LLM calls.",
+      "Performance budget: ingestion of a large book (Iliad, ~3300 chunks, ~2100 sections) must complete — including section summaries — in under 15 minutes on commodity hardware. This is achieved through bounded parallelism, not sequential LLM calls.",
       "Boring technology wins (Core Belief #12): intent classification uses keyword heuristics first, LLM only as fallback. The heuristic is a pure function with a unit test. Reliability over cleverness.",
       "Pure functions for core logic (Core Belief #19): context packing, RRF scoring, intent heuristics are pure functions with no I/O. They live in app/services/ and are tested with plain assert statements.",
       "Every new service method and every new API endpoint must have at least one pytest test. No exceptions."
@@ -15,11 +15,11 @@
   },
   "architecture": {
     "newFiles": [
-      "backend/app/models.py \u2014 add SectionSummaryModel (new table section_summaries)",
-      "backend/app/services/section_summarizer.py \u2014 SectionSummarizerService: parallel section summary generation",
-      "backend/app/services/context_packer.py \u2014 pure function pack_context(): smart context window assembly",
-      "backend/app/runtime/chat_graph.py \u2014 LangGraph StateGraph replacing linear stream_answer()",
-      "backend/app/types/chat.py \u2014 ChatState TypedDict and intent type literals",
+      "backend/app/models.py — add SectionSummaryModel (new table section_summaries)",
+      "backend/app/services/section_summarizer.py — SectionSummarizerService: parallel section summary generation",
+      "backend/app/services/context_packer.py — pure function pack_context(): smart context window assembly",
+      "backend/app/runtime/chat_graph.py — LangGraph StateGraph replacing linear stream_answer()",
+      "backend/app/types/chat.py — ChatState TypedDict and intent type literals",
       "backend/tests/test_section_summarizer.py",
       "backend/tests/test_context_packer.py",
       "backend/tests/test_chat_graph.py",
@@ -31,15 +31,15 @@
       "scripts/smoke/S79.sh"
     ],
     "modifiedFiles": [
-      "backend/app/workflows/ingestion.py \u2014 add section_summarize node after entity_extract",
-      "backend/app/services/summarizer.py \u2014 pregenerate() uses section summaries as fast path",
-      "backend/app/services/qa.py \u2014 stream_answer() becomes thin wrapper over chat_graph",
-      "backend/app/db_init.py \u2014 create section_summaries table",
-      "backend/app/routers/summarize.py \u2014 add GET /summarize/{doc_id}/sections endpoint",
-      "docs/ARCHITECTURE.md \u2014 document v2 additions",
-      "docs/QUALITY_SCORE.md \u2014 update Q&A grade"
+      "backend/app/workflows/ingestion.py — add section_summarize node after entity_extract",
+      "backend/app/services/summarizer.py — pregenerate() uses section summaries as fast path",
+      "backend/app/services/qa.py — stream_answer() becomes thin wrapper over chat_graph",
+      "backend/app/db_init.py — create section_summaries table",
+      "backend/app/routers/summarize.py — add GET /summarize/{doc_id}/sections endpoint",
+      "docs/ARCHITECTURE.md — document v2 additions",
+      "docs/QUALITY_SCORE.md — update Q&A grade"
     ],
-    "layerRules": "All new code obeys the existing 6-layer rule: Types \u2192 Config \u2192 Repo \u2192 Service \u2192 Runtime \u2192 API. SectionSummarizerService is a Service. ChatState TypedDict is a Type. chat_graph.py is a Runtime. No cross-layer imports."
+    "layerRules": "All new code obeys the existing 6-layer rule: Types → Config → Repo → Service → Runtime → API. SectionSummarizerService is a Service. ChatState TypedDict is a Type. chat_graph.py is a Runtime. No cross-layer imports."
   },
   "performanceBudget": {
     "ingestion_iliad": "Full ingestion (parse + chunk + embed + NER + section summaries) <= 15 minutes for a ~180k-word TXT book with ~2100 sections. Section summarization caps at 100 summary units. With Semaphore(10) concurrency and ~3 sec/call: 10 batches * 3 sec = 30 sec for section summaries. Document summary adds ~30 sec. Total background work well under 5 minutes after stage=complete.",
@@ -50,16 +50,16 @@
     {
       "id": "S75",
       "title": "SectionSummaryModel + parallel section summarization node in ingestion pipeline",
-      "phase": "V2A \u2014 Hierarchical Knowledge",
+      "phase": "V2A — Hierarchical Knowledge",
       "priority": 75,
       "featureRef": "F-INGEST-V2",
-      "description": "CONTEXT: The ingestion pipeline currently generates document-level summaries only (via background task), using map-reduce over all raw chunks. For a large book like the Iliad (3307 chunks), this requires 100+ sequential LLM calls and either times out or takes 15+ minutes. V2 fixes this by generating section-level summaries during ingestion in parallel, bounded to a maximum of 100 summary units per document regardless of section count. These section summaries become the input to document-level summarization (S76), replacing the slow chunk-based map-reduce. DATA MODEL \u2014 Add SectionSummaryModel to app/models.py: class SectionSummaryModel(Base): __tablename__ = 'section_summaries'. Columns: id: Mapped[str] (UUID primary key), document_id: Mapped[str] (non-nullable, indexed), section_id: Mapped[str | None] (nullable \u2014 null when the unit spans multiple merged sections), heading: Mapped[str] (the heading or merged headings for this unit, max 200 chars), content: Mapped[str] (the generated 1-2 sentence summary), unit_index: Mapped[int] (0-based position within the document), created_at: Mapped[datetime]. Add this model to app/db_init.py so the table is created on startup alongside other tables. DB MIGRATION: add 'section_summaries' to the tables created in db_init.py. SERVICE \u2014 Create app/services/section_summarizer.py. Class SectionSummarizerService. Method: async def generate(self, document_id: str, concurrency: int = 10) -> int. Implementation: (1) Fetch all SectionModel rows for document_id ordered by section_order. (2) Filter: keep only sections where len(section.preview) >= 200 characters. Short headings and near-empty sections produce useless summaries. (3) GROUPING for large documents: if the number of qualifying sections exceeds 100, merge adjacent sections into groups so the total units <= 100. Group by consecutive blocks: group_size = ceil(qualifying_count / 100). Each group's heading = first section heading in the group; each group's text = concatenation of section previews within the group. (4) For each unit (single section or merged group): call LiteLLM with model from get_settings().default_model, system='Summarize the following passage in 1 to 2 sentences. Be specific about names, events, and arguments. Output only the summary.', user=unit_text[:4000] (hard cap to stay within context). (5) Concurrency: use asyncio.Semaphore(concurrency) \u2014 NOT asyncio.gather without a semaphore. Wrap each LiteLLM call in the semaphore. This guarantees at most `concurrency` parallel calls at any moment. (6) Store each result as a SectionSummaryModel row as it completes (don't wait for all). (7) Return total count of rows inserted. Error handling: if an individual unit's LLM call fails, log a warning and skip that unit (non-fatal). If Ollama is unreachable (litellm.ServiceUnavailableError), log a warning and return 0 immediately \u2014 the document is still usable without section summaries. INGESTION GRAPH \u2014 In app/workflows/ingestion.py, add a new node function section_summarize_node(state: IngestionState) -> IngestionState AFTER entity_extract_node and BEFORE summarize_node. The node: imports SectionSummarizerService lazily (same pattern as other nodes), calls await svc.generate(state['document_id']), stores the count in state['section_summary_count'] (add this field to IngestionState TypedDict). The existing summarize_node (which fires background pregenerate) remains unchanged \u2014 S76 will modify pregenerate to use section summaries. Wire the new node into the graph: the edge entity_extract_node -> section_summarize_node -> summarize_node. PERFORMANCE REQUIREMENT: For the Iliad fixture (~2100 sections grouped to 100 units, Semaphore(10)): section_summarize_node must complete in under 5 minutes with a running Ollama instance. With Semaphore(10) and ~3 sec/call: 100 units / 10 concurrent = 10 sequential batches * ~3 sec = ~30 seconds. The 5-minute budget is conservative. API \u2014 Add GET /summarize/{document_id}/sections to app/routers/summarize.py: returns list of {unit_index, heading, content} ordered by unit_index for the given document. Returns [] if no section summaries exist (not an error \u2014 document may be pre-v2). TESTS \u2014 tests/test_section_summarizer.py: (a) test_grouping_caps_at_100_units: create a document with 300 qualifying sections, call generate() with a mock LiteLLM that returns instantly, assert SectionSummaryModel count <= 100. (b) test_short_sections_skipped: create sections where half have len(preview) < 200, assert only the qualifying half are summarized. (c) test_concurrency_respects_semaphore: mock LiteLLM call with asyncio.sleep(0.01), measure time for 50 units with concurrency=5, assert fewer concurrent calls than total units. (d) test_ollama_offline_returns_zero: mock litellm.acompletion to raise litellm.ServiceUnavailableError, assert generate() returns 0 and does not raise. (e) test_get_sections_endpoint_returns_list: after generate(), GET /summarize/{id}/sections returns list with correct unit_index ordering. SMOKE \u2014 scripts/smoke/S75.sh: (1) POST /ingest with a small real TXT fixture, wait for stage=complete by polling GET /documents/{id} every 5s up to 120s. (2) GET /summarize/{id}/sections, assert HTTP 200 and response is a JSON array (may be empty for very small docs). (3) Exit 0.",
+      "description": "CONTEXT: The ingestion pipeline currently generates document-level summaries only (via background task), using map-reduce over all raw chunks. For a large book like the Iliad (3307 chunks), this requires 100+ sequential LLM calls and either times out or takes 15+ minutes. V2 fixes this by generating section-level summaries during ingestion in parallel, bounded to a maximum of 100 summary units per document regardless of section count. These section summaries become the input to document-level summarization (S76), replacing the slow chunk-based map-reduce. DATA MODEL — Add SectionSummaryModel to app/models.py: class SectionSummaryModel(Base): __tablename__ = 'section_summaries'. Columns: id: Mapped[str] (UUID primary key), document_id: Mapped[str] (non-nullable, indexed), section_id: Mapped[str | None] (nullable — null when the unit spans multiple merged sections), heading: Mapped[str] (the heading or merged headings for this unit, max 200 chars), content: Mapped[str] (the generated 1-2 sentence summary), unit_index: Mapped[int] (0-based position within the document), created_at: Mapped[datetime]. Add this model to app/db_init.py so the table is created on startup alongside other tables. DB MIGRATION: add 'section_summaries' to the tables created in db_init.py. SERVICE — Create app/services/section_summarizer.py. Class SectionSummarizerService. Method: async def generate(self, document_id: str, concurrency: int = 10) -> int. Implementation: (1) Fetch all SectionModel rows for document_id ordered by section_order. (2) Filter: keep only sections where len(section.preview) >= 200 characters. Short headings and near-empty sections produce useless summaries. (3) GROUPING for large documents: if the number of qualifying sections exceeds 100, merge adjacent sections into groups so the total units <= 100. Group by consecutive blocks: group_size = ceil(qualifying_count / 100). Each group's heading = first section heading in the group; each group's text = concatenation of section previews within the group. (4) For each unit (single section or merged group): call LiteLLM with model from get_settings().default_model, system='Summarize the following passage in 1 to 2 sentences. Be specific about names, events, and arguments. Output only the summary.', user=unit_text[:4000] (hard cap to stay within context). (5) Concurrency: use asyncio.Semaphore(concurrency) — NOT asyncio.gather without a semaphore. Wrap each LiteLLM call in the semaphore. This guarantees at most `concurrency` parallel calls at any moment. (6) Store each result as a SectionSummaryModel row as it completes (don't wait for all). (7) Return total count of rows inserted. Error handling: if an individual unit's LLM call fails, log a warning and skip that unit (non-fatal). If Ollama is unreachable (litellm.ServiceUnavailableError), log a warning and return 0 immediately — the document is still usable without section summaries. INGESTION GRAPH — In app/workflows/ingestion.py, add a new node function section_summarize_node(state: IngestionState) -> IngestionState AFTER entity_extract_node and BEFORE summarize_node. The node: imports SectionSummarizerService lazily (same pattern as other nodes), calls await svc.generate(state['document_id']), stores the count in state['section_summary_count'] (add this field to IngestionState TypedDict). The existing summarize_node (which fires background pregenerate) remains unchanged — S76 will modify pregenerate to use section summaries. Wire the new node into the graph: the edge entity_extract_node -> section_summarize_node -> summarize_node. PERFORMANCE REQUIREMENT: For the Iliad fixture (~2100 sections grouped to 100 units, Semaphore(10)): section_summarize_node must complete in under 5 minutes with a running Ollama instance. With Semaphore(10) and ~3 sec/call: 100 units / 10 concurrent = 10 sequential batches * ~3 sec = ~30 seconds. The 5-minute budget is conservative. API — Add GET /summarize/{document_id}/sections to app/routers/summarize.py: returns list of {unit_index, heading, content} ordered by unit_index for the given document. Returns [] if no section summaries exist (not an error — document may be pre-v2). TESTS — tests/test_section_summarizer.py: (a) test_grouping_caps_at_100_units: create a document with 300 qualifying sections, call generate() with a mock LiteLLM that returns instantly, assert SectionSummaryModel count <= 100. (b) test_short_sections_skipped: create sections where half have len(preview) < 200, assert only the qualifying half are summarized. (c) test_concurrency_respects_semaphore: mock LiteLLM call with asyncio.sleep(0.01), measure time for 50 units with concurrency=5, assert fewer concurrent calls than total units. (d) test_ollama_offline_returns_zero: mock litellm.acompletion to raise litellm.ServiceUnavailableError, assert generate() returns 0 and does not raise. (e) test_get_sections_endpoint_returns_list: after generate(), GET /summarize/{id}/sections returns list with correct unit_index ordering. SMOKE — scripts/smoke/S75.sh: (1) POST /ingest with a small real TXT fixture, wait for stage=complete by polling GET /documents/{id} every 5s up to 120s. (2) GET /summarize/{id}/sections, assert HTTP 200 and response is a JSON array (may be empty for very small docs). (3) Exit 0.",
       "acceptanceCriteria": [
-        "SectionSummaryModel added to app/models.py and app/db_init.py \u2014 table section_summaries created on startup",
+        "SectionSummaryModel added to app/models.py and app/db_init.py — table section_summaries created on startup",
         "SectionSummarizerService.generate() groups sections to <= 100 units when document has > 100 qualifying sections",
         "Sections with preview length < 200 characters are skipped",
         "Concurrency controlled by asyncio.Semaphore(concurrency), default concurrency=10",
-        "Each unit stored immediately on completion \u2014 no wait-for-all",
+        "Each unit stored immediately on completion — no wait-for-all",
         "Ollama offline: generate() returns 0, no exception raised, document ingestion continues",
         "section_summarize_node wired into ingestion graph between entity_extract and summarize",
         "GET /summarize/{document_id}/sections returns [{unit_index, heading, content}] ordered by unit_index",
@@ -69,23 +69,23 @@
         "test_ollama_offline_returns_zero passes",
         "uv run pytest tests/test_section_summarizer.py exits 0",
         "scripts/smoke/S75.sh exits 0",
-        "No datetime.utcnow() calls in section_summarizer.py \u2014 use datetime.now(datetime.UTC) for created_at and any other datetime construction in this file"
+        "No datetime.utcnow() calls in section_summarizer.py — use datetime.now(datetime.UTC) for created_at and any other datetime construction in this file"
       ],
       "passes": true
     },
     {
       "id": "S76",
       "title": "Document summary fast-path: pregenerate() uses section summaries instead of raw chunks",
-      "phase": "V2A \u2014 Hierarchical Knowledge",
+      "phase": "V2A — Hierarchical Knowledge",
       "priority": 76,
       "featureRef": "F-INGEST-V2",
-      "description": "CONTEXT: After S75, section summaries exist for documents. This story changes pregenerate() in SummarizationService so that when section summaries are available, it uses them as the map-reduce input instead of raw chunks. This reduces the Iliad's document summary generation from 100+ sequential LLM calls to a single LLM call over the concatenated section summaries. This directly fixes the 15-minute timeout problem. FAST PATH LOGIC \u2014 In app/services/summarizer.py, add a private async method _build_section_summary_input(self, document_id: str) -> str | None. Implementation: (1) Query SectionSummaryModel for all rows matching document_id, ordered by unit_index. (2) If fewer than 3 rows found, return None (not enough coverage to trust). (3) Build a markdown string: join all rows as '## {heading}\\n{content}\\n\\n'. Return this string. MODIFY pregenerate() \u2014 The existing pregenerate() fetches chunks and runs map-reduce. Change it to: (1) First call _build_section_summary_input(document_id). (2) If it returns a non-None string (the fast path): use that string directly as the input_text for all three modes (one_sentence, executive, detailed). No map-reduce needed. Each mode is one LLM call on the section summary input. Store the section summary input as mode='_section_reduce' in SummaryModel (following Core Belief #18: cache expensive intermediates \u2014 same pattern as existing '_map_reduce' mode). (3) If it returns None (the slow path \u2014 no section summaries, pre-v2 document or section summarization was offline): fall through to the existing chunk-based map-reduce. This preserves backward compatibility for all existing documents. IMPORTANT: The '_section_reduce' row should be stored once and reused across all modes, exactly like '_map_reduce'. If '_section_reduce' already exists for this document, skip recomputing it. PERFORMANCE REQUIREMENT: For the Iliad with 100 section summary units: _build_section_summary_input() is a DB query (< 100ms). Each of the three summary modes (one_sentence, executive, detailed) is a single LLM call on the concatenated section summaries (~30-60 sec each). Total pregenerate time: < 3 minutes for Iliad. Compare to v1 which timed out at 15+ minutes. CACHE INVALIDATION: When section summaries for a document are regenerated (e.g. force_refresh ingest), the '_section_reduce' summary row must be deleted so pregenerate() recomputes it. Add a method async def invalidate_section_reduce_cache(self, document_id: str) -> None that deletes SummaryModel rows where document_id matches and mode='_section_reduce'. Call this at the start of generate() in SectionSummarizerService when regenerating. TESTS \u2014 tests/test_document_summary_fast_path.py: (a) test_fast_path_used_when_section_summaries_exist: insert 10 SectionSummaryModel rows for a doc, call pregenerate() with mock LiteLLM, assert mock was called exactly once per mode (not dozens of times as in map-reduce). (b) test_slow_path_fallback_when_no_section_summaries: no SectionSummaryModel rows, call pregenerate(), assert existing map-reduce logic runs (verify by checking that LiteLLM was called with chunk batches). (c) test_section_reduce_cached_as_db_row: after fast path runs, assert SummaryModel has a row with mode='_section_reduce'. (d) test_fast_path_skipped_with_fewer_than_3_units: insert 2 rows, assert slow path is taken. SMOKE \u2014 scripts/smoke/S76.sh: (1) Ingest a document that already has section summaries (from S75 smoke). (2) POST /summarize/{id} with mode=executive and force_refresh=true. (3) Assert HTTP 200 and streaming response contains non-empty content. (4) GET /summarize/{id}/cached, assert 'executive' key present in response. (5) Exit 0.",
+      "description": "CONTEXT: After S75, section summaries exist for documents. This story changes pregenerate() in SummarizationService so that when section summaries are available, it uses them as the map-reduce input instead of raw chunks. This reduces the Iliad's document summary generation from 100+ sequential LLM calls to a single LLM call over the concatenated section summaries. This directly fixes the 15-minute timeout problem. FAST PATH LOGIC — In app/services/summarizer.py, add a private async method _build_section_summary_input(self, document_id: str) -> str | None. Implementation: (1) Query SectionSummaryModel for all rows matching document_id, ordered by unit_index. (2) If fewer than 3 rows found, return None (not enough coverage to trust). (3) Build a markdown string: join all rows as '## {heading}\\n{content}\\n\\n'. Return this string. MODIFY pregenerate() — The existing pregenerate() fetches chunks and runs map-reduce. Change it to: (1) First call _build_section_summary_input(document_id). (2) If it returns a non-None string (the fast path): use that string directly as the input_text for all three modes (one_sentence, executive, detailed). No map-reduce needed. Each mode is one LLM call on the section summary input. Store the section summary input as mode='_section_reduce' in SummaryModel (following Core Belief #18: cache expensive intermediates — same pattern as existing '_map_reduce' mode). (3) If it returns None (the slow path — no section summaries, pre-v2 document or section summarization was offline): fall through to the existing chunk-based map-reduce. This preserves backward compatibility for all existing documents. IMPORTANT: The '_section_reduce' row should be stored once and reused across all modes, exactly like '_map_reduce'. If '_section_reduce' already exists for this document, skip recomputing it. PERFORMANCE REQUIREMENT: For the Iliad with 100 section summary units: _build_section_summary_input() is a DB query (< 100ms). Each of the three summary modes (one_sentence, executive, detailed) is a single LLM call on the concatenated section summaries (~30-60 sec each). Total pregenerate time: < 3 minutes for Iliad. Compare to v1 which timed out at 15+ minutes. CACHE INVALIDATION: When section summaries for a document are regenerated (e.g. force_refresh ingest), the '_section_reduce' summary row must be deleted so pregenerate() recomputes it. Add a method async def invalidate_section_reduce_cache(self, document_id: str) -> None that deletes SummaryModel rows where document_id matches and mode='_section_reduce'. Call this at the start of generate() in SectionSummarizerService when regenerating. TESTS — tests/test_document_summary_fast_path.py: (a) test_fast_path_used_when_section_summaries_exist: insert 10 SectionSummaryModel rows for a doc, call pregenerate() with mock LiteLLM, assert mock was called exactly once per mode (not dozens of times as in map-reduce). (b) test_slow_path_fallback_when_no_section_summaries: no SectionSummaryModel rows, call pregenerate(), assert existing map-reduce logic runs (verify by checking that LiteLLM was called with chunk batches). (c) test_section_reduce_cached_as_db_row: after fast path runs, assert SummaryModel has a row with mode='_section_reduce'. (d) test_fast_path_skipped_with_fewer_than_3_units: insert 2 rows, assert slow path is taken. SMOKE — scripts/smoke/S76.sh: (1) Ingest a document that already has section summaries (from S75 smoke). (2) POST /summarize/{id} with mode=executive and force_refresh=true. (3) Assert HTTP 200 and streaming response contains non-empty content. (4) GET /summarize/{id}/cached, assert 'executive' key present in response. (5) Exit 0.",
       "acceptanceCriteria": [
         "_build_section_summary_input() returns None when < 3 section summary units exist",
         "pregenerate() uses section summaries as input when >= 3 units available (fast path)",
         "Fast path: each of one_sentence/executive/detailed is one LLM call, not a map-reduce loop",
         "Fast path input stored as mode='_section_reduce' in SummaryModel for reuse (Core Belief #18)",
-        "Slow path (chunk map-reduce) used when no section summaries exist \u2014 backward compatible with all pre-v2 documents",
+        "Slow path (chunk map-reduce) used when no section summaries exist — backward compatible with all pre-v2 documents",
         "invalidate_section_reduce_cache() deletes '_section_reduce' row on regeneration",
         "For Iliad: pregenerate() completes in under 3 minutes with live Ollama",
         "test_fast_path_used_when_section_summaries_exist: LiteLLM called once per mode, not N times",
@@ -99,12 +99,12 @@
     {
       "id": "S77",
       "title": "ChatState TypedDict + LangGraph chat router skeleton with intent classifier",
-      "phase": "V2B \u2014 Agentic Chat",
+      "phase": "V2B — Agentic Chat",
       "priority": 77,
       "featureRef": "F-CHAT-V2",
-      "description": "CONTEXT: The current qa.py stream_answer() is a linear async function that always does: rewrite query \u2192 hybrid retrieval \u2192 (maybe prepend summary) \u2192 LLM call. There is no intelligence about what kind of question is being asked. V2 replaces this with a LangGraph StateGraph in app/runtime/chat_graph.py. This story creates the graph skeleton, the ChatState type, and the intent classifier node. Subsequent stories (S78, S79) fill in the strategy nodes and context packer. TYPES \u2014 Create app/types/chat.py. Define: (1) IntentType = Literal['summary', 'factual', 'relational', 'comparative', 'exploratory']. (2) ChatState as a TypedDict with fields: question: str, doc_ids: list[str], scope: Literal['single', 'all'], intent: IntentType | None, rewritten_question: str | None, chunks: list[dict], section_context: str | None, answer: str, citations: list[dict], confidence: Literal['high', 'medium', 'low'], not_found: bool, model: str | None. All fields must have defaults compatible with TypedDict (use total=False for optional fields OR provide all defaults). INTENT CLASSIFIER \u2014 The intent classifier runs as the first node in the graph. It must be fast because it adds latency to every query. Strategy: keyword heuristics first (pure function, microseconds), LLM fallback only when heuristics return low confidence. Pure function classify_intent_heuristic(question: str) -> tuple[IntentType, float]: implements the following rules in order (first match wins): (1) If question contains any of [summarize, overview, what is this about, what are the themes, main points, key ideas, synopsis, brief me, give me a summary]: return ('summary', 0.9). (2) If question contains any of [how are, how does, relation between, connection between, what is the relationship, how do X and Y]: return ('relational', 0.85). (3) If question contains any of [compare, difference between, how is X different, versus, vs., similarities]: return ('comparative', 0.85). (4) If question contains any of [explain, what does, who is, where is, when did, which, list all, how many, what happened]: return ('factual', 0.8). (5) Otherwise: return ('exploratory', 0.5). All string matching is case-insensitive. This function lives in app/services/intent.py as a pure function with no imports from other app layers. LLM FALLBACK: if confidence < 0.7, call LiteLLM with system='Classify the question. Reply with exactly one word: summary, factual, relational, comparative, or exploratory.', user=question. Parse response: strip whitespace and lowercase. If response matches one of the five values, use it with confidence=0.8. Otherwise fall back to 'factual' with confidence=0.6. The LLM fallback must be wrapped in try/except \u2014 if it fails (Ollama offline), default to 'factual'. GRAPH SKELETON \u2014 Create app/runtime/chat_graph.py. Build a LangGraph StateGraph[ChatState] with the following nodes: (1) classify_node: calls classify_intent_heuristic(), if confidence < 0.7 calls LLM fallback, writes intent and (if rewriting enabled) calls existing Kuzu rewriting logic (import from qa.py, do not duplicate). (2) route_node: a conditional edge function, not a node \u2014 reads intent from state and routes: 'summary' -> 'summary_node', 'relational' -> 'graph_node', 'comparative' -> 'comparative_node', 'factual' OR 'exploratory' -> 'search_node'. (3) summary_node: STUB for S78 \u2014 for now, writes answer='[summary_node stub]' to state, sets confidence='high'. (4) search_node: STUB for S78 \u2014 calls the existing _hybrid_retrieval logic from qa.py, writes chunks to state, writes answer='[search_node stub]'. (5) graph_node: STUB for S78 \u2014 writes answer='[graph_node stub]'. (6) comparative_node: STUB for S78 \u2014 writes answer='[comparative_node stub]'. (7) synthesize_node: STUB for S79 \u2014 takes chunks from state, calls LLM, writes answer. For now copies existing LLM call logic from stream_answer(). The graph's entry point is classify_node. All terminal nodes (after their answer is set) route to synthesize_node, then END. QA.PY INTEGRATION \u2014 Modify stream_answer() in qa.py to invoke the LangGraph graph instead of its existing logic. The signature of stream_answer() does NOT change \u2014 the frontend contract is unchanged. stream_answer() creates the initial ChatState from its parameters, invokes the graph with graph.invoke(state), then streams the answer field token by token using the same SSE format as before. The graph must be compiled once at module load (graph = build_chat_graph().compile()) and reused. IMPORTANT: The streaming behavior from the frontend's perspective must be identical to v1 \u2014 the same SSE events with the same fields (token, done, citations, confidence, not_found). The graph's synthesize_node is responsible for calling LLM and accumulating tokens. TESTS \u2014 tests/test_intent_classifier.py: (a) test_summary_keywords_detected: each keyword in the summary list triggers intent='summary'. (b) test_comparative_keywords_detected. (c) test_relational_keywords_detected. (d) test_low_confidence_triggers_llm_fallback: mock LiteLLM to return 'factual', assert intent='factual'. (e) test_llm_fallback_offline_defaults_to_factual: mock LiteLLM to raise exception, assert intent='factual'. tests/test_chat_graph.py: (a) test_summary_question_routes_to_summary_node: run graph with question='summarize this book', assert stub answer contains 'summary_node'. (b) test_factual_question_routes_to_search_node. (c) test_graph_invoke_does_not_raise: run full graph with real state dict, assert no exception. SMOKE \u2014 scripts/smoke/S77.sh: POST /qa with body {question: 'What are the main themes?', document_ids: [], scope: 'all'}, assert HTTP 200 and response body contains 'answer' field with non-empty string. Exit 0.",
+      "description": "CONTEXT: The current qa.py stream_answer() is a linear async function that always does: rewrite query → hybrid retrieval → (maybe prepend summary) → LLM call. There is no intelligence about what kind of question is being asked. V2 replaces this with a LangGraph StateGraph in app/runtime/chat_graph.py. This story creates the graph skeleton, the ChatState type, and the intent classifier node. Subsequent stories (S78, S79) fill in the strategy nodes and context packer. TYPES — Create app/types/chat.py. Define: (1) IntentType = Literal['summary', 'factual', 'relational', 'comparative', 'exploratory']. (2) ChatState as a TypedDict with fields: question: str, doc_ids: list[str], scope: Literal['single', 'all'], intent: IntentType | None, rewritten_question: str | None, chunks: list[dict], section_context: str | None, answer: str, citations: list[dict], confidence: Literal['high', 'medium', 'low'], not_found: bool, model: str | None. All fields must have defaults compatible with TypedDict (use total=False for optional fields OR provide all defaults). INTENT CLASSIFIER — The intent classifier runs as the first node in the graph. It must be fast because it adds latency to every query. Strategy: keyword heuristics first (pure function, microseconds), LLM fallback only when heuristics return low confidence. Pure function classify_intent_heuristic(question: str) -> tuple[IntentType, float]: implements the following rules in order (first match wins): (1) If question contains any of [summarize, overview, what is this about, what are the themes, main points, key ideas, synopsis, brief me, give me a summary]: return ('summary', 0.9). (2) If question contains any of [how are, how does, relation between, connection between, what is the relationship, how do X and Y]: return ('relational', 0.85). (3) If question contains any of [compare, difference between, how is X different, versus, vs., similarities]: return ('comparative', 0.85). (4) If question contains any of [explain, what does, who is, where is, when did, which, list all, how many, what happened]: return ('factual', 0.8). (5) Otherwise: return ('exploratory', 0.5). All string matching is case-insensitive. This function lives in app/services/intent.py as a pure function with no imports from other app layers. LLM FALLBACK: if confidence < 0.7, call LiteLLM with system='Classify the question. Reply with exactly one word: summary, factual, relational, comparative, or exploratory.', user=question. Parse response: strip whitespace and lowercase. If response matches one of the five values, use it with confidence=0.8. Otherwise fall back to 'factual' with confidence=0.6. The LLM fallback must be wrapped in try/except — if it fails (Ollama offline), default to 'factual'. GRAPH SKELETON — Create app/runtime/chat_graph.py. Build a LangGraph StateGraph[ChatState] with the following nodes: (1) classify_node: calls classify_intent_heuristic(), if confidence < 0.7 calls LLM fallback, writes intent and (if rewriting enabled) calls existing Kuzu rewriting logic (import from qa.py, do not duplicate). (2) route_node: a conditional edge function, not a node — reads intent from state and routes: 'summary' -> 'summary_node', 'relational' -> 'graph_node', 'comparative' -> 'comparative_node', 'factual' OR 'exploratory' -> 'search_node'. (3) summary_node: STUB for S78 — for now, writes answer='[summary_node stub]' to state, sets confidence='high'. (4) search_node: STUB for S78 — calls the existing _hybrid_retrieval logic from qa.py, writes chunks to state, writes answer='[search_node stub]'. (5) graph_node: STUB for S78 — writes answer='[graph_node stub]'. (6) comparative_node: STUB for S78 — writes answer='[comparative_node stub]'. (7) synthesize_node: STUB for S79 — takes chunks from state, calls LLM, writes answer. For now copies existing LLM call logic from stream_answer(). The graph's entry point is classify_node. All terminal nodes (after their answer is set) route to synthesize_node, then END. QA.PY INTEGRATION — Modify stream_answer() in qa.py to invoke the LangGraph graph instead of its existing logic. The signature of stream_answer() does NOT change — the frontend contract is unchanged. stream_answer() creates the initial ChatState from its parameters, invokes the graph with graph.invoke(state), then streams the answer field token by token using the same SSE format as before. The graph must be compiled once at module load (graph = build_chat_graph().compile()) and reused. IMPORTANT: The streaming behavior from the frontend's perspective must be identical to v1 — the same SSE events with the same fields (token, done, citations, confidence, not_found). The graph's synthesize_node is responsible for calling LLM and accumulating tokens. TESTS — tests/test_intent_classifier.py: (a) test_summary_keywords_detected: each keyword in the summary list triggers intent='summary'. (b) test_comparative_keywords_detected. (c) test_relational_keywords_detected. (d) test_low_confidence_triggers_llm_fallback: mock LiteLLM to return 'factual', assert intent='factual'. (e) test_llm_fallback_offline_defaults_to_factual: mock LiteLLM to raise exception, assert intent='factual'. tests/test_chat_graph.py: (a) test_summary_question_routes_to_summary_node: run graph with question='summarize this book', assert stub answer contains 'summary_node'. (b) test_factual_question_routes_to_search_node. (c) test_graph_invoke_does_not_raise: run full graph with real state dict, assert no exception. SMOKE — scripts/smoke/S77.sh: POST /qa with body {question: 'What are the main themes?', document_ids: [], scope: 'all'}, assert HTTP 200 and response body contains 'answer' field with non-empty string. Exit 0.",
       "acceptanceCriteria": [
-        "app/types.py defines IntentType literal and ChatState TypedDict (collocated with ScoredChunk and other types \u2014 do NOT create a separate app/types/chat.py)",
+        "app/types.py defines IntentType literal and ChatState TypedDict (collocated with ScoredChunk and other types — do NOT create a separate app/types/chat.py)",
         "app/services/intent.py contains classify_intent_heuristic() as a pure function with no I/O",
         "Keyword heuristics cover all five intent types with case-insensitive matching",
         "LLM fallback invoked only when heuristic confidence < 0.7",
@@ -118,12 +118,12 @@
         "test_summary_question_routes_to_summary_node passes",
         "test_graph_invoke_does_not_raise passes",
         "uv run pytest tests/test_intent_classifier.py tests/test_chat_graph.py exits 0",
-        "scripts/smoke/S77.sh exits 0 \u2014 POST /qa returns HTTP 200 with non-empty answer",
+        "scripts/smoke/S77.sh exits 0 — POST /qa returns HTTP 200 with non-empty answer",
         "True streaming: stream_answer() does NOT buffer the full LLM response before yielding tokens. Implement one of: (a) graph.astream_events(version='v1') intercepting on_chat_model_stream events from synthesize_node, OR (b) synthesize_node returns the prepared prompt+context in state without calling the LLM, and stream_answer() calls the LLM directly after ainvoke(). In either case, the SSE client receives the first 'token' event as the LLM generates it, not after all tokens are collected.",
         "Graph singleton compiled once at module load (not per request) and reused across all calls to stream_answer()",
-        "'summary' (the word alone) is in _SUMMARY_KWS \u2014 'what is the summary?', 'provide a summary', 'give me a summary', 'the summary of this' all classify as summary intent",
-        "'how does' and 'how do' are removed from _RELATIONAL_KWS \u2014 factual questions like 'how does the main character escape?' and 'how does FSRS scheduling work?' must NOT misclassify as relational intent",
-        "test_streaming_is_progressive: with a mock LLM async-generator that yields 3 tokens one at a time (with asyncio.sleep(0) between each), assert that the first SSE 'token' event is yielded before all 3 tokens are generated \u2014 verifies tokens are not fully buffered before streaming begins",
+        "'summary' (the word alone) is in _SUMMARY_KWS — 'what is the summary?', 'provide a summary', 'give me a summary', 'the summary of this' all classify as summary intent",
+        "'how does' and 'how do' are removed from _RELATIONAL_KWS — factual questions like 'how does the main character escape?' and 'how does FSRS scheduling work?' must NOT misclassify as relational intent",
+        "test_streaming_is_progressive: with a mock LLM async-generator that yields 3 tokens one at a time (with asyncio.sleep(0) between each), assert that the first SSE 'token' event is yielded before all 3 tokens are generated — verifies tokens are not fully buffered before streaming begins",
         "test_summary_keyword_alone: classify_intent_heuristic('what is the summary of this book?') returns ('summary', 0.9)",
         "test_factual_question_not_relational: classify_intent_heuristic('how does the hero escape?') returns intent != 'relational'"
       ],
@@ -132,10 +132,10 @@
     {
       "id": "S78",
       "title": "Strategy nodes: summary_lookup, graph_traversal, comparative, and search with section augmentation",
-      "phase": "V2B \u2014 Agentic Chat",
+      "phase": "V2B — Agentic Chat",
       "priority": 78,
       "featureRef": "F-CHAT-V2",
-      "description": "CONTEXT: S77 created the LangGraph skeleton with stub nodes. This story implements the real logic for each strategy node. Each node is a self-contained async function that reads from ChatState and writes back to it. SUMMARY_NODE \u2014 Replace the stub. Logic: (1) Fetch the 'executive' summary from SummaryModel for the requested document(s). For scope='single' and one document: query SummaryModel where document_id=state.doc_ids[0] and mode='executive', return content. For scope='all': fetch the most recent LibrarySummaryModel where mode='executive'. (2) If no summary found: fall through to search_node by setting state.intent='factual' and returning state (the graph will re-route on the next step \u2014 add a conditional edge: if summary_node finds nothing, re-route to search_node). (3) If found: set state.chunks=[] (no retrieval needed), state.section_context=summary_content, state.answer='' (synthesize_node will generate the final answer using section_context as primary input). GRAPH_NODE \u2014 Replace the stub. Logic: (1) Extract entity names from the question using a simple regex approach: find capitalized words and quoted strings. (2) Query Kuzu: for each extracted entity, MATCH (e:Entity {name: $name})-[r]-(related) RETURN e.name, type(r), related.name LIMIT 20. (3) Format graph results as a structured string: 'Knowledge graph connections:\\n{entity} --{relation}--> {related}\\n...'. (4) If Kuzu is unavailable or returns 0 results: set state.section_context=None and fall through (return state with intent overridden to 'factual', triggering re-route to search_node). (5) Also run hybrid retrieval (k=5) as a grounding supplement \u2014 set state.chunks to these 5 chunks. State.section_context = graph_result_string. Wrap all Kuzu calls in try/except \u2014 graph failure must never fail the answer. COMPARATIVE_NODE \u2014 Replace the stub. Logic: (1) Run hybrid retrieval twice: once for each side of the comparison (detect sides by splitting on 'compare', 'versus', 'vs.', 'difference between', 'vs'). If two sides cannot be detected, run a single retrieval. (2) Interleave results: [side_a_chunk_1, side_b_chunk_1, side_a_chunk_2, side_b_chunk_2, ...]. (3) Write interleaved chunks to state.chunks. Set state.section_context to a header: 'Comparison query: {question}'. The synthesize_node will format the answer structurally. SEARCH_NODE \u2014 Replace the stub with full implementation. Logic: (1) Use rewritten_question if available, else question. (2) Call existing hybrid retrieval (HybridRetriever, k=10). (3) For each retrieved chunk that has a section_id: look up its SectionSummaryModel row by section_id (batch DB lookup, not per-chunk). (4) For each chunk, prepend section summary if found: format as '### {section_heading}\\n{section_summary}\\n---\\n{chunk_text}'. This gives the LLM section-level context without retrieving entire sections. (5) Write augmented chunks to state.chunks. SYNTHESIZE_NODE \u2014 Replace the stub. This node is the LLM call. Logic: (1) Build context string from state.chunks (augmented) and state.section_context (graph results, section summary, or library summary). (2) Build system prompt based on intent: 'summary' -> 'Answer using the provided document summary. Be concise and structured.'; 'relational' -> 'Answer using the knowledge graph connections and the supporting passages. Name the entities clearly.'; 'comparative' -> 'Compare the two subjects using the provided passages. Structure as: Subject A: ... Subject B: ...'; default -> existing QA system prompt. (3) Call LiteLLM with streaming=True. (4) Accumulate tokens and write to state.stream_tokens. (5) Parse final accumulated text using existing _split_response() to extract answer, citations, confidence, not_found. (6) Write these fields to state. The SSE streaming in stream_answer() reads from state.stream_tokens as the graph runs (use LangGraph's streaming API or astream_events). IMPORTANT: Do not duplicate any existing logic. Import _split_response, _enrich_citation_titles, _maybe_rewrite_query from existing qa.py locations. Refactor them into app/services/ if they are currently defined inside stream_answer() (move to module level). TESTS \u2014 tests/test_chat_graph_nodes.py: (a) test_summary_node_returns_executive_summary: insert a SummaryModel row with mode='executive', run summary_node, assert state.section_context == that content. (b) test_summary_node_falls_through_when_no_summary: no summary in DB, assert intent overridden to 'factual'. (c) test_graph_node_falls_through_on_kuzu_error: mock Kuzu to raise exception, assert no exception raised and intent overridden to 'factual'. (d) test_search_node_augments_chunks_with_section_summaries: insert SectionSummaryModel rows, run search_node with mock retrieval returning chunks with matching section_ids, assert output chunk texts contain '---' separator and section heading. (e) test_comparative_node_interleaves_results: mock retrieval to return 3 chunks per side, assert state.chunks alternates sides. (f) test_synthesize_node_calls_litellm: mock LiteLLM, run synthesize_node, assert LiteLLM called with system prompt containing intent-appropriate text. SMOKE \u2014 scripts/smoke/S78.sh: (1) POST /qa with question='Who is Achilles?', assert HTTP 200 and answer non-empty. (2) POST /qa with question='Summarize this document', assert HTTP 200. (3) Both responses must return within 30 seconds. Exit 0.",
+      "description": "CONTEXT: S77 created the LangGraph skeleton with stub nodes. This story implements the real logic for each strategy node. Each node is a self-contained async function that reads from ChatState and writes back to it. SUMMARY_NODE — Replace the stub. Logic: (1) Fetch the 'executive' summary from SummaryModel for the requested document(s). For scope='single' and one document: query SummaryModel where document_id=state.doc_ids[0] and mode='executive', return content. For scope='all': fetch the most recent LibrarySummaryModel where mode='executive'. (2) If no summary found: fall through to search_node by setting state.intent='factual' and returning state (the graph will re-route on the next step — add a conditional edge: if summary_node finds nothing, re-route to search_node). (3) If found: set state.chunks=[] (no retrieval needed), state.section_context=summary_content, state.answer='' (synthesize_node will generate the final answer using section_context as primary input). GRAPH_NODE — Replace the stub. Logic: (1) Extract entity names from the question using a simple regex approach: find capitalized words and quoted strings. (2) Query Kuzu: for each extracted entity, MATCH (e:Entity {name: $name})-[r]-(related) RETURN e.name, type(r), related.name LIMIT 20. (3) Format graph results as a structured string: 'Knowledge graph connections:\\n{entity} --{relation}--> {related}\\n...'. (4) If Kuzu is unavailable or returns 0 results: set state.section_context=None and fall through (return state with intent overridden to 'factual', triggering re-route to search_node). (5) Also run hybrid retrieval (k=5) as a grounding supplement — set state.chunks to these 5 chunks. State.section_context = graph_result_string. Wrap all Kuzu calls in try/except — graph failure must never fail the answer. COMPARATIVE_NODE — Replace the stub. Logic: (1) Run hybrid retrieval twice: once for each side of the comparison (detect sides by splitting on 'compare', 'versus', 'vs.', 'difference between', 'vs'). If two sides cannot be detected, run a single retrieval. (2) Interleave results: [side_a_chunk_1, side_b_chunk_1, side_a_chunk_2, side_b_chunk_2, ...]. (3) Write interleaved chunks to state.chunks. Set state.section_context to a header: 'Comparison query: {question}'. The synthesize_node will format the answer structurally. SEARCH_NODE — Replace the stub with full implementation. Logic: (1) Use rewritten_question if available, else question. (2) Call existing hybrid retrieval (HybridRetriever, k=10). (3) For each retrieved chunk that has a section_id: look up its SectionSummaryModel row by section_id (batch DB lookup, not per-chunk). (4) For each chunk, prepend section summary if found: format as '### {section_heading}\\n{section_summary}\\n---\\n{chunk_text}'. This gives the LLM section-level context without retrieving entire sections. (5) Write augmented chunks to state.chunks. SYNTHESIZE_NODE — Replace the stub. This node is the LLM call. Logic: (1) Build context string from state.chunks (augmented) and state.section_context (graph results, section summary, or library summary). (2) Build system prompt based on intent: 'summary' -> 'Answer using the provided document summary. Be concise and structured.'; 'relational' -> 'Answer using the knowledge graph connections and the supporting passages. Name the entities clearly.'; 'comparative' -> 'Compare the two subjects using the provided passages. Structure as: Subject A: ... Subject B: ...'; default -> existing QA system prompt. (3) Call LiteLLM with streaming=True. (4) Accumulate tokens and write to state.stream_tokens. (5) Parse final accumulated text using existing _split_response() to extract answer, citations, confidence, not_found. (6) Write these fields to state. The SSE streaming in stream_answer() reads from state.stream_tokens as the graph runs (use LangGraph's streaming API or astream_events). IMPORTANT: Do not duplicate any existing logic. Import _split_response, _enrich_citation_titles, _maybe_rewrite_query from existing qa.py locations. Refactor them into app/services/ if they are currently defined inside stream_answer() (move to module level). TESTS — tests/test_chat_graph_nodes.py: (a) test_summary_node_returns_executive_summary: insert a SummaryModel row with mode='executive', run summary_node, assert state.section_context == that content. (b) test_summary_node_falls_through_when_no_summary: no summary in DB, assert intent overridden to 'factual'. (c) test_graph_node_falls_through_on_kuzu_error: mock Kuzu to raise exception, assert no exception raised and intent overridden to 'factual'. (d) test_search_node_augments_chunks_with_section_summaries: insert SectionSummaryModel rows, run search_node with mock retrieval returning chunks with matching section_ids, assert output chunk texts contain '---' separator and section heading. (e) test_comparative_node_interleaves_results: mock retrieval to return 3 chunks per side, assert state.chunks alternates sides. (f) test_synthesize_node_calls_litellm: mock LiteLLM, run synthesize_node, assert LiteLLM called with system prompt containing intent-appropriate text. SMOKE — scripts/smoke/S78.sh: (1) POST /qa with question='Who is Achilles?', assert HTTP 200 and answer non-empty. (2) POST /qa with question='Summarize this document', assert HTTP 200. (3) Both responses must return within 30 seconds. Exit 0.",
       "acceptanceCriteria": [
         "summary_node fetches executive summary from SummaryModel; falls through to search when absent",
         "graph_node queries Kuzu for entity relationships; falls through to search on Kuzu error without raising",
@@ -151,10 +151,10 @@
         "test_graph_node_falls_through_on_kuzu_error passes",
         "test_search_node_augments_chunks_with_section_summaries passes",
         "uv run pytest tests/test_chat_graph_nodes.py exits 0",
-        "scripts/smoke/S78.sh exits 0 \u2014 both /qa calls return HTTP 200 within 30 seconds",
-        "summary_node populates state['answer'] directly from executive summary text (not state['section_context']) when the summary exists \u2014 the pass-through check in synthesize_node (if existing_answer: return {}) prevents a redundant second LLM call for summary intent",
+        "scripts/smoke/S78.sh exits 0 — both /qa calls return HTTP 200 within 30 seconds",
+        "summary_node populates state['answer'] directly from executive summary text (not state['section_context']) when the summary exists — the pass-through check in synthesize_node (if existing_answer: return {}) prevents a redundant second LLM call for summary intent",
         "summary_node sets confidence='high' explicitly when it populates the answer from an executive summary",
-        "synthesize_node's pass-through (existing_answer non-empty \u2192 return {}) works correctly with the answer set by summary_node \u2014 no LLM call is made for summary intent when executive summary is cached",
+        "synthesize_node's pass-through (existing_answer non-empty → return {}) works correctly with the answer set by summary_node — no LLM call is made for summary intent when executive summary is cached",
         "test_summary_node_sets_answer_directly: mock session returns an executive summary row; assert summary_node returns dict containing non-empty 'answer' key and confidence='high'; assert synthesize_node is NOT called (0 LLM invocations)",
         "test_summary_intent_end_to_end: POST /qa with scope='single' and question='summarize this document' returns HTTP 200, done event has non-empty answer and confidence='high'"
       ],
@@ -163,10 +163,10 @@
     {
       "id": "S79",
       "title": "Pure context packer: smart context window assembly with deduplication and section grouping",
-      "phase": "V2B \u2014 Agentic Chat",
+      "phase": "V2B — Agentic Chat",
       "priority": 79,
       "featureRef": "F-CHAT-V2",
-      "description": "CONTEXT: The synthesize_node currently concatenates augmented chunks in retrieval order. For long documents with many matching chunks, this wastes the context window with redundant text (chunks from the same section repeat the same ideas). This story adds a pure context packer that groups chunks by section, deduplicates near-duplicate content, and respects a strict token budget. Per Core Belief #19, this is a pure function with no I/O. PURE FUNCTION \u2014 Create app/services/context_packer.py. Define: pack_context(chunks: list[dict], token_budget: int = 3000, dedup_ratio: float = 0.8) -> str. The `chunks` list contains dicts with keys: text (str), section_id (str | None), section_heading (str | None), section_summary (str | None), relevance_score (float). Algorithm: (1) Group chunks by section_id (chunks with section_id=None form their own group keyed by chunk index). (2) Sort section groups by their highest relevance_score descending. (3) For each section group (most relevant first): (a) If a section_summary is present and not yet included, emit '### {section_heading}\\n{section_summary}\\n' (count tokens). (b) For each chunk in the group (sorted by relevance descending): check if this chunk's text is more than dedup_ratio (80%) similar to any already-emitted text. Similarity = len(longest_common_substring(a, b)) / max(len(a), len(b)). If similar, skip it. Otherwise emit '---\\n{chunk_text}\\n'. (c) Stop adding chunks when cumulative token count >= token_budget. (d) Token count estimate: len(text.split()) * 1.3 (fast approximation, no tokenizer dependency). (4) Return the assembled string. EDGE CASES: if chunks is empty, return ''. If all chunks exceed budget individually, include at least the first chunk truncated to token_budget. If dedup_ratio=1.0, deduplication is disabled (always include). INTEGRATION: In synthesize_node in chat_graph.py, replace the ad-hoc chunk concatenation with a call to pack_context(state.chunks, token_budget=3000). The state.section_context (graph results, library summary) is prepended to the pack_context output, capped at 1000 tokens. TESTS \u2014 tests/test_context_packer.py: all tests are pure unit tests with no DB or mock setup. (a) test_sections_ordered_by_relevance: chunks from section B have higher score than section A, assert B appears first in output. (b) test_deduplication_skips_similar_chunks: two chunks with > 80% overlap, assert only one appears in output. (c) test_token_budget_enforced: chunks totaling 6000 tokens with budget=3000, assert output token estimate <= 3300 (10% tolerance). (d) test_section_summary_emitted_once: section with 3 chunks and a section_summary, assert section_summary appears exactly once in output. (e) test_empty_chunks_returns_empty_string. (f) test_no_section_id_chunks_handled: all chunks have section_id=None, assert output is non-empty and no exception raised. (g) test_dedup_ratio_1_includes_all: with dedup_ratio=1.0, all chunks within budget are included even if near-duplicate. SMOKE \u2014 scripts/smoke/S79.sh: POST /qa with question='What happens in book 1?' for a book document. Assert HTTP 200, answer non-empty, response time < 15 seconds. Exit 0.",
+      "description": "CONTEXT: The synthesize_node currently concatenates augmented chunks in retrieval order. For long documents with many matching chunks, this wastes the context window with redundant text (chunks from the same section repeat the same ideas). This story adds a pure context packer that groups chunks by section, deduplicates near-duplicate content, and respects a strict token budget. Per Core Belief #19, this is a pure function with no I/O. PURE FUNCTION — Create app/services/context_packer.py. Define: pack_context(chunks: list[dict], token_budget: int = 3000, dedup_ratio: float = 0.8) -> str. The `chunks` list contains dicts with keys: text (str), section_id (str | None), section_heading (str | None), section_summary (str | None), relevance_score (float). Algorithm: (1) Group chunks by section_id (chunks with section_id=None form their own group keyed by chunk index). (2) Sort section groups by their highest relevance_score descending. (3) For each section group (most relevant first): (a) If a section_summary is present and not yet included, emit '### {section_heading}\\n{section_summary}\\n' (count tokens). (b) For each chunk in the group (sorted by relevance descending): check if this chunk's text is more than dedup_ratio (80%) similar to any already-emitted text. Similarity = len(longest_common_substring(a, b)) / max(len(a), len(b)). If similar, skip it. Otherwise emit '---\\n{chunk_text}\\n'. (c) Stop adding chunks when cumulative token count >= token_budget. (d) Token count estimate: len(text.split()) * 1.3 (fast approximation, no tokenizer dependency). (4) Return the assembled string. EDGE CASES: if chunks is empty, return ''. If all chunks exceed budget individually, include at least the first chunk truncated to token_budget. If dedup_ratio=1.0, deduplication is disabled (always include). INTEGRATION: In synthesize_node in chat_graph.py, replace the ad-hoc chunk concatenation with a call to pack_context(state.chunks, token_budget=3000). The state.section_context (graph results, library summary) is prepended to the pack_context output, capped at 1000 tokens. TESTS — tests/test_context_packer.py: all tests are pure unit tests with no DB or mock setup. (a) test_sections_ordered_by_relevance: chunks from section B have higher score than section A, assert B appears first in output. (b) test_deduplication_skips_similar_chunks: two chunks with > 80% overlap, assert only one appears in output. (c) test_token_budget_enforced: chunks totaling 6000 tokens with budget=3000, assert output token estimate <= 3300 (10% tolerance). (d) test_section_summary_emitted_once: section with 3 chunks and a section_summary, assert section_summary appears exactly once in output. (e) test_empty_chunks_returns_empty_string. (f) test_no_section_id_chunks_handled: all chunks have section_id=None, assert output is non-empty and no exception raised. (g) test_dedup_ratio_1_includes_all: with dedup_ratio=1.0, all chunks within budget are included even if near-duplicate. SMOKE — scripts/smoke/S79.sh: POST /qa with question='What happens in book 1?' for a book document. Assert HTTP 200, answer non-empty, response time < 15 seconds. Exit 0.",
       "acceptanceCriteria": [
         "app/services/context_packer.py defines pack_context() as a pure function with no imports from repos, models, or external services",
         "pack_context() groups chunks by section_id and orders section groups by max relevance score",
@@ -188,10 +188,10 @@
     {
       "id": "S80",
       "title": "V2 integration tests, performance benchmarks, and QUALITY_SCORE update",
-      "phase": "V2C \u2014 Quality Gates",
+      "phase": "V2C — Quality Gates",
       "priority": 80,
       "featureRef": "F-V2-QUALITY",
-      "description": "CONTEXT: Stories S75-S79 implement the v2 architecture. This story adds integration tests that validate the full v2 pipeline end-to-end on real documents, enforces the performance budget, and updates the quality documentation. Without enforced CI gates, the performance and routing improvements are invisible to future ralph iterations. INTEGRATION TESTS \u2014 tests/test_v2_pipeline.py. This test file uses the same session-scoped fixture pattern as test_e2e_book.py (reads from conftest_books.py). Tests assume the three corpus books are already ingested. (a) test_section_summaries_generated_for_all_books: for each of the three books, assert len(SectionSummaryModel rows where document_id=doc.id) >= 10. This verifies section_summarize_node ran successfully. (b) test_document_summary_uses_fast_path: for each book with section summaries, fetch SummaryModel where mode='_section_reduce', assert it exists. This proves pregenerate() used the fast path. (c) test_intent_routing_summary: POST /qa with body {question: 'Give me an overview of this book', document_ids: [alice_id], scope: 'single'}. Assert HTTP 200. Assert response.answer is non-empty. Assert response.confidence in ('high', 'medium'). (d) test_intent_routing_factual: POST /qa with body {question: 'Who is the White Rabbit?', document_ids: [alice_id], scope: 'single'}. Assert HTTP 200 and answer non-empty and at least one citation returned. (e) test_intent_routing_comparative: POST /qa with body {question: 'Compare Alice and Arjuna', document_ids: [], scope: 'all'}. Assert HTTP 200 and answer non-empty. (f) test_intent_routing_relational: POST /qa with body {question: 'How are Achilles and Hector related?', document_ids: [iliad_id], scope: 'single'}. Assert HTTP 200 and answer non-empty. (g) test_library_overview_includes_all_three_books: POST /summarize/all with mode=executive and force_refresh=true. Assert HTTP 200 and streaming response contains content referencing at least two of the three book titles. PERFORMANCE TEST \u2014 tests/test_v2_ingestion_perf.py. This test is slow and skipped in CI unless LUMINARY_PERF_TESTS=1 env var is set (use pytest.mark.skipif). When enabled: (a) test_section_summarize_node_under_5_minutes: reset section_summaries for the Iliad, run SectionSummarizerService.generate() on the Iliad document, time it, assert completion in under 300 seconds. (b) test_pregenerate_fast_path_under_3_minutes: ensure section summaries exist, delete existing SummaryModel rows for Iliad, call pregenerate() on Iliad, time it, assert completion in under 180 seconds. MAKEFILE \u2014 Add target 'test-v2': runs 'cd backend && uv run pytest tests/test_v2_pipeline.py -v'. Add to Makefile alongside existing 'test-books-all'. The perf tests are NOT part of 'make test-v2' \u2014 they require LUMINARY_PERF_TESTS=1. QUALITY SCORE UPDATE \u2014 After all tests pass, invoke the luminary-docs agent to update docs/QUALITY_SCORE.md. Changes required: Q&A row: grade B -> A, notes 'v2 agentic router: intent classification, 4 strategy nodes, section-aware context packing'. Ingestion row: notes 'v2: section-level summarization, fast-path document summary, sub-5min for Iliad'. Add a new 'Last Updated' line for v2. TECH DEBT \u2014 Add TD-011 to tech-debt-tracker.md: 'pack_context() uses a word-count token approximation (word_count * 1.3). Replace with tiktoken or litellm.token_counter for exact counts, especially if context windows larger than 4k are used.' Priority: low. SMOKE \u2014 scripts/smoke/S80.sh: sequence of 4 POST /qa calls with different intent types (summary, factual, relational, comparative), assert all return HTTP 200 and non-empty answer. Assert GET /summarize/{iliad_id}/sections returns non-empty array. Exit 0.",
+      "description": "CONTEXT: Stories S75-S79 implement the v2 architecture. This story adds integration tests that validate the full v2 pipeline end-to-end on real documents, enforces the performance budget, and updates the quality documentation. Without enforced CI gates, the performance and routing improvements are invisible to future ralph iterations. INTEGRATION TESTS — tests/test_v2_pipeline.py. This test file uses the same session-scoped fixture pattern as test_e2e_book.py (reads from conftest_books.py). Tests assume the three corpus books are already ingested. (a) test_section_summaries_generated_for_all_books: for each of the three books, assert len(SectionSummaryModel rows where document_id=doc.id) >= 10. This verifies section_summarize_node ran successfully. (b) test_document_summary_uses_fast_path: for each book with section summaries, fetch SummaryModel where mode='_section_reduce', assert it exists. This proves pregenerate() used the fast path. (c) test_intent_routing_summary: POST /qa with body {question: 'Give me an overview of this book', document_ids: [alice_id], scope: 'single'}. Assert HTTP 200. Assert response.answer is non-empty. Assert response.confidence in ('high', 'medium'). (d) test_intent_routing_factual: POST /qa with body {question: 'Who is the White Rabbit?', document_ids: [alice_id], scope: 'single'}. Assert HTTP 200 and answer non-empty and at least one citation returned. (e) test_intent_routing_comparative: POST /qa with body {question: 'Compare Alice and Arjuna', document_ids: [], scope: 'all'}. Assert HTTP 200 and answer non-empty. (f) test_intent_routing_relational: POST /qa with body {question: 'How are Achilles and Hector related?', document_ids: [iliad_id], scope: 'single'}. Assert HTTP 200 and answer non-empty. (g) test_library_overview_includes_all_three_books: POST /summarize/all with mode=executive and force_refresh=true. Assert HTTP 200 and streaming response contains content referencing at least two of the three book titles. PERFORMANCE TEST — tests/test_v2_ingestion_perf.py. This test is slow and skipped in CI unless LUMINARY_PERF_TESTS=1 env var is set (use pytest.mark.skipif). When enabled: (a) test_section_summarize_node_under_5_minutes: reset section_summaries for the Iliad, run SectionSummarizerService.generate() on the Iliad document, time it, assert completion in under 300 seconds. (b) test_pregenerate_fast_path_under_3_minutes: ensure section summaries exist, delete existing SummaryModel rows for Iliad, call pregenerate() on Iliad, time it, assert completion in under 180 seconds. MAKEFILE — Add target 'test-v2': runs 'cd backend && uv run pytest tests/test_v2_pipeline.py -v'. Add to Makefile alongside existing 'test-books-all'. The perf tests are NOT part of 'make test-v2' — they require LUMINARY_PERF_TESTS=1. QUALITY SCORE UPDATE — After all tests pass, invoke the luminary-docs agent to update docs/QUALITY_SCORE.md. Changes required: Q&A row: grade B -> A, notes 'v2 agentic router: intent classification, 4 strategy nodes, section-aware context packing'. Ingestion row: notes 'v2: section-level summarization, fast-path document summary, sub-5min for Iliad'. Add a new 'Last Updated' line for v2. TECH DEBT — Add TD-011 to tech-debt-tracker.md: 'pack_context() uses a word-count token approximation (word_count * 1.3). Replace with tiktoken or litellm.token_counter for exact counts, especially if context windows larger than 4k are used.' Priority: low. SMOKE — scripts/smoke/S80.sh: sequence of 4 POST /qa calls with different intent types (summary, factual, relational, comparative), assert all return HTTP 200 and non-empty answer. Assert GET /summarize/{iliad_id}/sections returns non-empty array. Exit 0.",
       "acceptanceCriteria": [
         "tests/test_v2_pipeline.py contains all 7 integration tests listed above",
         "test_section_summaries_generated_for_all_books: each of the 3 corpus books has >= 10 section summary rows",
@@ -205,10 +205,10 @@
         "TD-011 added to tech-debt-tracker.md",
         "uv run pytest tests/test_v2_pipeline.py exits 0 (with real books ingested)",
         "scripts/smoke/S80.sh exits 0",
-        "test_intent_routing_factual: mock LLM returns a response string that includes the citation JSON block (e.g. '\\n{\"citations\":[{\"section_heading\":\"Chapter 1\",\"page\":1,\"excerpt\":\"...\"}],\"confidence\":\"high\"}') \u2014 done event assertions check that citations list is non-empty and first citation has a non-empty section_heading",
+        "test_intent_routing_factual: mock LLM returns a response string that includes the citation JSON block (e.g. '\\n{\"citations\":[{\"section_heading\":\"Chapter 1\",\"page\":1,\"excerpt\":\"...\"}],\"confidence\":\"high\"}') — done event assertions check that citations list is non-empty and first citation has a non-empty section_heading",
         "test_intent_routing_summary: POST /qa with question='summarize this document' and a document that has a cached executive summary returns HTTP 200, done event has non-empty answer and confidence='high' (no LLM call needed when summary is cached)",
-        "test_keyword_summary_word: classify_intent_heuristic('Please give me a summary of this') returns ('summary', 0.9) \u2014 unit test, no DB required",
-        "test_streaming_not_buffered: with mock LLM yielding tokens one-by-one via async generator, first SSE 'token' event is yielded by stream_answer() before the mock generator has yielded all its tokens \u2014 verifies streaming is not batched"
+        "test_keyword_summary_word: classify_intent_heuristic('Please give me a summary of this') returns ('summary', 0.9) — unit test, no DB required",
+        "test_streaming_not_buffered: with mock LLM yielding tokens one-by-one via async generator, first SSE 'token' event is yielded by stream_answer() before the mock generator has yielded all its tokens — verifies streaming is not batched"
       ],
       "passes": true
     },
@@ -218,20 +218,20 @@
       "phase": "V2",
       "priority": 81,
       "featureRef": "V2-adaptive-retrieval",
-      "description": "CONTEXT: The current chat graph always ends after one synthesize call. If the LLM returns confidence='low' (meaning it lacked sufficient context), the answer is returned as-is. This story adds a confidence check gate after synthesize_node that triggers a second retrieval pass using a complementary strategy, then re-synthesizes with the combined richer context.\n\nCURRENT GRAPH TOPOLOGY:\n  classify_node \u2192 route_node \u2192 [summary|graph|comparative|search]_node \u2192 synthesize_node \u2192 END\n\nNEW TOPOLOGY AFTER THIS STORY:\n  classify_node \u2192 route_node \u2192 [strategy]_node \u2192 synthesize_node\n    \u2192 confidence_gate_node\n      \u2192 (high|medium confidence, OR retry_attempted=True) \u2192 END\n      \u2192 (low confidence, retry_attempted=False) \u2192 augment_node\n        \u2192 synthesize_node (re-runs with appended context)\n        \u2192 confidence_gate_node \u2192 END (always, retry_attempted=True)\n\nCOMPLEMENTARY STRATEGY MAPPING (augment_node selects based on primary_strategy):\n  'search' or 'factual' or 'exploratory' \u2192 add Kuzu graph entity relationships\n    (run _query_kuzu_for_entity for entities extracted from the question)\n  'relational' \u2192 add hybrid search results (k=15, broader)\n  'summary' \u2192 add hybrid search results (k=10)\n  'comparative' \u2192 add hybrid search results with no doc_id filter (k=10)\n\nCONTEXT MERGING: augment_node APPENDS to state['chunks'] and state['section_context'] (does not replace). pack_context() in synthesize_node handles deduplication and token budget enforcement automatically \u2014 no special merge logic needed.\n\nLOOP PREVENTION: ChatState gains retry_attempted: bool (default False). route_node sets primary_strategy in state. augment_node sets retry_attempted=True. confidence_gate_node checks retry_attempted before re-routing \u2014 guarantees at most 1 retry.\n\nGRAPH KNOWLEDGE WHEREVER NECESSARY: This story ensures graph entity context supplements every factual/exploratory/search answer when the LLM signals insufficient context, not just when the user explicitly asks a relational question.",
+      "description": "CONTEXT: The current chat graph always ends after one synthesize call. If the LLM returns confidence='low' (meaning it lacked sufficient context), the answer is returned as-is. This story adds a confidence check gate after synthesize_node that triggers a second retrieval pass using a complementary strategy, then re-synthesizes with the combined richer context.\n\nCURRENT GRAPH TOPOLOGY:\n  classify_node → route_node → [summary|graph|comparative|search]_node → synthesize_node → END\n\nNEW TOPOLOGY AFTER THIS STORY:\n  classify_node → route_node → [strategy]_node → synthesize_node\n    → confidence_gate_node\n      → (high|medium confidence, OR retry_attempted=True) → END\n      → (low confidence, retry_attempted=False) → augment_node\n        → synthesize_node (re-runs with appended context)\n        → confidence_gate_node → END (always, retry_attempted=True)\n\nCOMPLEMENTARY STRATEGY MAPPING (augment_node selects based on primary_strategy):\n  'search' or 'factual' or 'exploratory' → add Kuzu graph entity relationships\n    (run _query_kuzu_for_entity for entities extracted from the question)\n  'relational' → add hybrid search results (k=15, broader)\n  'summary' → add hybrid search results (k=10)\n  'comparative' → add hybrid search results with no doc_id filter (k=10)\n\nCONTEXT MERGING: augment_node APPENDS to state['chunks'] and state['section_context'] (does not replace). pack_context() in synthesize_node handles deduplication and token budget enforcement automatically — no special merge logic needed.\n\nLOOP PREVENTION: ChatState gains retry_attempted: bool (default False). route_node sets primary_strategy in state. augment_node sets retry_attempted=True. confidence_gate_node checks retry_attempted before re-routing — guarantees at most 1 retry.\n\nGRAPH KNOWLEDGE WHEREVER NECESSARY: This story ensures graph entity context supplements every factual/exploratory/search answer when the LLM signals insufficient context, not just when the user explicitly asks a relational question.",
       "acceptanceCriteria": [
         "ChatState in app/types.py gains two new fields: retry_attempted: bool (default False) and primary_strategy: str | None (default None)",
         "route_node (the conditional edge function) sets state['primary_strategy'] to the node name it dispatches to (e.g. 'search_node', 'graph_node', 'summary_node', 'comparative_node')",
         "confidence_gate_node added as a real graph node (not just a conditional edge function): reads state['confidence'] and state['retry_attempted']; returns {} to proceed to END or {} to proceed to augment_node",
         "confidence_gate_node routes to END when: confidence in ('high', 'medium') OR retry_attempted is True",
         "confidence_gate_node routes to augment_node when: confidence == 'low' AND retry_attempted is False",
-        "augment_node selects complementary strategy based on primary_strategy: search|factual|exploratory \u2192 Kuzu entity graph lines appended to section_context; relational \u2192 hybrid search k=15 appended to chunks; summary \u2192 hybrid search k=10 appended to chunks; comparative \u2192 hybrid search k=10 no doc_id filter appended to chunks",
+        "augment_node selects complementary strategy based on primary_strategy: search|factual|exploratory → Kuzu entity graph lines appended to section_context; relational → hybrid search k=15 appended to chunks; summary → hybrid search k=10 appended to chunks; comparative → hybrid search k=10 no doc_id filter appended to chunks",
         "augment_node sets retry_attempted=True in its return dict before returning",
-        "augment_node APPENDS to existing state['chunks'] (list concatenation) and APPENDS to state['section_context'] (string join with separator) \u2014 never overwrites",
+        "augment_node APPENDS to existing state['chunks'] (list concatenation) and APPENDS to state['section_context'] (string join with separator) — never overwrites",
         "augment_node is non-fatal: all errors (Kuzu offline, retrieval failure) are caught and logged; returns {retry_attempted: True} with no context changes rather than raising",
-        "synthesize_node is re-used unchanged \u2014 it is wired to both the first-pass and retry-pass edges; pack_context() handles deduplication of appended chunks automatically",
-        "Graph topology: synthesize_node \u2192 confidence_gate_node \u2192 (conditional) \u2192 [END | augment_node \u2192 synthesize_node \u2192 confidence_gate_node \u2192 END]",
-        "Singleton _compiled_graph is reset to None when build_chat_graph() is called \u2014 changing graph topology without restarting the server works correctly in tests via monkeypatching get_chat_graph",
+        "synthesize_node is re-used unchanged — it is wired to both the first-pass and retry-pass edges; pack_context() handles deduplication of appended chunks automatically",
+        "Graph topology: synthesize_node → confidence_gate_node → (conditional) → [END | augment_node → synthesize_node → confidence_gate_node → END]",
+        "Singleton _compiled_graph is reset to None when build_chat_graph() is called — changing graph topology without restarting the server works correctly in tests via monkeypatching get_chat_graph",
         "test_low_confidence_triggers_retry: first synthesize_node call returns confidence='low'; assert augment_node runs and second synthesize_node call occurs; final response has retry_attempted=True in state",
         "test_medium_confidence_skips_retry: first synthesize_node call returns confidence='medium'; assert augment_node does NOT run; END reached after first synthesis",
         "test_no_double_retry: second synthesize_node call (post-augment) returns confidence='low'; assert flow ends at confidence_gate_node without a third synthesis call",
@@ -760,6 +760,494 @@
         "scripts/smoke/S101.sh exits 0"
       ],
       "passes": true
+    },
+    {
+      "id": "S102",
+      "title": "Tech Debt group 1: datetime.now(UTC), typed settings PATCH, FK pragma, raw file cleanup",
+      "phase": "V2 Phase 5 - Hardening",
+      "priority": 102,
+      "featureRef": "F-DEBT-MECHANICAL",
+      "description": "CONTEXT: Four mechanical tech debt items with no UX impact can be resolved together. TD-002: all routers use deprecated datetime.utcnow() which raises DeprecationWarning in Python 3.12+ and is removed in 3.13. TD-005: PATCH /settings body accepts a raw dict violating Invariant #4 (all FastAPI inputs are Pydantic models). TD-010: SQLite FK pragma is not enabled so cascading deletes are implemented manually in every delete endpoint -- missing it in one new endpoint causes orphaned rows. TD-008: raw uploaded files in ~/.luminary/raw/{doc_id}.ext are not deleted when a document is deleted, accumulating disk usage over time. IMPLEMENTATION: Replace datetime.utcnow() with datetime.now(timezone.utc) everywhere. Define SettingsUpdateRequest(BaseModel) with Optional fields for all writable settings keys. Add a SQLAlchemy event listener on engine connect that runs PRAGMA foreign_keys = ON. In the document delete endpoint, glob and remove ~/.luminary/raw/{doc_id}.* after DB deletion.",
+      "acceptanceCriteria": [
+        "grep -r 'utcnow' backend/app/ returns no results; all replaced with datetime.now(timezone.utc)",
+        "PATCH /settings uses SettingsUpdateRequest(BaseModel) with Optional[str] fields; returns 422 on unknown field names",
+        "database.py registers a SQLAlchemy 'connect' event that runs PRAGMA foreign_keys = ON for every connection",
+        "Document delete endpoint: after DB deletion, any file matching ~/.luminary/raw/{doc_id}.* is deleted",
+        "All existing tests pass; uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S103",
+      "title": "Tech Debt TD-006: async classify_node and graceful 503 on Ollama unreachable in chat graph",
+      "phase": "V2 Phase 5 - Hardening",
+      "priority": 103,
+      "featureRef": "F-DEBT-ASYNC-GRAPH",
+      "description": "CONTEXT: classify_node and other nodes in runtime/chat_graph.py make synchronous litellm.completion() calls inside an async ASGI context (TD-006). If Ollama is unreachable, the exception escapes the graph executor and can crash the ASGI worker rather than returning a structured error to the client. USER JOURNEY: User sends a chat message while Ollama is stopped -> the SSE stream emits a JSON event {\"type\": \"error\", \"message\": \"Ollama is unreachable. Start it with: ollama serve\"} and closes cleanly -- no 500, no silent hang. IMPLEMENTATION: Replace every litellm.completion() call in runtime/ with await litellm.acompletion(). Wrap the top-level graph execution in the /chat/stream handler with try/except for litellm.ServiceUnavailableError and emit a structured SSE error event. Apply the same pattern to any other runtime/ graph that calls LiteLLM (ingestion summarize node, etc.).",
+      "acceptanceCriteria": [
+        "grep -r 'litellm.completion(' backend/app/runtime/ returns no results -- all replaced with await litellm.acompletion()",
+        "Test: mock litellm.acompletion to raise ServiceUnavailableError; POST /chat/stream returns a valid SSE event with type=error and message containing 'Ollama is unreachable'",
+        "No HTTP 500 returned when Ollama is unreachable; SSE connection closes cleanly after error event",
+        "All existing chat graph tests pass",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S104",
+      "title": "Tech Debt TD-004: migrate API keys from plaintext SQLite to OS keychain via keyring",
+      "phase": "V2 Phase 5 - Hardening",
+      "priority": 104,
+      "featureRef": "F-DEBT-KEYCHAIN",
+      "description": "CONTEXT: API keys for external LLM providers (OpenAI, Anthropic, Gemini) are stored as plaintext strings in the SQLite settings table (TD-004). Any process that can read ~/.luminary/luminary.db can extract live API keys. IMPLEMENTATION: Add keyring to backend dependencies (uv add keyring). In SettingsService, intercept writes of any field whose name ends in _api_key: store the actual value in the OS keychain via keyring.set_password('luminary', field_name, value) and write the sentinel string '__keychain__' into SQLite. On read, if the stored value equals '__keychain__', fetch from keychain; otherwise return as-is for backward compatibility with existing installs. On first read of a plaintext key, migrate it to the keychain automatically (read -> store in keychain -> write sentinel to SQLite). Frontend Settings page: display saved keys as 'saved securely' instead of the raw value.",
+      "acceptanceCriteria": [
+        "uv add keyring; keyring listed in pyproject.toml dependencies",
+        "SettingsService.set() for *_api_key fields writes '__keychain__' sentinel to SQLite and actual value to OS keychain",
+        "SettingsService.get() returns keychain value when SQLite shows '__keychain__' sentinel",
+        "Existing plaintext key in SQLite is auto-migrated to keychain on first read",
+        "Test using keyring's mock backend: assert SQLite row is '__keychain__' after set(); assert get() returns original value",
+        "Settings page UI shows 'saved securely' for key fields that have been stored"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S105",
+      "title": "Tech Debt TD-003 and TD-011: bundle splitting for heavy deps and exact token counting via litellm",
+      "phase": "V2 Phase 5 - Hardening",
+      "priority": 105,
+      "featureRef": "F-DEBT-BUNDLE",
+      "description": "CONTEXT: Two performance debt items. TD-003: Vite build reports a chunk size warning (~1.2MB) because Sigma.js/Graphology and Recharts are bundled eagerly even though they are only needed on Viz and Monitoring tabs. TD-011: context_packer.py uses word_count * 1.3 as a token approximation which is inaccurate for non-English text, code, and long documents. IMPLEMENTATION: In App.tsx, confirm Viz and Monitoring are React.lazy() (S84 made Viz/Monitoring lazy but verify no regression). Wrap ProgressDashboard and any other Recharts-heavy component trees in React.lazy() + Suspense boundaries so Recharts is not in the initial bundle. For token counting, replace the word_count * 1.3 formula in context_packer.py with litellm.token_counter(model=model, text=text) which wraps tiktoken and falls back gracefully for unknown models.",
+      "acceptanceCriteria": [
+        "vite build produces no chunk size warning (all output chunks <= 500KB after splitting)",
+        "Viz and Monitoring pages verified as React.lazy(); ProgressDashboard wrapped in React.lazy() + Suspense",
+        "context_packer.py pack_context() uses litellm.token_counter() instead of word_count * 1.3",
+        "Unit test: pack_context() token count for a 500-word English passage is within 5% of tiktoken cl100k_base reference",
+        "Existing context packer tests pass; uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S106",
+      "title": "Tech Debt TD-001: add section_id to notes model so DocumentReader indicators persist across reloads",
+      "phase": "V2 Phase 5 - Hardening",
+      "priority": 106,
+      "featureRef": "F-DEBT-NOTES-SECTION",
+      "description": "CONTEXT: NoteModel has no section_id column (TD-001). The DocumentReader section list is intended to show a dot indicator on sections that have notes, but because section_id is never stored, the app cannot reconstruct which sections have notes after a page reload -- the indicators disappear. USER JOURNEY: User reads Section 3, opens the note editor from the section, saves a note -> reloads the page -> Section 3 still shows a note indicator dot in the section list. IMPLEMENTATION: Add section_id TEXT column to the notes table (SQLite ALTER TABLE or db_init.py CREATE TABLE update). Add optional section_id field to NoteCreateRequest and NoteUpdateRequest Pydantic models. Include section_id in NoteResponse. DocumentReader section list: after fetching the document's notes (GET /notes?document_id=X), build a Set of section_ids that have notes and render a small dot badge on each matching section row.",
+      "acceptanceCriteria": [
+        "notes table has section_id TEXT column (nullable); existing rows unaffected",
+        "POST /notes and PATCH /notes/{id} accept optional section_id in request body and persist it",
+        "GET /notes?document_id=X returns section_id in each note object",
+        "DocumentReader section list: sections with at least one saved note show a visible dot indicator",
+        "Indicator persists after page reload (sourced from API, not component state)",
+        "Smoke test: create note with section_id; reload page; indicator visible on correct section"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S107",
+      "title": "Documentation pass: complete all partial-doc domains to reach QUALITY_SCORE A across the board",
+      "phase": "V2 Phase 5 - Hardening",
+      "priority": 107,
+      "featureRef": "F-DOCS-COMPLETE",
+      "description": "CONTEXT: Six domains in QUALITY_SCORE.md show documented=partial: Knowledge Graph, Notes, Search, Learning Engine, Study Mode, Monitoring. Per Invariant #8, docs/ is the system of record. Partial documentation means the system of record is incomplete and onboarding a new contributor requires reading source code instead of docs. This story writes the missing sections. SCOPE: docs/ARCHITECTURE.md: add Learning Engine section covering FSRS state machine (New->Learning->Review->Relearning), review flow, confusion detector pattern, and gap detector algorithm. Add Study Mode section covering UI states and session lifecycle. Add Knowledge Graph section covering disambiguation algorithm and Kuzu schema. docs/FRONTEND.md: document all 6 tab UX flows (Learning, Chat, Viz, Study, Notes, Monitoring) with state descriptions and key component names. QUALITY_SCORE.md: update all domains to documented=yes; promote all domains with implemented=yes and tested=yes to grade A.",
+      "acceptanceCriteria": [
+        "docs/ARCHITECTURE.md has Learning Engine section (>= 200 words covering FSRS states, review flow, confusion detector)",
+        "docs/ARCHITECTURE.md has Study Mode section covering UI states and session lifecycle",
+        "docs/ARCHITECTURE.md has Knowledge Graph section covering disambiguation algorithm and Kuzu schema",
+        "docs/FRONTEND.md documents all 6 tab UX flows with component names",
+        "QUALITY_SCORE.md: all domains show documented=yes",
+        "QUALITY_SCORE.md: all domains with implemented=yes and tested=yes show grade A",
+        "No code changes in this story -- docs only"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S108",
+      "title": "Voice input for Teach-Back Mode via Web Speech API",
+      "phase": "V2 Phase 6 - Voice and Proactive Discovery",
+      "priority": 108,
+      "featureRef": "F-TEACH-VOICE",
+      "description": "CONTEXT: The Teach-Back Mode (S99) requires typing a long-form explanation -- high friction for a feature that should feel conversational. The Feynman Technique works best when explanation feels natural, not when it requires composing formal paragraphs. Voice input removes this barrier with zero backend cost and zero new dependencies. USER JOURNEY: User opens Teach-Back panel -> sees a microphone button next to the text area -> clicks it -> button pulses red while recording -> user speaks their explanation aloud -> interim transcript appears in real time in the textarea -> user stops recording -> final transcript in textarea -> user submits for evaluation. IMPLEMENTATION: Use the browser-native SpeechRecognition API (window.SpeechRecognition || window.webkitSpeechRecognition). No backend changes required -- the transcript feeds into the existing POST /study/teachback/{id}. Handle the case where speech recognition is not supported with a visible 'Voice input not supported in this browser' message. No new npm packages needed.",
+      "acceptanceCriteria": [
+        "TeachbackPanel has a microphone button rendered alongside the textarea",
+        "Clicking the button starts SpeechRecognition with interimResults=true; button shows pulsing red indicator",
+        "Interim transcript appears in textarea in real time as the user speaks",
+        "Clicking button again (or end of speech) stops recognition; final transcript replaces textarea content",
+        "If SpeechRecognition is unavailable, button is disabled with tooltip 'Voice input not supported in this browser'",
+        "Submitting a voice-sourced transcript to POST /study/teachback/{id} works identically to typed input",
+        "npx tsc --noEmit exits 0; no new backend changes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S109",
+      "title": "Proactive Suggested Explorations in Chat from Kuzu entity graph",
+      "phase": "V2 Phase 6 - Voice and Proactive Discovery",
+      "priority": 109,
+      "featureRef": "F-CHAT-EXPLORATIONS",
+      "description": "CONTEXT: The Chat tab starts empty, forcing users to think of questions (the blank canvas problem, reviewed in S95 which added context-aware suggestion pills). S95 pills are text-and-label suggestions. This story adds a deeper layer: when a document is selected, the Kuzu graph for that document is queried for its top entity pairs by RELATED_TO edge weight, and 3-5 proactive exploration suggestions are surface as clickable chips above the input. These are richer than S95 pills -- they are graph-derived and document-specific. USER JOURNEY: User opens Chat, selects a document -> below the S95 suggestion pills, a 'Explore connections' row appears with chips like 'Compare Eloi and Morlocks' or 'How does the Time Traveller relate to the Sphinx?' -> clicking a chip pre-fills and submits the question. IMPLEMENTATION: New endpoint GET /chat/explorations?document_id=X -- queries Kuzu for top-degree entity pairs by shared edge count, formats them as suggestion strings. Frontend: render as a second row of chips in Chat, shown only when a document is selected and the chat history is empty.",
+      "acceptanceCriteria": [
+        "GET /chat/explorations?document_id=X returns a list of up to 5 ExplorationSuggestion objects with text and entity_names fields",
+        "Suggestions are derived from Kuzu RELATED_TO edges for the given document -- not hardcoded",
+        "Frontend: 'Explore connections' chip row visible in Chat when document is selected and chat is empty",
+        "Clicking a chip pre-fills the chat input and submits the message",
+        "Chip row hidden when chat history is non-empty (not shown mid-conversation)",
+        "If document has no graph entities, chip row is omitted gracefully",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S110",
+      "title": "Reading progress tracking: IntersectionObserver per section with progress bar in library",
+      "phase": "V2 Phase 6 - Voice and Proactive Discovery",
+      "priority": 110,
+      "featureRef": "F-READING-PROGRESS",
+      "description": "CONTEXT: The app has no signal for which document sections the user has actually read. FSRS knows what cards have been reviewed, but not what has been read. The study planner (S101) cannot distinguish 'not reviewed yet' from 'not read yet'. Reading progress data also feeds into S116 (gap heatmap) and S113 (learning goals). USER JOURNEY: User opens a document and reads through it -> sections they scroll past and spend time on are silently marked as read -> library card shows a reading progress bar (e.g. '7 / 12 sections read') -> on next visit, progress bar reflects previous reading. IMPLEMENTATION: Backend: new table reading_progress (id, document_id, section_id, first_seen_at, last_seen_at, view_count). POST /reading/progress upserts by (document_id, section_id). GET /documents/{id} response includes reading_progress_pct (sections_read / total_sections). Frontend: DocumentReader uses IntersectionObserver -- when a section is in viewport for >= 3 continuous seconds, fire POST /reading/progress. Library card shows a thin progress bar under the document title.",
+      "acceptanceCriteria": [
+        "reading_progress table created in db_init.py with columns id, document_id, section_id, first_seen_at, last_seen_at, view_count",
+        "POST /reading/progress: upserts by (document_id, section_id); increments view_count on repeat",
+        "GET /documents/{id} response includes reading_progress_pct float (0.0 to 1.0)",
+        "DocumentReader: IntersectionObserver fires POST /reading/progress when section in viewport >= 3 seconds",
+        "Library card renders a thin progress bar reflecting reading_progress_pct",
+        "Progress persists across reloads (stored in DB, not component state)",
+        "Test: POST reading/progress twice for same section -> view_count=2; reading_progress_pct reflects correct ratio"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S111",
+      "title": "In-document annotation and text highlighting with persistent storage",
+      "phase": "V2 Phase 6 - Voice and Proactive Discovery",
+      "priority": 111,
+      "featureRef": "F-ANNOTATIONS",
+      "description": "CONTEXT: A core reading workflow is missing: users cannot highlight text or add inline annotations. They must switch to the Notes tab and remember the section manually -- high friction that breaks reading flow. Highlights are the primary engagement signal in every serious reading app (Kindle, Readwise, iBooks). USER JOURNEY: User selects text in a document section -> a small popover appears with color swatches (yellow, green, blue, red) and an 'Add note' option -> user picks yellow and optionally types a note -> text appears highlighted in the reader -> on reload, highlight persists in the same position. IMPLEMENTATION: Backend: new table annotations (id, document_id, chunk_id, selected_text, start_offset, end_offset, color, note_text, created_at). CRUD endpoints POST/GET/DELETE /annotations. Frontend: on mouseup in DocumentReader, detect selection; show popover with color swatches; on save, POST annotation; on document load, apply highlight spans via DOM range; FloatingToolbar gains a 'Highlight' action. New 'Highlights' tab in DocumentReader alongside 'Key Points' and 'Notes'.",
+      "acceptanceCriteria": [
+        "annotations table in db_init.py with id, document_id, chunk_id, selected_text, start_offset, end_offset, color, note_text, created_at",
+        "POST /annotations creates an annotation; GET /annotations?document_id=X returns all; DELETE /annotations/{id} removes one",
+        "DocumentReader: mouseup on text shows a popover with at least 4 color options and optional note input",
+        "Saved highlight persists across page reloads -- highlight span visible at correct text position on reload",
+        "FloatingToolbar includes a Highlight action",
+        "DocumentReader has a Highlights tab showing all annotations for the current document",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S112",
+      "title": "Graph-driven flashcard generation from Kuzu entity relationship pairs",
+      "phase": "V2 Phase 6 - Voice and Proactive Discovery",
+      "priority": 112,
+      "featureRef": "F-FLASHCARD-GRAPH",
+      "description": "CONTEXT: FlashcardService.generate() builds cards from raw text chunks. Entity relationship pairs in Kuzu (RELATED_TO, APPEARS_IN edges) are richer source material -- they produce cards testing conceptual relationships ('What is the relationship between X and Y?') rather than isolated fact recall. Relationship cards are harder to answer but have stronger long-term retention because they require connecting concepts rather than recognizing isolated facts. USER JOURNEY: User opens Learning tab GeneratePanel -> switches a toggle to 'From Entity Relationships' mode -> sees a preview of entity pairs that will be used (e.g., 'Time Traveller <-> Eloi (12 co-appearances)') -> generates flashcards -> reviews cards that ask about relationships, not just definitions. IMPLEMENTATION: FlashcardService.generate_from_graph(document_id, k) fetches top-K entity pairs by shared chunk count from Kuzu; for each pair retrieves shared chunks via GET /search; prompts LLM to generate a relationship-focused card. New endpoint POST /flashcards/generate-from-graph. Frontend: GeneratePanel adds a mode toggle; 'From Entities' mode calls the new endpoint.",
+      "acceptanceCriteria": [
+        "FlashcardService.generate_from_graph(document_id, k) fetches top-K entity pairs by edge weight from Kuzu",
+        "For each pair, shared chunks are retrieved and passed to LLM with a relationship-framing prompt",
+        "POST /flashcards/generate-from-graph accepts {document_id: str, k: int} and returns generated flashcards",
+        "Generated cards have question framed as a relationship ('How does X relate to Y?' or 'What connects X and Y?') -- not a definition question",
+        "Frontend GeneratePanel: mode toggle with 'From Text' (default) and 'From Entities' options",
+        "Entity mode shows a preview list of the top entity pairs before generating",
+        "FSRS scheduling works identically for graph-generated cards (same review flow)",
+        "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S113",
+      "title": "Learning Goals with target dates and FSRS-based readiness projection",
+      "phase": "V2 Phase 7 - Learning Engine Grade A",
+      "priority": 113,
+      "featureRef": "F-LEARNING-GOALS",
+      "description": "CONTEXT: The app has no goal-setting mechanism. Without a target date, learners have no accountability loop and FSRS reviews feel optional rather than urgent. FSRS stores stability and retrievability per card, which means it can project 'how many cards will be retained by date X' -- this is the foundation of a readiness gauge. USER JOURNEY: User creates a goal: 'Master The Time Machine by March 25' -> app shows a readiness gauge: 'On track: 78% cards will be retained by that date, 4 at-risk cards need extra review' -> user clicks an at-risk card to review it now. IMPLEMENTATION: New table learning_goals (id, document_id, title, target_date, created_at). GoalService.compute_readiness(goal_id): uses FSRS projected stability to estimate retrievability at target_date for each card; counts at-risk cards (projected_retrievability < 0.7). Endpoints POST/GET/DELETE /goals; GET /goals/{id}/readiness. Frontend: new Goals panel in Study tab with goal creation form, readiness gauge (green/yellow/red), and at-risk card list.",
+      "acceptanceCriteria": [
+        "learning_goals table in db_init.py with id, document_id, title, target_date, created_at",
+        "POST /goals creates a goal; GET /goals returns list; DELETE /goals/{id} removes",
+        "GET /goals/{id}/readiness returns {on_track: bool, projected_retention_pct: float, at_risk_card_count: int, at_risk_cards: list}",
+        "GoalService.compute_readiness() uses FSRS stability to project retrievability at target_date (not a random estimate)",
+        "Frontend Study tab has a Goals panel with goal creation form (title, document selector, date picker)",
+        "Readiness gauge shows green (>= 80%), yellow (60-79%), red (< 60%) based on projected_retention_pct",
+        "At-risk cards listed with direct link to review them",
+        "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S114",
+      "title": "Adaptive difficulty signals: surface struggling cards with source section links",
+      "phase": "V2 Phase 7 - Learning Engine Grade A",
+      "priority": 114,
+      "featureRef": "F-ADAPTIVE-DIFFICULTY",
+      "description": "CONTEXT: FSRS tracks individual card difficulty and review history but the app never intervenes when a learner is clearly struggling. A learner who has rated the same card 'Again' 3+ times in 14 days is not just forgetting -- they likely do not understand the underlying concept and need to re-read the source material, not just review the card more. The confusion detector (S100) detects repeated questions across sessions; this story detects repeated failure on the same card. USER JOURNEY: User opens Study tab -> sees a 'Struggling' sub-panel distinct from 'Weak Areas' -> each item shows the card question, how many times rated Again recently, and a 'Re-read source' button that opens DocumentReader at the source section. IMPLEMENTATION: FSRSService.get_struggling_cards(document_id, again_threshold=3, days=14): queries review history for cards with again_count >= threshold in the window. New endpoint GET /study/struggling?document_id=X. Frontend: Study tab Struggling panel, separate from WeakAreasPanel.",
+      "acceptanceCriteria": [
+        "FSRSService.get_struggling_cards(document_id, again_threshold, days) queries review history correctly",
+        "GET /study/struggling?document_id=X returns cards with again_count >= 3 in last 14 days",
+        "Response includes card question, again_count, and source_section_id for each card",
+        "Frontend Study tab has a Struggling panel separate from Weak Areas",
+        "Each struggling card shows: question preview, again count badge, 'Re-read source' button",
+        "'Re-read source' navigates to DocumentReader at the specific section",
+        "Test: simulate 3 Again ratings on a card within 14 days -> GET /study/struggling returns that card",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S115",
+      "title": "Study session analytics: per-session history with accuracy and cards reviewed",
+      "phase": "V2 Phase 7 - Learning Engine Grade A",
+      "priority": 115,
+      "featureRef": "F-SESSION-ANALYTICS",
+      "description": "CONTEXT: ProgressDashboard shows aggregate charts (retention curve, mastery heatmap, streak calendar) but no per-session breakdown. A learner cannot see 'in yesterday's 10-minute session I reviewed 15 cards at 73% accuracy focused on Chapter 3.' Without session-level data, the progress view feels abstract and does not build the sense of cumulative effort. USER JOURNEY: User completes a review session -> clicks 'End Session' -> session is logged -> opens Study History tab -> sees a table of past sessions with date, duration, card count, accuracy, and document covered -> clicks a row to expand card-level detail. IMPLEMENTATION: New table study_sessions (id, started_at, ended_at, document_id, cards_reviewed, correct_count, accuracy_pct). POST /study/start-session and POST /study/end-session endpoints. GET /study/sessions returns paginated history. Frontend: new History sub-tab in Study tab.",
+      "acceptanceCriteria": [
+        "study_sessions table in db_init.py with id, started_at, ended_at, document_id, cards_reviewed, correct_count, accuracy_pct",
+        "POST /study/start-session returns a session_id",
+        "POST /study/end-session/{session_id} finalizes the session with computed stats",
+        "GET /study/sessions returns paginated session list sorted by started_at desc",
+        "Frontend Study tab has a History sub-tab showing past sessions in a table",
+        "Table columns: date, duration, cards reviewed, accuracy %, document name",
+        "Clicking a row expands to show card-level breakdown (question, rating given)",
+        "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S116",
+      "title": "FSRS fragility heatmap on DocumentReader section list",
+      "phase": "V2 Phase 7 - Learning Engine Grade A",
+      "priority": 116,
+      "featureRef": "F-HEATMAP",
+      "description": "CONTEXT: The DocumentReader section list shows headings and reading progress dots (S110). It does not show which sections have the weakest FSRS retention. Overlaying fragility scores as a color-coded left border would make the reading experience study-aware: the user can see at a glance which chapter they need to re-engage with before their next review. USER JOURNEY: User opens a document they have studied -> section list shows color-coded borders (green = mastered, yellow = needs review, red = critical gap) -> hovering a colored section shows a tooltip: '3 cards due, avg retention 42%' -> user clicks the red section to re-read it before reviewing. IMPLEMENTATION: GET /study/section-heatmap?document_id=X: aggregates FSRS retrievability scores for all cards sourced from each section, returns a map {section_id: fragility_score} (0.0 mastered, 1.0 critical). Frontend: DocumentReader section list applies a colored left-border CSS class based on the heatmap. Heatmap invalidated after a study session ends.",
+      "acceptanceCriteria": [
+        "GET /study/section-heatmap?document_id=X returns {section_id: fragility_score} map for all sections with flashcards",
+        "fragility_score is derived from average FSRS retrievability of cards sourced from that section (not random)",
+        "Sections with no cards return fragility_score=null (no border applied)",
+        "DocumentReader section list renders a colored left-border: green (<= 0.3), yellow (0.31-0.6), red (> 0.6)",
+        "Hovering a colored section shows tooltip with due card count and avg retention %",
+        "Heatmap query invalidated (TanStack Query) when a study session ends",
+        "Test: card with retrievability 0.2 for section A -> section A fragility_score <= 0.3"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S117",
+      "title": "Concept prerequisite mapping: PREREQUISITE_OF edges in Kuzu with learning-path endpoint",
+      "phase": "V2 Phase 7 - Learning Engine Grade A",
+      "priority": 117,
+      "featureRef": "F-PREREQUISITES",
+      "description": "CONTEXT: The Kuzu knowledge graph has RELATED_TO peer edges but no directionality for learning order. Every concept appears flat. In reality, understanding 'Natural Selection' requires 'Variation' and 'Heredity' as prerequisites. Identifying prerequisite language during ingestion and storing directed PREREQUISITE_OF edges enables a learning-path view in the Viz tab and powers goal-based sequencing in S113. IMPLEMENTATION: Ingestion pipeline NER step: after entity extraction, scan chunk text for prerequisite linguistic markers (requires understanding of, builds on, defined as a type of, is a subclass of, depends on, first introduced as). For each match, create a directed PREREQUISITE_OF edge in Kuzu from the dependent concept to the prerequisite. New endpoint GET /graph/learning-path?start_entity=X&document_id=Y returns a topologically sorted list of concepts. Frontend Viz tab: new 'Learning Path' toggle renders PREREQUISITE_OF edges as directed arrows in orange.",
+      "acceptanceCriteria": [
+        "Ingestion pipeline detects prerequisite markers and creates PREREQUISITE_OF directed edges in Kuzu",
+        "Kuzu schema has PREREQUISITE_OF relationship table with from_entity, to_entity, document_id, confidence",
+        "GET /graph/learning-path?start_entity=X&document_id=Y returns a topologically sorted concept list",
+        "Viz tab has a 'Learning Path' toggle that renders PREREQUISITE_OF edges as directed orange arrows",
+        "Clicking a node in learning-path mode shows its prerequisites as a breadcrumb trail",
+        "Test: ingest a passage containing 'X requires understanding of Y' -> PREREQUISITE_OF edge from X to Y exists in Kuzu",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S118",
+      "title": "Desktop push notifications for FSRS due cards via browser Notification API",
+      "phase": "V2 Phase 7 - Learning Engine Grade A",
+      "priority": 118,
+      "featureRef": "F-DUE-NOTIFICATIONS",
+      "description": "CONTEXT: The study planner (S101) surfaces a pre-session agenda but only when the user actively opens the app. Daily FSRS adherence is what makes spaced repetition effective -- but the current app is entirely passive. A browser push notification (no Tauri required, no mobile required) provides a low-effort habit trigger that closes the daily review loop on desktop. USER JOURNEY: User opens Luminary for the first time -> browser prompts for notification permission -> user grants -> on subsequent days, when the user focuses the browser window and has due cards, a desktop notification appears: 'Luminary: 12 cards due for review today' -> clicking it activates the Study tab. IMPLEMENTATION: Frontend only. On app mount, call Notification.requestPermission() once. New backend endpoint GET /study/due-count returns {due_today: int}. On window visibilitychange to 'visible', if due_today > 0 and last notification was > 4 hours ago (localStorage timestamp), fire new Notification(). Settings page includes 'Disable review reminders' toggle.",
+      "acceptanceCriteria": [
+        "GET /study/due-count returns {due_today: int} counting cards with next_review_date <= today",
+        "App requests Notification.requestPermission() once on first mount (not on every load)",
+        "On window focus (visibilitychange visible), if due_today > 0 and last-notified > 4h ago, fires browser notification",
+        "Notification title: 'Luminary' body: 'X cards due for review today'",
+        "Clicking notification activates Study tab",
+        "Settings page has 'Review reminders' toggle that disables the notification check",
+        "No notification fired if permission denied or toggle off"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S119",
+      "title": "Audio ingestion via faster-whisper: MP3/M4A/WAV transcription with timestamp chunks",
+      "phase": "V2 Phase 8 - Multimodal Ingestion",
+      "priority": 119,
+      "featureRef": "F-AUDIO-INGEST",
+      "description": "CONTEXT: A significant share of learning happens through audio: lectures, podcasts, recorded seminars. The ingestion pipeline currently classifies and rejects audio files. Adding local Whisper transcription (via faster-whisper, a CTranslate2-optimized backend that is 4x faster than openai-whisper and runs fully offline) enables audio content to flow through the existing embed-NER-store pipeline unchanged. USER JOURNEY: User drags an MP3 lecture file into the library -> progress bar shows 'Transcribing...' then 'Indexing...' -> document appears in library with an audio icon and duration badge -> user can ask questions in Chat about the lecture content. IMPLEMENTATION: uv add faster-whisper. Add 'audio' to content-type classifier (_classify). New transcribe_node in the LangGraph ingestion graph inserted between parse_node and chunk_node for audio content type. _chunk_audio() creates chunks from Whisper segments, storing start_time and end_time as chunk metadata. All downstream nodes (embed, NER, store) unchanged.",
+      "acceptanceCriteria": [
+        "uv add faster-whisper; listed in pyproject.toml",
+        "Content-type classifier returns 'audio' for .mp3, .m4a, .wav file extensions",
+        "LangGraph ingestion graph has transcribe_node for audio content type",
+        "Each chunk from _chunk_audio has start_time and end_time fields in metadata",
+        "Audio document appears in library with audio icon and total duration",
+        "Chat can answer factual questions about the audio content via normal Q&A flow",
+        "Test: transcribe a short synthetic audio file (or use a fixture transcript); assert chunks have start_time metadata",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S120",
+      "title": "Audio timestamp playback in DocumentReader: mini-player with jump-to-chunk",
+      "phase": "V2 Phase 8 - Multimodal Ingestion",
+      "priority": 120,
+      "featureRef": "F-AUDIO-PLAYBACK",
+      "description": "CONTEXT: S119 adds start_time/end_time metadata to audio chunks. Without a playback UI, users cannot verify AI answers against the source audio or follow along while reading the transcript. This story adds a persistent audio mini-player in DocumentReader for audio documents and a per-chunk 'Play from here' button. USER JOURNEY: User opens an audio document -> a sticky mini-player appears at the bottom of DocumentReader with play/pause and a scrubber -> each transcript chunk in the reader has a small play button showing the timestamp -> user reads an interesting chunk and clicks its timestamp -> mini-player seeks to that position and plays. IMPLEMENTATION: Frontend only -- no backend changes required. DocumentReader detects document type == 'audio'. Renders HTML5 audio element with document's raw file URL. Each chunk row shows a timestamp badge (MM:SS) formatted from start_time metadata; clicking it calls audioEl.currentTime = start_time.",
+      "acceptanceCriteria": [
+        "DocumentReader shows a sticky mini-player at the bottom for audio documents",
+        "Mini-player has play/pause button, current time display, duration display, and a seek scrubber",
+        "Each transcript chunk shows a timestamp badge (MM:SS) from start_time metadata",
+        "Clicking a timestamp badge seeks the audio to that position and starts playback",
+        "Mini-player is absent for non-audio documents",
+        "npx tsc --noEmit exits 0; no backend changes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S121",
+      "title": "Video ingestion (MP4): ffmpeg audio extraction + Whisper transcription with video player",
+      "phase": "V2 Phase 8 - Multimodal Ingestion",
+      "priority": 121,
+      "featureRef": "F-VIDEO-INGEST",
+      "description": "CONTEXT: S119 handles audio files. Video (MP4) is the dominant format for lecture recordings and screen captures. The transcript is identical to audio after extraction -- the only difference is the extraction step (ffmpeg audio strip) and the player UI (HTML5 video instead of audio). USER JOURNEY: User drags an MP4 lecture recording -> progress bar shows 'Extracting audio... Transcribing... Indexing...' -> document appears with a video icon -> DocumentReader shows the video player with jump-to-timestamp on chunk click. IMPLEMENTATION: Detect .mp4 content type. In transcribe_node: run ffmpeg -i input.mp4 -vn -ar 16000 -ac 1 -f wav /tmp/{doc_id}_audio.wav as a subprocess, then transcribe with faster-whisper. Check for ffmpeg availability in lifespan; log a warning if not found. Frontend: DocumentReader renders HTML5 video element for video documents.",
+      "acceptanceCriteria": [
+        "Content-type classifier returns 'video' for .mp4 extension",
+        "transcribe_node runs ffmpeg subprocess to extract audio before Whisper transcription",
+        "lifespan startup checks for ffmpeg via shutil.which('ffmpeg'); logs a warning if not found",
+        "Ingestion returns a user-friendly error if ffmpeg is unavailable and a video file is uploaded",
+        "DocumentReader renders an HTML5 video element with jump-to-timestamp for video documents",
+        "Chat can answer questions about video transcript content",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S122",
+      "title": "YouTube URL ingestion via yt-dlp: audio download, Whisper transcription, timestamp deep-links",
+      "phase": "V2 Phase 8 - Multimodal Ingestion",
+      "priority": 122,
+      "featureRef": "F-YOUTUBE-INGEST",
+      "description": "CONTEXT: The most common source of lecture content is YouTube. Users routinely watch conference talks, MIT lectures, and tutorial videos. Accepting a YouTube URL in the upload dialog -- downloading audio with yt-dlp, transcribing with Whisper (S119), and then linking back to the source video at the correct timestamp -- closes the loop between Luminary's knowledge base and the original content. USER JOURNEY: User pastes a YouTube URL in the upload dialog -> Luminary downloads the audio, transcribes, indexes -> document appears with a YouTube icon and video title -> 'Play from here' on any chunk opens YouTube at that exact timestamp in a new tab. IMPLEMENTATION: uv add yt-dlp. Upload dialog detects YouTube URL pattern (youtube.com/watch or youtu.be/). Backend: download audio to temp file, route through S119 transcribe_node. Store video URL and video_id as document metadata. Frontend: 'Play from here' opens {url}&t={start_seconds} in a new tab.",
+      "acceptanceCriteria": [
+        "uv add yt-dlp; listed in pyproject.toml",
+        "Upload dialog accepts YouTube URLs (youtube.com/watch?v=, youtu.be/)",
+        "Backend downloads audio via yt-dlp subprocess, routes through transcribe_node",
+        "Document stores source_url (YouTube URL) and video_title from yt-dlp metadata",
+        "Library card shows YouTube icon and video title",
+        "'Play from here' on a chunk opens {source_url}&t={start_seconds} in a new tab",
+        "If yt-dlp is unavailable, upload returns a 503 with 'yt-dlp not installed' message",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S123",
+      "title": "EPUB and Kindle ingestion: ebooklib chapter parsing and My Clippings.txt highlight import",
+      "phase": "V2 Phase 8 - Multimodal Ingestion",
+      "priority": 123,
+      "featureRef": "F-EPUB-KINDLE",
+      "description": "CONTEXT: Many learners use Kindle or read EPUB books outside Luminary and have years of highlights. EPUB ingestion lets users bring their reading library into Luminary without PDF conversion. Kindle My Clippings.txt import lets users bring their existing highlight corpus into Luminary's search and flashcard pipeline instantly. USER JOURNEY (EPUB): User uploads an .epub file -> chapters become sections in DocumentReader -> full ingestion pipeline (embed, NER, FSRS cards) works identically. USER JOURNEY (Kindle): User drags My Clippings.txt -> each book's highlights become a document with the book title, highlights as chunks, and creation dates -> flashcards generatable from highlights. IMPLEMENTATION: uv add ebooklib. _classify returns 'epub' for .epub. _parse_epub() extracts chapters as sections with headings. My Clippings.txt parser: split on '========== ' delimiter, group by book title, create one document per book.",
+      "acceptanceCriteria": [
+        "uv add ebooklib; listed in pyproject.toml",
+        "Content-type classifier returns 'epub' for .epub extension",
+        "_parse_epub() extracts chapters as sections preserving chapter headings",
+        "EPUB document flows through full ingestion pipeline (embed, NER, store)",
+        "Content-type classifier returns 'kindle_clippings' for My Clippings.txt (detected by filename pattern)",
+        "_parse_kindle_clippings() groups highlights by book title, returns one document per book",
+        "Kindle-imported documents marked with source=kindle badge in library",
+        "Flashcard generation works on both EPUB and Kindle-imported documents",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S124",
+      "title": "Obsidian vault export: notes, flashcards, and entity wikilinks as markdown files",
+      "phase": "V2 Phase 9 - Portability and Ecosystem",
+      "priority": 124,
+      "featureRef": "F-EXPORT-OBSIDIAN",
+      "description": "CONTEXT: Power users use Obsidian as their primary note-taking and knowledge management system. Exporting Luminary notes and flashcards as Obsidian-compatible markdown files enables the two tools to complement each other: Luminary for structured learning (FSRS, teach-back, gap detection), Obsidian for long-term knowledge management. USER JOURNEY: User opens Settings -> Export section -> clicks 'Export to Obsidian Vault' for a document -> downloads a .zip file -> unzips into their Obsidian vault folder -> notes appear as .md files with YAML frontmatter, flashcards appear in a flashcards.md compatible with the Obsidian Spaced Repetition plugin, entity wikilinks in graph.md enable Obsidian graph view. IMPLEMENTATION: New endpoint GET /export/obsidian?document_id=X. Generates a zip in memory: one .md file per note (YAML frontmatter: tags, document_title, created_at), flashcards.md with #flashcard tag format, graph.md with [[EntityName]] wikilinks.",
+      "acceptanceCriteria": [
+        "GET /export/obsidian?document_id=X returns a .zip file with correct Content-Type",
+        "Zip contains one .md file per note with YAML frontmatter (tags, document_title, created_at)",
+        "Zip contains flashcards.md with each card in '{{question}}\\n?\\n{{answer}}\\n#flashcard' format",
+        "Zip contains graph.md with [[EntityName]] wikilinks for each entity in the document's Kuzu graph",
+        "Frontend Settings page has 'Export to Obsidian' button per document in library",
+        "Button triggers zip download",
+        "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S125",
+      "title": "Anki deck export via genanki: flashcards as .apkg with FSRS state preservation",
+      "phase": "V2 Phase 9 - Portability and Ecosystem",
+      "priority": 125,
+      "featureRef": "F-EXPORT-ANKI",
+      "description": "CONTEXT: Anki is the global standard for spaced repetition with the largest mobile app install base. Exporting Luminary flashcards as an Anki .apkg deck solves the mobile FSRS gap (no mobile app needed) and lets users continue reviews on any device. FSRS difficulty and stability are stored as custom fields in the Anki note type so a future import back into Luminary can restore scheduling state. USER JOURNEY: User opens Learning tab -> clicks 'Export to Anki' in the flashcard panel -> downloads a .apkg file -> imports into Anki desktop or AnkiDroid -> all cards present with front (question) / back (answer + source citation). IMPLEMENTATION: uv add genanki. New endpoint GET /export/anki?document_id=X generates a .apkg. Custom Anki note model with fields: Front, Back, Source, FSRS_Difficulty, FSRS_Stability. Cards grouped into a deck named after the document title.",
+      "acceptanceCriteria": [
+        "uv add genanki; listed in pyproject.toml",
+        "GET /export/anki?document_id=X returns a .apkg file",
+        "Deck name matches the document title",
+        "Each card has Front (question), Back (answer + source chunk citation), FSRS_Difficulty, FSRS_Stability fields",
+        "Anki package is valid: importable into Anki 2.1+ without errors",
+        "Frontend Learning tab flashcard panel has 'Export to Anki' button",
+        "Button triggers .apkg download",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S126",
+      "title": "Local network relay for mobile FSRS review: LAN binding, QR code, and mobile study view",
+      "phase": "V2 Phase 9 - Portability and Ecosystem",
+      "priority": 126,
+      "featureRef": "F-LAN-RELAY",
+      "description": "CONTEXT: FSRS tethered to a desktop is the single biggest gap in the learning science model. Daily review adherence is what makes spaced repetition effective -- but the current app is only accessible from the computer where it runs. This story enables mobile browser access over a local WiFi network without any cloud infrastructure. USER JOURNEY: User opens Settings -> sees a QR code labeled 'Review on mobile' -> scans with phone on same WiFi -> phone browser opens a minimal mobile-optimized study page -> user reviews due cards with flip animation and FSRS rating buttons -> ratings sync instantly to the desktop database. IMPLEMENTATION: Backend: add --host 0.0.0.0 mode triggered by a LAN_MODE=true env var or Settings toggle. A new minimal frontend route /mobile/study renders a stripped-down FSRS review UI (no sidebar, no library, dark-mode safe). Settings page generates a QR code using a pure-JS library for the LAN URL.",
+      "acceptanceCriteria": [
+        "Backend supports binding to 0.0.0.0 when LAN_MODE env var is set or Settings toggle is on",
+        "GET /study/mobile-session returns due cards formatted for the mobile view",
+        "Frontend /mobile/study route: card flip animation, FSRS rating buttons (Again/Hard/Good/Easy), no sidebar",
+        "FSRS ratings from mobile view persist in the same database as desktop sessions",
+        "Settings page shows a QR code with the LAN URL (http://192.168.x.x:8000/mobile/study)",
+        "CORS updated to allow LAN IP origin",
+        "Mobile view loads in < 3s on a mid-range phone over WiFi (no heavy bundle deps)",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S127",
+      "title": "Tauri v2 desktop packaging: single installer bundling frontend and Python sidecar",
+      "phase": "V2 Phase 9 - Portability and Ecosystem",
+      "priority": 127,
+      "featureRef": "F-TAURI-PACKAGING",
+      "description": "CONTEXT: Currently the app requires the user to run uvicorn and npm run dev manually from a terminal. This is a significant barrier to adoption for non-developer users. Tauri v2 bundles the Vite frontend into a native desktop shell; the Python backend is packaged as a standalone binary (PyInstaller sidecar) spawned by Tauri on launch. The result is a single distributable installer for macOS (.dmg), Windows (.exe), and Linux (.deb). USER JOURNEY: User downloads Luminary.dmg, drags to Applications, opens it -- no Python or Node required. IMPLEMENTATION: uv add pyinstaller as a dev dependency. PyInstaller spec file that packages the uvicorn app as a standalone binary. Tauri v2 config: sidecar entry pointing to the binary, spawned on app launch and killed on app exit. GitHub Actions workflow builds and attaches installers on version tag push.",
+      "acceptanceCriteria": [
+        "PyInstaller spec produces a standalone binary that runs the uvicorn app with no Python installation required",
+        "Tauri v2 tauri.conf.json configured with sidecar pointing to the Python binary",
+        "App launches from the installer: backend starts, frontend opens -- no terminal required",
+        "Sidecar process is killed cleanly when the Tauri window closes",
+        "GitHub Actions workflow: on tag push, builds .dmg (macOS), .exe (Windows), .deb (Linux) and attaches as release artifacts",
+        "Install on a clean macOS machine with no Python/Node: Luminary opens and basic ingestion works"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S128",
+      "title": "Readwise CSV and Kindle Clippings import with auto-ingestion pipeline",
+      "phase": "V2 Phase 9 - Portability and Ecosystem",
+      "priority": 128,
+      "featureRef": "F-READWISE-IMPORT",
+      "description": "CONTEXT: Many learners have years of book highlights stored in Readwise or Kindle. Importing them creates immediate value on first use -- the library is populated with their existing knowledge corpus before they upload a single new document. S123 adds basic Kindle Clippings parsing; this story adds the Readwise CSV format and ensures that imported highlights flow through the full ingestion pipeline (embedding, NER, FSRS card generation) so they are immediately searchable and learnable. USER JOURNEY: User opens Library -> Import -> 'Import from Readwise' -> selects a Readwise CSV export -> each book becomes a document with highlights as chunks, tags from Readwise preserved, author and book title populated -> user can immediately generate flashcards from their highlight library. IMPLEMENTATION: Readwise CSV columns: Title, Author, URL, Highlight, Note, Location, Date, Tags. Parse into document + chunk records. Run embed + NER pipeline on highlights. If document_title matches an existing library document, link highlights to it.",
+      "acceptanceCriteria": [
+        "Import dialog in Library accepts Readwise CSV format",
+        "Parser extracts Title, Author, Highlight, Note, Tags from Readwise CSV columns",
+        "Each unique book title becomes one document; each highlight becomes one chunk",
+        "Imported documents flow through the full embed + NER ingestion pipeline",
+        "Tags from Readwise CSV are mapped to the Luminary document tags field",
+        "If document title matches an existing library document, imported highlights are linked to it",
+        "Flashcard generation works on Readwise-imported documents",
+        "Import progress shown in the library upload progress indicator",
+        "uv run ruff check . exits 0"
+      ],
+      "passes": false
     }
   ],
   "regressionBaseline": "423 tests pass on branch ralph/luminary-v2 before re-implementation begins (run: uv run pytest --ignore=tests/test_v2_pipeline.py --ignore=tests/test_v2_ingestion_perf.py --ignore=tests/test_ingestion_perf.py --ignore=tests/test_performance.py). After each story, the test count must be >= 423. Any drop is a regression -- stop and fix before marking passes:true."
