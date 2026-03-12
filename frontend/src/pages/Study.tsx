@@ -121,6 +121,7 @@ async function generateFlashcards(req: {
   scope: "full" | "section"
   section_heading: string | null
   count: number
+  difficulty: "easy" | "medium" | "hard"
 }): Promise<Flashcard[]> {
   const res = await fetch(`${API_BASE}/flashcards/generate`, {
     method: "POST",
@@ -147,6 +148,13 @@ async function updateFlashcard(
 async function deleteFlashcard(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/flashcards/${id}`, { method: "DELETE" })
   if (!res.ok) throw new Error("Failed to delete flashcard")
+}
+
+async function deleteAllFlashcards(documentId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/flashcards/document/${documentId}`, {
+    method: "DELETE",
+  })
+  if (!res.ok) throw new Error("Failed to delete all flashcards")
 }
 
 // ---------------------------------------------------------------------------
@@ -380,23 +388,37 @@ interface GeneratePanelProps {
     scope: "full" | "section"
     section_heading: string | null
     count: number
+    difficulty: "easy" | "medium" | "hard"
+  }) => void
+  onRegenerate: (req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+    difficulty: "easy" | "medium" | "hard"
   }) => void
   isGenerating: boolean
   preselectedSection?: string | null
 }
 
 const COUNT_OPTIONS = [5, 10, 20, 50]
+const DIFFICULTY_OPTIONS = [
+  { value: "easy", label: "Easy" },
+  { value: "medium", label: "Medium" },
+  { value: "hard", label: "Hard" },
+]
 
 function GeneratePanel({
   documentId: _documentId,
   sections,
   onGenerate,
+  onRegenerate,
   isGenerating,
   preselectedSection,
 }: GeneratePanelProps) {
   const [count, setCount] = useState(10)
   const [scope, setScope] = useState<"full" | "section">("full")
   const [sectionHeading, setSectionHeading] = useState<string | null>(null)
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
 
   // Sync scope/heading when a gap section is clicked from outside
   useEffect(() => {
@@ -419,6 +441,22 @@ function GeneratePanel({
           {COUNT_OPTIONS.map((n) => (
             <option key={n} value={n}>
               {n} cards
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Difficulty */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
+        <select
+          value={difficulty}
+          onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
+          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          {DIFFICULTY_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
             </option>
           ))}
         </select>
@@ -460,14 +498,24 @@ function GeneratePanel({
         </div>
       )}
 
-      <button
-        onClick={() => onGenerate({ scope, section_heading: sectionHeading, count })}
-        disabled={isGenerating || (scope === "section" && !sectionHeading)}
-        className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-      >
-        {isGenerating && <Loader2 size={14} className="animate-spin" />}
-        Generate Flashcards
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={() => onGenerate({ scope, section_heading: sectionHeading, count, difficulty })}
+          disabled={isGenerating || (scope === "section" && !sectionHeading)}
+          className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {isGenerating && <Loader2 size={14} className="animate-spin" />}
+          Generate
+        </button>
+        <button
+          onClick={() => onRegenerate({ scope, section_heading: sectionHeading, count, difficulty })}
+          disabled={isGenerating || (scope === "section" && !sectionHeading)}
+          className="flex items-center gap-2 rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+          title="Delete all current cards and generate new ones"
+        >
+          Regenerate
+        </button>
+      </div>
     </div>
   )
 }
@@ -528,6 +576,7 @@ export default function Study() {
       scope: "full" | "section"
       section_heading: string | null
       count: number
+      difficulty: "easy" | "medium" | "hard"
     }) =>
       generateFlashcards({
         document_id: activeDocumentId!,
@@ -568,6 +617,36 @@ export default function Study() {
     },
     onError: () => toast.error("Failed to delete flashcard"),
   })
+
+  // Delete all mutation
+  const deleteAllMutation = useMutation({
+    mutationFn: () => deleteAllFlashcards(activeDocumentId!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+    },
+    onError: () => toast.error("Failed to clear flashcards"),
+  })
+
+  async function handleRegenerate(req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+    difficulty: "easy" | "medium" | "hard"
+  }) {
+    if (!activeDocumentId) return
+    const confirmed = window.confirm(
+      "This will delete all current flashcards for this document and generate new ones. Continue?"
+    )
+    if (!confirmed) return
+
+    setGenerateErrorKind(null)
+    try {
+      await deleteAllMutation.mutateAsync()
+      await generateMutation.mutateAsync(req)
+    } catch (err) {
+      logger.error("Regenerate failed", { err })
+    }
+  }
 
   function handleExportCsv() {
     if (!activeDocumentId) return
@@ -618,7 +697,8 @@ export default function Study() {
           documentId={activeDocumentId}
           sections={sections}
           onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
-          isGenerating={generateMutation.isPending}
+          onRegenerate={handleRegenerate}
+          isGenerating={generateMutation.isPending || deleteAllMutation.isPending}
           preselectedSection={selectedGapSection}
         />
 

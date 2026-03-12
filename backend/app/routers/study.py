@@ -565,7 +565,8 @@ async def get_study_stats(
     retention_values: list[float] = []
     for c in all_cards:
         if c.last_review and c.fsrs_stability > 0:
-            days_since = (now - c.last_review).total_seconds() / 86400
+            last_review_aware = c.last_review.replace(tzinfo=UTC)
+            days_since = (now - last_review_aware).total_seconds() / 86400
             retention_values.append(math.exp(-days_since / c.fsrs_stability))
     avg_retention = (
         round(sum(retention_values) / len(retention_values), 4)
@@ -581,7 +582,7 @@ async def get_study_stats(
 
     # --- Total study time (minutes) ---
     total_study_time_minutes = sum(
-        (s.ended_at - s.started_at).total_seconds() / 60
+        (s.ended_at.replace(tzinfo=UTC) - s.started_at.replace(tzinfo=UTC)).total_seconds() / 60
         for s in sessions
         if s.ended_at
     )

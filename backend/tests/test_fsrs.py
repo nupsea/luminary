@@ -91,7 +91,7 @@ async def test_schedule_good_sets_future_due_date_and_positive_stability(test_db
 
     assert updated.fsrs_stability > 0
     assert updated.due_date is not None
-    assert updated.due_date > datetime.now(UTC)
+    assert updated.due_date.replace(tzinfo=UTC) > datetime.now(UTC)
     assert updated.reps == 1
     assert updated.lapses == 0
     assert updated.last_review is not None

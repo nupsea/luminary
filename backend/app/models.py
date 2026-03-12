@@ -86,6 +86,7 @@ class FlashcardModel(Base):
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     source_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    difficulty: Mapped[str] = mapped_column(String, nullable=False, default="medium")
     is_user_edited: Mapped[bool] = mapped_column(Boolean, default=False)
     fsrs_stability: Mapped[float] = mapped_column(Float, default=0.0)
     fsrs_difficulty: Mapped[float] = mapped_column(Float, default=0.0)

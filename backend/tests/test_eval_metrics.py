@@ -106,6 +106,15 @@ def test_hit_rate_empty_samples():
     assert compute_hit_rate_5([]) == pytest.approx(0.0)
 
 
+def test_hit_rate_newline_in_chunk():
+    """Hint with spaces matches chunk where whitespace is a newline (Gutenberg line-wrap fix)."""
+    hint = "any real body must have extension in four directions"
+    # Chunk text has a line break mid-phrase, as in Project Gutenberg plain-text files
+    chunk = "any\nreal body must have extension in four directions: it must have"
+    samples = [_sample("q1", hint, [chunk])]
+    assert compute_hit_rate_5(samples) == pytest.approx(1.0)
+
+
 # ---------------------------------------------------------------------------
 # MRR tests
 # ---------------------------------------------------------------------------

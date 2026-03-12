@@ -130,18 +130,20 @@ def test_search_endpoint_422_empty_q(client):
 
 def test_fts_sync_on_update(client):
     """Create note, update content, old term misses, new term hits."""
-    create = client.post("/notes", json={"content": "original content phrase", "tags": []})
+    unique_old = "alpha beta gamma delta original"
+    unique_new = "epsilon zeta eta theta updated"
+    create = client.post("/notes", json={"content": unique_old, "tags": []})
     assert create.status_code == 201
     note_id = create.json()["id"]
 
-    client.patch(f"/notes/{note_id}", json={"content": "updated text phrase"})
+    client.patch(f"/notes/{note_id}", json={"content": unique_new})
 
-    hit = client.get("/notes/search", params={"q": "updated text"})
+    hit = client.get("/notes/search", params={"q": "epsilon zeta"})
     assert hit.status_code == 200
     hit_ids = [r["note_id"] for r in hit.json()["results"]]
     assert note_id in hit_ids
 
-    miss = client.get("/notes/search", params={"q": "original content"})
+    miss = client.get("/notes/search", params={"q": "alpha beta"})
     assert miss.status_code == 200
     miss_ids = [r["note_id"] for r in miss.json()["results"]]
     assert note_id not in miss_ids

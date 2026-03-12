@@ -17,6 +17,7 @@ evals/golden/manifest.json.  Re-runs skip ingestion.
 
 import argparse
 import json
+import re
 import sys
 import time
 from datetime import UTC, datetime
@@ -204,18 +205,30 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
         return {}
 
 
+def _norm(s: str) -> str:
+    """Collapse all whitespace runs to a single space for robust substring matching.
+
+    Project Gutenberg plain-text files wrap lines at ~70 chars, so a passage
+    that reads "any real body" in the golden hint may appear as "any\nreal body"
+    inside a stored chunk.  Normalising before comparison eliminates these
+    false misses.
+    """
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
 def compute_hit_rate_5(samples: list[dict]) -> float:
     """HR@5: fraction of questions where context_hint substring is in top-5 retrieved chunks."""
     if not samples:
         return 0.0
     hits = 0
     for s in samples:
-        context_hint = s.get("context_hint", "").lower().strip()
+        context_hint = s.get("context_hint", "").strip()
         if not context_hint:
             # Fall back to ground truth prefix if no context_hint
-            context_hint = s.get("ground_truths", [""])[0].lower()[:50]
+            context_hint = s.get("ground_truths", [""])[0][:50]
+        hint_norm = _norm(context_hint)[:80]
         chunks = s.get("contexts", [])[:5]
-        if any(context_hint[:80] in ctx.lower() for ctx in chunks):
+        if any(hint_norm in _norm(ctx) for ctx in chunks):
             hits += 1
     return hits / len(samples)
 
@@ -226,13 +239,14 @@ def compute_mrr(samples: list[dict]) -> float:
         return 0.0
     reciprocal_ranks = []
     for s in samples:
-        context_hint = s.get("context_hint", "").lower().strip()
+        context_hint = s.get("context_hint", "").strip()
         if not context_hint:
-            context_hint = s.get("ground_truths", [""])[0].lower()[:50]
+            context_hint = s.get("ground_truths", [""])[0][:50]
+        hint_norm = _norm(context_hint)[:80]
         chunks = s.get("contexts", [])
         rank = None
         for i, ctx in enumerate(chunks, start=1):
-            if context_hint[:80] in ctx.lower():
+            if hint_norm in _norm(ctx):
                 rank = i
                 break
         reciprocal_ranks.append(1.0 / rank if rank else 0.0)

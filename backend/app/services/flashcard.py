@@ -12,7 +12,7 @@ import litellm
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, FlashcardModel, NoteModel, SectionModel
+from app.models import ChunkModel, DocumentModel, FlashcardModel, NoteModel, SectionModel
 from app.services.llm import get_llm_service
 from app.telemetry import trace_chain
 
@@ -20,15 +20,19 @@ logger = logging.getLogger(__name__)
 
 FLASHCARD_SYSTEM = (
     "You are a learning assistant creating flashcards for active recall. "
-    "Generate questions that test understanding of the passage. "
+    "Generate questions that test understanding of the content. "
     "Prefer questions that: (1) ask the learner to explain a concept in their own words"
     " (comprehension), "
     "(2) apply a concept to a new situation (application), "
     "(3) distinguish between similar concepts (analysis), "
     "or (4) evaluate a claim or argument (evaluation). "
     "AVOID: trivia questions about exact wording, hypothetical questions not grounded"
-    " in the passage, "
+    " in the content, "
     "questions whose answer is not in the text, yes/no questions. "
+    "CRITICAL — questions must be fully self-contained. "
+    "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
+    "'in this book', 'in this document', or any similar reference to the source material. "
+    "A flashcard question must make complete sense on its own without seeing the original text. "
     "CRITICAL — question framing must match the answer exactly: "
     "if the answer describes a state, mood, behaviour, or activity, ask about that"
     " state/mood/behaviour/activity. "
@@ -42,7 +46,9 @@ FLASHCARD_SYSTEM = (
 )
 
 FLASHCARD_USER_TMPL = (
-    "Generate {count} flashcard pairs from the text below.\n"
+    "Generate {count} {difficulty}-level flashcard pairs from the text below.\n"
+    "Difficulty guidelines: {difficulty_guidelines}\n"
+    "{extra_instructions}"
     "Each card must be answerable from the provided text only.\n"
     'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
     "The \"answer\" field may use Markdown (bold, lists) for clarity.\n\n"
@@ -50,8 +56,36 @@ FLASHCARD_USER_TMPL = (
     "JSON array:"
 )
 
+_DIFFICULTY_GUIDELINES = {
+    "easy": (
+        "Focus on basic recall, key characters, main plot points, and obvious facts. "
+        "Questions should be straightforward."
+    ),
+    "medium": (
+        "Focus on comprehension, connecting ideas, identifying themes, and explaining 'why'. "
+        "Questions should require some thought and understanding."
+    ),
+    "hard": (
+        "Focus on analysis, evaluation, complex relationships, subtle themes, and application "
+        "to new contexts. Questions should be challenging and require deep insight."
+    ),
+}
+
+_BOOK_CONTENT_GUIDELINE = (
+    "IMPORTANT: Focus exclusively on the primary narrative or subject matter "
+    "(story, characters, plot, themes, or core arguments). "
+    "STRICTLY AVOID generating any flashcard about: "
+    "Project Gutenberg, publication details, copyright notices, licensing, "
+    "translators, editors, publishers, prefaces, forewords, introductions, "
+    "the purpose of publishing the work, or any other front/back matter. "
+    "These are irrelevant to learning the content and must be completely ignored. "
+    "If the provided text starts with publisher boilerplate or editorial notes, "
+    "skip past them entirely and generate questions only from the actual narrative or subject.\n"
+)
+
+
 # Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)
-_CHUNK_CHAR_LIMIT = 5_000
+_CHUNK_CHAR_LIMIT = 10_000
 
 
 async def _fetch_chunks(
@@ -59,8 +93,13 @@ async def _fetch_chunks(
     scope: Literal["full", "section"],
     section_heading: str | None,
     session: AsyncSession,
+    content_type: str = "unknown",
 ) -> list[ChunkModel]:
-    """Return ordered chunks for the document, filtered by section when scope='section'."""
+    """Return ordered chunks for the document, filtered by section when scope='section'.
+
+    If scope='full' and content_type='book', it tries to skip preface/introduction sections
+    to avoid metadata-heavy flashcards.
+    """
     if scope == "section" and section_heading:
         sec_result = await session.execute(
             select(SectionModel)
@@ -78,30 +117,114 @@ async def _fetch_chunks(
             )
             return list(result.scalars().all())
 
+    # Full scope
+    if content_type == "book":
+        # Identify sections to skip (preface, intro, etc.)
+        skip_terms = [
+            "preface", "introduction", "prologue", "foreword",
+            "about the author", "copyright", "translator",
+            "table of contents", "appendix", "index", "bibliography"
+        ]
+        sections_result = await session.execute(
+            select(SectionModel)
+            .where(SectionModel.document_id == document_id)
+            .order_by(SectionModel.section_order)
+        )
+        sections = list(sections_result.scalars().all())
+
+        if sections:
+            valid_section_ids = [
+                s.id for s in sections
+                if not any(term in s.heading.lower() for term in skip_terms)
+            ]
+            # If we filtered everything out, fall back to all sections
+            if not valid_section_ids:
+                valid_section_ids = [s.id for s in sections]
+
+            result = await session.execute(
+                select(ChunkModel)
+                .where(ChunkModel.document_id == document_id)
+                .where(ChunkModel.section_id.in_(valid_section_ids))
+                .order_by(ChunkModel.chunk_index)
+            )
+            return list(result.scalars().all())
+
     result = await session.execute(
         select(ChunkModel)
         .where(ChunkModel.document_id == document_id)
         .order_by(ChunkModel.chunk_index)
     )
-    return list(result.scalars().all())
+    all_chunks = list(result.scalars().all())
+
+    # If it's a book and we don't have sections (or skip logic didn't trigger),
+    # skip the first 5% which is usually front matter/preface.
+    if content_type == "book" and all_chunks:
+        # Check if first chunk has a section heading that was missed
+        # If no sections at all, skip first 5%
+        sections_count_result = await session.execute(
+            select(text("COUNT(*)"))
+            .select_from(SectionModel)
+            .where(SectionModel.document_id == document_id)
+        )
+        count = sections_count_result.scalar()
+        if count == 0:
+            skip_count = max(1, len(all_chunks) // 20)
+            return all_chunks[skip_count:]
+
+    return all_chunks
 
 
 def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
-    """Build combined text (up to char limit) from chunks.
+    """Build combined text from chunks.
 
+    If the total text exceeds _CHUNK_CHAR_LIMIT, it samples chunks from the
+    beginning, middle, and end to provide better coverage of the entire document.
     Returns (combined_text, first_chunk_id).
     """
-    parts: list[str] = []
-    total = 0
-    for chunk in chunks:
-        if total + len(chunk.text) > _CHUNK_CHAR_LIMIT:
-            remaining = _CHUNK_CHAR_LIMIT - total
-            if remaining > 200:  # noqa: PLR2004
-                parts.append(chunk.text[:remaining])
+    if not chunks:
+        return "", ""
+
+    total_chars = sum(len(c.text) for c in chunks)
+    if total_chars <= _CHUNK_CHAR_LIMIT:
+        return "\n\n".join(c.text for c in chunks), chunks[0].id
+
+    # Sampling strategy:
+    # 1. Take first 25% of the limit from the beginning
+    # 2. Take 50% from the middle
+    # 3. Take 25% from the end
+    target_len = _CHUNK_CHAR_LIMIT
+    segment_size = target_len // 4
+
+    def get_segment(chunk_list: list[ChunkModel], max_chars: int) -> str:
+        parts: list[str] = []
+        current = 0
+        for c in chunk_list:
+            if current + len(c.text) > max_chars:
+                break
+            parts.append(c.text)
+            current += len(c.text)
+        return "\n\n".join(parts)
+
+    # Beginning
+    beginning = get_segment(chunks, segment_size)
+
+    # Middle
+    mid_idx = len(chunks) // 2
+    middle = get_segment(chunks[mid_idx:], segment_size * 2)
+
+    # End
+    # For the end, we iterate backwards to get a segment, then reverse it
+    end_parts: list[str] = []
+    end_current = 0
+    for c in reversed(chunks):
+        if end_current + len(c.text) > segment_size:
             break
-        parts.append(chunk.text)
-        total += len(chunk.text)
-    return "\n\n".join(parts), chunks[0].id
+        end_parts.append(c.text)
+        end_current += len(c.text)
+    end = "\n\n".join(reversed(end_parts))
+
+    combined = f"{beginning}\n\n[...]\n\n{middle}\n\n[...]\n\n{end}"
+    return combined, chunks[0].id
 
 
 def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
@@ -186,6 +309,7 @@ class FlashcardService:
         section_heading: str | None,
         count: int,
         session: AsyncSession,
+        difficulty: Literal["easy", "medium", "hard"] = "medium",
     ) -> list[FlashcardModel]:
         """Generate flashcards from document chunks using LLM.
 
@@ -193,7 +317,14 @@ class FlashcardService:
         parses JSON output, and persists cards in SQLite with fsrs_state='new'.
         """
         llm = get_llm_service()
-        chunks = await _fetch_chunks(document_id, scope, section_heading, session)
+
+        doc_result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = doc_result.scalar_one_or_none()
+        content_type = doc.content_type if doc else "unknown"
+
+        chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
         if not chunks:
             return []
 
@@ -201,15 +332,26 @@ class FlashcardService:
         if not combined_text:
             return []
 
-        prompt = FLASHCARD_USER_TMPL.format(count=count, text=combined_text)
+        extra_instructions = ""
+        if content_type == "book":
+            extra_instructions = _BOOK_CONTENT_GUIDELINE
+
+        prompt = FLASHCARD_USER_TMPL.format(
+            count=count,
+            difficulty=difficulty,
+            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+            extra_instructions=extra_instructions,
+            text=combined_text,
+        )
 
         with trace_chain(
             "flashcard.generate",
-            input_value=f"doc={document_id} scope={scope} count={count}",
+            input_value=f"doc={document_id} scope={scope} count={count} difficulty={difficulty}",
         ) as span:
             span.set_attribute("flashcard.document_id", document_id)
             span.set_attribute("flashcard.scope", scope)
             span.set_attribute("flashcard.requested_count", count)
+            span.set_attribute("flashcard.difficulty", difficulty)
             if section_heading:
                 span.set_attribute("flashcard.section_heading", section_heading)
 
@@ -234,6 +376,7 @@ class FlashcardService:
                 question=question,
                 answer=answer,
                 source_excerpt=source_excerpt,
+                difficulty=difficulty,
                 fsrs_state="new",
                 fsrs_stability=0.0,
                 fsrs_difficulty=0.0,
@@ -259,6 +402,7 @@ class FlashcardService:
         note_ids: list[str] | None,
         count: int,
         session: AsyncSession,
+        difficulty: Literal["easy", "medium", "hard"] = "medium",
     ) -> list[FlashcardModel]:
         """Generate flashcards from user notes scoped by tag or explicit note IDs.
 
@@ -293,14 +437,21 @@ class FlashcardService:
         if not combined_text:
             return []
 
-        prompt = FLASHCARD_USER_TMPL.format(count=count, text=combined_text)
+        prompt = FLASHCARD_USER_TMPL.format(
+            count=count,
+            difficulty=difficulty,
+            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+            extra_instructions="",
+            text=combined_text,
+        )
 
         with trace_chain(
             "flashcard.generate_from_notes",
-            input_value=f"tag={tag} note_ids={note_ids} count={count}",
+            input_value=f"tag={tag} note_ids={note_ids} count={count} difficulty={difficulty}",
         ) as span:
             span.set_attribute("flashcard.source", "note")
             span.set_attribute("flashcard.requested_count", count)
+            span.set_attribute("flashcard.difficulty", difficulty)
 
             raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
             cards_data = _parse_llm_response(raw, "notes")
@@ -324,6 +475,7 @@ class FlashcardService:
                 question=question,
                 answer=answer,
                 source_excerpt=source_excerpt,
+                difficulty=difficulty,
                 fsrs_state="new",
                 fsrs_stability=0.0,
                 fsrs_difficulty=0.0,

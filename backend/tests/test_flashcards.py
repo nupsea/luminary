@@ -293,7 +293,8 @@ async def test_service_prompt_includes_book_guidelines(test_db):
 
     assert mock_llm.captured_prompts, "LLM generate should have been called"
     assert "story" in mock_llm.captured_prompts[0].lower()
-    assert "gutenberg" in mock_llm.captured_prompts[0].lower()  # _BOOK_CONTENT_GUIDELINE names Project Gutenberg
+    # _BOOK_CONTENT_GUIDELINE names Project Gutenberg
+    assert "gutenberg" in mock_llm.captured_prompts[0].lower()
     assert "avoid" in mock_llm.captured_prompts[0].lower()
 
 

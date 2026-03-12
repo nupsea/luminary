@@ -44,6 +44,7 @@ class FlashcardGenerateRequest(BaseModel):
     scope: Literal["full", "section"] = "full"
     section_heading: str | None = None
     count: int = 10
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
 
 
 class FromGapsRequest(BaseModel):
@@ -73,6 +74,7 @@ class FlashcardResponse(BaseModel):
     question: str
     answer: str
     source_excerpt: str
+    difficulty: str = "medium"
     is_user_edited: bool
     fsrs_state: str
     fsrs_stability: float
@@ -99,6 +101,7 @@ def _to_response(card: FlashcardModel) -> FlashcardResponse:
         question=card.question,
         answer=card.answer,
         source_excerpt=card.source_excerpt,
+        difficulty=card.difficulty,
         is_user_edited=card.is_user_edited,
         fsrs_state=card.fsrs_state,
         fsrs_stability=card.fsrs_stability,
@@ -128,6 +131,7 @@ async def generate_flashcards(
             scope=req.scope,
             section_heading=req.section_heading,
             count=req.count,
+            difficulty=req.difficulty,
             session=session,
         )
     except (
@@ -271,6 +275,21 @@ async def delete_flashcard(
     await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
     await session.commit()
     logger.info("Deleted flashcard", extra={"card_id": card_id})
+
+
+@router.delete("/document/{document_id}", status_code=204)
+async def delete_all_document_flashcards(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete all flashcards for a specific document."""
+    await session.execute(
+        delete(FlashcardModel)
+        .where(FlashcardModel.id.isnot(None))
+        .where(FlashcardModel.document_id == document_id)
+    )
+    await session.commit()
+    logger.info("Deleted all flashcards for document", extra={"document_id": document_id})
 
 
 @router.post("/{card_id}/review", response_model=FlashcardResponse)

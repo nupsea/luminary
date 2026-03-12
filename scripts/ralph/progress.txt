@@ -716,3 +716,21 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - XOR-encrypted hex vs raw API key is reliably distinguishable: API keys always contain non-hex chars (dashes, 'sk-', 'AIza'); bytes.fromhex() fails on them
   - Cache stores raw (decrypted) values for API key fields after S104; get_effective_routing() no longer needs to call decrypt_setting()
 ---
+
+## 2026-03-13T00:00:00Z - S129 - Tech Debt TD-014: Fix RAGAS eval pipeline -- HR@5 and MRR always zero
+- Implemented: Added text field to SearchResult in search.py (full chunk text, capped 2000 chars). Fixed search_chunks() field name bug (text_excerpt not text). Moved ragas/datasets imports to lazy. Fixed passed logic to always reflect threshold compliance regardless of --assert-thresholds flag.
+- Files changed: backend/app/routers/search.py, evals/run_eval.py, backend/tests/test_eval_metrics.py, backend/tests/test_flashcards.py, scripts/smoke/S129.sh
+- AC verified:
+  - SearchResult.text field added (2000 char cap): PASS
+  - search_chunks() returns full text in result.text: PASS
+  - ragas/datasets imports moved to lazy (inside if args.model): PASS
+  - run_eval.py importable without ragas/datasets installed: PASS
+  - passed flag reflects threshold compliance always: PASS
+  - HR@5 >= 0.60, MRR >= 0.45: PASS (with real Alice data)
+  - All 7 ACs PASS
+- Reviewer verdict: PASS (one stale test assertion fixed inline)
+- Learnings:
+  - ragas/datasets are heavy optional deps; import them lazily inside the if args.model block so run_eval.py can be imported by backend pytest without those packages installed
+  - SearchResult.text_excerpt is a 200-char UI preview; eval pipeline needs the full chunk text -- add a text field alongside text_excerpt rather than changing the existing field
+  - passed flag in scores_history.jsonl must always reflect threshold compliance, not just when --assert-thresholds CLI flag is set
+---

@@ -8,6 +8,7 @@ import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -133,6 +134,7 @@ async def _fts_delete_rows(note_id: str, session: AsyncSession) -> None:
             {"nid": note_id},
         )
     ).fetchall()
+    logger.debug("_fts_delete_rows note_id=%s found %d rows", note_id, len(rows))
     for (rowid,) in rows:
         await session.execute(
             text("DELETE FROM notes_fts WHERE rowid = :rowid"),
@@ -353,6 +355,7 @@ class NoteFlashcardGenerateRequest(BaseModel):
     tag: str | None = None
     note_ids: list[str] | None = None
     count: int = 5
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
 
 
 class NoteFlashcardItem(BaseModel):
@@ -380,6 +383,7 @@ async def generate_note_flashcards(
             tag=req.tag,
             note_ids=req.note_ids,
             count=req.count,
+            difficulty=req.difficulty,
             session=session,
         )
     except ValueError as exc:
