@@ -152,3 +152,29 @@ def test_factual_question_not_relational():
         assert intent == "relational", (
             f"Expected relational for {q!r}, got {intent!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# S95: test_suggestion_pills_route_correctly
+# Verifies that each suggestion pill label routes to the correct intent via
+# classify_intent_heuristic with confidence >= 0.9.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("pill_text", "expected_intent"),
+    [
+        ("Find gaps in my notes", "notes_gap"),
+        ("Summarize this for me", "summary"),
+        ("Quiz me on the key concepts", "socratic"),
+    ],
+)
+def test_suggestion_pills_route_correctly(pill_text: str, expected_intent: str) -> None:
+    """Each suggestion pill label classifies to the correct intent with confidence >= 0.9."""
+    intent, confidence = classify_intent_heuristic(pill_text)
+    assert intent == expected_intent, (
+        f"Pill {pill_text!r}: expected intent={expected_intent!r}, got {intent!r}"
+    )
+    assert confidence >= 0.9, (
+        f"Pill {pill_text!r}: expected confidence >= 0.9, got {confidence}"
+    )
