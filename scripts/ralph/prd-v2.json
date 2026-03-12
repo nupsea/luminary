@@ -895,7 +895,7 @@
         "If document has no graph entities, chip row is omitted gracefully",
         "npx tsc --noEmit exits 0; uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S110",
