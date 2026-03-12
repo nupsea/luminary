@@ -7,8 +7,51 @@
  */
 
 import { AnimatePresence, motion } from "framer-motion"
-import { useEffect, useState } from "react"
-import { Loader2, Check, AlertTriangle, X as XIcon } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Loader2, Check, AlertTriangle, X as XIcon, Mic, MicOff } from "lucide-react"
+
+// ---------------------------------------------------------------------------
+// Web Speech API types (not included in all TS lib targets)
+// ---------------------------------------------------------------------------
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList
+  resultIndex: number
+}
+interface SpeechRecognitionResultList {
+  readonly length: number
+  item(index: number): SpeechRecognitionResult
+  [index: number]: SpeechRecognitionResult
+}
+interface SpeechRecognitionResult {
+  readonly isFinal: boolean
+  readonly length: number
+  item(index: number): SpeechRecognitionAlternative
+  [index: number]: SpeechRecognitionAlternative
+}
+interface SpeechRecognitionAlternative {
+  readonly transcript: string
+  readonly confidence: number
+}
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognitionInstance
+}
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((e: SpeechRecognitionEvent) => void) | null
+  onend: (() => void) | null
+  onerror: ((e: Event) => void) | null
+  start(): void
+  stop(): void
+}
+
+// Detect browser SpeechRecognition support (Chrome/Edge ship webkitSpeechRecognition)
+const SpeechRecognitionAPI: SpeechRecognitionConstructor | null =
+  (typeof window !== "undefined" &&
+    ((window as unknown as { SpeechRecognition?: SpeechRecognitionConstructor }).SpeechRecognition ??
+      (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionConstructor }).webkitSpeechRecognition)) ||
+  null
 
 const API_BASE = "http://localhost:8000"
 
@@ -98,6 +141,71 @@ function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
   const [explanation, setExplanation] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [result, setResult] = useState<TeachbackResult | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+  // Tracks whether the current stop was user-initiated (manual) vs natural end.
+  // The Web Speech API always fires onend after stop(); without this guard,
+  // a manual stop followed by the user typing before onend fires would have
+  // onend overwrite those edits with the stale finalTranscript.
+  const manualStopRef = useRef(false)
+
+  // Clean up recognition on unmount
+  useEffect(() => {
+    return () => {
+      manualStopRef.current = true
+      recognitionRef.current?.stop()
+    }
+  }, [])
+
+  function toggleRecording() {
+    if (isRecording) {
+      manualStopRef.current = true
+      recognitionRef.current?.stop()
+      setIsRecording(false)
+      return
+    }
+    if (!SpeechRecognitionAPI) return
+    const recognition = new SpeechRecognitionAPI()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = "en-US"
+
+    manualStopRef.current = false
+    let finalTranscript = ""
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      let interim = ""
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const segment = e.results[i][0].transcript
+        if (e.results[i].isFinal) {
+          finalTranscript += segment
+        } else {
+          interim += segment
+        }
+      }
+      // Show final + current interim in textarea in real-time
+      setExplanation(finalTranscript + interim)
+    }
+
+    recognition.onend = () => {
+      // On natural end: commit final transcript (drops trailing interim).
+      // On manual stop: skip setExplanation so user edits made after clicking
+      // stop are not overwritten by the stale finalTranscript closure value.
+      if (!manualStopRef.current) {
+        setExplanation(finalTranscript)
+      }
+      setIsRecording(false)
+      recognitionRef.current = null
+    }
+
+    recognition.onerror = () => {
+      setIsRecording(false)
+      recognitionRef.current = null
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setIsRecording(true)
+  }
 
   async function handleSubmit() {
     if (!explanation.trim()) return
@@ -176,13 +284,33 @@ function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
     <div className="flex w-full max-w-2xl flex-col gap-3">
       <p className="text-base font-medium text-foreground">{card.question}</p>
       <p className="text-xs text-muted-foreground">Explain the answer in your own words:</p>
-      <textarea
-        value={explanation}
-        onChange={(e) => setExplanation(e.target.value)}
-        placeholder="Type your explanation here..."
-        className="h-32 resize-none rounded border border-border bg-background p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        autoFocus
-      />
+      <div className="relative">
+        <textarea
+          value={explanation}
+          onChange={(e) => setExplanation(e.target.value)}
+          placeholder="Type your explanation here..."
+          className="h-32 w-full resize-none rounded border border-border bg-background p-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          autoFocus
+        />
+        {/* Microphone button — top-right corner of textarea */}
+        <button
+          type="button"
+          onClick={toggleRecording}
+          disabled={!SpeechRecognitionAPI}
+          title={SpeechRecognitionAPI ? (isRecording ? "Stop recording" : "Start voice input") : "Voice input not supported in this browser"}
+          aria-label={SpeechRecognitionAPI ? (isRecording ? "Stop recording" : "Start voice input") : "Voice input not supported in this browser"}
+          className="absolute right-2 top-2 rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isRecording ? (
+            <MicOff size={16} className="animate-pulse text-destructive" />
+          ) : (
+            <Mic size={16} />
+          )}
+        </button>
+      </div>
+      {isRecording && (
+        <p className="text-xs text-destructive">Recording... click the mic again to stop.</p>
+      )}
       <button
         onClick={() => void handleSubmit()}
         disabled={isSubmitting || !explanation.trim()}

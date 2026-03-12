@@ -205,7 +205,7 @@ def test_patch_note_updates_section_id(client):
 
 
 def test_patch_note_null_section_id_does_not_clear(client):
-    """PATCH /notes/{id} with section_id=null does NOT clear existing section_id (PATCH semantics)."""
+    """PATCH /notes/{id} with section_id=null does NOT clear it (PATCH semantics)."""
     create_resp = client.post(
         "/notes",
         json={"content": "Has section", "section_id": "sec-original"},
