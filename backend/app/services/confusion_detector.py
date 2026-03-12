@@ -30,10 +30,13 @@ _APP_STOPWORDS: frozenset[str] = frozenset(
     {
         # UI suggestion verbs (appear in Chat.tsx EXAMPLE_QUESTIONS / pill labels)
         "summarize", "summary", "quiz", "compare", "list", "review", "help",
+        "plan", "find",
         # Generic learning vocabulary
         "main", "key", "themes", "theme", "findings", "finding",
-        "conclusions", "conclusion", "ideas", "idea", "concepts", "concept",
+        "conclusions", "conclusion", "drawn",  # "conclusions are drawn" pattern
+        "ideas", "idea", "concepts", "concept",
         "points", "point", "topics", "topic",
+        "session",  # "plan my session" pill label
         # Document-structural words
         "book", "chapter", "text", "section", "passage", "document", "doc",
         "content", "read", "reading", "notes", "note", "gaps", "gap",

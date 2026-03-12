@@ -155,3 +155,46 @@ def test_confusion_api_returns_list(client):
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
+
+
+# ---------------------------------------------------------------------------
+# (f) UI surface inputs must not trigger confusion signals
+# ---------------------------------------------------------------------------
+
+# All strings from Chat.tsx EXAMPLE_QUESTIONS and all non-prefixed strings
+# from getContextualSuggestions() (strip the __plan__ prefix from plan pill).
+# If any token in these questions is not in _STOPWORDS, a user who clicks
+# the same suggestion pill 3 times would incorrectly see a confusion banner.
+_UI_SURFACE_INPUTS = [
+    # Chat.tsx EXAMPLE_QUESTIONS
+    "What are the main themes?",
+    "Summarize the key findings.",
+    "What conclusions are drawn?",
+    # getContextualSuggestions() non-prefixed pill labels
+    "Find gaps in my notes",
+    "Summarize this for me",
+    "Quiz me on the key concepts",
+    "Plan my session",  # "__plan__Plan my session" stripped of prefix
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", _UI_SURFACE_INPUTS)
+async def test_ui_surface_inputs_produce_no_signal(db_session, question):
+    """Sending a UI suggestion string threshold=3 times must not produce a confusion signal.
+
+    All tokens in these strings must fall in _STOPWORDS so users who click
+    the same suggestion pill 3 times never see a spurious confusion banner.
+    """
+    threshold = 3
+    for _ in range(threshold):
+        db_session.add(_qa_row(question))
+    await db_session.commit()
+
+    svc = ConfusionDetectorService()
+    signals = await svc.detect(db_session, threshold=threshold)
+
+    assert signals == [], (
+        f"UI input {question!r} produced unexpected confusion signals: {signals!r}. "
+        "Add its non-stopword tokens to _APP_STOPWORDS in confusion_detector.py."
+    )

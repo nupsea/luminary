@@ -618,3 +618,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - All card nodes (socratic, teach_back, notes_gap) should catch both ServiceUnavailableError AND APIConnectionError for consistent user messaging
 ---
+
+## 2026-03-12T00:00:00Z - S100 - Confusion Detection Nudge: repeated questions across sessions surface a flashcard suggestion
+- Implemented: ConfusionDetectorService, GET /chat/confusion-signals, ConfusionBanner in Chat.tsx, 12 tests. Added "drawn", "plan", "find", "session" to _APP_STOPWORDS and added test_ui_surface_inputs_produce_no_signal parametrized test.
+- Files changed: backend/app/services/confusion_detector.py, backend/tests/test_confusion_detector.py
+- AC verified:
+  - ConfusionDetectorService.detect queries qa_history, tokenizes, counts: PASS
+  - _STOPWORDS = ENGLISH_STOP_WORDS | _APP_STOPWORDS with separate documentation: PASS
+  - Returns top 3 signals ordered by count desc; [] when < threshold: PASS
+  - GET /chat/confusion-signals HTTP 200 list[ConfusionSignalResponse]: PASS
+  - POST /flashcards/from-gaps S97 used as-is: PASS
+  - Chat.tsx confusion query staleTime 5min; banner count >= 3: PASS
+  - ConfusionBanner amber styling, concept+count, Add+dismiss: PASS
+  - Dismiss component-state Set, no localStorage: PASS
+  - [Add to Flashcards] Loader2/auto-dismiss/503 inline: PASS
+  - Query loading/error: no banner (silent fail): PASS
+  - test_ui_surface_inputs_produce_no_signal 7 parametrized cases: PASS
+  - 12 tests pass: PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - smoke/S100.sh exists: PASS
+- Reviewer verdict: PASS (no Critical, High, or Low items)
+- Learnings:
+  - Per invariant #21, every string visible in UI that feeds into a classifier/filter (EXAMPLE_QUESTIONS, suggestion pills) must appear as a parametrized test case
+  - UI-surface words like "drawn" (from "conclusions are drawn"), "plan", "session" are app-specific noise that sklearn's ENGLISH_STOP_WORDS doesn't cover; they belong in _APP_STOPWORDS
+---
