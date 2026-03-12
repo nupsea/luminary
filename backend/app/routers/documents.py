@@ -21,6 +21,7 @@ from app.models import (
     MisconceptionModel,
     NoteModel,
     QAHistoryModel,
+    ReadingProgressModel,
     SectionModel,
     StudySessionModel,
     SummaryModel,
@@ -94,6 +95,7 @@ class DocumentListItem(BaseModel):
     learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
     chapter_count: int | None
     chunk_count: int
+    reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
 
 
 class DocumentListResponse(BaseModel):
@@ -147,6 +149,7 @@ class DocumentDetail(BaseModel):
     created_at: datetime
     last_accessed_at: datetime
     sections: list[SectionItem]
+    reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +249,18 @@ async def list_documents(
             .correlate(DocumentModel)
             .scalar_subquery()
         )
+        section_count_sq = (
+            select(func.count())
+            .where(SectionModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
+        read_section_count_sq = (
+            select(func.count())
+            .where(ReadingProgressModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
 
         stmt = select(
             DocumentModel,
@@ -254,6 +269,8 @@ async def list_documents(
             summary_count_sq.label("summary_count"),
             study_session_count_sq.label("study_session_count"),
             chunk_count_sq.label("chunk_count"),
+            section_count_sq.label("section_count"),
+            read_section_count_sq.label("read_section_count"),
         )
 
         result = await session.execute(stmt)
@@ -268,6 +285,9 @@ async def list_documents(
         summary_count = row[3] or 0
         study_session_count = row[4] or 0
         chunk_count = row[5] or 0
+        section_count = row[6] or 0
+        read_section_count = row[7] or 0
+        reading_progress_pct = (read_section_count / section_count) if section_count > 0 else 0.0
         all_items.append(
             DocumentListItem(
                 id=doc.id,
@@ -287,6 +307,7 @@ async def list_documents(
                 ),
                 chapter_count=doc.chapter_count,
                 chunk_count=chunk_count,
+                reading_progress_pct=reading_progress_pct,
             )
         )
 
@@ -483,6 +504,14 @@ async def get_document(document_id: str):
         )
         sections = sections_result.scalars().all()
 
+        read_count_result = await session.execute(
+            select(func.count()).where(ReadingProgressModel.document_id == document_id)
+        )
+        read_count = read_count_result.scalar_one() or 0
+
+    section_count = len(sections)
+    reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
+
     return DocumentDetail(
         id=doc.id,
         title=doc.title,
@@ -506,6 +535,7 @@ async def get_document(document_id: str):
             )
             for s in sections
         ],
+        reading_progress_pct=reading_progress_pct,
     )
 
 
@@ -533,6 +563,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 MisconceptionModel,
                 NoteModel,
                 QAHistoryModel,
+                ReadingProgressModel,
             ):
                 await session.execute(
                     delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
@@ -623,6 +654,7 @@ async def delete_document(document_id: str):
             MisconceptionModel,
             NoteModel,
             QAHistoryModel,
+            ReadingProgressModel,
         ):
             await session.execute(
                 delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]

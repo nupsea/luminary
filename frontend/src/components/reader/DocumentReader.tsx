@@ -425,6 +425,75 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Reading progress tracking (S110)
+// ---------------------------------------------------------------------------
+
+async function postReadingProgress(documentId: string, sectionId: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/reading/progress`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_id: documentId, section_id: sectionId }),
+    })
+  } catch {
+    // Best-effort: network errors must never interrupt reading
+  }
+}
+
+function useReadingProgress(documentId: string, sectionCount: number) {
+  const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Track whether any progress was posted so we can invalidate the library
+  // query on unmount and keep the progress bar in sync within the same session.
+  const progressPosted = useRef(false)
+  const qc = useQueryClient()
+
+  useEffect(() => {
+    if (sectionCount === 0) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const sectionId = (entry.target as HTMLElement).dataset["sectionId"]
+          if (!sectionId) continue
+
+          if (entry.isIntersecting) {
+            if (!timers.current.has(sectionId)) {
+              const t = setTimeout(() => {
+                timers.current.delete(sectionId)
+                progressPosted.current = true
+                void postReadingProgress(documentId, sectionId)
+              }, 3000)
+              timers.current.set(sectionId, t)
+            }
+          } else {
+            const t = timers.current.get(sectionId)
+            if (t !== undefined) {
+              clearTimeout(t)
+              timers.current.delete(sectionId)
+            }
+          }
+        }
+      },
+      { threshold: 0.5 },
+    )
+
+    const elements = document.querySelectorAll("[data-section-id]")
+    for (const el of elements) observer.observe(el)
+
+    return () => {
+      observer.disconnect()
+      for (const t of timers.current.values()) clearTimeout(t)
+      timers.current.clear()
+      // Invalidate the library query so progress bars reflect this session.
+      if (progressPosted.current) {
+        void qc.invalidateQueries({ queryKey: ["documents"] })
+        progressPosted.current = false
+      }
+    }
+  }, [documentId, sectionCount, qc])
+}
+
+// ---------------------------------------------------------------------------
 // DocumentReader
 // ---------------------------------------------------------------------------
 
@@ -461,6 +530,9 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
     () => new Set((docNotes ?? []).map((n) => n.section_id).filter((id): id is string => id !== null && id !== undefined)),
     [docNotes],
   )
+
+  // Track reading progress via IntersectionObserver (3-second dwell per section)
+  useReadingProgress(documentId, doc?.sections.length ?? 0)
 
   function handleExplain(text: string, mode: ExplainMode) {
     setSheetText(text)
@@ -546,6 +618,7 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
                   return (
                     <li
                       key={section.id}
+                      data-section-id={section.id}
                       className="rounded-md border border-border p-3"
                     >
                       <div className="flex items-start gap-1">

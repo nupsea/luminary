@@ -20,6 +20,7 @@ export interface DocumentDetail {
   created_at: string
   last_accessed_at: string
   sections: SectionItem[]
+  reading_progress_pct: number  // 0.0 to 1.0
 }
 
 export type SummaryMode = "one_sentence" | "executive" | "detailed" | "conversation"

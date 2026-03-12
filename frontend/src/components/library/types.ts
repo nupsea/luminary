@@ -18,6 +18,7 @@ export interface DocumentListItem {
   flashcard_count: number
   learning_status: LearningStatus
   chunk_count: number
+  reading_progress_pct: number  // 0.0 to 1.0
 }
 
 export interface DocumentListResponse {

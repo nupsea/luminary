@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 import { Check, Pencil, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -279,6 +280,13 @@ export function DocumentCard({
           )
         )}
       </div>
+
+      {/* Reading progress bar — shown when at least one section has been read */}
+      {doc.reading_progress_pct > 0 && (
+        <div className="mt-2">
+          <Progress value={doc.reading_progress_pct * 100} className="h-1" />
+        </div>
+      )}
 
       {/* Inline delete confirmation */}
       {confirmDelete && (

@@ -26,6 +26,7 @@ from app.routers.graph import router as graph_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
+from app.routers.reading import router as reading_router
 from app.routers.search import router as search_router
 from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
@@ -108,6 +109,7 @@ app.include_router(graph_router)
 app.include_router(monitoring_router)
 app.include_router(notes_router)
 app.include_router(qa_router)
+app.include_router(reading_router)
 app.include_router(search_router)
 app.include_router(sections_router)
 app.include_router(settings_router)
