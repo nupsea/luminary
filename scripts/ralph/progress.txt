@@ -668,3 +668,19 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - Panel action navigation in SPA must use React Router navigate() not window.location.href to preserve component state (active document, scope, chat history)
 ---
+
+## 2026-03-12T10:47:07Z - S102 - Tech Debt group 1: datetime.now(UTC), typed settings PATCH, FK pragma, raw file cleanup
+- Implemented: (1) Replaced all datetime.utcnow() with datetime.now(UTC) across models.py, routers/notes.py, routers/study.py, services/flashcard.py; (2) Added ConfigDict(extra="forbid") to LLMSettingsPatch so PATCH /settings/llm returns 422 on unknown fields; (3) Added SQLAlchemy connect event listener in database.py enabling PRAGMA foreign_keys=ON per connection; (4) Added _delete_raw_file() helper in documents.py called from both delete_document and bulk_delete_documents to clean up ~/.luminary/raw/{doc_id}.* on deletion
+- Files changed: backend/app/models.py, backend/app/routers/notes.py, backend/app/routers/study.py, backend/app/services/flashcard.py, backend/app/routers/settings.py, backend/app/database.py, backend/app/routers/documents.py, backend/tests/test_settings.py, scripts/smoke/S102.sh
+- AC verified:
+  - grep -r 'utcnow' backend/app/ returns no results: PASS
+  - PATCH /settings/llm returns 422 on unknown field names: PASS (test added)
+  - database.py registers connect event for PRAGMA foreign_keys=ON: PASS
+  - Document delete cleans up ~/.luminary/raw/{doc_id}.*: PASS
+  - All existing tests pass; ruff check exits 0: PASS
+- Reviewer verdict: PASS (production code correct; test coverage gaps fixed inline)
+- Learnings:
+  - For async SQLAlchemy + aiosqlite, attach connect events to engine.sync_engine not the AsyncEngine directly
+  - SQLAlchemy column defaults must be callables; datetime.now(UTC) needs lambda wrapper
+  - ruff UP017 prefers datetime.UTC alias over timezone.utc
+---
