@@ -1197,7 +1197,7 @@ async def teach_back_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except litellm.ServiceUnavailableError:
+    except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
         logger.warning("teach_back_node: Ollama unreachable")
         card = {
             "type": "teach_back_result",

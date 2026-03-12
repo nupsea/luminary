@@ -593,3 +593,28 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - Per invariant #21, every suggestion pill label must appear as a parametrized test case in the intent classifier tests
   - socratic_node offline handler needed both ServiceUnavailableError AND APIConnectionError, matching notes_gap_node pattern
 ---
+
+## 2026-03-12T00:00:00Z - S99 - Teach It Back Mode: user explains a concept, AI evaluates and surfaces misconceptions
+- Implemented: 'teach_back' intent, teach_back_node, TeachBackResultCard.tsx, 15 tests, smoke S99.sh
+- Files changed: backend/app/runtime/chat_graph.py (APIConnectionError added to offline handler)
+- AC verified:
+  - 'teach_back' in IntentType: PASS
+  - classify_intent_heuristic for 8 phrases: PASS (15 parametrized cases)
+  - No false positive 'explain this to me': PASS
+  - teach_back_node 5 chunks, LiteLLM, __card__ JSON: PASS
+  - Fenced code block JSON parsed: PASS
+  - Malformed JSON fallback card, no exception: PASS
+  - Ollama offline error card, no exception: PASS
+  - No SSE loop changes: PASS
+  - POST /flashcards/from-gaps used as-is from S97: PASS
+  - TeachBackResultCard: correct/misconceptions/gaps/encouragement: PASS
+  - Add Gaps button idle->loading->done->error; disabled when empty; 503 inline: PASS
+  - Loading skeleton while SSE in flight: PASS
+  - 15 tests pass: PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - smoke/S99.sh exists: PASS
+- Reviewer verdict: PASS (no Critical or High items; APIConnectionError Low item fixed proactively)
+- Learnings:
+  - All card nodes (socratic, teach_back, notes_gap) should catch both ServiceUnavailableError AND APIConnectionError for consistent user messaging
+---
