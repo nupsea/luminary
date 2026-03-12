@@ -522,3 +522,26 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - When stories are implemented out of order (S101 before S95), verify that the later story's ACs are still satisfied by the existing code; only add what's genuinely missing (the test here)
   - classify_intent_heuristic checks keywords via substring match on lowercased input; pill labels must contain the exact keyword substring to route correctly
 ---
+
+## 2026-03-12T00:00:00Z - S96 - Inline Gap Analysis Card in Chat: notes-vs-book comparison via chat intent
+- Implemented: Already fully implemented in prior stories. Added type narrowing: GapCardData.type narrowed from string to "gap_result" literal; added explicit gap_result branch in Chat.tsx card renderer (else fallthrough eliminated).
+- Files changed: frontend/src/components/GapResultCard.tsx, frontend/src/pages/Chat.tsx
+- AC verified:
+  - notes_gap in IntentType Literal: PASS
+  - classify_intent_heuristic returns notes_gap 0.95: PASS (13 phrases in _NOTES_GAP_KWS)
+  - notes_gap_node error cases (no doc, no notes, Ollama offline): PASS
+  - SSE __card__ protocol with comment block: PASS (qa.py lines 350-374)
+  - route_node dispatches notes_gap -> notes_gap_node -> END: PASS
+  - Chat.tsx Message type? and cardData? fields: PASS
+  - SSE parser creates card-type message: PASS
+  - GapResultCard: error/gaps/covered/empty states, disabled Generate button: PASS
+  - Notes.tsx setShowGapDetect(true), no useNavigate: PASS
+  - GapDetectDialog.tsx preserved: PASS
+  - 4 named tests + 19 total test_chat_graph_gap.py pass: PASS
+  - ruff exits 0: PASS
+  - tsc --noEmit exits 0: PASS
+  - smoke/S96.sh exists: PASS
+- Reviewer verdict: PASS after 2 High fixes -- (1) GapCardData.type narrowed to "gap_result" literal; (2) else fallthrough in Chat.tsx card renderer made exhaustive with explicit gap_result check
+- Learnings:
+  - When completing a discriminated union, narrow all member type fields to string literals (not 'string') -- then the exhaustive else branch on 'never' can't reference .type, so use a plain fallback without property access
+---
