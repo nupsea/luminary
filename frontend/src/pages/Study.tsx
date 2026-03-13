@@ -78,6 +78,17 @@ interface SectionItem {
   section_order: number
 }
 
+interface EntityPair {
+  name_a: string
+  name_b: string
+  relation_label: string
+  confidence: number
+}
+
+interface EntityPairsResponse {
+  pairs: EntityPair[]
+}
+
 interface DocumentSections {
   sections: SectionItem[]
 }
@@ -117,6 +128,27 @@ class GenerateError extends Error {
     super(message)
     this.status = status
   }
+}
+
+async function fetchEntityPairs(documentId: string): Promise<EntityPairsResponse> {
+  const res = await fetch(
+    `${API_BASE}/flashcards/entity-pairs?document_id=${encodeURIComponent(documentId)}`
+  )
+  if (!res.ok) return { pairs: [] }
+  return res.json() as Promise<EntityPairsResponse>
+}
+
+async function generateFromGraph(req: {
+  document_id: string
+  k: number
+}): Promise<Flashcard[]> {
+  const res = await fetch(`${API_BASE}/flashcards/generate-from-graph`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) throw new GenerateError(res.status, "Failed to generate entity flashcards")
+  return res.json() as Promise<Flashcard[]>
 }
 
 async function generateFlashcards(req: {
@@ -399,6 +431,7 @@ interface GeneratePanelProps {
     count: number
     difficulty: "easy" | "medium" | "hard"
   }) => void
+  onGenerateFromGraph: (k: number) => void
   isGenerating: boolean
   preselectedSection?: string | null
 }
@@ -410,18 +443,23 @@ const DIFFICULTY_OPTIONS = [
   { value: "hard", label: "Hard" },
 ]
 
+const PAIRS_K_OPTIONS = [3, 5, 10]
+
 function GeneratePanel({
-  documentId: _documentId,
+  documentId,
   sections,
   onGenerate,
   onRegenerate,
+  onGenerateFromGraph,
   isGenerating,
   preselectedSection,
 }: GeneratePanelProps) {
+  const [mode, setMode] = useState<"text" | "entities">("text")
   const [count, setCount] = useState(10)
   const [scope, setScope] = useState<"full" | "section">("full")
   const [sectionHeading, setSectionHeading] = useState<string | null>(null)
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
+  const [pairsK, setPairsK] = useState(5)
 
   // Sync scope/heading when a gap section is clicked from outside
   useEffect(() => {
@@ -431,94 +469,199 @@ function GeneratePanel({
     }
   }, [preselectedSection])
 
+  const {
+    data: pairsData,
+    isLoading: pairsLoading,
+    isError: pairsError,
+  } = useQuery<EntityPairsResponse>({
+    queryKey: ["entity-pairs", documentId],
+    queryFn: () => fetchEntityPairs(documentId),
+    enabled: mode === "entities",
+    staleTime: 60_000,
+  })
+  const entityPairs = pairsData?.pairs ?? []
+
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/30 p-4">
-      {/* Count */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Count</label>
-        <select
-          value={count}
-          onChange={(e) => setCount(Number(e.target.value))}
-          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
+      {/* Mode toggle */}
+      <div className="flex gap-0 rounded-md border border-border bg-background w-fit">
+        <button
+          onClick={() => setMode("text")}
+          className={`px-3 py-1.5 text-sm font-medium rounded-l-md transition-colors ${
+            mode === "text"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
         >
-          {COUNT_OPTIONS.map((n) => (
-            <option key={n} value={n}>
-              {n} cards
-            </option>
-          ))}
-        </select>
+          From Text
+        </button>
+        <button
+          onClick={() => setMode("entities")}
+          className={`px-3 py-1.5 text-sm font-medium rounded-r-md transition-colors ${
+            mode === "entities"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          From Entities
+        </button>
       </div>
 
-      {/* Difficulty */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
-        <select
-          value={difficulty}
-          onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
-          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          {DIFFICULTY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      {mode === "text" ? (
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Count */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Count</label>
+            <select
+              value={count}
+              onChange={(e) => setCount(Number(e.target.value))}
+              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n} cards
+                </option>
+              ))}
+            </select>
+          </div>
 
-      {/* Scope */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Scope</label>
-        <select
-          value={scope}
-          onChange={(e) => {
-            const v = e.target.value as "full" | "section"
-            setScope(v)
-            if (v === "full") setSectionHeading(null)
-          }}
-          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          <option value="full">Full document</option>
-          <option value="section">By section</option>
-        </select>
-      </div>
+          {/* Difficulty */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
+            <select
+              value={difficulty}
+              onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
+              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {DIFFICULTY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      {/* Section picker */}
-      {scope === "section" && sections.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-muted-foreground">Section</label>
-          <select
-            value={sectionHeading ?? ""}
-            onChange={(e) => setSectionHeading(e.target.value || null)}
-            className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="">Select section...</option>
-            {sections.map((s) => (
-              <option key={s.id} value={s.heading}>
-                {s.heading}
-              </option>
-            ))}
-          </select>
+          {/* Scope */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Scope</label>
+            <select
+              value={scope}
+              onChange={(e) => {
+                const v = e.target.value as "full" | "section"
+                setScope(v)
+                if (v === "full") setSectionHeading(null)
+              }}
+              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="full">Full document</option>
+              <option value="section">By section</option>
+            </select>
+          </div>
+
+          {/* Section picker */}
+          {scope === "section" && sections.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Section</label>
+              <select
+                value={sectionHeading ?? ""}
+                onChange={(e) => setSectionHeading(e.target.value || null)}
+                className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Select section...</option>
+                {sections.map((s) => (
+                  <option key={s.id} value={s.heading}>
+                    {s.heading}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => onGenerate({ scope, section_heading: sectionHeading, count, difficulty })}
+              disabled={isGenerating || (scope === "section" && !sectionHeading)}
+              className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isGenerating && <Loader2 size={14} className="animate-spin" />}
+              Generate
+            </button>
+            <button
+              onClick={() => onRegenerate({ scope, section_heading: sectionHeading, count, difficulty })}
+              disabled={isGenerating || (scope === "section" && !sectionHeading)}
+              className="flex items-center gap-2 rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+              title="Delete all current cards and generate new ones"
+            >
+              Regenerate
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {/* Top pairs count */}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Top pairs</label>
+              <select
+                value={pairsK}
+                onChange={(e) => setPairsK(Number(e.target.value))}
+                className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {PAIRS_K_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n} pairs
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => onGenerateFromGraph(pairsK)}
+              disabled={isGenerating}
+              className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isGenerating && <Loader2 size={14} className="animate-spin" />}
+              Generate from Entities
+            </button>
+          </div>
+
+          {/* Entity pairs preview */}
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Entity pair preview</span>
+            {pairsLoading ? (
+              <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                Loading entity pairs...
+              </div>
+            ) : pairsError ? (
+              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                Could not load entity pairs.
+              </div>
+            ) : entityPairs.length === 0 ? (
+              <div className="rounded border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+                No entity relationships found for this document. Try ingesting the document first.
+              </div>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {entityPairs.map((pair, i) => (
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-sm"
+                  >
+                    <span className="font-medium text-foreground">{pair.name_a}</span>
+                    <span className="text-muted-foreground">--</span>
+                    <span className="italic text-muted-foreground">{pair.relation_label}</span>
+                    <span className="text-muted-foreground">--</span>
+                    <span className="font-medium text-foreground">{pair.name_b}</span>
+                    <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+                      {Math.round(pair.confidence * 100)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => onGenerate({ scope, section_heading: sectionHeading, count, difficulty })}
-          disabled={isGenerating || (scope === "section" && !sectionHeading)}
-          className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          {isGenerating && <Loader2 size={14} className="animate-spin" />}
-          Generate
-        </button>
-        <button
-          onClick={() => onRegenerate({ scope, section_heading: sectionHeading, count, difficulty })}
-          disabled={isGenerating || (scope === "section" && !sectionHeading)}
-          className="flex items-center gap-2 rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-          title="Delete all current cards and generate new ones"
-        >
-          Regenerate
-        </button>
-      </div>
     </div>
   )
 }
@@ -572,6 +715,27 @@ export default function Study() {
   })
 
   const sections = docData?.sections ?? []
+
+  // Generate from graph mutation
+  const generateFromGraphMutation = useMutation({
+    mutationFn: (k: number) =>
+      generateFromGraph({ document_id: activeDocumentId!, k }),
+    onSuccess: (newCards) => {
+      setGenerateErrorKind(null)
+      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      toast.success(
+        `Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""} from entity pairs`
+      )
+    },
+    onError: (err: unknown) => {
+      const status = err instanceof GenerateError ? err.status : 0
+      if (status === 503) {
+        setGenerateErrorKind("ollama_offline")
+      } else {
+        setGenerateErrorKind("server_error")
+      }
+    },
+  })
 
   // Generate mutation
   const generateMutation = useMutation({
@@ -701,7 +865,15 @@ export default function Study() {
           sections={sections}
           onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
           onRegenerate={handleRegenerate}
-          isGenerating={generateMutation.isPending || deleteAllMutation.isPending}
+          onGenerateFromGraph={(k) => {
+            setGenerateErrorKind(null)
+            generateFromGraphMutation.mutate(k)
+          }}
+          isGenerating={
+            generateMutation.isPending ||
+            deleteAllMutation.isPending ||
+            generateFromGraphMutation.isPending
+          }
           preselectedSection={selectedGapSection}
         />
 

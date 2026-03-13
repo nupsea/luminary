@@ -222,8 +222,16 @@ async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
 
     if not raw_pairs:
         co_pairs = graph.get_co_occurring_pairs_for_document(document_id, limit=10)
+        # CO_OCCURS weight is a raw co-occurrence count (1.0, 2.0, …), not a probability.
+        # Normalise to [0.0, 1.0] so the frontend percentage display is meaningful.
+        max_weight = max((w for _, _, w in co_pairs), default=1.0) or 1.0
         previews = [
-            EntityPairPreview(name_a=a, name_b=b, relation_label="co-occurs", confidence=w)
+            EntityPairPreview(
+                name_a=a,
+                name_b=b,
+                relation_label="co-occurs",
+                confidence=round(w / max_weight, 4),
+            )
             for a, b, w in co_pairs
         ]
     else:

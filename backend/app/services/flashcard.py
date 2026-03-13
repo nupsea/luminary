@@ -282,7 +282,8 @@ GAP_FLASHCARD_USER_TMPL = (
 GRAPH_FLASHCARD_SYSTEM = (
     "You are a learning assistant creating flashcards that test understanding of relationships "
     "between concepts. Each question must ask how two named entities are connected, "
-    "what one entity means in the context of the other, or what role one plays relative to the other. "
+    "what one entity means in the context of the other, "
+    "or what role one plays relative to the other. "
     "NEVER frame a question as a definition question ('What is X?'). "
     "NEVER use phrases like 'in this passage' or 'according to this text'. "
     "Questions must be self-contained. "
