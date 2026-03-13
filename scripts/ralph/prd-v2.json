@@ -1061,7 +1061,7 @@
         "Settings page has 'Review reminders' toggle that disables the notification check",
         "No notification fired if permission denied or toggle off"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S119",
