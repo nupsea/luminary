@@ -19,6 +19,7 @@ from app.models import (
     ChunkModel,
     DocumentModel,
     FlashcardModel,
+    LearningGoalModel,
     MisconceptionModel,
     NoteModel,
     QAHistoryModel,
@@ -566,6 +567,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 QAHistoryModel,
                 ReadingProgressModel,
                 AnnotationModel,
+                LearningGoalModel,
             ):
                 await session.execute(
                     delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
@@ -658,6 +660,7 @@ async def delete_document(document_id: str):
             QAHistoryModel,
             ReadingProgressModel,
             AnnotationModel,
+            LearningGoalModel,
         ):
             await session.execute(
                 delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]

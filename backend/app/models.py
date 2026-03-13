@@ -242,6 +242,25 @@ class ReadingProgressModel(Base):
     )
 
 
+class LearningGoalModel(Base):
+    """A user-defined learning goal with a target date.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "learning_goals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    # ISO date string: 'YYYY-MM-DD' — stored as TEXT for SQLite portability
+    target_date: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
 class AnnotationModel(Base):
     """Persistent text highlights anchored to a document section.
 
