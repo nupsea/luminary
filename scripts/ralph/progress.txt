@@ -868,3 +868,21 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - When ruff E741 flags 'l' as ambiguous in list comprehensions, rename to 'ln' or 'line' throughout the comprehension (both iteration variable and usage sites).
 ---
+
+## 2026-03-13T00:00:00Z - S115 - Study session analytics: per-session history with accuracy and cards reviewed
+- Implemented: accuracy_pct column on StudySessionModel + additive migration; GET /study/sessions paginated endpoint; GET /study/sessions/{id}/cards endpoint; end_session now computes and stores accuracy_pct; SessionHistoryTab frontend component with loading/error/empty states and row expand; tab toggle (Flashcards | History) in Study page; smoke test S115.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/study.py, backend/tests/test_study_sessions.py (new), backend/tests/test_book_parser_fixes.py (pre-existing import fix), frontend/src/pages/Study.tsx, scripts/smoke/S115.sh (new)
+- AC verified:
+  - study_sessions table with accuracy_pct column (additive migration): PASS
+  - POST /study/sessions/start returns session_id: PASS (existing endpoint)
+  - POST /study/sessions/{session_id}/end finalizes with computed stats: PASS (added accuracy_pct)
+  - GET /study/sessions returns paginated session list sorted by started_at desc: PASS (7 tests)
+  - Frontend Study tab has History sub-tab: PASS
+  - Table columns: date, duration, cards reviewed, accuracy %, document name: PASS
+  - Clicking row expands to card-level breakdown: PASS
+  - ruff check . exits 0; npx tsc --noEmit exits 0: PASS
+- Reviewer verdict: PASS after fixing Critical (Fragment key prop on map rows -- reviewer applied inline)
+- Learnings:
+  - When mapping rows that produce two sibling elements (data row + expand row), always use <Fragment key={id}> not bare <> -- React requires key on the outermost element of map(). Bare fragments lose the key and cause reconciliation issues when rows reorder.
+  - StudySessionModel already had cards_correct (not correct_count) -- always read the model before authoring AC field names. Planner correctly identified this risk and prevented a duplicate column.
+---

@@ -1007,7 +1007,7 @@
         "Clicking a row expands to show card-level breakdown (question, rating given)",
         "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S116",
