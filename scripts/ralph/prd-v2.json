@@ -988,7 +988,7 @@
         "Test: simulate 3 Again ratings on a card within 14 days -> GET /study/struggling returns that card",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S115",

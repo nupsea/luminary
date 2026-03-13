@@ -851,3 +851,20 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - For on-demand queries with enabled:false, call only refetch() -- not invalidateQueries followed by refetch(). The invalidation is redundant and creates a subtle race.
   - Route ordering matters: GET /{id}/readiness must be declared before DELETE /{id} in FastAPI to prevent "readiness" being matched as a goal_id for DELETE.
 ---
+
+## 2026-03-13T00:00:00 - S114 - Adaptive difficulty signals: surface struggling cards with source section links
+- Implemented: Partial commit (972dbfe) had already implemented FSRSService.get_struggling_cards, GET /study/struggling endpoint, StrugglingPanel frontend component, Re-read source navigation, and tests. This iteration fixed ruff E741 (ambiguous variable name 'l') and E501 (line too long) in book_parser.py and test_book_parser.py to satisfy AC8.
+- Files changed: backend/app/services/book_parser.py, backend/tests/test_book_parser.py
+- AC verified:
+  - FSRSService.get_struggling_cards queries review history correctly: PASS
+  - GET /study/struggling returns cards with again_count >= 3 in last 14 days: PASS
+  - Response includes card question, again_count, source_section_id: PASS
+  - Frontend Study tab has Struggling panel separate from Weak Areas: PASS
+  - Each struggling card shows question preview, again count badge, Re-read source button: PASS
+  - Re-read source navigates to DocumentReader at specific section: PASS
+  - Test: 3 Again ratings -> GET /study/struggling returns that card: PASS (6 tests all pass)
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (no Critical items)
+- Learnings:
+  - When ruff E741 flags 'l' as ambiguous in list comprehensions, rename to 'ln' or 'line' throughout the comprehension (both iteration variable and usage sites).
+---
