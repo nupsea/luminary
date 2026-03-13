@@ -7,12 +7,25 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
+from app.services.book_parser import BookParser
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 
+# Single shared instance (stateless)
+_book_parser = BookParser()
+
 
 class DocumentParser:
+    """
+    General document parser.
+
+    For every format, BookParser is tried first.  If it detects clear chapter
+    structure it returns a rich ParsedDocument.  When it returns None (the
+    document is not book-shaped), we fall back to the original heuristic
+    parsers so that short reports, technical docs, etc. still work correctly.
+    """
+
     def parse(self, file_path: Path, format: str) -> ParsedDocument:
         fmt = format.lower()
         if fmt == "pdf":
@@ -26,7 +39,17 @@ class DocumentParser:
         else:
             raise ValueError(f"Unsupported format: {format}")
 
+    # ------------------------------------------------------------------
+    # PDF
+    # ------------------------------------------------------------------
+
     def _parse_pdf(self, file_path: Path) -> ParsedDocument:
+        # Try BookParser first (handles Gutenberg, TOC, chapter patterns, running headers)
+        result = _book_parser.parse(file_path, "pdf")
+        if result is not None:
+            return result
+
+        # Fallback: font-size heuristic
         doc = fitz.open(str(file_path))
         sections: list[Section] = []
         raw_parts: list[str] = []
@@ -97,7 +120,17 @@ class DocumentParser:
             raw_text=raw_text,
         )
 
+    # ------------------------------------------------------------------
+    # DOCX
+    # ------------------------------------------------------------------
+
     def _parse_docx(self, file_path: Path) -> ParsedDocument:
+        # Try BookParser first (style-based + regex fallback for books without styles)
+        result = _book_parser.parse(file_path, "docx")
+        if result is not None:
+            return result
+
+        # Fallback: Word heading styles only
         doc = DocxDocument(str(file_path))
         sections: list[Section] = []
         raw_parts: list[str] = []
@@ -151,7 +184,17 @@ class DocumentParser:
             raw_text=raw_text,
         )
 
+    # ------------------------------------------------------------------
+    # TXT
+    # ------------------------------------------------------------------
+
     def _parse_txt(self, file_path: Path) -> ParsedDocument:
+        # Try BookParser first (chapter detection + Gutenberg stripping)
+        result = _book_parser.parse(file_path, "txt")
+        if result is not None:
+            return result
+
+        # Fallback: paragraph-split (for unstructured text files)
         raw_bytes = file_path.read_bytes()
         detected = chardet.detect(raw_bytes)
         encoding = detected.get("encoding") or "utf-8"
@@ -178,7 +221,17 @@ class DocumentParser:
             raw_text=text,
         )
 
+    # ------------------------------------------------------------------
+    # Markdown
+    # ------------------------------------------------------------------
+
     def _parse_md(self, file_path: Path) -> ParsedDocument:
+        # Try BookParser first (markdown-it token-based with min-chapter guard)
+        result = _book_parser.parse(file_path, "md")
+        if result is not None:
+            return result
+
+        # Fallback: same markdown-it logic without the chapter minimum guard
         text = file_path.read_text(encoding="utf-8")
         md = MarkdownIt()
         tokens = md.parse(text)
