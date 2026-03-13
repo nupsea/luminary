@@ -20,7 +20,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -103,7 +103,38 @@ class SessionSummary(BaseModel):
     session_id: str
     cards_reviewed: int
     cards_correct: int
+    accuracy_pct: float
     ended_at: datetime
+
+
+class SessionListItem(BaseModel):
+    id: str
+    started_at: datetime
+    ended_at: datetime | None
+    duration_minutes: float | None
+    cards_reviewed: int
+    cards_correct: int
+    accuracy_pct: float | None
+    document_id: str | None
+    document_title: str | None
+    mode: str
+
+    model_config = {"from_attributes": True}
+
+
+class SessionListResponse(BaseModel):
+    items: list[SessionListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class SessionCardDetail(BaseModel):
+    flashcard_id: str
+    question: str
+    rating: str
+    is_correct: bool
+    reviewed_at: datetime
 
 
 class GapResult(BaseModel):
@@ -446,10 +477,12 @@ async def end_session(
 
     cards_reviewed = len(events)
     cards_correct = sum(1 for e in events if e.is_correct)
+    accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
 
     sess.ended_at = datetime.now(UTC)
     sess.cards_reviewed = cards_reviewed
     sess.cards_correct = cards_correct
+    sess.accuracy_pct = accuracy_pct
     await db.commit()
     await db.refresh(sess)
 
@@ -459,14 +492,109 @@ async def end_session(
             "session_id": session_id,
             "cards_reviewed": cards_reviewed,
             "cards_correct": cards_correct,
+            "accuracy_pct": accuracy_pct,
         },
     )
     return SessionSummary(
         session_id=sess.id,
         cards_reviewed=cards_reviewed,
         cards_correct=cards_correct,
+        accuracy_pct=accuracy_pct,
         ended_at=sess.ended_at,
     )
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    document_id: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> SessionListResponse:
+    """Return a paginated list of study sessions sorted by started_at desc."""
+    base_stmt = select(StudySessionModel)
+    if document_id:
+        base_stmt = base_stmt.where(StudySessionModel.document_id == document_id)
+
+    count_result = await db.execute(
+        select(func.count()).select_from(base_stmt.subquery())
+    )
+    total = count_result.scalar_one()
+
+    offset = (page - 1) * page_size
+    sessions_result = await db.execute(
+        base_stmt.order_by(StudySessionModel.started_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    sessions = sessions_result.scalars().all()
+
+    # Collect unique doc IDs to fetch titles in one query
+    doc_ids = {s.document_id for s in sessions if s.document_id}
+    doc_titles: dict[str, str] = {}
+    if doc_ids:
+        docs_result = await db.execute(
+            select(DocumentModel).where(DocumentModel.id.in_(doc_ids))
+        )
+        for doc in docs_result.scalars().all():
+            doc_titles[doc.id] = doc.title
+
+    items: list[SessionListItem] = []
+    for sess in sessions:
+        duration: float | None = None
+        if sess.ended_at:
+            duration = round(
+                (sess.ended_at - sess.started_at).total_seconds() / 60, 2
+            )
+        items.append(
+            SessionListItem(
+                id=sess.id,
+                started_at=sess.started_at,
+                ended_at=sess.ended_at,
+                duration_minutes=duration,
+                cards_reviewed=sess.cards_reviewed,
+                cards_correct=sess.cards_correct,
+                accuracy_pct=sess.accuracy_pct,
+                document_id=sess.document_id,
+                document_title=doc_titles.get(sess.document_id) if sess.document_id else None,
+                mode=sess.mode,
+            )
+        )
+
+    logger.debug("list_sessions: page=%d page_size=%d total=%d", page, page_size, total)
+    return SessionListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/sessions/{session_id}/cards", response_model=list[SessionCardDetail])
+async def get_session_cards(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[SessionCardDetail]:
+    """Return per-card rating and correctness for a given session."""
+    sess_result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    if sess_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    events_result = await db.execute(
+        select(ReviewEventModel, FlashcardModel)
+        .join(FlashcardModel, ReviewEventModel.flashcard_id == FlashcardModel.id)
+        .where(ReviewEventModel.session_id == session_id)
+        .order_by(ReviewEventModel.reviewed_at)
+    )
+    rows = events_result.all()
+
+    return [
+        SessionCardDetail(
+            flashcard_id=event.flashcard_id,
+            question=card.question,
+            rating=event.rating,
+            is_correct=event.is_correct,
+            reviewed_at=event.reviewed_at,
+        )
+        for event, card in rows
+    ]
 
 
 @router.post("/teachback", response_model=TeachbackResponse)

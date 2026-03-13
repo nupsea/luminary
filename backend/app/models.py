@@ -107,6 +107,7 @@ class StudySessionModel(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cards_reviewed: Mapped[int] = mapped_column(Integer, default=0)
     cards_correct: Mapped[int] = mapped_column(Integer, default=0)
+    accuracy_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     # flashcard|teachback|socratic|synthesis
     mode: Mapped[str] = mapped_column(String, nullable=False)
 

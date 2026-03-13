@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react"
 import {
   AlertCircle,
   BookOpen,
@@ -134,6 +134,34 @@ interface StrugglingCard {
   source_section_id: string | null
 }
 
+interface StudySessionItem {
+  id: string
+  started_at: string
+  ended_at: string | null
+  duration_minutes: number | null
+  cards_reviewed: number
+  cards_correct: number
+  accuracy_pct: number | null
+  document_id: string | null
+  document_title: string | null
+  mode: string
+}
+
+interface SessionListResponse {
+  items: StudySessionItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+interface SessionCardDetail {
+  flashcard_id: string
+  question: string
+  rating: string
+  is_correct: boolean
+  reviewed_at: string
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -195,6 +223,18 @@ async function fetchStrugglingCards(documentId: string): Promise<StrugglingCard[
   )
   if (!res.ok) throw new Error("Failed to load struggling cards")
   return res.json() as Promise<StrugglingCard[]>
+}
+
+async function fetchSessions(page: number, pageSize: number): Promise<SessionListResponse> {
+  const res = await fetch(`${API_BASE}/study/sessions?page=${page}&page_size=${pageSize}`)
+  if (!res.ok) throw new Error("Failed to load session history")
+  return res.json() as Promise<SessionListResponse>
+}
+
+async function fetchSessionCards(sessionId: string): Promise<SessionCardDetail[]> {
+  const res = await fetch(`${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/cards`)
+  if (!res.ok) throw new Error("Failed to load session cards")
+  return res.json() as Promise<SessionCardDetail[]>
 }
 
 class GenerateError extends Error {
@@ -1062,6 +1102,180 @@ function GoalsPanel({ docs }: GoalsPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// SessionHistoryTab
+// ---------------------------------------------------------------------------
+
+function SessionHistoryTab() {
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 20
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null)
+
+  const { data, isLoading, isError } = useQuery<SessionListResponse, Error>({
+    queryKey: ["study-sessions", page],
+    queryFn: () => fetchSessions(page, PAGE_SIZE),
+  })
+
+  const { data: sessionCards, isLoading: cardsLoading, isError: cardsError } = useQuery<SessionCardDetail[], Error>({
+    queryKey: ["session-cards", expandedSessionId],
+    queryFn: () => fetchSessionCards(expandedSessionId!),
+    enabled: expandedSessionId !== null,
+  })
+
+  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1
+
+  function formatDate(iso: string): string {
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  function formatDuration(mins: number | null): string {
+    if (mins === null) return "-"
+    if (mins < 1) return "< 1 min"
+    return `${Math.round(mins)} min`
+  }
+
+  function formatAccuracy(pct: number | null): string {
+    return pct !== null ? `${pct}%` : "-"
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {[1, 2, 3].map((n) => (
+          <div key={n} className="h-10 animate-pulse rounded-md bg-muted" />
+        ))}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        Failed to load session history. Please try refreshing.
+      </div>
+    )
+  }
+
+  if (!data || data.items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <p className="text-sm text-muted-foreground">
+          No study sessions recorded yet. Complete a session to see history here.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="overflow-x-auto rounded-md border border-border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/50 text-left text-xs text-muted-foreground">
+              <th className="px-4 py-2 font-medium">Date</th>
+              <th className="px-4 py-2 font-medium">Duration</th>
+              <th className="px-4 py-2 font-medium">Cards</th>
+              <th className="px-4 py-2 font-medium">Accuracy</th>
+              <th className="px-4 py-2 font-medium">Document</th>
+              <th className="px-4 py-2 font-medium">Mode</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((sess) => (
+              <Fragment key={sess.id}>
+                <tr
+                  className="cursor-pointer border-b border-border hover:bg-accent/30"
+                  onClick={() =>
+                    setExpandedSessionId(expandedSessionId === sess.id ? null : sess.id)
+                  }
+                >
+                  <td className="px-4 py-2 text-foreground">{formatDate(sess.started_at)}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{formatDuration(sess.duration_minutes)}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{sess.cards_reviewed}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{formatAccuracy(sess.accuracy_pct)}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{sess.document_title ?? "-"}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{sess.mode}</td>
+                </tr>
+                {expandedSessionId === sess.id && (
+                  <tr key={`${sess.id}-detail`} className="border-b border-border bg-muted/20">
+                    <td colSpan={6} className="px-4 py-3">
+                      {cardsLoading ? (
+                        <div className="flex flex-col gap-1">
+                          {[1, 2].map((n) => (
+                            <div key={n} className="h-8 animate-pulse rounded bg-muted" />
+                          ))}
+                        </div>
+                      ) : cardsError ? (
+                        <p className="text-sm text-red-600">Failed to load card details.</p>
+                      ) : !sessionCards || sessionCards.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No card events recorded for this session.</p>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground">
+                              <th className="pb-1 pr-4 font-medium">Question</th>
+                              <th className="pb-1 pr-4 font-medium">Rating</th>
+                              <th className="pb-1 font-medium">Result</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sessionCards.map((card) => (
+                              <tr key={card.flashcard_id} className="border-t border-border/50">
+                                <td className="py-1 pr-4 max-w-xs truncate text-foreground">
+                                  {card.question}
+                                </td>
+                                <td className="py-1 pr-4 text-muted-foreground capitalize">{card.rating}</td>
+                                <td className="py-1">
+                                  {card.is_correct ? (
+                                    <span className="text-green-600">Correct</span>
+                                  ) : (
+                                    <span className="text-red-500">Incorrect</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="rounded border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span>Page {page} of {totalPages}</span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="rounded border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Study page
 // ---------------------------------------------------------------------------
 
@@ -1075,6 +1289,7 @@ export default function Study() {
   // Track section pre-selected by clicking a gap item
   const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
   const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
+  const [studySubTab, setStudySubTab] = useState<"flashcards" | "history">("flashcards")
   const mountTime = useRef(Date.now())
 
   // Document list for the in-tab picker
@@ -1251,6 +1466,37 @@ export default function Study() {
         </div>
       ) : (
       <>
+      {/* Sub-tab toggle */}
+      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
+        <button
+          onClick={() => setStudySubTab("flashcards")}
+          className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+            studySubTab === "flashcards"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Flashcards
+        </button>
+        <button
+          onClick={() => setStudySubTab("history")}
+          className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+            studySubTab === "history"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          History
+        </button>
+      </div>
+
+      {studySubTab === "history" ? (
+        <section className="flex flex-col gap-4">
+          <h2 className="text-lg font-semibold text-foreground">Session History</h2>
+          <SessionHistoryTab />
+        </section>
+      ) : (
+      <>
       {/* Flashcards section */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
@@ -1374,6 +1620,8 @@ export default function Study() {
           <ProgressDashboard documentId={activeDocumentId} />
         </Suspense>
       </section>
+      </>
+      )}
       </>
       )}
     </div>
