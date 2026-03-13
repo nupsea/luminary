@@ -15,7 +15,6 @@ import pytest
 
 from app.services.book_parser import BookParser
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -64,10 +63,10 @@ class TestGutenbergStripping:
         assert result is not None
         # Ensure no section has ONLY short TOC-like lines as its entire text
         for section in result.sections:
-            lines = [l.strip() for l in section.text.splitlines() if l.strip()]
+            lines = [ln.strip() for ln in section.text.splitlines() if ln.strip()]
             if lines:
                 # At least one real sentence-length line should exist
-                long_lines = [l for l in lines if len(l) > 60]
+                long_lines = [ln for ln in lines if len(ln) > 60]
                 assert long_lines, (
                     f"Section '{section.heading}' seems to be only TOC: "
                     + repr(section.text[:200])

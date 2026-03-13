@@ -25,7 +25,6 @@ import logging
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Optional
 
 import chardet
 import fitz  # PyMuPDF
@@ -153,7 +152,8 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 # TOC detection: line that looks like a TOC entry
-# Handles: CHAPTER I, I. Title, I Introduction, and space-indented variants like ' V In the Golden Age'
+# Handles: CHAPTER I, I. Title, I Introduction, and space-indented variants
+# like ' V In the Golden Age'
 _RE_TOC_LINE = re.compile(
     rf"^\s*(?:{_ROMAN}|Chapter\s+\d+|CHAPTER\s+{_ROMAN})"
     r"(?:[.:]\s+\S|\s+[A-Z]\S)",
@@ -210,7 +210,7 @@ class BookParser:
     # Public entry point
     # ------------------------------------------------------------------
 
-    def parse(self, file_path: Path, fmt: str) -> Optional[ParsedDocument]:
+    def parse(self, file_path: Path, fmt: str) -> ParsedDocument | None:
         """
         Attempt to parse *file_path* as a book with chapter structure.
 
@@ -236,7 +236,7 @@ class BookParser:
     # TXT
     # ------------------------------------------------------------------
 
-    def _parse_txt(self, file_path: Path) -> Optional[ParsedDocument]:
+    def _parse_txt(self, file_path: Path) -> ParsedDocument | None:
         raw_bytes = file_path.read_bytes()
         detected = chardet.detect(raw_bytes)
         encoding = detected.get("encoding") or "utf-8"
@@ -260,7 +260,7 @@ class BookParser:
     # PDF
     # ------------------------------------------------------------------
 
-    def _parse_pdf(self, file_path: Path) -> Optional[ParsedDocument]:
+    def _parse_pdf(self, file_path: Path) -> ParsedDocument | None:
         doc = fitz.open(str(file_path))
         if len(doc) == 0:
             return None
@@ -317,10 +317,10 @@ class BookParser:
         # TOC page: >60% of non-empty lines match TOC pattern
         toc_pages: set[int] = set()
         for pi, ptxt in enumerate(page_texts):
-            non_empty = [l for l in ptxt.splitlines() if l.strip()]
+            non_empty = [ln for ln in ptxt.splitlines() if ln.strip()]
             if not non_empty:
                 continue
-            toc_hits = sum(1 for l in non_empty if _RE_TOC_LINE.match(l))
+            toc_hits = sum(1 for ln in non_empty if _RE_TOC_LINE.match(ln))
             if toc_hits / len(non_empty) > 0.6:
                 toc_pages.add(pi)
 
@@ -404,7 +404,7 @@ class BookParser:
     # DOCX
     # ------------------------------------------------------------------
 
-    def _parse_docx(self, file_path: Path) -> Optional[ParsedDocument]:
+    def _parse_docx(self, file_path: Path) -> ParsedDocument | None:
         doc = DocxDocument(str(file_path))
         sections: list[Section] = []
         raw_parts: list[str] = []
@@ -467,7 +467,7 @@ class BookParser:
     # Markdown
     # ------------------------------------------------------------------
 
-    def _parse_md(self, file_path: Path) -> Optional[ParsedDocument]:
+    def _parse_md(self, file_path: Path) -> ParsedDocument | None:
         raw_text = file_path.read_text(encoding="utf-8", errors="replace")
         md = MarkdownIt()
         tokens = md.parse(raw_text)
@@ -592,7 +592,7 @@ class BookParser:
 
         return text
 
-    def _segment_chapters(self, text: str) -> Optional[list[Section]]:
+    def _segment_chapters(self, text: str) -> list[Section] | None:
         """
         Detect which heading pattern dominates and split text into Sections.
 
@@ -617,13 +617,13 @@ class BookParser:
 
     def _pick_best_pattern(
         self, text: str
-    ) -> tuple[Optional[str], Optional[re.Pattern[str]], int]:
+    ) -> tuple[str | None, re.Pattern[str] | None, int]:
         """Return (pattern_id, pattern, count) for the best-matching pattern."""
         # P7 requires HERE ENDETH confirmation
         has_endeth = bool(_RE_ENDETH.search(text))
 
-        best_id: Optional[str] = None
-        best_pat: Optional[re.Pattern[str]] = None
+        best_id: str | None = None
+        best_pat: re.Pattern[str] | None = None
         best_count = 0
 
         for pid, pat in _PATTERNS:
@@ -644,7 +644,7 @@ class BookParser:
 
     def _split_generic(
         self, text: str, pattern: re.Pattern[str]
-    ) -> Optional[list[Section]]:
+    ) -> list[Section] | None:
         """Generic split: each match becomes a heading; text between = body."""
         sections: list[Section] = []
         positions = [(m.start(), m.end(), m.group(0).strip()) for m in pattern.finditer(text)]
@@ -673,7 +673,7 @@ class BookParser:
 
     def _split_with_optional_subtitle(
         self, text: str, pattern: re.Pattern[str], prefix: str
-    ) -> Optional[list[Section]]:
+    ) -> list[Section] | None:
         """
         For P1-style patterns: the heading line is e.g. 'CHAPTER I.'
         The next non-empty line may be a short subtitle (< 80 chars, not a sentence).
@@ -697,7 +697,7 @@ class BookParser:
                 stripped = line.strip()
                 if stripped:
                     # subtitle: short ≤ 80 chars, not ending with sentence punctuation
-                    if len(stripped) <= 80 and not stripped[-1] in ".?!":
+                    if len(stripped) <= 80 and stripped[-1] not in ".?!":
                         subtitle = stripped
                         body_line_start = li + 1
                     break
@@ -724,7 +724,7 @@ class BookParser:
 
     def _split_roman_with_subtitle(
         self, text: str, pattern: re.Pattern[str], pid: str
-    ) -> Optional[list[Section]]:
+    ) -> list[Section] | None:
         """
         For P2 (roman. on own line) and P4 (centred roman):
         the next non-empty line is always the section title.
@@ -768,7 +768,7 @@ class BookParser:
 
         return sections if len(sections) >= _MIN_CHAPTERS else None
 
-    def _split_by_hr(self, text: str) -> Optional[list[Section]]:
+    def _split_by_hr(self, text: str) -> list[Section] | None:
         """Split on horizontal-rule dividers (-----)."""
         hr_pat = _PATTERNS[-1][1]  # HR is last
         parts = hr_pat.split(text)
@@ -779,7 +779,7 @@ class BookParser:
                 continue
             # First non-empty line of each part becomes the heading
             lines = body.splitlines()
-            first_line = next((l.strip() for l in lines if l.strip()), f"Section {i+1}")
+            first_line = next((ln.strip() for ln in lines if ln.strip()), f"Section {i+1}")
             rest = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
             if not rest:
                 rest = body
@@ -814,7 +814,7 @@ def _clean_heading(heading: str) -> str:
     return h
 
 
-def _match_any_pattern(text: str) -> Optional[int]:
+def _match_any_pattern(text: str) -> int | None:
     """
     Try matching a single line of text against known patterns.
     Returns heading level (1 or 2) if matched, else None.
