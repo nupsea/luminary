@@ -240,3 +240,28 @@ class ReadingProgressModel(Base):
     __table_args__ = (
         UniqueConstraint("document_id", "section_id", name="uq_reading_progress_doc_section"),
     )
+
+
+class AnnotationModel(Base):
+    """Persistent text highlights anchored to a document section.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "annotations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    section_id: Mapped[str] = mapped_column(String, nullable=False)
+    # chunk_id is nullable: sections do not map 1:1 to chunks
+    chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    selected_text: Mapped[str] = mapped_column(Text, nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    # yellow|green|blue|pink
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="yellow")
+    note_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )

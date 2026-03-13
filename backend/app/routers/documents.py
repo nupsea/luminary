@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select, text
 from app.config import Settings, get_settings
 from app.database import get_session_factory
 from app.models import (
+    AnnotationModel,
     ChunkModel,
     DocumentModel,
     FlashcardModel,
@@ -564,6 +565,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 NoteModel,
                 QAHistoryModel,
                 ReadingProgressModel,
+                AnnotationModel,
             ):
                 await session.execute(
                     delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
@@ -655,6 +657,7 @@ async def delete_document(document_id: str):
             NoteModel,
             QAHistoryModel,
             ReadingProgressModel,
+            AnnotationModel,
         ):
             await session.execute(
                 delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]

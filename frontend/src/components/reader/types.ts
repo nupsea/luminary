@@ -23,6 +23,19 @@ export interface DocumentDetail {
   reading_progress_pct: number  // 0.0 to 1.0
 }
 
+export interface AnnotationItem {
+  id: string
+  document_id: string
+  section_id: string
+  chunk_id: string | null
+  selected_text: string
+  start_offset: number
+  end_offset: number
+  color: "yellow" | "green" | "blue" | "pink"
+  note_text: string | null
+  created_at: string
+}
+
 export type SummaryMode = "one_sentence" | "executive" | "detailed" | "conversation"
 
 export interface SummaryTabDef {

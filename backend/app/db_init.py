@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
+    AnnotationModel,
     ChunkModel,
     DocumentModel,
     EvalRunModel,
@@ -59,6 +60,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE flashcards ADD COLUMN deck TEXT NOT NULL DEFAULT 'default'",
             "ALTER TABLE flashcards ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'medium'",
             "ALTER TABLE notes ADD COLUMN section_id TEXT",
+            "ALTER TABLE annotations ADD COLUMN note_text TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

@@ -1,16 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import { FloatingToolbar } from "@/components/FloatingToolbar"
-import type { ExplainMode } from "@/components/FloatingToolbar"
-import type { DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
+import type { ExplainMode, HighlightInfo } from "@/components/FloatingToolbar"
+import type { AnnotationItem, DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { AnnotationPopover } from "./AnnotationPopover"
 
 const API_BASE = "http://localhost:8000"
 
@@ -425,6 +426,184 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Annotation highlight reconstruction (S111)
+// ---------------------------------------------------------------------------
+
+const COLOR_CLASSES: Record<string, string> = {
+  yellow: "bg-yellow-200 dark:bg-yellow-900/50",
+  green: "bg-green-200 dark:bg-green-900/50",
+  blue: "bg-blue-200 dark:bg-blue-900/50",
+  pink: "bg-pink-200 dark:bg-pink-900/50",
+}
+
+interface SectionPreviewProps {
+  preview: string
+  annotations: AnnotationItem[]
+  sectionId: string
+}
+
+function SectionPreviewWithHighlights({ preview, annotations, sectionId }: SectionPreviewProps) {
+  const sectionAnnotations = annotations
+    .filter((a) => a.section_id === sectionId)
+    .sort((a, b) => a.start_offset - b.start_offset)
+
+  if (sectionAnnotations.length === 0) {
+    return (
+      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview">{preview}</p>
+    )
+  }
+
+  // Build segments — skip overlapping annotations (keep first)
+  const segments: { text: string; annotation: AnnotationItem | null }[] = []
+  let cursor = 0
+  for (const ann of sectionAnnotations) {
+    const start = ann.start_offset
+    const end = ann.end_offset
+    // Validate offsets and skip invalid / overlapping annotations
+    if (start < cursor || end <= start || end > preview.length) continue
+    const highlightText = preview.slice(start, end)
+    // Verify text matches to avoid phantom highlights from stale data
+    if (!ann.selected_text.startsWith(highlightText.slice(0, 10))) continue
+    if (start > cursor) segments.push({ text: preview.slice(cursor, start), annotation: null })
+    segments.push({ text: highlightText, annotation: ann })
+    cursor = end
+  }
+  if (cursor < preview.length) segments.push({ text: preview.slice(cursor), annotation: null })
+
+  return (
+    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview">
+      {segments.map((seg, i) =>
+        seg.annotation ? (
+          <mark
+            key={i}
+            data-annotation-id={seg.annotation.id}
+            className={cn("rounded-sm", COLOR_CLASSES[seg.annotation.color] ?? COLOR_CLASSES.yellow)}
+            title={seg.annotation.note_text ?? undefined}
+          >
+            {seg.text}
+          </mark>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
+    </p>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Highlights panel (left panel tab)
+// ---------------------------------------------------------------------------
+
+interface HighlightsPanelProps {
+  annotations: AnnotationItem[]
+  loading: boolean
+  error: boolean
+  onDelete: (id: string) => void
+}
+
+function HighlightsPanel({ annotations, loading, error, onDelete }: HighlightsPanelProps) {
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  async function handleConfirmDelete(id: string) {
+    setDeleting(true)
+    try {
+      await fetch(`${API_BASE}/annotations/${id}`, { method: "DELETE" })
+      onDelete(id)
+      setConfirmDelete(null)
+    } catch {
+      // keep confirm open so user can retry
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-2 px-6 py-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
+        ))}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="px-6 py-3">
+        <p className="text-xs text-destructive">Could not load highlights.</p>
+      </div>
+    )
+  }
+
+  if (annotations.length === 0) {
+    return (
+      <div className="px-6 py-3">
+        <p className="text-xs text-muted-foreground">
+          No highlights yet. Select text and click Highlight.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2 px-6 py-3">
+      {annotations.map((ann) => (
+        <div key={ann.id} className="rounded-md border border-border p-2">
+          {confirmDelete === ann.id ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-foreground">Delete this highlight?</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleConfirmDelete(ann.id)}
+                  disabled={deleting}
+                  className="rounded bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+                >
+                  {deleting ? "Deleting..." : "Yes"}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={deleting}
+                  className="rounded border border-border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
+                >
+                  No
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2">
+              <span
+                className={cn(
+                  "mt-0.5 h-2 w-2 shrink-0 rounded-full",
+                  COLOR_CLASSES[ann.color] ?? COLOR_CLASSES.yellow,
+                )}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs text-foreground" title={ann.selected_text}>
+                  {ann.selected_text.length > 60
+                    ? `${ann.selected_text.slice(0, 60)}...`
+                    : ann.selected_text}
+                </p>
+                {ann.note_text && (
+                  <p className="mt-0.5 text-xs text-muted-foreground">{ann.note_text}</p>
+                )}
+              </div>
+              <button
+                onClick={() => setConfirmDelete(ann.id)}
+                title="Delete highlight"
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Reading progress tracking (S110)
 // ---------------------------------------------------------------------------
 
@@ -513,6 +692,8 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
+  const [leftTab, setLeftTab] = useState<"sections" | "highlights">("sections")
+  const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
 
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
@@ -521,6 +702,21 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
       const res = await fetch(`${API_BASE}/notes?document_id=${encodeURIComponent(documentId)}`)
       if (!res.ok) throw new Error("Failed to fetch notes")
       return res.json() as Promise<NoteEntry[]>
+    },
+    staleTime: 30_000,
+  })
+
+  // Fetch annotations for highlight reconstruction and panel (S111)
+  const {
+    data: docAnnotations,
+    isLoading: annotationsLoading,
+    isError: annotationsError,
+  } = useQuery<AnnotationItem[]>({
+    queryKey: ["annotations-for-doc", documentId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/annotations?document_id=${encodeURIComponent(documentId)}`)
+      if (!res.ok) throw new Error("Failed to fetch annotations")
+      return res.json() as Promise<AnnotationItem[]>
     },
     staleTime: 30_000,
   })
@@ -538,6 +734,10 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
     setSheetText(text)
     setSheetMode(mode)
     setSheetOpen(true)
+  }
+
+  function handleHighlight(info: HighlightInfo) {
+    setPendingHighlight(info)
   }
 
   if (isLoading) {
@@ -602,67 +802,120 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
             </div>
           </div>
 
-          {/* Section list — relative for FloatingToolbar positioning */}
-          <div ref={sectionListRef} className="relative flex-1 overflow-auto px-6 pb-6">
-            {notesError && (
-              <p className="mb-2 text-xs text-muted-foreground">Note indicators unavailable — could not load notes.</p>
-            )}
-            <FloatingToolbar containerRef={sectionListRef} onExplain={handleExplain} />
-            {doc.sections.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No sections detected.</p>
+          {/* Left panel tab bar — Sections / Highlights */}
+          <div className="flex border-b border-border">
+            {(["sections", "highlights"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setLeftTab(tab)}
+                className={cn(
+                  "flex-1 py-2 text-xs font-medium capitalize transition-colors",
+                  leftTab === tab
+                    ? "border-b-2 border-primary text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab === "highlights"
+                  ? `Highlights${(docAnnotations ?? []).length > 0 ? ` (${(docAnnotations ?? []).length})` : ""}`
+                  : "Sections"}
+              </button>
+            ))}
+          </div>
+
+          {/* Section list / Highlights — relative for FloatingToolbar + AnnotationPopover positioning */}
+          <div ref={sectionListRef} className="relative flex-1 overflow-auto pb-6">
+            {leftTab === "highlights" ? (
+              <HighlightsPanel
+                annotations={docAnnotations ?? []}
+                loading={annotationsLoading}
+                error={annotationsError}
+                onDelete={() => void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })}
+              />
             ) : (
-              <ul className="space-y-3">
-                {doc.sections.map((section) => {
-                  const hasNote = notedSections.has(section.id)
-                  const editorOpen = openNoteEditor === section.id
-                  return (
-                    <li
-                      key={section.id}
-                      data-section-id={section.id}
-                      className="rounded-md border border-border p-3"
-                    >
-                      <div className="flex items-start gap-1">
-                        <p
-                          className="flex-1 text-sm font-semibold text-foreground"
-                          style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
-                        >
-                          {section.heading || "(Untitled section)"}
-                        </p>
-                        {hasNote && (
-                          <span title="Has note" className="mt-0.5 shrink-0 text-primary">
-                            <StickyNote size={12} />
-                          </span>
-                        )}
-                        <button
-                          onClick={() =>
-                            setOpenNoteEditor(editorOpen ? null : section.id)
-                          }
-                          title="Add note"
-                          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-                        >
-                          <StickyNote size={12} />
-                        </button>
-                      </div>
-                      {section.preview && (
-                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                          {section.preview}
-                        </p>
-                      )}
-                      {editorOpen && (
-                        <NoteEditor
-                          documentId={documentId}
-                          sectionId={section.id}
-                          onSaved={() => {
-                            setOpenNoteEditor(null)
-                            void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-                          }}
-                          onCancel={() => setOpenNoteEditor(null)}
-                        />
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
+              <>
+                {notesError && (
+                  <p className="mb-2 px-6 pt-3 text-xs text-muted-foreground">
+                    Note indicators unavailable — could not load notes.
+                  </p>
+                )}
+                <FloatingToolbar
+                  containerRef={sectionListRef}
+                  onExplain={handleExplain}
+                  onHighlight={handleHighlight}
+                />
+                {pendingHighlight && (
+                  <AnnotationPopover
+                    info={pendingHighlight}
+                    documentId={documentId}
+                    position={{ top: pendingHighlight.y + 50, left: pendingHighlight.x }}
+                    onSaved={() => {
+                      setPendingHighlight(null)
+                      void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
+                    }}
+                    onCancel={() => setPendingHighlight(null)}
+                  />
+                )}
+                <div className="px-6 pt-3">
+                  {doc.sections.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No sections detected.</p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {doc.sections.map((section) => {
+                        const hasNote = notedSections.has(section.id)
+                        const editorOpen = openNoteEditor === section.id
+                        return (
+                          <li
+                            key={section.id}
+                            data-section-id={section.id}
+                            className="rounded-md border border-border p-3"
+                          >
+                            <div className="flex items-start gap-1">
+                              <p
+                                className="flex-1 text-sm font-semibold text-foreground"
+                                style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
+                              >
+                                {section.heading || "(Untitled section)"}
+                              </p>
+                              {hasNote && (
+                                <span title="Has note" className="mt-0.5 shrink-0 text-primary">
+                                  <StickyNote size={12} />
+                                </span>
+                              )}
+                              <button
+                                onClick={() =>
+                                  setOpenNoteEditor(editorOpen ? null : section.id)
+                                }
+                                title="Add note"
+                                className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+                              >
+                                <StickyNote size={12} />
+                              </button>
+                            </div>
+                            {section.preview && (
+                              <SectionPreviewWithHighlights
+                                preview={section.preview}
+                                annotations={docAnnotations ?? []}
+                                sectionId={section.id}
+                              />
+                            )}
+                            {editorOpen && (
+                              <NoteEditor
+                                documentId={documentId}
+                                sectionId={section.id}
+                                onSaved={() => {
+                                  setOpenNoteEditor(null)
+                                  void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+                                }}
+                                onCancel={() => setOpenNoteEditor(null)}
+                              />
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
