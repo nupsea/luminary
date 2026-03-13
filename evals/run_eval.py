@@ -101,7 +101,8 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
     try:
         with file_path.open("rb") as fh:
             resp = httpx.post(
-                f"{backend_url}/ingest",
+                f"{backend_url}/documents/ingest",
+                data={"content_type": "book"},
                 files={"file": (file_path.name, fh, "text/plain")},
                 timeout=30.0,
             )
@@ -322,7 +323,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run RAGAS evaluation against a golden dataset.")
     parser.add_argument(
         "--dataset",
-        choices=VALID_DATASETS,
         required=True,
         help="Golden dataset name",
     )

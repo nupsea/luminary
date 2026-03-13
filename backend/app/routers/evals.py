@@ -27,9 +27,6 @@ _EVALS_DIR = REPO_ROOT / "evals"
 # Strong references to background tasks — prevents GC before they complete.
 _background_tasks: set[asyncio.Task] = set()
 
-VALID_DATASETS = Literal["book", "paper", "conversation", "notes", "code"]
-
-
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
@@ -48,7 +45,7 @@ class EvalResultItem(BaseModel):
 
 
 class EvalRunRequest(BaseModel):
-    dataset: VALID_DATASETS  # type: ignore[valid-type]
+    dataset: str
     assert_thresholds: bool = False
 
 
@@ -85,6 +82,16 @@ async def _run_eval_subprocess(dataset: str, assert_thresholds: bool) -> None:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/datasets", response_model=list[str])
+async def get_datasets() -> list[str]:
+    """Return a list of available evaluation datasets (golden JSONL files)."""
+    golden_dir = _EVALS_DIR / "golden"
+    if not golden_dir.exists():
+        return []
+    files = list(golden_dir.glob("*.jsonl"))
+    return sorted([f.stem for f in files])
 
 
 @router.get("/results", response_model=list[EvalResultItem])
