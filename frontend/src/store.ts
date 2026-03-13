@@ -6,10 +6,15 @@ interface AppState {
   currentProvider: string
   libraryView: "grid" | "list"
   notesView: "grid" | "list"
+  // S118: Review reminders toggle. Persisted to localStorage; default true (opt-out model).
+  // Note: direct localStorage read at module load is safe because Luminary is a client-only
+  // SPA (Vite + Tauri) with no server-side rendering.
+  reviewRemindersEnabled: boolean
   setActiveDocument: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
   setNotesView: (view: "grid" | "list") => void
+  setReviewRemindersEnabled: (enabled: boolean) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -18,8 +23,14 @@ export const useAppStore = create<AppState>((set) => ({
   currentProvider: "openai",
   libraryView: "grid",
   notesView: "grid",
+  // Only "false" disables; absent key (first run) defaults to enabled.
+  reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
   setActiveDocument: (id) => set({ activeDocumentId: id }),
   setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
   setLibraryView: (view) => set({ libraryView: view }),
   setNotesView: (view) => set({ notesView: view }),
+  setReviewRemindersEnabled: (enabled) => {
+    localStorage.setItem("luminary:reviewReminders", String(enabled))
+    set({ reviewRemindersEnabled: enabled })
+  },
 }))

@@ -15,6 +15,7 @@ import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { SearchDialog } from "./components/SearchDialog"
 import { Skeleton } from "./components/ui/skeleton"
+import { useReviewNotification } from "./hooks/useReviewNotification"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
 // performance. Viz and Monitoring were already lazy — Chat, Learning, Notes, Study added in S84.
 const Chat = lazy(() => import("./pages/Chat"))
@@ -226,6 +227,9 @@ function Sidebar() {
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const qc = useQueryClient()
+
+  // S118: review reminder notifications
+  useReviewNotification()
 
   // Startup prefetch: documents list + LLM settings
   useEffect(() => {

@@ -75,6 +75,8 @@ interface SettingsDrawerProps {
 
 function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const queryClient = useQueryClient()
+  const reviewRemindersEnabled = useAppStore((s) => s.reviewRemindersEnabled)
+  const setReviewRemindersEnabled = useAppStore((s) => s.setReviewRemindersEnabled)
   const { data: llm } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: fetchLLMSettings,
@@ -391,7 +393,33 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           <div className="border-t border-border" />
 
-          {/* Section 3: Privacy notice */}
+          {/* Section 3: Notifications (S118) */}
+          <section>
+            <h3 className="mb-3 text-sm font-semibold text-foreground">Notifications</h3>
+            <label className="flex cursor-pointer items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">Review reminders</p>
+                <p className="text-xs text-muted-foreground">
+                  Show a desktop notification when cards are due (at most once every 4 hours).
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={reviewRemindersEnabled}
+                onChange={(e) => setReviewRemindersEnabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-border accent-primary"
+              />
+            </label>
+            {typeof Notification !== "undefined" && Notification.permission === "denied" && (
+              <p className="mt-2 text-xs text-amber-600">
+                Notifications are blocked by your browser. Enable them in browser settings to receive reminders.
+              </p>
+            )}
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Section 4: Privacy notice */}
           <section>
             <p className="text-xs text-muted-foreground">
               {localMode === "private"

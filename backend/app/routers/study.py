@@ -234,6 +234,10 @@ class SectionHeatmapResponse(BaseModel):
     heatmap: dict[str, SectionHeatmapItem]
 
 
+class DueCountResponse(BaseModel):
+    due_today: int
+
+
 def _compute_section_heatmap(
     cards: list[FlashcardModel],
     chunk_to_section: dict[str, str | None],
@@ -378,6 +382,26 @@ def _build_session_plan(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/due-count", response_model=DueCountResponse)
+async def get_due_count(
+    session: AsyncSession = Depends(get_db),
+) -> DueCountResponse:
+    """Return the count of flashcards whose due_date is today or in the past.
+
+    Lightweight endpoint for frontend notification checks -- O(index) count
+    query, not a full card fetch.
+    """
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(func.count()).select_from(FlashcardModel).where(
+            FlashcardModel.due_date <= now
+        )
+    )
+    count = result.scalar_one()
+    logger.debug("due-count: %d cards due", count)
+    return DueCountResponse(due_today=count)
 
 
 @router.get("/due", response_model=list[FlashcardResponse])
