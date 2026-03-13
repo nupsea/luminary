@@ -62,26 +62,34 @@ _ROMAN = (
 # Ordinal words for "FIRST BOOK", "SECOND BOOK" etc.
 _ORDINALS = (
     r"(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|"
-    r"ELEVENTH|TWELFTH|THIRTEENTH)"
+    r"ELEVENTH|TWELFTH|THIRTEENTH|FOURTEENTH|FIFTEENTH|SIXTEENTH|SEVENTEENTH|"
+    r"EIGHTEENTH|NINETEENTH|TWENTIETH)"
+)
+
+# Number words for "Chapter One"
+_WORDS_N = (
+    r"(?:ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|"
+    r"FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY)"
 )
 
 # Pattern families (compiled)
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # P1: CHAPTER N. [dot optional] – most explicit
     # Allow optional leading whitespace for indented CHAPTER headings (Gita, etc.)
+    # Also allow number words (ONE, TWO...)
     (
         "P1",
         re.compile(
-            rf"^[ \t]*(?:CHAPTER|CHAP\.?)\s+({_ROMAN}|\d+)[\.:]?\s*$",
+            rf"^[ \t]*(?:CHAPTER|CHAP\.?)\s+({_ROMAN}|\d+|{_WORDS_N})[\.:]?\s*$",
             re.MULTILINE | re.IGNORECASE,
         ),
     ),
     # P7: CHAPTER N (no dot, Gita style) – requires HERE ENDETH confirmation
-    # Allow leading whitespace
+    # Allow leading whitespace and number words
     (
         "P7",
         re.compile(
-            rf"^[ \t]*CHAPTER\s+({_ROMAN}|\d+)\s*$",
+            rf"^[ \t]*CHAPTER\s+({_ROMAN}|\d+|{_WORDS_N})\s*$",
             re.MULTILINE,
         ),
     ),
@@ -98,7 +106,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "P6a",
         re.compile(
-            rf"^(?:PART|BOOK|SECTION)\s+({_ROMAN}|\d+)[\.]?(?:\s+[^\n]+)?$",
+            rf"^(?:PART|BOOK|SECTION|VOLUME)\s+({_ROMAN}|\d+|{_WORDS_N})[\.]?(?:\s+[^\n]+)?$",
             re.MULTILINE | re.IGNORECASE,
         ),
     ),
@@ -107,8 +115,8 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "P6b",
         re.compile(
-            rf"^[ \t]*(?:THE\s+)?{_ORDINALS}\s+BOOK(?:\s+OF\s+[^\n]+)?$",
-            re.MULTILINE,
+            rf"^[ \t]*(?:THE\s+)?{_ORDINALS}\s+(?:BOOK|SECTION|MEDITATION)(?:\s+OF\s+[^\n]+)?$",
+            re.MULTILINE | re.IGNORECASE,
         ),
     ),
     # P8: Bible book headings – match full heading line
@@ -144,8 +152,8 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "P5",
         re.compile(
-            r"^Chapter\s+(\d+)[\.:\s]\s*(\S.{0,120})$",
-            re.MULTILINE,
+            r"^Chapter\s+(\d+|" + _WORDS_N + r")[\.:\s]\s*(\S.{0,120})$",
+            re.MULTILINE | re.IGNORECASE,
         ),
     ),
     # Horizontal-rule divider (8+ dashes, equals, or asterisks on own line)
@@ -235,9 +243,41 @@ class BookParser:
                 return self._parse_docx(file_path)
             elif fmt in ("md", "markdown"):
                 return self._parse_md(file_path)
+            elif fmt in ("html", "htm"):
+                return self._parse_html(file_path)
         except Exception:
             logger.exception("BookParser failed for %s (format=%s)", file_path, fmt)
         return None
+
+    # ------------------------------------------------------------------
+    # HTML
+    # ------------------------------------------------------------------
+
+    def _parse_html(self, file_path: Path) -> ParsedDocument | None:
+        raw_bytes = file_path.read_bytes()
+        detected = chardet.detect(raw_bytes)
+        encoding = detected.get("encoding") or "utf-8"
+        html_text = raw_bytes.decode(encoding, errors="replace")
+
+        # Basic HTML to text conversion (strip tags)
+        # For real books, Gutenberg-style HTML is common.
+        text = re.sub(r"<[^>]+>", " ", html_text)
+        text = re.sub(r"[ \t]+", " ", text)  # collapse spaces
+        text = re.sub(r"\n\s*\n", "\n\n", text)  # collapse blank lines
+
+        clean_text, raw_text_no_meta = self._strip_gutenberg(text)
+        sections = self._segment_chapters(clean_text)
+        if sections is None:
+            return None
+
+        return ParsedDocument(
+            title=file_path.stem.replace("_", " ").title(),
+            format="html",
+            pages=0,
+            word_count=len(raw_text_no_meta.split()),
+            sections=sections,
+            raw_text=raw_text_no_meta,
+        )
 
     # ------------------------------------------------------------------
     # TXT
@@ -615,8 +655,8 @@ class BookParser:
 
         if best_pattern_id in ("P2", "P4"):
             return self._split_roman_with_subtitle(text, best_pattern, best_pattern_id)
-        elif best_pattern_id == "P1":
-            return self._split_with_optional_subtitle(text, best_pattern, "CHAPTER")
+        elif best_pattern_id in ("P1", "P7", "P6a", "P6b"):
+            return self._split_with_optional_subtitle(text, best_pattern)
         elif best_pattern_id == "HR":
             return self._split_by_hr(text)
         else:
@@ -679,11 +719,11 @@ class BookParser:
         return sections if len(sections) >= _MIN_CHAPTERS else None
 
     def _split_with_optional_subtitle(
-        self, text: str, pattern: re.Pattern[str], prefix: str
+        self, text: str, pattern: re.Pattern[str]
     ) -> list[Section] | None:
         """
         For P1-style patterns: the heading line is e.g. 'CHAPTER I.'
-        The next non-empty line may be a short subtitle (< 80 chars, not a sentence).
+        The next non-empty line may be a short subtitle (< 100 chars, not a period).
         """
         sections: list[Section] = []
         matches = list(pattern.finditer(text))
@@ -703,8 +743,12 @@ class BookParser:
             for li, line in enumerate(remaining_lines):
                 stripped = line.strip()
                 if stripped:
-                    # subtitle: short ≤ 80 chars, not ending with sentence punctuation
-                    if len(stripped) <= 80 and stripped[-1] not in ".?!":
+                    # subtitle: short ≤ 100 chars. Allow ? and ! but not lone period at end
+                    # of a multi-word line (which usually indicates a real sentence).
+                    if len(stripped) <= 100 and (
+                        stripped[-1] in "?!" or stripped[-1] not in "."
+                        or len(stripped.split()) <= 3
+                    ):
                         subtitle = stripped
                         body_line_start = li + 1
                     break

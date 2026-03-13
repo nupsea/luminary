@@ -363,3 +363,45 @@ class TestStripGutenberg:
         assert len(result.sections) == 2
         assert result.sections[0].heading is not None
         assert len(result.sections[0].text) > 20
+from pathlib import Path
+
+
+def test_alice_chapter_xi_subtitle():
+    path = DATA_BOOKS / "alice_in_wonderland.txt"
+    if not path.exists():
+        pytest.skip("alice_in_wonderland.txt not found")
+    
+    result = bp.parse(path, "txt")
+    assert result is not None
+    # Chapter XI is usually the 11th chapter (index 10)
+    # but there might be a preface or something.
+    # Let's find it by heading.
+    ch11 = next((s for s in result.sections if "CHAPTER XI" in s.heading), None)
+    assert ch11 is not None
+    assert "Who Stole the Tarts?" in ch11.heading
+
+def test_html_parsing(tmp_path):
+    html_content = """
+    <html>
+    <body>
+    <h1>The Book Title</h1>
+    *** START OF THE PROJECT GUTENBERG EBOOK TEST ***
+    CHAPTER I.
+    Introduction
+    This is the first chapter body.
+    CHAPTER II.
+    The Second Part
+    This is the second chapter body.
+    *** END OF THE PROJECT GUTENBERG EBOOK TEST ***
+    </body>
+    </html>
+    """
+    html_file = tmp_path / "test_book.html"
+    html_file.write_text(html_content)
+    
+    result = bp.parse(html_file, "html")
+    assert result is not None
+    assert len(result.sections) == 2
+    assert "CHAPTER I. — Introduction" in result.sections[0].heading
+    assert "CHAPTER II. — The Second Part" in result.sections[1].heading
+    assert result.format == "html"
