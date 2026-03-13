@@ -50,7 +50,14 @@ _RE_PG_END = re.compile(
 )
 
 # Roman numeral helper (I–MMMCMXCIX)
-_ROMAN = r"(?:M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{1,3}))"
+# Roman numeral helper — covers I through MMMCMXCIX.
+# V?I{0,3} (instead of V?I{1,3}) allows standalone V, X, XV etc.
+# The (?=[IVXLCDM]) lookahead prevents matching the empty string.
+_ROMAN = (
+    r"(?=[IVXLCDM])"
+    r"(?:M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))"
+)
+
 
 # Ordinal words for "FIRST BOOK", "SECOND BOOK" etc.
 _ORDINALS = (
@@ -79,11 +86,11 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
     # P3: I. CAPS TITLE on one line (Sherlock Holmes)
-    # Require title part to be ALL CAPS, max 80 chars, no lowercase letters
+    # Simple character class: uppercase letters, spaces, common punctuation
     (
         "P3",
         re.compile(
-            rf"^({_ROMAN})\.[ \t]+([A-Z][A-Z ,\'\'\-:/&]{2,79})$",
+            rf"^({_ROMAN})\.[ \t]+([A-Z][A-Z0-9 ',\-:&]{{2,79}})$",
             re.MULTILINE,
         ),
     ),
