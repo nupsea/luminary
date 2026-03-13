@@ -886,3 +886,21 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - When mapping rows that produce two sibling elements (data row + expand row), always use <Fragment key={id}> not bare <> -- React requires key on the outermost element of map(). Bare fragments lose the key and cause reconciliation issues when rows reorder.
   - StudySessionModel already had cards_correct (not correct_count) -- always read the model before authoring AC field names. Planner correctly identified this risk and prevented a duplicate column.
 ---
+
+## 2026-03-13T00:00:00Z - S116 - FSRS fragility heatmap on DocumentReader section list
+- Implemented: SectionHeatmapItem/SectionHeatmapResponse Pydantic schemas; pure _compute_section_heatmap() helper (fragility = 1 - avg(exp(-t/S))); GET /study/section-heatmap?document_id=X endpoint; DocumentReader.tsx heatmap useQuery + fragilityBorderClass() + colored <li> border + native title tooltip; Study.tsx onExit invalidates ["section-heatmap", documentId]; 5 tests; smoke test S116.sh
+- Files changed: backend/app/routers/study.py, backend/tests/test_section_heatmap.py (new), frontend/src/components/reader/DocumentReader.tsx, frontend/src/pages/Study.tsx, scripts/smoke/S116.sh (new)
+- AC verified:
+  - GET /study/section-heatmap?document_id=X returns {heatmap: {section_id: SectionHeatmapItem}}: PASS
+  - fragility_score = 1 - avg(exp(-t/S)) for cards in section: PASS (test verified formula)
+  - Sections with no cards absent from heatmap (null treated by absence): PASS
+  - Colored left-border: green (<= 0.3), yellow (0.31-0.6), red (> 0.6): PASS
+  - Tooltip with due count and avg retention %: PASS (native title attribute)
+  - Heatmap TanStack Query invalidated on session end: PASS
+  - Test: high-retrievability card -> fragility_score <= 0.3: PASS
+  - ruff check . exits 0; npx tsc --noEmit exits 0: PASS
+- Reviewer verdict: PASS (no Critical items)
+- Learnings:
+  - Pure helper functions using Pydantic return types must be declared AFTER the Pydantic class definitions -- Python resolves names at definition time, not at call time. Place schema classes before the helpers that reference them.
+  - AC7 stated "card with retrievability 0.2 -> fragility_score <= 0.3" which is mathematically incorrect (1 - 0.2 = 0.8). The intent was "high-retrievability card -> low fragility". Always verify AC math before implementing; use the formula-correct interpretation in tests.
+---

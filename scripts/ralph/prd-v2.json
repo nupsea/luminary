@@ -1025,7 +1025,7 @@
         "Heatmap query invalidated (TanStack Query) when a study session ends",
         "Test: card with retrievability 0.2 for section A -> section A fragility_score <= 0.3"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S117",
