@@ -8,6 +8,7 @@ Routes:
   POST /study/teachback              — LLM evaluation of user's teach-back explanation
   GET  /study/stats/{document_id}    — progress stats: mastery, retention, streak
   GET  /study/history                — daily study activity for the last N days
+  GET  /study/struggling             — cards with >= N 'again' ratings in last M days
 """
 
 import json
@@ -181,6 +182,14 @@ class DailyHistoryItem(BaseModel):
     date: str  # YYYY-MM-DD
     cards_reviewed: int
     study_time_minutes: float
+
+
+class StrugglingCardItem(BaseModel):
+    flashcard_id: str
+    document_id: str | None
+    question: str
+    again_count: int
+    source_section_id: str | None
 
 
 class SessionCardResponse(BaseModel):
@@ -690,6 +699,24 @@ async def get_study_history(
         )
         for d, v in sorted(daily.items())
     ]
+
+
+@router.get("/struggling", response_model=list[StrugglingCardItem])
+async def get_struggling_cards(
+    document_id: str | None = None,
+    again_threshold: int = Query(default=3, ge=1),
+    days: int = Query(default=14, ge=1, le=365),
+    session: AsyncSession = Depends(get_db),
+) -> list[StrugglingCardItem]:
+    """Return flashcards rated 'again' at least again_threshold times in the last N days."""
+    fsrs_svc = get_fsrs_service()
+    rows = await fsrs_svc.get_struggling_cards(
+        session=session,
+        document_id=document_id,
+        again_threshold=again_threshold,
+        days=days,
+    )
+    return [StrugglingCardItem(**r) for r in rows]
 
 
 # ---------------------------------------------------------------------------

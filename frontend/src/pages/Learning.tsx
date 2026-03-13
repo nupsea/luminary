@@ -546,6 +546,7 @@ export default function Learning() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const tagFilter = searchParams.get("tag")
+  const initialSectionId = searchParams.get("section_id") ?? undefined
 
   const [search, setSearch] = useState("")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
@@ -672,6 +673,7 @@ export default function Learning() {
       <DocumentReader
         documentId={activeDocumentId}
         onBack={() => setActiveDocument(null)}
+        initialSectionId={initialSectionId}
       />
     )
   }

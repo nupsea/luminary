@@ -6,13 +6,13 @@ Card no longer exposes those fields.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FlashcardModel
+from app.models import ChunkModel, FlashcardModel, ReviewEventModel
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,70 @@ class FSRSService:
             extra={"card_id": card_id, "rating": rating, "new_state": db_card.fsrs_state},
         )
         return db_card
+
+
+    async def get_struggling_cards(
+        self,
+        session: AsyncSession,
+        document_id: str | None = None,
+        again_threshold: int = 3,
+        days: int = 14,
+    ) -> list[dict]:
+        """Return flashcards with >= again_threshold 'again' ratings in the last N days.
+
+        Each result dict contains flashcard_id, question, again_count, source_section_id.
+        source_section_id is None for cards without an associated chunk/section.
+        """
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+
+        # Step 1: count 'again' events per flashcard within the window
+        count_stmt = (
+            select(
+                ReviewEventModel.flashcard_id,
+                func.count(ReviewEventModel.id).label("again_count"),
+            )
+            .where(ReviewEventModel.rating == "again")
+            .where(ReviewEventModel.reviewed_at >= cutoff)
+            .group_by(ReviewEventModel.flashcard_id)
+            .having(func.count(ReviewEventModel.id) >= again_threshold)
+        )
+        count_rows = await session.execute(count_stmt)
+        counts: dict[str, int] = {row.flashcard_id: row.again_count for row in count_rows}
+
+        if not counts:
+            return []
+
+        # Step 2: fetch flashcard details + section_id via chunk join
+        card_stmt = (
+            select(FlashcardModel, ChunkModel.section_id)
+            .outerjoin(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
+            .where(FlashcardModel.id.in_(list(counts)))
+        )
+        if document_id:
+            card_stmt = card_stmt.where(FlashcardModel.document_id == document_id)
+
+        card_rows = await session.execute(card_stmt)
+        results: list[dict] = []
+        for card, section_id in card_rows:
+            results.append(
+                {
+                    "flashcard_id": card.id,
+                    "document_id": card.document_id,
+                    "question": card.question,
+                    "again_count": counts[card.id],
+                    "source_section_id": section_id,
+                }
+            )
+
+        results.sort(key=lambda r: r["again_count"], reverse=True)
+        logger.debug(
+            "get_struggling_cards: document_id=%s threshold=%d days=%d found=%d",
+            document_id,
+            again_threshold,
+            days,
+            len(results),
+        )
+        return results
 
 
 _fsrs_service: FSRSService | None = None

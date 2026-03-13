@@ -679,9 +679,10 @@ function useReadingProgress(documentId: string, sectionCount: number) {
 interface DocumentReaderProps {
   documentId: string
   onBack: () => void
+  initialSectionId?: string
 }
 
-export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
+export function DocumentReader({ documentId, onBack, initialSectionId }: DocumentReaderProps) {
   const qc = useQueryClient()
   const { data: doc, isLoading } = useQuery({
     queryKey: ["document", documentId],
@@ -694,6 +695,15 @@ export function DocumentReader({ documentId, onBack }: DocumentReaderProps) {
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
   const [leftTab, setLeftTab] = useState<"sections" | "highlights">("sections")
   const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
+
+  // Scroll to initialSectionId once document sections are loaded (S114)
+  useEffect(() => {
+    if (!initialSectionId || !doc) return
+    const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+  }, [initialSectionId, doc])
 
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
