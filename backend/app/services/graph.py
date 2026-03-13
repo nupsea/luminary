@@ -5,7 +5,8 @@ Schema:
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
          RELATED_TO(Entity->Entity, relation_label, confidence),
-         CALLS(Entity->Entity, document_id)  — function call graph for code documents
+         CALLS(Entity->Entity, document_id)  -- function call graph for code documents
+         PREREQUISITE_OF(Entity->Entity, document_id, confidence)  -- S117
 
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
@@ -56,6 +57,8 @@ class KuzuService:
             "FROM Entity TO Entity, relation_label STRING, confidence FLOAT)",
             "CREATE REL TABLE IF NOT EXISTS CALLS("
             "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS PREREQUISITE_OF("
+            "FROM Entity TO Entity, document_id STRING, confidence FLOAT)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)
@@ -288,6 +291,216 @@ class KuzuService:
                 "get_co_occurring_pairs_for_document failed, returning empty", exc_info=True
             )
             return []
+
+    # -------------------------------------------------------------------------
+    # Prerequisite edges (S117)
+    # -------------------------------------------------------------------------
+
+    def add_prerequisite(
+        self,
+        dependent_id: str,
+        prerequisite_id: str,
+        document_id: str,
+        confidence: float = 1.0,
+    ) -> None:
+        """Create a PREREQUISITE_OF edge from dependent to prerequisite.
+
+        Idempotent: if an edge with the same (dependent, prerequisite, document_id)
+        already exists, it is left unchanged.
+        """
+        result = self._conn.execute(
+            "MATCH (a:Entity {id: $dep})-[r:PREREQUISITE_OF]->(b:Entity {id: $pre})"
+            " WHERE r.document_id = $did RETURN r.confidence",
+            {"dep": dependent_id, "pre": prerequisite_id, "did": document_id},
+        )
+        if not result.has_next():
+            self._conn.execute(
+                "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
+                " CREATE (a)-[:PREREQUISITE_OF {document_id: $did, confidence: $conf}]->(b)",
+                {
+                    "dep": dependent_id, "pre": prerequisite_id,
+                    "did": document_id, "conf": confidence,
+                },
+            )
+
+    def get_prerequisite_edges_for_document(self, document_id: str) -> list[dict]:
+        """Return all PREREQUISITE_OF edges for a document.
+
+        Returns list of dicts:
+            {from_entity, to_entity, from_id, to_id, confidence}
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (a:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}),"
+                " (b:Entity)-[:MENTIONED_IN]->(d),"
+                " (a)-[r:PREREQUISITE_OF]->(b)"
+                " WHERE r.document_id = $did"
+                " RETURN a.name, b.name, a.id, b.id, r.confidence",
+                {"did": document_id},
+            )
+            edges: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                edges.append({
+                    "from_entity": row[0],
+                    "to_entity": row[1],
+                    "from_id": row[2],
+                    "to_id": row[3],
+                    "confidence": float(row[4] or 1.0),
+                })
+            return edges
+        except Exception:
+            logger.debug("get_prerequisite_edges_for_document failed", exc_info=True)
+            return []
+
+    def get_learning_path(self, start_entity_name: str, document_id: str) -> dict:
+        """Return topologically sorted prerequisite chain starting from start_entity_name.
+
+        Algorithm:
+        1. Find the Entity node matching start_entity_name (case-insensitive)
+           that is MENTIONED_IN the given document_id.
+        2. BFS traversal following PREREQUISITE_OF edges outward from start,
+           collecting all reachable nodes. Cycles are handled with a seen set.
+        3. Kahn's algorithm topological sort on the subgraph.
+        4. Return {start_entity, document_id, nodes, edges}.
+        Returns empty nodes/edges if start_entity not found or has no prerequisite edges.
+        """
+        from collections import deque  # noqa: PLC0415
+
+        # Step 1: find start entity node (case-insensitive name match)
+        try:
+            name_lower = start_entity_name.lower()
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                " RETURN e.id, e.name, e.type",
+                {"did": document_id},
+            )
+            start_id: str | None = None
+            nodes_in_doc: dict[str, dict] = {}  # id -> {name, type}
+            while result.has_next():
+                row = result.get_next()
+                eid, ename, etype = row[0], row[1], row[2]
+                nodes_in_doc[eid] = {"name": ename, "type": etype or "CONCEPT"}
+                if ename and ename.lower() == name_lower:
+                    start_id = eid
+
+            if start_id is None:
+                return {"start_entity": start_entity_name, "document_id": document_id,
+                        "nodes": [], "edges": []}
+        except Exception:
+            logger.debug("get_learning_path entity lookup failed", exc_info=True)
+            return {"start_entity": start_entity_name, "document_id": document_id,
+                    "nodes": [], "edges": []}
+
+        # Step 2: BFS traversal following PREREQUISITE_OF edges from start
+        try:
+            # Build adjacency list for PREREQUISITE_OF edges scoped to document
+            all_prereq_result = self._conn.execute(
+                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
+                " WHERE r.document_id = $did RETURN a.id, b.id, r.confidence",
+                {"did": document_id},
+            )
+            # adj: from_id -> list of (to_id, confidence)
+            adj: dict[str, list[tuple[str, float]]] = {}
+            while all_prereq_result.has_next():
+                row = all_prereq_result.get_next()
+                from_id, to_id, conf = row[0], row[1], float(row[2] or 1.0)
+                adj.setdefault(from_id, []).append((to_id, conf))
+
+            if start_id not in adj:
+                # Start node exists but has no outgoing prerequisite edges
+                return {"start_entity": start_entity_name, "document_id": document_id,
+                        "nodes": [], "edges": []}
+
+            # BFS to collect reachable subgraph
+            visited: set[str] = {start_id}
+            queue: deque[str] = deque([start_id])
+            subgraph_nodes: set[str] = {start_id}
+            subgraph_edges: list[tuple[str, str, float]] = []
+
+            while queue:
+                current = queue.popleft()
+                for neighbor_id, conf in adj.get(current, []):
+                    subgraph_edges.append((current, neighbor_id, conf))
+                    if neighbor_id not in visited:
+                        visited.add(neighbor_id)
+                        subgraph_nodes.add(neighbor_id)
+                        queue.append(neighbor_id)
+
+            # Step 3: Kahn's algorithm topological sort
+            # Build in-degree map restricted to subgraph
+            in_degree: dict[str, int] = {n: 0 for n in subgraph_nodes}
+            sub_adj: dict[str, list[str]] = {n: [] for n in subgraph_nodes}
+            for from_id, to_id, _ in subgraph_edges:
+                if from_id in subgraph_nodes and to_id in subgraph_nodes:
+                    sub_adj[from_id].append(to_id)
+                    in_degree[to_id] = in_degree.get(to_id, 0) + 1
+
+            # Initialize queue with nodes that have no incoming edges.
+            # Kahn's on PREREQUISITE_OF edges (dep -> prereq) yields dependents
+            # first.  Reversing gives learning order: deepest prerequisites first.
+            topo_queue: deque[str] = deque(
+                nid for nid in subgraph_nodes if in_degree[nid] == 0
+            )
+            topo_order: list[str] = []
+            while topo_queue:
+                node = topo_queue.popleft()
+                topo_order.append(node)
+                for neighbor in sub_adj.get(node, []):
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        topo_queue.append(neighbor)
+
+            # Reverse so prerequisites come first (learning order).
+            topo_order.reverse()
+
+            # Cycle detection: Kahn's drops cyclic nodes (their in-degree never
+            # reaches 0).  Log a warning so data-quality issues are surfaced.
+            if len(topo_order) < len(subgraph_nodes):
+                logger.warning(
+                    "Cyclic PREREQUISITE_OF subgraph detected for document %s"
+                    " (start=%s): %d nodes unreachable via topological sort",
+                    document_id, start_entity_name,
+                    len(subgraph_nodes) - len(topo_order),
+                )
+
+            # Assign depth: 0 = deepest prerequisite, increasing = closer to start
+            depth_map: dict[str, int] = {}
+            for i, nid in enumerate(topo_order):
+                depth_map[nid] = i
+
+            from app.types import LearningPathNode  # noqa: PLC0415
+
+            sorted_nodes = [
+                LearningPathNode(
+                    entity_id=nid,
+                    name=nodes_in_doc.get(nid, {}).get("name", nid),
+                    entity_type=nodes_in_doc.get(nid, {}).get("type", "CONCEPT"),
+                    depth=depth_map.get(nid, 0),
+                )
+                for nid in topo_order
+                if nid in nodes_in_doc
+            ]
+
+            return_edges = [
+                {
+                    "from_entity": nodes_in_doc.get(f, {}).get("name", f),
+                    "to_entity": nodes_in_doc.get(t, {}).get("name", t),
+                    "confidence": c,
+                }
+                for f, t, c in subgraph_edges
+            ]
+
+            return {
+                "start_entity": start_entity_name,
+                "document_id": document_id,
+                "nodes": sorted_nodes,
+                "edges": return_edges,
+            }
+        except Exception:
+            logger.debug("get_learning_path traversal failed", exc_info=True)
+            return {"start_entity": start_entity_name, "document_id": document_id,
+                    "nodes": [], "edges": []}
 
     # -------------------------------------------------------------------------
     # Delete

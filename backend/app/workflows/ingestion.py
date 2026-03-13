@@ -731,6 +731,35 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                     # outer except captures it and the root cause is visible in logs.
                     raise
 
+            # Prerequisite detection: scan chunk texts for marker phrases.
+            # Only creates edges between entities already confirmed by GLiNER.
+            try:
+                from app.services.prerequisite_detector import detect_prerequisites  # noqa: PLC0415
+
+                canonical_name_to_id: dict[str, str] = {
+                    ent["name"]: ent["id"] for ent in canonical_entities
+                }
+                known_names: set[str] = set(canonical_name_to_id.keys())
+                prereq_pairs = detect_prerequisites(ner_chunks, known_names)
+                prereq_count = 0
+                for dep_name, prereq_name, confidence in prereq_pairs:
+                    dep_id = canonical_name_to_id.get(dep_name)
+                    prereq_id = canonical_name_to_id.get(prereq_name)
+                    if dep_id and prereq_id and dep_id != prereq_id:
+                        graph.add_prerequisite(dep_id, prereq_id, doc_id, confidence)
+                        prereq_count += 1
+                logger.info(
+                    "prerequisite edges created: %d",
+                    prereq_count,
+                    extra={"doc_id": doc_id},
+                )
+            except Exception as prereq_exc:
+                logger.warning(
+                    "prerequisite detection failed (non-fatal)",
+                    extra={"doc_id": doc_id},
+                    exc_info=prereq_exc,
+                )
+
             # Build call graph for code documents
             content_type = state.get("content_type") or ""
             if content_type == "code":

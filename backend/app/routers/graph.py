@@ -5,10 +5,29 @@ import logging
 from fastapi import APIRouter, Query
 
 from app.services.graph import get_graph_service
+from app.types import LearningPathResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/graph", tags=["graph"])
+
+
+@router.get("/learning-path")
+async def get_learning_path(
+    start_entity: str = Query(..., description="Entity name to start path from"),
+    document_id: str = Query(..., description="Document scope"),
+) -> LearningPathResponse:
+    """Return topologically sorted prerequisite chain for a concept.
+
+    Returns LearningPathResponse with nodes sorted from deepest prerequisite
+    toward the start node (start has highest depth index).
+    Returns empty nodes/edges if the entity is not found or has no edges.
+
+    IMPORTANT: This route must be declared before GET /{document_id} to prevent
+    FastAPI from matching 'learning-path' as a document_id path parameter.
+    """
+    svc = get_graph_service()
+    return svc.get_learning_path(start_entity, document_id)
 
 
 @router.get("/{document_id}")

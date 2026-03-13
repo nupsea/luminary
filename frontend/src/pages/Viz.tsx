@@ -12,6 +12,30 @@ import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 
 // ---------------------------------------------------------------------------
+// Learning path types (S117)
+// ---------------------------------------------------------------------------
+
+interface LearningPathNode {
+  entity_id: string
+  name: string
+  entity_type: string
+  depth: number
+}
+
+interface LearningPathEdge {
+  from_entity: string
+  to_entity: string
+  confidence: number
+}
+
+interface LearningPathData {
+  start_entity: string
+  document_id: string
+  nodes: LearningPathNode[]
+  edges: LearningPathEdge[]
+}
+
+// ---------------------------------------------------------------------------
 // Error boundary
 // ---------------------------------------------------------------------------
 
@@ -133,6 +157,16 @@ async function fetchGraphData(
   return res.json() as Promise<GraphData>
 }
 
+async function fetchLearningPath(
+  documentId: string,
+  startEntity: string,
+): Promise<LearningPathData> {
+  const url = `${API_BASE}/graph/learning-path?document_id=${encodeURIComponent(documentId)}&start_entity=${encodeURIComponent(startEntity)}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error("Failed to fetch learning path")
+  return res.json() as Promise<LearningPathData>
+}
+
 async function fetchDocList(): Promise<DocListItem[]> {
   const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
   if (!res.ok) return []
@@ -183,6 +217,69 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
 }
 
 // ---------------------------------------------------------------------------
+// Learning path graph builder (S117)
+// Builds a directed Graphology graph from learning-path API data.
+// ---------------------------------------------------------------------------
+
+const LP_EDGE_COLOR = "#f97316" // orange-500
+
+function buildLearningPathGraph(data: LearningPathData): Graph {
+  // Use a directed graph so Sigma renders arrows
+  const g = new Graph({ type: "directed" })
+
+  const nodeById: Record<string, LearningPathNode> = {}
+  data.nodes.forEach((n) => {
+    nodeById[n.entity_id] = n
+  })
+
+  const maxDepth = data.nodes.reduce((max, n) => Math.max(max, n.depth), 0)
+
+  data.nodes.forEach((node) => {
+    if (!g.hasNode(node.entity_id)) {
+      g.addNode(node.entity_id, {
+        label: node.name,
+        entityType: node.entity_type,
+        frequency: 1,
+        depth: node.depth,
+        x: Math.random() * 200 - 100,
+        // Spread nodes vertically by depth: deeper prerequisites lower on screen
+        y: maxDepth > 0 ? ((maxDepth - node.depth) / maxDepth) * 200 - 100 : 0,
+        size: 10,
+        color: TYPE_COLORS[node.entity_type as EntityType] ?? DEFAULT_COLOR,
+      })
+    }
+  })
+
+  data.edges.forEach((edge, idx) => {
+    // Look up IDs from name
+    const fromNode = data.nodes.find((n) => n.name === edge.from_entity)
+    const toNode = data.nodes.find((n) => n.name === edge.to_entity)
+    if (!fromNode || !toNode) return
+    const from = fromNode.entity_id
+    const to = toNode.entity_id
+    if (g.hasNode(from) && g.hasNode(to) && from !== to) {
+      if (!g.hasEdge(from, to)) {
+        g.addEdge(from, to, {
+          key: `lp-e-${idx}`,
+          weight: edge.confidence,
+          color: LP_EDGE_COLOR,
+          type: "PREREQUISITE_OF",
+        })
+      }
+    }
+  })
+
+  if (g.order > 0) {
+    forceAtlas2.assign(g, {
+      iterations: 80,
+      settings: forceAtlas2.inferSettings(g),
+    })
+  }
+
+  return g
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -201,9 +298,12 @@ export default function Viz() {
   const [activeTypes, setActiveTypes] = useState<Set<EntityType>>(new Set(ALL_ENTITY_TYPES))
   const [search, setSearch] = useState("")
   const [scope, setScope] = useState<"document" | "all">("document")
-  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph">("knowledge_graph")
+  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
+  // Learning path state (S117)
+  const [learningPathStart, setLearningPathStart] = useState("")
+  const [lpInputDraft, setLpInputDraft] = useState("")
 
   // Document list for the picker
   const { data: docList } = useQuery({
@@ -217,9 +317,22 @@ export default function Viz() {
   const queryKey = ["graph", scope, activeDocumentId, viewMode]
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey,
-    queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode),
+    queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode as "knowledge_graph" | "call_graph"),
     staleTime: 30_000,
-    enabled: !noDocSelected,
+    enabled: !noDocSelected && viewMode !== "learning_path",
+  })
+
+  // Learning path query (S117)
+  const {
+    data: lpData,
+    isLoading: lpLoading,
+    isError: lpError,
+    refetch: lpRefetch,
+  } = useQuery({
+    queryKey: ["learning-path", activeDocumentId, learningPathStart],
+    queryFn: () => fetchLearningPath(activeDocumentId!, learningPathStart),
+    staleTime: 30_000,
+    enabled: viewMode === "learning_path" && !!activeDocumentId && !!learningPathStart,
   })
 
   useEffect(() => {
@@ -231,8 +344,12 @@ export default function Viz() {
     }
   }, [isLoading, data])
 
-  // Build filtered graphology graph from API data + active entity types
+  // Build filtered graphology graph from API data + active entity types (or learning path)
   const filteredGraph = useMemo(() => {
+    if (viewMode === "learning_path") {
+      if (!lpData || lpData.nodes.length === 0) return null
+      return buildLearningPathGraph(lpData)
+    }
     if (!data) return null
     const visibleNodes = data.nodes.filter((n) => activeTypes.has(n.type as EntityType))
     const visibleIds = new Set(visibleNodes.map((n) => n.id))
@@ -240,7 +357,7 @@ export default function Viz() {
       (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
     )
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes])
+  }, [data, activeTypes, viewMode, lpData])
 
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
@@ -257,7 +374,7 @@ export default function Viz() {
 
     const s = new Sigma(filteredGraph, el, {
       renderEdgeLabels: false,
-      defaultEdgeColor: "#e2e8f0",
+      defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
       labelSize: 12,
       labelWeight: "normal",
     })
@@ -375,9 +492,32 @@ export default function Viz() {
   // Render helpers
   // ---------------------------------------------------------------------------
   const showEmpty =
-    !noDocSelected && !isLoading && !isError && (!data || data.nodes.length === 0)
+    !noDocSelected && !isLoading && !isError && (!data || data.nodes.length === 0) && viewMode !== "learning_path"
   const showAllHidden =
-    filteredGraph !== null && filteredGraph.order === 0 && !!data && data.nodes.length > 0
+    filteredGraph !== null && filteredGraph.order === 0 && !!data && data.nodes.length > 0 && viewMode !== "learning_path"
+
+  // Learning path render helpers (S117)
+  const lpNoInput = viewMode === "learning_path" && !learningPathStart
+  const lpShowLoading = viewMode === "learning_path" && !!learningPathStart && lpLoading
+  const lpShowError = viewMode === "learning_path" && !!learningPathStart && !lpLoading && lpError
+  const lpShowEmpty = viewMode === "learning_path" && !!learningPathStart && !lpLoading && !lpError && lpData && lpData.nodes.length === 0
+
+  // Learning path prerequisites breadcrumb for selected node
+  const lpBreadcrumb = useMemo((): string[] => {
+    if (!selectedNode || !lpData || viewMode !== "learning_path") return []
+    // Walk edges from selectedNode back toward start
+    const trail: string[] = [selectedNode.label]
+    const edgeMap: Record<string, string> = {}
+    lpData.edges.forEach((e) => { edgeMap[e.from_entity] = e.to_entity })
+    let current = selectedNode.label
+    const seen = new Set<string>([current])
+    while (edgeMap[current] && !seen.has(edgeMap[current])) {
+      current = edgeMap[current]
+      seen.add(current)
+      trail.push(current)
+    }
+    return trail
+  }, [selectedNode, lpData, viewMode])
 
   return (
     <VizErrorBoundary>
@@ -417,8 +557,8 @@ export default function Viz() {
             <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               View
             </p>
-            <div className="flex rounded-md border border-border overflow-hidden text-xs">
-              {(["knowledge_graph", "call_graph"] as const).map((v) => (
+            <div className="flex flex-col rounded-md border border-border overflow-hidden text-xs">
+              {(["knowledge_graph", "call_graph", "learning_path"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => {
@@ -431,14 +571,42 @@ export default function Viz() {
                       : "text-muted-foreground hover:bg-accent"
                   }`}
                 >
-                  {v === "knowledge_graph" ? "Knowledge" : "Call Graph"}
+                  {v === "knowledge_graph" ? "Knowledge" : v === "call_graph" ? "Call Graph" : "Learning Path"}
                 </button>
               ))}
             </div>
             {viewMode === "call_graph" && (
               <p className="mt-1 text-xs text-muted-foreground">Code documents only</p>
             )}
+            {viewMode === "learning_path" && (
+              <p className="mt-1 text-xs text-muted-foreground">Orange arrows = PREREQUISITE_OF</p>
+            )}
           </div>
+
+          {/* Learning path: start entity input (S117) */}
+          {viewMode === "learning_path" && (
+            <div>
+              <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Start entity
+              </p>
+              <input
+                type="text"
+                value={lpInputDraft}
+                onChange={(e) => setLpInputDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setLearningPathStart(lpInputDraft.trim())
+                }}
+                placeholder="Type a concept name..."
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={() => setLearningPathStart(lpInputDraft.trim())}
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+              >
+                Load path
+              </button>
+            </div>
+          )}
 
           {/* Scope toggle */}
           <div>
@@ -516,6 +684,50 @@ export default function Viz() {
               <p className="text-base font-semibold text-foreground">No document selected</p>
               <p className="text-sm text-muted-foreground max-w-xs">
                 Choose a document from the dropdown on the left to explore its knowledge graph.
+              </p>
+            </div>
+          )}
+
+          {/* Learning path states (S117) */}
+          {lpNoInput && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
+              <Network size={40} className="text-muted-foreground/40" />
+              <p className="text-base font-semibold text-foreground">Enter a start entity</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Type a concept name in the "Start entity" input and press Enter to view its prerequisite chain.
+              </p>
+            </div>
+          )}
+
+          {lpShowLoading && (
+            <div className="absolute inset-0 flex flex-col gap-4 p-6">
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="flex-1 w-full rounded-lg" />
+            </div>
+          )}
+
+          {lpShowError && (
+            <div className="absolute inset-0 flex items-center justify-center p-6">
+              <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
+                <p className="font-medium">Failed to load learning path</p>
+                <button
+                  onClick={() => void lpRefetch()}
+                  className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {lpShowEmpty && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
+              <Network size={40} className="text-muted-foreground/40" />
+              <p className="text-base font-semibold text-foreground">
+                No prerequisite path found for "{learningPathStart}"
+              </p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                This entity has no PREREQUISITE_OF edges in this document. Try a different concept.
               </p>
             </div>
           )}
@@ -599,7 +811,7 @@ export default function Viz() {
           {/* Node click popover */}
           {selectedNode && (
             <div
-              className="fixed z-50 rounded-lg border border-border bg-background shadow-lg p-3 min-w-[180px]"
+              className="fixed z-50 rounded-lg border border-border bg-background shadow-lg p-3 min-w-[180px] max-w-[260px]"
               style={{ left: selectedNode.screenX + 8, top: selectedNode.screenY - 60 }}
             >
               <div className="flex items-center gap-2 mb-1.5">
@@ -614,9 +826,18 @@ export default function Viz() {
               <p className="text-sm font-semibold text-foreground capitalize mb-1">
                 {selectedNode.label}
               </p>
-              <p className="text-xs text-muted-foreground mb-2">
-                Mentions: {selectedNode.frequency}
-              </p>
+              {viewMode === "learning_path" && lpBreadcrumb.length > 1 ? (
+                <div className="mb-2">
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Prerequisites:</p>
+                  <p className="text-xs text-foreground">
+                    {lpBreadcrumb.join(" -> ")}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground mb-2">
+                  Mentions: {selectedNode.frequency}
+                </p>
+              )}
               <button
                 onClick={() => {
                   setSelectedNode(null)

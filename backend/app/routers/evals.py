@@ -10,7 +10,6 @@ import json
 import logging
 import subprocess
 from pathlib import Path
-from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel

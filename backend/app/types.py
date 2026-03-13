@@ -113,3 +113,24 @@ class GapReport(TypedDict):
     gaps: list[str]
     covered: list[str]
     query_used: str
+
+
+# ---------------------------------------------------------------------------
+# Learning path (S117)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LearningPathNode:
+    entity_id: str
+    name: str
+    entity_type: str
+    depth: int  # 0 = deepest prerequisite, increasing = closer to start (dependent)
+
+
+class LearningPathResponse(TypedDict):
+    start_entity: str
+    document_id: str
+    # nodes: topologically sorted LearningPathNode dataclasses (serialized to dicts on wire)
+    nodes: list[LearningPathNode]
+    edges: list[dict]  # list of {from_entity, to_entity, confidence}
