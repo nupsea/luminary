@@ -1043,7 +1043,7 @@
         "Test: ingest a passage containing 'X requires understanding of Y' -> PREREQUISITE_OF edge from X to Y exists in Kuzu",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S118",

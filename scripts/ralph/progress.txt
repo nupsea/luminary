@@ -904,3 +904,21 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - Pure helper functions using Pydantic return types must be declared AFTER the Pydantic class definitions -- Python resolves names at definition time, not at call time. Place schema classes before the helpers that reference them.
   - AC7 stated "card with retrievability 0.2 -> fragility_score <= 0.3" which is mathematically incorrect (1 - 0.2 = 0.8). The intent was "high-retrievability card -> low fragility". Always verify AC math before implementing; use the formula-correct interpretation in tests.
 ---
+
+## 2026-03-14T00:00:00 - S117 - Concept prerequisite mapping: PREREQUISITE_OF edges in Kuzu with learning-path endpoint
+- Implemented: prerequisite_detector.py (pure-function regex scanner, 6 marker patterns, entity guard); KuzuService PREREQUISITE_OF schema + add_prerequisite/get_prerequisite_edges_for_document/get_learning_path (BFS + Kahn's topo sort reversed for learning order, cycle detection); ingestion wiring (non-fatal, INFO log); GET /graph/learning-path endpoint (declared before /{document_id}); Viz Learning Path mode (directed orange graph, start-entity input, loading/error/empty states, breadcrumb trail)
+- Files changed: backend/app/types.py, backend/app/services/graph.py, backend/app/services/prerequisite_detector.py (new), backend/app/workflows/ingestion.py, backend/app/routers/graph.py, backend/tests/test_prerequisite_detector.py (new), backend/tests/test_graph.py, frontend/src/pages/Viz.tsx, scripts/smoke/S117.sh (new), backend/app/routers/evals.py (ruff fix)
+- AC verified:
+  - Ingestion pipeline detects prerequisite markers and creates PREREQUISITE_OF directed edges in Kuzu: PASS
+  - Kuzu schema has PREREQUISITE_OF relationship table with from_entity, to_entity, document_id, confidence: PASS
+  - GET /graph/learning-path?start_entity=X&document_id=Y returns topologically sorted concept list: PASS
+  - Viz tab has 'Learning Path' toggle that renders PREREQUISITE_OF edges as directed orange arrows: PASS
+  - Clicking a node in learning-path mode shows its prerequisites as a breadcrumb trail: PASS
+  - Test: ingest passage 'X requires understanding of Y' -> PREREQUISITE_OF edge from X to Y: PASS (test_prerequisite_detector.py)
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: 2 Critical fixed (dead all_edges variable removed; LearningPathResponse return type added to router); cycle-detection log warning and test added for High issue
+- Learnings:
+  - Kahn's algorithm on PREREQUISITE_OF graph (dep->prereq) yields dependents first; must reverse for learning order (prerequisites first)
+  - GET /graph/learning-path MUST be declared before GET /{document_id} in FastAPI router or it gets captured as a path param
+  - Single-char entity names fail _ENTITY_FRAG regex (requires 2+ chars); tests must use realistic multi-char names
+---
