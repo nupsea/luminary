@@ -21,7 +21,7 @@ from app.models import SectionModel, SectionSummaryModel
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "Summarize the following passage in 1 to 2 sentences. "
+    "Summarize the following passage in 2 to 3 sentences. "
     "Be specific about names, events, and arguments. "
     "Output only the summary."
 )
@@ -30,7 +30,7 @@ MIN_PREVIEW_LEN = 200
 # 30 units per document: enough thematic coverage while keeping Ollama call count
 # manageable (100 was causing >30 min ingestion times on local hardware).
 MAX_UNITS = 30
-TEXT_HARD_CAP = 4000
+TEXT_HARD_CAP = 10000
 
 # Case-insensitive signals that indicate a metadata/legal section
 _METADATA_SIGNALS = [

@@ -8,22 +8,24 @@ from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services.book_parser import BookParser
+from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 
-# Single shared instance (stateless)
+# Shared instances (stateless)
 _book_parser = BookParser()
+_universal_parser = UniversalParser()
 
 
 class DocumentParser:
     """
     General document parser.
 
-    For every format, BookParser is tried first.  If it detects clear chapter
-    structure it returns a rich ParsedDocument.  When it returns None (the
-    document is not book-shaped), we fall back to the original heuristic
-    parsers so that short reports, technical docs, etc. still work correctly.
+    Uses a tiered approach:
+    1. UniversalParser (signature discovery for books, scripts, papers, chat)
+    2. BookParser (legacy regex families for classic books)
+    3. Heuristic fallbacks (font-size, paragraph splits)
     """
 
     def parse(self, file_path: Path, format: str) -> ParsedDocument:
@@ -44,7 +46,12 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument:
-        # Try BookParser first (handles Gutenberg, TOC, chapter patterns, running headers)
+        # Try UniversalParser first
+        result = _universal_parser.parse(file_path, "pdf")
+        if result is not None:
+            return result
+
+        # Try BookParser next
         result = _book_parser.parse(file_path, "pdf")
         if result is not None:
             return result
@@ -125,7 +132,12 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_docx(self, file_path: Path) -> ParsedDocument:
-        # Try BookParser first (style-based + regex fallback for books without styles)
+        # Try UniversalParser first
+        result = _universal_parser.parse(file_path, "docx")
+        if result is not None:
+            return result
+
+        # Try BookParser next
         result = _book_parser.parse(file_path, "docx")
         if result is not None:
             return result
@@ -189,7 +201,12 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_txt(self, file_path: Path) -> ParsedDocument:
-        # Try BookParser first (chapter detection + Gutenberg stripping)
+        # Try UniversalParser first
+        result = _universal_parser.parse(file_path, "txt")
+        if result is not None:
+            return result
+
+        # Try BookParser next
         result = _book_parser.parse(file_path, "txt")
         if result is not None:
             return result
@@ -226,6 +243,11 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_md(self, file_path: Path) -> ParsedDocument:
+        # Try UniversalParser first
+        result = _universal_parser.parse(file_path, "md")
+        if result is not None:
+            return result
+
         # Try BookParser first (markdown-it token-based with min-chapter guard)
         result = _book_parser.parse(file_path, "md")
         if result is not None:

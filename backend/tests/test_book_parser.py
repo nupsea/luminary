@@ -363,7 +363,6 @@ class TestStripGutenberg:
         assert len(result.sections) == 2
         assert result.sections[0].heading is not None
         assert len(result.sections[0].text) > 20
-from pathlib import Path
 
 
 def test_alice_chapter_xi_subtitle():

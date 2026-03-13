@@ -278,7 +278,7 @@ async def _chunk_book(
                 page_start=s.get("page_start", 0),
                 page_end=s.get("page_end", 0),
                 section_order=s_idx,
-                preview=s.get("text", "")[:300],
+                preview=s.get("text", "")[:10000],
             )
             session.add(section_model)
             section_models.append(section_model)
@@ -490,7 +490,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         page_start=s.get("page_start", 0),
                         page_end=s.get("page_end", 0),
                         section_order=s_idx,
-                        preview=s.get("text", "")[:300],
+                        preview=s.get("text", "")[:10000],
                     )
                     session.add(section_model)
                 chunk_models: list[ChunkModel] = []
