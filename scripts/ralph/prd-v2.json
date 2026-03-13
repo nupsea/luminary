@@ -969,7 +969,7 @@
         "At-risk cards listed with direct link to review them",
         "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S114",

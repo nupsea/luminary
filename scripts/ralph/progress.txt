@@ -832,3 +832,22 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - CO_OCCURS edge weight from Kuzu is a raw co-occurrence count (1, 2, ... N) -- NOT a probability. Always normalise before exposing as "confidence" to frontend. Pattern: divide by max_weight with a default=1.0 guard to avoid ZeroDivisionError on empty list.
   - When backend route has a lazy import (from module import fn inside method body), patch at the source module (app.services.graph.get_graph_service), not at the caller module. The lazy import fetches from sys.modules at call time.
 ---
+
+## 2026-03-13T08:00:00Z - S113 - Learning Goals with target dates and FSRS-based readiness projection
+- Implemented: LearningGoalModel ORM, GoalService with FSRS-4.5 power-law retrievability, /goals CRUD router (POST/GET/DELETE + GET readiness), cascade delete in documents.py, GoalsPanel+GoalRow+RetentionBadge in Study.tsx
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/goal_service.py (new), backend/app/routers/goals.py (new), backend/app/main.py, backend/app/routers/documents.py, frontend/src/pages/Study.tsx, backend/tests/test_goal_service.py (new), scripts/smoke/S113.sh (new)
+- AC verified:
+  - learning_goals table with id, document_id, title, target_date, created_at: PASS
+  - POST /goals, GET /goals, DELETE /goals/{id}: PASS
+  - GET /goals/{id}/readiness returns on_track, projected_retention_pct, at_risk_card_count, at_risk_cards: PASS
+  - GoalService.compute_readiness() uses FSRS-4.5 power-law _retrievability(S, t): PASS
+  - Frontend Goals panel with title input, doc selector, date picker: PASS
+  - Readiness gauge green/yellow/red via RetentionBadge: PASS
+  - At-risk cards listed with projected_retention_pct: PASS
+  - ruff check . exits 0; npx tsc --noEmit exits 0: PASS
+- Reviewer verdict: PASS after fixing High item (removed redundant invalidateQueries before refetch in GoalRow)
+- Learnings:
+  - FSRS-4.5 power-law formula: R(t,S) = (1 + FACTOR*t/S)^DECAY where FACTOR=19/81, DECAY=-0.5. Use this for all future FSRS readiness projections; it is more accurate than the exponential approximation.
+  - For on-demand queries with enabled:false, call only refetch() -- not invalidateQueries followed by refetch(). The invalidation is redundant and creates a subtle race.
+  - Route ordering matters: GET /{id}/readiness must be declared before DELETE /{id} in FastAPI to prevent "readiness" being matched as a goal_id for DELETE.
+---
