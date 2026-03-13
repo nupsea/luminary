@@ -279,6 +279,29 @@ GAP_FLASHCARD_USER_TMPL = (
     'Generate one flashcard as JSON: {{"front": "question", "back": "answer"}}'
 )
 
+GRAPH_FLASHCARD_SYSTEM = (
+    "You are a learning assistant creating flashcards that test understanding of relationships "
+    "between concepts. Each question must ask how two named entities are connected, "
+    "what one entity means in the context of the other, or what role one plays relative to the other. "
+    "NEVER frame a question as a definition question ('What is X?'). "
+    "NEVER use phrases like 'in this passage' or 'according to this text'. "
+    "Questions must be self-contained. "
+    "Output a JSON array starting with [ and ending with ]. "
+    "Write no explanation, preamble, or markdown fences."
+)
+
+GRAPH_FLASHCARD_USER_TMPL = (
+    "Entity A: {name_a}\n"
+    "Entity B: {name_b}\n"
+    "Relationship hint: {relation_label}\n\n"
+    "Context passages:\n{context}\n\n"
+    "Generate {count} flashcard(s) testing the relationship between '{name_a}' and '{name_b}'.\n"
+    "Each question must be framed as a relationship question "
+    "('How does X relate to Y?', 'What connects X and Y?', 'What role does X play in Y?').\n"
+    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
+    "JSON array:"
+)
+
 
 def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
     """Parse a single {front, back} JSON object from LLM response for one gap."""
@@ -563,6 +586,124 @@ class FlashcardService:
                 len(gaps),
             )
         return len(cards), ids
+
+
+    async def generate_from_graph(
+        self,
+        document_id: str,
+        k: int,
+        session: AsyncSession,
+        cards_per_pair: int = 1,
+    ) -> list[FlashcardModel]:
+        """Generate flashcards from Kuzu entity relationship pairs.
+
+        For each of the top-k entity pairs (by edge weight), fetches shared
+        chunk context and calls LiteLLM with a relationship-framing prompt.
+        Falls through gracefully when Kuzu is empty or Ollama is unreachable.
+        """
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        llm = get_llm_service()
+        graph = get_graph_service()
+
+        # Fetch top-k pairs by confidence (RELATED_TO) -- fall back to CO_OCCURS if empty
+        pairs_4 = graph.get_related_entity_pairs_for_document(document_id, limit=k)
+        if pairs_4:
+            pairs: list[tuple[str, str, str, float]] = pairs_4
+        else:
+            co_pairs = graph.get_co_occurring_pairs_for_document(document_id, limit=k)
+            pairs = [(a, b, "co-occurs", w) for a, b, w in co_pairs]
+
+        if not pairs:
+            logger.info("generate_from_graph: no entity pairs found for doc=%s", document_id)
+            return []
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def _generate_one(
+            name_a: str, name_b: str, relation_label: str
+        ) -> list[FlashcardModel]:
+            async with semaphore:
+                from app.services.retriever import get_retriever  # noqa: PLC0415
+
+                retriever = get_retriever()
+                query = f"{name_a} {name_b}"
+                scored_chunks = await retriever.retrieve(
+                    query=query, document_ids=[document_id], k=5
+                )
+                if not scored_chunks:
+                    return []
+
+                context = "\n\n".join(c.text for c in scored_chunks)[:_CHUNK_CHAR_LIMIT]
+                first_chunk_id = scored_chunks[0].chunk_id
+
+                prompt = GRAPH_FLASHCARD_USER_TMPL.format(
+                    name_a=name_a,
+                    name_b=name_b,
+                    relation_label=relation_label or "related",
+                    context=context,
+                    count=cards_per_pair,
+                )
+                raw = await llm.generate(prompt, system=GRAPH_FLASHCARD_SYSTEM, stream=False)
+                cards_data = _parse_llm_response(raw, document_id)
+
+                now = datetime.now(UTC)
+                cards: list[FlashcardModel] = []
+                for item in cards_data:
+                    if not isinstance(item, dict):
+                        continue
+                    question = str(item.get("question", "")).strip()
+                    answer = str(item.get("answer", "")).strip()
+                    source_excerpt = str(item.get("source_excerpt", "")).strip()
+                    if not question or not answer:
+                        continue
+                    cards.append(
+                        FlashcardModel(
+                            id=str(uuid.uuid4()),
+                            document_id=document_id,
+                            chunk_id=first_chunk_id,
+                            source="graph",
+                            deck="graph",
+                            question=question,
+                            answer=answer,
+                            source_excerpt=source_excerpt,
+                            difficulty="medium",
+                            fsrs_state="new",
+                            fsrs_stability=0.0,
+                            fsrs_difficulty=0.0,
+                            due_date=now,
+                            reps=0,
+                            lapses=0,
+                            created_at=now,
+                        )
+                    )
+                return cards
+
+        raw_results = await asyncio.gather(
+            *[_generate_one(a, b, label) for a, b, label, _conf in pairs],
+            return_exceptions=True,
+        )
+
+        all_cards: list[FlashcardModel] = []
+        for res in raw_results:
+            if isinstance(res, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+                raise res  # type: ignore[misc]
+            if isinstance(res, BaseException):
+                logger.warning("generate_from_graph: error for a pair: %s", res)
+                continue
+            all_cards.extend(res)  # type: ignore[arg-type]
+
+        for card in all_cards:
+            session.add(card)
+        if all_cards:
+            await session.commit()
+            for card in all_cards:
+                await session.refresh(card)
+            logger.info(
+                "generate_from_graph: created %d cards for doc=%s", len(all_cards), document_id
+            )
+
+        return all_cards
 
 
 _flashcard_service: FlashcardService | None = None

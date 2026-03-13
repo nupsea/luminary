@@ -256,6 +256,39 @@ class KuzuService:
             )
             return []
 
+    def get_co_occurring_pairs_for_document(
+        self, document_id: str, limit: int = 5
+    ) -> list[tuple[str, str, float]]:
+        """Return top-K entity pairs by CO_OCCURS edge weight for a given document.
+
+        Returns list of (name_a, name_b, weight), ordered by weight descending,
+        capped at *limit*. Returns [] on any Kuzu error or when no CO_OCCURS edges exist.
+
+        Used as a fallback by generate_from_graph when no RELATED_TO edges exist.
+        """
+        try:
+            result = self._conn.execute(
+                f"MATCH (a:Entity)-[:MENTIONED_IN]->(d:Document {{id: $did}}),"
+                f" (b:Entity)-[:MENTIONED_IN]->(d),"
+                f" (a)-[r:CO_OCCURS]->(b)"
+                f" WHERE r.document_id = $did"
+                f" RETURN a.name, b.name, r.weight"
+                f" ORDER BY r.weight DESC LIMIT {int(limit)}",
+                {"did": document_id},
+            )
+            pairs: list[tuple[str, str, float]] = []
+            while result.has_next():
+                row = result.get_next()
+                name_a, name_b, weight = row[0], row[1], row[2]
+                if name_a and name_b:
+                    pairs.append((name_a, name_b, float(weight or 0.0)))
+            return pairs
+        except Exception:
+            logger.debug(
+                "get_co_occurring_pairs_for_document failed, returning empty", exc_info=True
+            )
+            return []
+
     # -------------------------------------------------------------------------
     # Delete
     # -------------------------------------------------------------------------

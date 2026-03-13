@@ -61,6 +61,22 @@ class FlashcardUpdateRequest(BaseModel):
     answer: str | None = None
 
 
+class GenerateFromGraphRequest(BaseModel):
+    document_id: str
+    k: int = Field(default=5, ge=1, le=20)
+
+
+class EntityPairPreview(BaseModel):
+    name_a: str
+    name_b: str
+    relation_label: str
+    confidence: float
+
+
+class EntityPairsResponse(BaseModel):
+    pairs: list[EntityPairPreview]
+
+
 class ReviewRequest(BaseModel):
     rating: Literal["again", "hard", "good", "easy"]
     session_id: str | None = None
@@ -190,6 +206,62 @@ def _cards_to_csv(cards: list[FlashcardModel], document_title: str) -> str:
     for card in cards:
         writer.writerow([card.question, card.answer, card.source_excerpt, document_title])
     return output.getvalue()
+
+
+@router.get("/entity-pairs", response_model=EntityPairsResponse)
+async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
+    """Return top entity pairs for a document from Kuzu (for preview before generation).
+
+    Uses RELATED_TO edges ordered by confidence descending; falls back to CO_OCCURS
+    when no RELATED_TO edges exist.
+    """
+    from app.services.graph import get_graph_service  # noqa: PLC0415
+
+    graph = get_graph_service()
+    raw_pairs = graph.get_related_entity_pairs_for_document(document_id, limit=10)
+
+    if not raw_pairs:
+        co_pairs = graph.get_co_occurring_pairs_for_document(document_id, limit=10)
+        previews = [
+            EntityPairPreview(name_a=a, name_b=b, relation_label="co-occurs", confidence=w)
+            for a, b, w in co_pairs
+        ]
+    else:
+        previews = [
+            EntityPairPreview(name_a=a, name_b=b, relation_label=label, confidence=conf)
+            for a, b, label, conf in raw_pairs
+        ]
+
+    return EntityPairsResponse(pairs=previews)
+
+
+@router.post("/generate-from-graph", response_model=list[FlashcardResponse], status_code=201)
+async def generate_flashcards_from_graph(
+    req: GenerateFromGraphRequest,
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> list[FlashcardResponse]:
+    """Generate relationship-framing flashcards from Kuzu entity pairs. HTTP 201."""
+    try:
+        cards = await service.generate_from_graph(
+            document_id=req.document_id,
+            k=req.k,
+            session=session,
+        )
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is not running. Start it with: ollama serve",
+        ) from exc
+    logger.info(
+        "Generated graph flashcards",
+        extra={"document_id": req.document_id, "count": len(cards)},
+    )
+    return [_to_response(c) for c in cards]
 
 
 @router.get("/{document_id}/export/csv")
