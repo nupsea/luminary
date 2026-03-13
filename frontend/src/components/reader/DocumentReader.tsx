@@ -15,6 +15,26 @@ import { AnnotationPopover } from "./AnnotationPopover"
 
 const API_BASE = "http://localhost:8000"
 
+// ---------------------------------------------------------------------------
+// FSRS fragility heatmap (S116)
+// ---------------------------------------------------------------------------
+
+interface SectionHeatmapItem {
+  section_id: string
+  fragility_score: number | null
+  due_card_count: number
+  avg_retention_pct: number | null
+}
+
+function fragilityBorderClass(score: number | null): string {
+  if (score === null) return ""
+  if (score <= 0.3) return "border-l-4 border-l-green-500"
+  if (score <= 0.6) return "border-l-4 border-l-yellow-500"
+  return "border-l-4 border-l-red-500"
+}
+
+// ---------------------------------------------------------------------------
+
 async function fetchDocument(id: string): Promise<DocumentDetail> {
   const res = await fetch(`${API_BASE}/documents/${id}`)
   if (!res.ok) throw new Error("Failed to fetch document")
@@ -731,6 +751,20 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
     staleTime: 30_000,
   })
 
+  // Fetch FSRS fragility heatmap for section coloring (S116)
+  const { data: heatmapData } = useQuery<Record<string, SectionHeatmapItem>>({
+    queryKey: ["section-heatmap", documentId],
+    queryFn: async () => {
+      const res = await fetch(
+        `${API_BASE}/study/section-heatmap?document_id=${encodeURIComponent(documentId)}`
+      )
+      if (!res.ok) return {}
+      const data = (await res.json()) as { heatmap: Record<string, SectionHeatmapItem> }
+      return data.heatmap
+    },
+    staleTime: 60_000,
+  })
+
   // Derive the set of section IDs that have at least one note
   const notedSections = useMemo(
     () => new Set((docNotes ?? []).map((n) => n.section_id).filter((id): id is string => id !== null && id !== undefined)),
@@ -873,11 +907,18 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                       {doc.sections.map((section) => {
                         const hasNote = notedSections.has(section.id)
                         const editorOpen = openNoteEditor === section.id
+                        const heatmapItem = heatmapData?.[section.id] ?? null
+                        const borderClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
+                        const tooltipText =
+                          heatmapItem && heatmapItem.fragility_score !== null
+                            ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
+                            : undefined
                         return (
                           <li
                             key={section.id}
                             data-section-id={section.id}
-                            className="rounded-md border border-border p-3"
+                            title={tooltipText}
+                            className={cn("rounded-md border border-border p-3", borderClass)}
                           >
                             <div className="flex items-start gap-1">
                               <p

@@ -223,6 +223,64 @@ class StrugglingCardItem(BaseModel):
     source_section_id: str | None
 
 
+class SectionHeatmapItem(BaseModel):
+    section_id: str
+    fragility_score: float | None
+    due_card_count: int
+    avg_retention_pct: float | None
+
+
+class SectionHeatmapResponse(BaseModel):
+    heatmap: dict[str, SectionHeatmapItem]
+
+
+def _compute_section_heatmap(
+    cards: list[FlashcardModel],
+    chunk_to_section: dict[str, str | None],
+    now: datetime,
+) -> dict[str, SectionHeatmapItem]:
+    """Aggregate FSRS retrievability per section.
+
+    fragility_score = 1 - avg_retrievability where retrievability = exp(-t/S).
+    Sections with no cards are absent from the returned dict.
+    Pure function -- no I/O.
+    """
+    groups: dict[str, list[FlashcardModel]] = {}
+    for card in cards:
+        if not card.chunk_id:
+            continue
+        section_id = chunk_to_section.get(card.chunk_id)
+        if section_id is None:
+            continue
+        groups.setdefault(section_id, []).append(card)
+
+    result: dict[str, SectionHeatmapItem] = {}
+    for section_id, group in groups.items():
+        retrievabilities: list[float] = []
+        for card in group:
+            if card.fsrs_stability <= 0 or card.last_review is None:
+                retrievabilities.append(0.0)
+            else:
+                last_review_aware = card.last_review.replace(tzinfo=UTC)
+                days_since = (now - last_review_aware).total_seconds() / 86400
+                retrievabilities.append(math.exp(-days_since / card.fsrs_stability))
+
+        avg_ret = sum(retrievabilities) / len(retrievabilities)
+        fragility = round(max(0.0, min(1.0, 1.0 - avg_ret)), 4)
+        due_count = sum(
+            1
+            for card in group
+            if card.due_date and card.due_date.replace(tzinfo=UTC) <= now
+        )
+        result[section_id] = SectionHeatmapItem(
+            section_id=section_id,
+            fragility_score=fragility,
+            due_card_count=due_count,
+            avg_retention_pct=round(avg_ret * 100, 1),
+        )
+    return result
+
+
 class SessionCardResponse(BaseModel):
     card_id: str
     question: str
@@ -845,6 +903,45 @@ async def get_struggling_cards(
         days=days,
     )
     return [StrugglingCardItem(**r) for r in rows]
+
+
+@router.get("/section-heatmap", response_model=SectionHeatmapResponse)
+async def get_section_heatmap(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> SectionHeatmapResponse:
+    """Return per-section FSRS fragility scores for a document.
+
+    fragility_score ranges from 0.0 (well-retained) to 1.0 (completely forgotten).
+    Sections with no flashcards are absent from the heatmap dict.
+    """
+    cards_result = await session.execute(
+        select(FlashcardModel).where(FlashcardModel.document_id == document_id)
+    )
+    cards = list(cards_result.scalars().all())
+
+    if not cards:
+        return SectionHeatmapResponse(heatmap={})
+
+    chunk_ids = [c.chunk_id for c in cards if c.chunk_id]
+    chunk_to_section: dict[str, str | None] = {}
+    if chunk_ids:
+        chunk_rows = await session.execute(
+            select(ChunkModel.id, ChunkModel.section_id).where(
+                ChunkModel.id.in_(chunk_ids)
+            )
+        )
+        for chunk_id, section_id in chunk_rows:
+            chunk_to_section[chunk_id] = section_id
+
+    now = datetime.now(UTC)
+    heatmap = _compute_section_heatmap(cards, chunk_to_section, now)
+    logger.info(
+        "section-heatmap: document_id=%s sections_with_cards=%d",
+        document_id,
+        len(heatmap),
+    )
+    return SectionHeatmapResponse(heatmap=heatmap)
 
 
 # ---------------------------------------------------------------------------

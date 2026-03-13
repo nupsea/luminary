@@ -1438,6 +1438,9 @@ export default function Study() {
         onExit={() => {
           setStudying(false)
           void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+          if (activeDocumentId) {
+            void queryClient.invalidateQueries({ queryKey: ["section-heatmap", activeDocumentId] })
+          }
         }}
       />
     )
