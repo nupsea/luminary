@@ -950,7 +950,7 @@
         "FSRS scheduling works identically for graph-generated cards (same review flow)",
         "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S113",

@@ -814,3 +814,21 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - useReadingProgress hook must invalidate ["documents"] TanStack Query cache on unmount when progress was posted -- otherwise the library card shows stale pct=0 in the same session (refetchOnWindowFocus=false globally)
   - Reviewer applied the fix inline: progressPosted ref + qc.invalidateQueries on cleanup
 ---
+
+## 2026-03-13T00:00:00Z - S112 - Graph-driven flashcard generation from Kuzu entity relationship pairs
+- Implemented: Frontend GeneratePanel mode toggle ("From Text" / "From Entities") with entity-pair preview (loading/error/empty/populated states), fetchEntityPairs() and generateFromGraph() API helpers, generateFromGraphMutation in Study page. Backend was already partially implemented (S112 partial commit); added 6 pytest tests and smoke script. Fixed CO_OCCURS weight normalisation bug (raw co-occurrence counts were leaked as confidence values > 1.0; now normalised to [0.0, 1.0] in GET /flashcards/entity-pairs). Fixed long line in GRAPH_FLASHCARD_SYSTEM prompt constant.
+- Files changed: frontend/src/pages/Study.tsx, backend/tests/test_flashcard_from_graph.py (new), scripts/smoke/S112.sh (new), backend/app/services/flashcard.py, backend/app/routers/flashcards.py
+- AC verified:
+  - FlashcardService.generate_from_graph(document_id, k) fetches top-K entity pairs by edge weight: PASS
+  - For each pair, shared chunks retrieved and passed to LLM with relationship-framing prompt: PASS
+  - POST /flashcards/generate-from-graph accepts {document_id, k} returns flashcards: PASS (test 201)
+  - Generated cards have relationship question framing: PASS (GRAPH_FLASHCARD_SYSTEM prompt enforces)
+  - Frontend GeneratePanel mode toggle "From Text" / "From Entities": PASS
+  - Entity mode shows preview list of top entity pairs: PASS (3-state: loading/error/empty)
+  - FSRS scheduling works identically for graph-generated cards: PASS (source field not used in FSRS)
+  - ruff check . exits 0; npx tsc --noEmit exits 0: PASS
+- Reviewer verdict: PASS after fixing CO_OCCURS confidence normalisation (Critical) and adding coverage test
+- Learnings:
+  - CO_OCCURS edge weight from Kuzu is a raw co-occurrence count (1, 2, ... N) -- NOT a probability. Always normalise before exposing as "confidence" to frontend. Pattern: divide by max_weight with a default=1.0 guard to avoid ZeroDivisionError on empty list.
+  - When backend route has a lazy import (from module import fn inside method body), patch at the source module (app.services.graph.get_graph_service), not at the caller module. The lazy import fetches from sys.modules at call time.
+---
