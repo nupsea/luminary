@@ -69,6 +69,10 @@ class ChunkModel(Base):
     page_number: Mapped[int] = mapped_column(Integer, default=0)
     speaker: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Code-aware chunking fields (set by tech_book/tech_article content type)
+    has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    code_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -270,6 +274,28 @@ class LearningGoalModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class CodeSnippetModel(Base):
+    """Extracted code block from a tech_book or tech_article document.
+
+    Each row corresponds to one atomic code block (fenced or indented) found
+    during tech_book chunking.  The language and AST-derived signature are
+    stored for downstream use (flashcard generation, Run button, filtering).
+
+    Note: any new delete path in documents.py must also delete these rows.
+    """
+
+    __tablename__ = "code_snippets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    chunk_id: Mapped[str] = mapped_column(String, nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    language: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class AnnotationModel(Base):

@@ -10,13 +10,16 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
 
 from app.database import get_session_factory
-from app.models import ChunkModel, SectionModel
+from app.models import ChunkModel, CodeSnippetModel, SectionModel
 from app.services.parser import DocumentParser
 from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
 
-ContentType = Literal["book", "conversation", "notes", "audio", "video", "epub", "kindle_clippings"]
+ContentType = Literal[
+    "book", "conversation", "notes", "audio", "video", "epub", "kindle_clippings",
+    "tech_book", "tech_article",
+]
 
 _parser = DocumentParser()
 
@@ -26,6 +29,8 @@ CHUNK_CONFIGS: dict[str, dict[str, int]] = {
     "conversation": {"chunk_size": 450, "chunk_overlap": 90},
     "notes": {"chunk_size": 300, "chunk_overlap": 75},
     "code": {"chunk_size": 300, "chunk_overlap": 75},
+    "tech_book": {"chunk_size": 500, "chunk_overlap": 80},
+    "tech_article": {"chunk_size": 350, "chunk_overlap": 60},
     "epub": {"chunk_size": 600, "chunk_overlap": 120},
     "kindle_clippings": {"chunk_size": 300, "chunk_overlap": 75},
 }
@@ -85,6 +90,13 @@ def _classify(
         return "paper"
     if re.search(r"\b(abstract|methodology)\b", headings_lower):
         return "paper"
+    # tech_book: >= 3 fenced code blocks (= >= 6 triple-backtick tokens) in first 5000 chars,
+    # OR >= 2 numbered section headings (e.g. "1.1", "2.3") in first 5000 chars.
+    first_5k = raw_text[:5000]
+    code_fence_count = len(re.findall(r"```", first_5k))
+    numbered_section_count = len(re.findall(r"\b\d+\.\d+\b", first_5k))
+    if code_fence_count >= 6 or numbered_section_count >= 2:
+        return "tech_book"
     chapter_count = len(re.findall(r"\bchapter\b", headings_lower))
     if chapter_count >= 2 and word_count > 40000:
         return "book"
@@ -175,13 +187,17 @@ async def classify_node(state: IngestionState) -> IngestionState:
                     snippet = pd["raw_text"][:2000]
                     prompt = (
                         "Classify this document as exactly one of: "
-                        "paper, book, conversation, notes, code.\n"
+                        "paper, book, conversation, notes, code, tech_book, tech_article.\n"
                         f"Document snippet (first 2000 chars):\n{snippet}\n\n"
                         "Reply with exactly one word from the list above."
                     )
                     llm_result = await get_llm_service().generate(prompt)
                     llm_type = str(llm_result).strip().lower().split()[0]
-                    if llm_type in ("paper", "book", "conversation", "notes", "code"):
+                    _valid_types = {
+                        "paper", "book", "conversation", "notes",
+                        "code", "tech_book", "tech_article",
+                    }
+                    if llm_type in _valid_types:
                         content_type = llm_type
                         logger.info(
                             "LLM reclassified document",
@@ -370,6 +386,143 @@ async def _chunk_book(
             "num_chunks": len(chunks),
             "context_injected": True,
             "chapter_count": len(section_models),
+        },
+    )
+    return {**state, "chunks": chunks, "status": "embedding"}
+
+
+async def _chunk_tech_book(
+    state: IngestionState, pd: dict | None, doc_id: str
+) -> IngestionState:
+    """Tech-book chunking: prose splits normally; code blocks are atomic (never sub-split).
+
+    For each section:
+    1. Detect fenced (```) and indented code blocks.
+    2. Emit each code block as one atomic ChunkModel with has_code=True.
+    3. Split surrounding prose with RecursiveCharacterTextSplitter.
+    4. Store extracted code blocks in CodeSnippetModel with language and AST signature.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+    from app.services.tech_book_chunker import chunk_mixed_content  # noqa: PLC0415
+
+    content_type = state.get("content_type") or "tech_book"
+    cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["tech_book"])
+
+    async with get_session_factory()() as session:
+        doc_result = await session.execute(
+            select(DocumentModel.title).where(DocumentModel.id == doc_id)
+        )
+        doc_title = doc_result.scalar_one_or_none() or "Unknown"
+
+        raw_sections = pd["sections"] if pd else []
+        if not raw_sections:
+            raw_text = pd["raw_text"] if pd else ""
+            raw_sections = [
+                {
+                    "heading": "Full Text",
+                    "level": 1,
+                    "text": raw_text,
+                    "page_start": 0,
+                    "page_end": 0,
+                }
+            ]
+
+        section_models: list[SectionModel] = []
+        for s_idx, s in enumerate(raw_sections):
+            section_model = SectionModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                level=s.get("level", 1),
+                page_start=s.get("page_start", 0),
+                page_end=s.get("page_end", 0),
+                section_order=s_idx,
+                preview=s.get("text", "")[:10000],
+            )
+            session.add(section_model)
+            section_models.append(section_model)
+
+        await session.flush()
+
+        chunks: list[dict] = []
+        chunk_idx = 0
+        chunk_models: list[ChunkModel] = []
+        snippet_models: list[CodeSnippetModel] = []
+
+        for section_model, s in zip(section_models, raw_sections, strict=False):
+            section_text = s.get("text", "")
+            if not section_text.strip():
+                continue
+
+            context_header = f"[{doc_title} > {section_model.heading}] "
+
+            for chunk_dict in chunk_mixed_content(
+                section_text,
+                section_model.id,
+                doc_id,
+                cfg["chunk_size"],
+                cfg["chunk_overlap"],
+            ):
+                chunk_id = str(uuid.uuid4())
+                # Inject context header for semantic richness (same as book chunking)
+                enriched_text = context_header + chunk_dict["text"]
+                chunk_model = ChunkModel(
+                    id=chunk_id,
+                    document_id=doc_id,
+                    section_id=section_model.id,
+                    text=enriched_text,
+                    token_count=len(enriched_text.split()),
+                    page_number=s.get("page_start", 0),
+                    speaker=None,
+                    chunk_index=chunk_idx,
+                    has_code=chunk_dict["has_code"],
+                    code_language=chunk_dict["code_language"],
+                    code_signature=chunk_dict["code_signature"],
+                )
+                chunk_models.append(chunk_model)
+                chunks.append(
+                    {
+                        "id": chunk_id,
+                        "document_id": doc_id,
+                        "text": enriched_text,
+                        "index": chunk_idx,
+                    }
+                )
+                chunk_idx += 1
+
+                if chunk_dict["is_code_block"]:
+                    snippet_models.append(
+                        CodeSnippetModel(
+                            id=str(uuid.uuid4()),
+                            document_id=doc_id,
+                            chunk_id=chunk_id,
+                            section_id=section_model.id,
+                            language=chunk_dict["code_language"],
+                            signature=chunk_dict["code_signature"],
+                            content=chunk_dict["text"],
+                        )
+                    )
+
+        session.add_all(chunk_models)
+        await session.flush()
+        session.add_all(snippet_models)
+        await session.execute(
+            _update(DocumentModel)
+            .where(DocumentModel.id == doc_id)
+            .values(chapter_count=len(section_models))
+        )
+        await session.commit()
+
+    logger.info(
+        "Tech-book chunking complete",
+        extra={
+            "doc_id": doc_id,
+            "num_chunks": len(chunks),
+            "num_snippets": len(snippet_models),
+            "content_type": content_type,
         },
     )
     return {**state, "chunks": chunks, "status": "embedding"}
@@ -718,6 +871,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                     extra={"doc_id": doc_id, "num_chunks": len(chunks)},
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
+
+            if content_type in ("tech_book", "tech_article"):
+                return await _chunk_tech_book(state, pd, doc_id)
 
             if content_type == "book":
                 return await _chunk_book(state, pd, doc_id)

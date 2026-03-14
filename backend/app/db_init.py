@@ -7,6 +7,7 @@ from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
     ChunkModel,
+    CodeSnippetModel,
     DocumentModel,
     EvalRunModel,
     FlashcardModel,
@@ -67,6 +68,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE documents ADD COLUMN error_message TEXT",
             "ALTER TABLE documents ADD COLUMN source_url TEXT",
             "ALTER TABLE documents ADD COLUMN video_title TEXT",
+            "ALTER TABLE chunks ADD COLUMN has_code INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE chunks ADD COLUMN code_language TEXT",
+            "ALTER TABLE chunks ADD COLUMN code_signature TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

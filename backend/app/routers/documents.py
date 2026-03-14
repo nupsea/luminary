@@ -19,6 +19,7 @@ from app.database import get_session_factory
 from app.models import (
     AnnotationModel,
     ChunkModel,
+    CodeSnippetModel,
     DocumentModel,
     FlashcardModel,
     LearningGoalModel,
@@ -171,6 +172,15 @@ class YouTubeIngestRequest(BaseModel):
 class KindleIngestResponse(BaseModel):
     document_ids: list[str]
     book_count: int
+
+
+class CodeSnippetItem(BaseModel):
+    id: str
+    chunk_id: str
+    section_id: str | None
+    language: str | None
+    signature: str | None
+    content: str
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +800,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 {"doc_id": document_id},
             )
             for model in (
+                CodeSnippetModel,
                 ChunkModel,
                 SectionModel,
                 SummaryModel,
@@ -883,6 +894,7 @@ async def delete_document(document_id: str):
             {"doc_id": document_id},
         )
         for model in (
+            CodeSnippetModel,
             ChunkModel,
             SectionModel,
             SummaryModel,
@@ -1025,3 +1037,37 @@ async def get_conversation_metadata(document_id: str) -> dict:
         "last_timestamp": None,
     }
     return metadata
+
+
+@router.get("/{document_id}/code_snippets", response_model=list[CodeSnippetItem])
+async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
+    """Return extracted code snippets for a document.
+
+    Returns an empty list for non-tech documents or documents with no code blocks.
+    Returns 404 if the document does not exist.
+    """
+    async with get_session_factory()() as session:
+        doc_result = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        snippets_result = await session.execute(
+            select(CodeSnippetModel)
+            .where(CodeSnippetModel.document_id == document_id)
+            .order_by(CodeSnippetModel.created_at)
+        )
+        snippets = snippets_result.scalars().all()
+
+    return [
+        CodeSnippetItem(
+            id=s.id,
+            chunk_id=s.chunk_id,
+            section_id=s.section_id,
+            language=s.language,
+            signature=s.signature,
+            content=s.content,
+        )
+        for s in snippets
+    ]
