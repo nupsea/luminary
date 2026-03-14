@@ -1013,3 +1013,23 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - asyncio.create_task() for background ingestion needs strong reference via _background_tasks set (same pattern as other ingest paths)
   - YouTube docs stored as content_type="audio" + source_url field; frontend derives "isYouTube" from source_url presence -- no new content_type enum needed
 ---
+
+## 2026-03-15T00:00:00Z - S123 - EPUB and Kindle ingestion
+
+- Implemented: ruff fix (remove unused asyncio import from note_search.py), background task strong-reference fix in ingest-kindle endpoint, smoke test scripts/smoke/S123.sh
+- Files changed: backend/app/services/note_search.py, backend/app/routers/documents.py, scripts/smoke/S123.sh
+- AC verified:
+  - ebooklib>=0.20 in pyproject.toml: PASS (pre-existing)
+  - Classifier returns 'epub'/'book' for .epub extension: PASS
+  - _parse_epub() extracts chapters with headings: PASS
+  - EPUB flows through full pipeline: PASS
+  - Classifier returns 'kindle_clippings' by filename: PASS
+  - _parse_kindle_clippings() groups by book title: PASS
+  - Kindle badge shown in library: PASS (pre-existing frontend impl)
+  - Flashcard generation on EPUB/Kindle docs: PASS
+  - ruff check . exits 0: PASS
+- Reviewer verdict: PASS (fixed Critical: asyncio.create_task without strong ref in ingest-kindle loop)
+- Learnings:
+  - Most of S123 was pre-implemented; only ruff lint and smoke test were missing
+  - Background tasks in FastAPI routers need strong-reference pattern (add to _background_tasks set)
+---

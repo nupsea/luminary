@@ -1154,100 +1154,7 @@
         "Flashcard generation works on both EPUB and Kindle-imported documents",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
-    },
-    {
-      "id": "S124",
-      "title": "Obsidian vault export: notes, flashcards, and entity wikilinks as markdown files",
-      "phase": "V2 Phase 9 - Portability and Ecosystem",
-      "priority": 124,
-      "featureRef": "F-EXPORT-OBSIDIAN",
-      "description": "CONTEXT: Power users use Obsidian as their primary note-taking and knowledge management system. Exporting Luminary notes and flashcards as Obsidian-compatible markdown files enables the two tools to complement each other: Luminary for structured learning (FSRS, teach-back, gap detection), Obsidian for long-term knowledge management. USER JOURNEY: User opens Settings -> Export section -> clicks 'Export to Obsidian Vault' for a document -> downloads a .zip file -> unzips into their Obsidian vault folder -> notes appear as .md files with YAML frontmatter, flashcards appear in a flashcards.md compatible with the Obsidian Spaced Repetition plugin, entity wikilinks in graph.md enable Obsidian graph view. IMPLEMENTATION: New endpoint GET /export/obsidian?document_id=X. Generates a zip in memory: one .md file per note (YAML frontmatter: tags, document_title, created_at), flashcards.md with #flashcard tag format, graph.md with [[EntityName]] wikilinks.",
-      "acceptanceCriteria": [
-        "GET /export/obsidian?document_id=X returns a .zip file with correct Content-Type",
-        "Zip contains one .md file per note with YAML frontmatter (tags, document_title, created_at)",
-        "Zip contains flashcards.md with each card in '{{question}}\\n?\\n{{answer}}\\n#flashcard' format",
-        "Zip contains graph.md with [[EntityName]] wikilinks for each entity in the document's Kuzu graph",
-        "Frontend Settings page has 'Export to Obsidian' button per document in library",
-        "Button triggers zip download",
-        "uv run ruff check . exits 0; npx tsc --noEmit exits 0"
-      ],
-      "passes": false
-    },
-    {
-      "id": "S125",
-      "title": "Anki deck export via genanki: flashcards as .apkg with FSRS state preservation",
-      "phase": "V2 Phase 9 - Portability and Ecosystem",
-      "priority": 125,
-      "featureRef": "F-EXPORT-ANKI",
-      "description": "CONTEXT: Anki is the global standard for spaced repetition with the largest mobile app install base. Exporting Luminary flashcards as an Anki .apkg deck solves the mobile FSRS gap (no mobile app needed) and lets users continue reviews on any device. FSRS difficulty and stability are stored as custom fields in the Anki note type so a future import back into Luminary can restore scheduling state. USER JOURNEY: User opens Learning tab -> clicks 'Export to Anki' in the flashcard panel -> downloads a .apkg file -> imports into Anki desktop or AnkiDroid -> all cards present with front (question) / back (answer + source citation). IMPLEMENTATION: uv add genanki. New endpoint GET /export/anki?document_id=X generates a .apkg. Custom Anki note model with fields: Front, Back, Source, FSRS_Difficulty, FSRS_Stability. Cards grouped into a deck named after the document title.",
-      "acceptanceCriteria": [
-        "uv add genanki; listed in pyproject.toml",
-        "GET /export/anki?document_id=X returns a .apkg file",
-        "Deck name matches the document title",
-        "Each card has Front (question), Back (answer + source chunk citation), FSRS_Difficulty, FSRS_Stability fields",
-        "Anki package is valid: importable into Anki 2.1+ without errors",
-        "Frontend Learning tab flashcard panel has 'Export to Anki' button",
-        "Button triggers .apkg download",
-        "uv run ruff check . exits 0"
-      ],
-      "passes": false
-    },
-    {
-      "id": "S126",
-      "title": "Local network relay for mobile FSRS review: LAN binding, QR code, and mobile study view",
-      "phase": "V2 Phase 9 - Portability and Ecosystem",
-      "priority": 126,
-      "featureRef": "F-LAN-RELAY",
-      "description": "CONTEXT: FSRS tethered to a desktop is the single biggest gap in the learning science model. Daily review adherence is what makes spaced repetition effective -- but the current app is only accessible from the computer where it runs. This story enables mobile browser access over a local WiFi network without any cloud infrastructure. USER JOURNEY: User opens Settings -> sees a QR code labeled 'Review on mobile' -> scans with phone on same WiFi -> phone browser opens a minimal mobile-optimized study page -> user reviews due cards with flip animation and FSRS rating buttons -> ratings sync instantly to the desktop database. IMPLEMENTATION: Backend: add --host 0.0.0.0 mode triggered by a LAN_MODE=true env var or Settings toggle. A new minimal frontend route /mobile/study renders a stripped-down FSRS review UI (no sidebar, no library, dark-mode safe). Settings page generates a QR code using a pure-JS library for the LAN URL.",
-      "acceptanceCriteria": [
-        "Backend supports binding to 0.0.0.0 when LAN_MODE env var is set or Settings toggle is on",
-        "GET /study/mobile-session returns due cards formatted for the mobile view",
-        "Frontend /mobile/study route: card flip animation, FSRS rating buttons (Again/Hard/Good/Easy), no sidebar",
-        "FSRS ratings from mobile view persist in the same database as desktop sessions",
-        "Settings page shows a QR code with the LAN URL (http://192.168.x.x:8000/mobile/study)",
-        "CORS updated to allow LAN IP origin",
-        "Mobile view loads in < 3s on a mid-range phone over WiFi (no heavy bundle deps)",
-        "npx tsc --noEmit exits 0; uv run ruff check . exits 0"
-      ],
-      "passes": false
-    },
-    {
-      "id": "S127",
-      "title": "Tauri v2 desktop packaging: single installer bundling frontend and Python sidecar",
-      "phase": "V2 Phase 9 - Portability and Ecosystem",
-      "priority": 127,
-      "featureRef": "F-TAURI-PACKAGING",
-      "description": "CONTEXT: Currently the app requires the user to run uvicorn and npm run dev manually from a terminal. This is a significant barrier to adoption for non-developer users. Tauri v2 bundles the Vite frontend into a native desktop shell; the Python backend is packaged as a standalone binary (PyInstaller sidecar) spawned by Tauri on launch. The result is a single distributable installer for macOS (.dmg), Windows (.exe), and Linux (.deb). USER JOURNEY: User downloads Luminary.dmg, drags to Applications, opens it -- no Python or Node required. IMPLEMENTATION: uv add pyinstaller as a dev dependency. PyInstaller spec file that packages the uvicorn app as a standalone binary. Tauri v2 config: sidecar entry pointing to the binary, spawned on app launch and killed on app exit. GitHub Actions workflow builds and attaches installers on version tag push.",
-      "acceptanceCriteria": [
-        "PyInstaller spec produces a standalone binary that runs the uvicorn app with no Python installation required",
-        "Tauri v2 tauri.conf.json configured with sidecar pointing to the Python binary",
-        "App launches from the installer: backend starts, frontend opens -- no terminal required",
-        "Sidecar process is killed cleanly when the Tauri window closes",
-        "GitHub Actions workflow: on tag push, builds .dmg (macOS), .exe (Windows), .deb (Linux) and attaches as release artifacts",
-        "Install on a clean macOS machine with no Python/Node: Luminary opens and basic ingestion works"
-      ],
-      "passes": false
-    },
-    {
-      "id": "S128",
-      "title": "Readwise CSV and Kindle Clippings import with auto-ingestion pipeline",
-      "phase": "V2 Phase 9 - Portability and Ecosystem",
-      "priority": 128,
-      "featureRef": "F-READWISE-IMPORT",
-      "description": "CONTEXT: Many learners have years of book highlights stored in Readwise or Kindle. Importing them creates immediate value on first use -- the library is populated with their existing knowledge corpus before they upload a single new document. S123 adds basic Kindle Clippings parsing; this story adds the Readwise CSV format and ensures that imported highlights flow through the full ingestion pipeline (embedding, NER, FSRS card generation) so they are immediately searchable and learnable. USER JOURNEY: User opens Library -> Import -> 'Import from Readwise' -> selects a Readwise CSV export -> each book becomes a document with highlights as chunks, tags from Readwise preserved, author and book title populated -> user can immediately generate flashcards from their highlight library. IMPLEMENTATION: Readwise CSV columns: Title, Author, URL, Highlight, Note, Location, Date, Tags. Parse into document + chunk records. Run embed + NER pipeline on highlights. If document_title matches an existing library document, link highlights to it.",
-      "acceptanceCriteria": [
-        "Import dialog in Library accepts Readwise CSV format",
-        "Parser extracts Title, Author, Highlight, Note, Tags from Readwise CSV columns",
-        "Each unique book title becomes one document; each highlight becomes one chunk",
-        "Imported documents flow through the full embed + NER ingestion pipeline",
-        "Tags from Readwise CSV are mapped to the Luminary document tags field",
-        "If document title matches an existing library document, imported highlights are linked to it",
-        "Flashcard generation works on Readwise-imported documents",
-        "Import progress shown in the library upload progress indicator",
-        "uv run ruff check . exits 0"
-      ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S129",
@@ -1281,6 +1188,317 @@
         "All 15 context_hints that failed whitespace-normalized substring match against their source file are audited and corrected so that normalized match rate is 70/70",
         "pytest unit test verifies that ensure_ingested() skips re-ingest when GET /documents already returns a matching document",
         "smoke test scripts/smoke/S130.sh calls GET /evals/results and asserts HTTP 200 with at least one result row"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S131",
+      "title": "Code-aware chunking: tech_book content type, code block atomicity, and AST signatures",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 131,
+      "featureRef": "F-TECH-INGEST",
+      "description": "CONTEXT: The current chunker uses RecursiveCharacterTextSplitter with chunk_size=600 for all book content. A Python tutorial that has 3 paragraphs of prose followed by a 50-line function will have that function split in half. The split chunk embeds as meaningless context, retrieves badly, and produces broken flashcards. CHUNK_CONFIGS already has a 'code' entry for pure code files (.py, .js). What is missing is mixed-content detection: recognizing code blocks embedded in prose and treating them as atomic units that are never sub-split. Additionally, the _classify() function in ingestion.py does not have a 'tech_book' type. Most tech books today classify as 'book' or 'paper' -- losing the signal that they contain executable code and require different chunking, flashcard generation, and entity extraction strategies downstream. USER JOURNEY: User uploads a Python textbook PDF -> ingestion classifies it as 'tech_book' -> chunker detects all fenced code blocks and indented code blocks -> each code block is stored as one atomic chunk -> 'GET /documents/{id}/code_snippets' returns a list of extracted code examples with language and signature. IMPLEMENTATION: Add 'tech_book' and 'tech_article' to ContentType literal and CHUNK_CONFIGS (tech_book: chunk_size=500, overlap=80; tech_article: chunk_size=350, overlap=60). In _classify(): tech_book signal = >=3 code fences OR >=2 numbered section patterns (1.1, 2.3) in first 5000 chars. In chunker: before splitting, scan each section text for fenced code blocks (```), indented blocks (4+ spaces, consecutive lines >= 3), and in PDFs, runs of text in monospace fonts (PyMuPDF span['font'] contains 'Mono', 'Courier', 'Code', 'Consolas'). Extract these as fixed atomic chunks. Split surrounding prose normally. Code chunks are never sub-split. Optional AST: for Python blocks, run ast.parse() to extract function/class name and parameters as code_signature. Fallback to null if parse fails (syntax errors acceptable). New columns on ChunkModel: has_code (bool, default False), code_language (str nullable), code_signature (str nullable). New CodeSnippetModel table: id, document_id, chunk_id, section_id, language, signature, content. New endpoint: GET /documents/{id}/code_snippets. CROSS-STORY IMPACT: S132 depends on tech_book classification to activate section detection. S137 dispatches to TECH_FLASHCARD_SYSTEM when has_code=True. S140 uses code_language to show Run button.",
+      "acceptanceCriteria": [
+        "'tech_book' and 'tech_article' added to ContentType literal in ingestion.py; CHUNK_CONFIGS has entries for both",
+        "_classify() unit test: a file with >=3 code fences classifies as 'tech_book', not 'notes' or 'book'",
+        "Unit test: section text with a 50-line Python function produces a chunk with has_code=True, code_language='python', and the function body is intact (no internal split on whitespace boundaries)",
+        "Unit test: ast.parse() extraction on a well-formed function block yields non-null code_signature; a malformed block yields code_signature=null without raising",
+        "CodeSnippetModel migrated via db_init.py; ChunkModel gains has_code, code_language, code_signature columns",
+        "Integration test: ingest a Markdown tech doc with fenced code blocks; code_snippets table has >=1 row with language set",
+        "GET /documents/{id}/code_snippets returns list with language and signature fields; returns [] for a non-tech document",
+        "uv run ruff check . exits 0; uv run pytest passes (exit 0 or 5); scripts/smoke/S131.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S132",
+      "title": "Tech section detection: admonitions, numbered hierarchy, and learning objectives extraction",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 132,
+      "featureRef": "F-TECH-INGEST",
+      "description": "CONTEXT: Tech books have three structural elements absent from the current UniversalParser: (1) Numbered section hierarchy (Part I / Chapter 3 / 3.2 / 3.2.1) requiring level=1/2/3/4 and parent-child section linking. (2) Admonition blocks (NOTE / WARNING / TIP / CAUTION / IMPORTANT) -- these contain the highest-density learning signal in any tech book. A NOTE contains a rule to remember. A WARNING contains a gotcha. A TIP contains a best practice. Currently they dissolve into section prose. (3) Learning objectives at the start of every chapter ('By the end of this chapter you will be able to...'). These are a free curriculum: extracting them gives the user a structured map of expected knowledge gain. USER JOURNEY: User uploads a tech book -> Learning tab shows a 'Chapter Goals' panel at the top of each chapter listing the extracted objectives with checkboxes (auto-checked as flashcard mastery grows via S143). Admonitions in Document Reader are visually distinguished (colored left-border pill: blue=note, red=warning, green=tip). Section outline shows Part/Chapter/Section/Subsection at correct indent levels. IMPLEMENTATION: UniversalParser: new tech_book signature that scores 'Part N', 'Chapter N', 'N.M.P' patterns; assigns level=1/2/3/4; propagates parent_section_id (FK to parent SectionModel row). Admonition detection regex: lines starting with NOTE:, WARNING:, TIP:, CAUTION:, IMPORTANT:, and Markdown blockquote forms '> **Note**'. SectionModel gains admonition_type (str nullable) and parent_section_id (str nullable). Learning objective extraction: heuristic scan of first 300 chars of each top-level section; if text matches 'you will', 'you will be able to', 'after this chapter', 'in this chapter we cover', 'goals', 'objectives', call LiteLLM with a small extraction prompt (3-5 bullet points max). Store in new LearningObjectiveModel: id, document_id, section_id, text, covered (bool default False). New endpoints: GET /sections/{doc_id} (existing, gains admonition_type and parent_section_id in response), GET /documents/{doc_id}/objectives. CROSS-STORY IMPACT: S143 builds the objective-coverage tracking on top of LearningObjectiveModel. S139 uses section level hierarchy to compute difficulty_estimate from prerequisite chain depth.",
+      "acceptanceCriteria": [
+        "Unit test: 'Part I / Chapter 1 / 1.1 / 1.1.1' text produces sections with level=1/2/3/4 and correct parent_section_id chain",
+        "Unit test: line 'NOTE: Always use type hints.' produces section with admonition_type='note'",
+        "Unit test: line 'WARNING: Do not call this from an async context.' produces admonition_type='warning'",
+        "Unit test: chapter opening with 'By the end of this chapter you will understand closures' produces >=1 LearningObjectiveModel row",
+        "LearningObjectiveModel migrated via db_init.py; SectionModel gains admonition_type and parent_section_id columns without breaking existing data",
+        "GET /documents/{id}/objectives returns [] for a fiction book (empty state, not 404 or error)",
+        "Frontend Learning tab: 'Chapter Goals' panel visible per chapter for tech books; gracefully absent for fiction",
+        "Frontend Document Reader: admonition sections rendered with colored left-border (blue=note, red=warning, green=tip, orange=caution)",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S132.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S133",
+      "title": "PDF and EPUB image extraction with async enrichment queue foundation",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 133,
+      "featureRef": "F-TECH-IMAGES",
+      "description": "CONTEXT: Tech books are rich with architecture diagrams, UML charts, flowcharts, sequence diagrams, and code screenshots. These are currently discarded during parsing -- the entire visual dimension of technical knowledge is lost. This story establishes two things: (1) image extraction from PDF and EPUB sources, and (2) the async enrichment queue architecture that all subsequent enrichment stories (S134 image analysis, S138 web references, S139 prerequisites, S141 concept linking) will plug into. USER JOURNEY: User uploads a tech PDF -> ingestion completes (document is immediately usable) -> an 'Enriching...' badge appears on the document card -> images are extracted in the background -> badge updates to show 'X images found' -> user can open the document and see image thumbnails inline next to the prose they accompany. IMPLEMENTATION: Phase 2 Async Enrichment architecture. New EnrichmentJobModel table: id, document_id, job_type (image_extract | image_analyze | prerequisites | web_refs | concept_link), status (pending | running | done | failed), started_at, completed_at, error_message. DocumentModel.stage gains 'enriching' as a valid value set after 'complete'. New EnrichmentQueueWorker service: watches for pending jobs, runs them one at a time per document (parallelism across documents is fine), updates job status. Image extraction: PDF via PyMuPDF page.get_images(full=True) + doc.extract_image(xref). EPUB via ebooklib EpubImage items. Deduplication: SHA-256 hash of image bytes; skip if content_hash already exists for this document. Store files at DATA/images/{doc_id}/{page}_{index}.png (normalize to PNG). Skip images below 150x100 px (decorative). Skip images above 4000x4000 px (scans -- log warning). New ImageModel table: id, document_id, chunk_id (nearest preceding prose chunk by page), page, path, width, height, content_hash, image_type (null until S134), description (null until S134), created_at. New endpoints: GET /documents/{doc_id}/images (paginated, empty array for text-only docs), GET /images/{id}/raw (serves file from DATA/images), GET /documents/{doc_id}/enrichment (returns list of EnrichmentJobModel rows). CROSS-STORY IMPACT: S134 registers 'image_analyze' as a second job type in the enrichment queue. S138, S139, S141 each register their own job type. All enrichment stories reuse EnrichmentQueueWorker.",
+      "acceptanceCriteria": [
+        "EnrichmentJobModel and ImageModel migrated via db_init.py",
+        "DocumentModel.stage accepts 'enriching' without ORM validation error",
+        "EnrichmentQueueWorker processes 'image_extract' jobs sequentially per document, parallel across documents",
+        "Integration test: ingest PDF with >=1 embedded image; ImageModel count > 0; content_hash set; duplicate pages yield one row",
+        "Images below 150x100 px not stored; images above 4000x4000 px skipped with logged warning",
+        "EnrichmentJobModel row transitions pending -> running -> done after successful extraction",
+        "GET /documents/{id}/images returns [] for text-only document (not 404)",
+        "GET /images/{id}/raw returns 200 with Content-Type: image/* for a stored image",
+        "GET /documents/{id}/enrichment returns list of enrichment job rows with status",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S133.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S134",
+      "title": "Vision LLM image analysis: diagram classification, description embedding, and retrieval integration",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 134,
+      "featureRef": "F-TECH-IMAGES",
+      "description": "CONTEXT: Images extracted in S133 are opaque blobs. A vision LLM can describe diagrams in text, classify their type, and extract component relationships -- making them searchable, retrievable, and useful in Q&A answers. This story adds a second enrichment job type to the queue established in S133. All processing is fully local via Ollama's vision model (llava:13b default). USER JOURNEY: After image extraction completes -> 'image_analyze' jobs are enqueued automatically -> vision LLM processes each image -> descriptions become searchable ('show me architecture diagrams from this book') -> chat answers include image thumbnails when a diagram is relevant -> Document Reader shows 'View analysis' tooltip on each image revealing the extracted description and components list. IMPLEMENTATION: New ImageEnricherService in backend/app/services/image_enricher.py. Registers 'image_analyze' job type with EnrichmentQueueWorker from S133. Pre-filter before vision call: skip images where PIL detects <5 unique colors (logos/backgrounds) or aspect ratio >10:1 (rule lines) -- set image_type='decorative' without LLM call. Vision prompt via LiteLLM (model=Settings.vision_model, default='ollama/llava:13b'): 'Task 1: Classify this image as one of: architecture_diagram, sequence_diagram, er_diagram, flowchart, code_screenshot, table, chart, photo, decorative, other. Task 2: List every labeled component visible and any connections between them. Task 3: Extract any visible text verbatim. Respond in JSON: {\"image_type\": \"...\", \"components\": [...], \"text\": \"...\", \"description\": \"...\"}'. Store description in ImageModel.description and image_type. Embed description using existing BAAI/bge-m3 embedder; store in LanceDB 'image_vectors' table (schema: image_id, document_id, vector). Index description in new FTS5 virtual table images_fts (image_id UNINDEXED, document_id UNINDEXED, body). Retriever updated: hybrid search includes images_fts and image_vectors; results above similarity threshold include image_id in chunk metadata. Frontend Chat: when context includes image_id, render thumbnail inline. Offline: if vision model returns 503, set job status='failed', leave description null, log warning -- document remains fully accessible without analysis. CROSS-STORY IMPACT: S136 reads image_type from ImageModel to route diagram-to-graph extraction.",
+      "acceptanceCriteria": [
+        "ImageEnricherService.enrich(document_id) processes all ImageModel rows with description=null for that document",
+        "Unit test: mock LiteLLM vision response; assert description stored, image_type set, FTS5 indexed",
+        "Pre-filter test: solid-color image (PIL <5 unique colors) gets image_type='decorative' without LLM call",
+        "'image_vectors' LanceDB table created; description embedding stored with image_id and document_id metadata",
+        "images_fts FTS5 table created; keyword search on a term from an image description returns that image_id",
+        "Integration test (requires ollama llava): ingest PDF with diagram; ImageModel row has non-empty description and image_type set (skip if vision model not available via pytest.mark.skipif)",
+        "Offline test: vision model returns 503 -> job status='failed', enrichment failure does not break document access",
+        "Chat context includes image_id when similarity search matches image description; frontend renders thumbnail",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S134.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S135",
+      "title": "Tech entity types: LIBRARY, DESIGN_PATTERN, ALGORITHM, DATA_STRUCTURE, PROTOCOL with version-aware merge",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 135,
+      "featureRef": "F-TECH-GRAPH",
+      "description": "CONTEXT: GLiNER currently extracts PERSON, ORGANIZATION, PLACE, CONCEPT, EVENT, TECHNOLOGY, DATE. Tech content has richer typed entities that enable better knowledge graph relationships: a library name (numpy) is more specifically typed than a generic TECHNOLOGY, and a design pattern (Singleton) is more specifically typed than a CONCEPT. The Kuzu graph also has no relationship types that model technical dependencies: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON. Without these, the graph cannot represent 'React USES Virtual DOM' or 'async/await REPLACES callback patterns'. USER JOURNEY: User ingests a Python architecture book -> Viz tab shows entity nodes typed as LIBRARY (numpy, sqlalchemy), DESIGN_PATTERN (Repository, Factory), ALGORITHM (BFS, Dijkstra), DATA_STRUCTURE (B-tree, heap) with distinct visual styling per type -> edges show USES and IMPLEMENTS relationships -> Chat answers referencing multiple libraries show their dependency relationships. IMPLEMENTATION: Add 6 new GLiNER label types: LIBRARY, DESIGN_PATTERN, ALGORITHM, DATA_STRUCTURE, PROTOCOL, API_ENDPOINT. Keep existing TECHNOLOGY as fallback for unclassified tech terms. Tech-specific noise filter in ner.py: reject single-word generic terms as LIBRARY if they appear in a blocklist: class, function, method, object, type, interface, module, package, library, framework, tool, service, system, component, layer. Version-aware merge in entity_disambiguator.py: when extracting LIBRARY entities, detect version qualifiers in surrounding 2 tokens ('numpy 1.26', 'React 18', 'Python 3.13'). Canonical name includes major version only ('numpy 1', 'React 18', 'Python 3'). 'numpy' with no version is stored unversioned and linked to all versioned variants via a VERSION_OF edge. Code-block entity boost: entities mentioned inside a has_code=True chunk get confidence +0.1 before the >=0.65 threshold check. An import statement 'import numpy' is a stronger LIBRARY signal than prose. New Kuzu edge types: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON. Relationship extraction via co-occurrence + pattern matching: 'X implements Y', 'X extends Y', 'import X', 'X requires Y'. New endpoint GET /graph/entities/{doc_id}?type=LIBRARY returns filtered entity list. CROSS-STORY IMPACT: S136 needs COMPONENT/ACTOR node types added here (or separately -- add to this list). S139 prerequisite extractor reads CONCEPT and ALGORITHM entities from Kuzu. S141 concept linker matches CONCEPT and ALGORITHM nodes across documents. S145 mastery dashboard queries entities from Kuzu and joins to flashcards.",
+      "acceptanceCriteria": [
+        "GLiNER is called with 6 new label types alongside existing ones; total label list documented in ner.py",
+        "Unit test: sentence 'numpy implements ndarray using a contiguous memory block' extracts LIBRARY:numpy, DATA_STRUCTURE:ndarray, IMPLEMENTS edge",
+        "Noise filter unit test: sentence 'use the class method on the object' produces no entity extractions",
+        "Version-aware merge test: 'Python 3.11' and 'Python 3.13' are stored as separate Kuzu nodes; both linked to 'Python 3' via VERSION_OF",
+        "Code-block boost test: entity in has_code=True chunk with base confidence 0.58 passes threshold (0.58+0.1=0.68>=0.65); same entity in prose at 0.58 is rejected",
+        "GET /graph/entities/{doc_id}?type=LIBRARY returns only LIBRARY-typed entities",
+        "IMPLEMENTS and DEPENDS_ON edges visible in Viz tab entity graph",
+        "Integration test: ingest a Python tutorial; graph query returns >=1 LIBRARY entity",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S135.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S136",
+      "title": "Architecture diagram to knowledge graph: diagram-type routing and COMPONENT node extraction",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 136,
+      "featureRef": "F-TECH-GRAPH",
+      "description": "CONTEXT: Architecture diagrams described by the vision LLM in S134 contain structured architectural knowledge locked in a text description. That knowledge should flow into the Kuzu graph as typed nodes and edges. A sequence diagram captured in a textbook chapter on microservices should produce ACTOR nodes and SENDS_TO edges. An ER diagram should produce ENTITY nodes and REFERENCES edges. Each diagram type maps to a different Kuzu schema. USER JOURNEY: User ingests a system design textbook -> enrichment extracts 4 architecture diagrams -> Viz tab shows a 'Diagrams' layer toggle -> enabling it reveals COMPONENT nodes (blue hexagons) and CONNECTS_TO edges -> clicking a COMPONENT node shows the source image thumbnail in a sidebar panel -> Chat answer to 'how does the load balancer connect to the application servers?' references both the retrieved text chunks and the diagram-derived CONNECTS_TO edge. IMPLEMENTATION: New DiagramExtractorService in backend/app/services/diagram_extractor.py. Registered as a Phase 2 enrichment job type 'diagram_extract' that runs after 'image_analyze' completes. Reads ImageModel rows where image_type in (architecture_diagram, sequence_diagram, er_diagram, flowchart) and description is not null. Diagram-type routing: architecture_diagram -> extract COMPONENT nodes, CONNECTS_TO/CALLS/STORES_IN edges. sequence_diagram -> extract ACTOR nodes, SENDS_TO edges with message property. er_diagram -> extract ENTITY (data model) nodes, HAS_FIELD/REFERENCES edges. flowchart -> extract STEP nodes, LEADS_TO edges with condition property. LLM prompt (small, structured): 'From this diagram description, list components and connections as JSON: {\"nodes\": [{\"name\": \"...\", \"type\": \"...\"}], \"edges\": [{\"from\": \"...\", \"to\": \"...\", \"label\": \"...\"}]}'. After extraction, attempt name-match linkage: compare each node name against existing LIBRARY and TECHNOLOGY entities for this document (case-insensitive). If matched, add a DEPICTS edge from the diagram-derived node to the entity node. All diagram nodes stored in Kuzu with source_image_id property linking back to ImageModel. Viz tab: diagram-derived nodes shown with distinct shape (hexagon vs circle for narrative entities); 'Diagrams' toggle shows/hides them. Clicking a diagram node opens image thumbnail in sidebar. CROSS-STORY IMPACT: S141 concept linker can match diagram-derived COMPONENT nodes across documents to find shared infrastructure patterns.",
+      "acceptanceCriteria": [
+        "DiagramExtractorService reads ImageModel rows with qualifying image_type after image_analyze completes",
+        "Unit test: mock LLM response with known JSON; assert correct Kuzu nodes and edges created with correct type",
+        "Diagram-type routing test: image_type='sequence_diagram' produces ACTOR nodes with SENDS_TO edges; image_type='er_diagram' produces ENTITY nodes with REFERENCES edges",
+        "Name-match linkage test: COMPONENT node 'PostgreSQL' is linked via DEPICTS to existing LIBRARY:PostgreSQL entity if present",
+        "Integration test (requires S134 vision enrichment): ingest PDF with architecture diagram; Kuzu MATCH (c:COMPONENT) RETURN c returns results",
+        "GET /graph/entities/{doc_id}?type=COMPONENT returns diagram-derived nodes",
+        "Viz tab: COMPONENT nodes render with hexagon shape; 'Diagrams' layer toggle shows/hides them",
+        "Clicking a COMPONENT node with source_image_id set shows image thumbnail in sidebar panel",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S136.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S137",
+      "title": "Technical flashcard types with Bloom's taxonomy levels: trace, debug, code_completion, pattern_recognition, design_decision, complexity",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 137,
+      "featureRef": "F-TECH-LEARNING",
+      "description": "CONTEXT: The current flashcard system prompt (FLASHCARD_SYSTEM in flashcard.py) is written for fiction and literature -- it references characters, plot, themes, and narrative. For tech content, the entire prompt strategy must change. Technical understanding operates on Bloom's Taxonomy: from remembering syntax (level 1) to applying patterns (level 3) to evaluating design decisions (level 5). A 'hard' flashcard for a novel tests literary analysis. A 'hard' flashcard for a tech book tests whether the learner can trace through a recursive function and predict its output -- a completely different skill. Bloom's Taxonomy mapping for tech: Level 1 Remember -> definition, syntax_recall. Level 2 Understand -> concept_explanation, analogy. Level 3 Apply -> code_completion, api_signature. Level 4 Analyze -> trace (predict output), pattern_recognition. Level 5 Evaluate -> design_decision, complexity (justify Big-O). Level 6 Create -> implementation (write from scratch, hardest). USER JOURNEY: User opens Study tab for a Python book -> sees flashcard type chips ('trace', 'debug', 'definition') and Bloom level dots (blue=understand, green=apply, yellow=analyze) -> filter drawer lets them focus on Bloom 3-4 cards only -> a 'trace' card shows a code block with syntax highlighting and asks 'What does this print?' -> user types answer -> reveal shows the correct output with explanation. IMPLEMENTATION: FlashcardModel gains flashcard_type (str nullable, backfill='definition') and bloom_level (int nullable, 1-6). New TECH_FLASHCARD_SYSTEM prompt constant replacing FLASHCARD_SYSTEM for tech documents. New FlashcardService.generate_technical(document_id, section_id=None, bloom_min=1, bloom_max=6) dispatches by chunk content: has_code=True chunks -> trace, code_completion, debug cards (Bloom 3-5); admonition_type='warning' chunks -> definition cards (Bloom 1); admonition_type='tip' chunks -> concept_explanation cards (Bloom 2); sections with headings containing 'vs', 'trade-off', 'why', 'compared to' -> design_decision cards (Bloom 5); algorithm sections -> complexity cards (Bloom 5). debug card format: front shows code with a subtle bug; back explains the bug and correct fix. trace card format: front shows code and asks 'What is the output?'; back shows output with step-by-step trace. code_completion card format: one or more lines replaced with blank(s); back shows correct lines. Frontend Study tab: code blocks in flashcard front/back rendered with highlight.js (add if not present). Card type badge (small chip). Bloom level colored dot. Filter drawer: filter by flashcard_type multi-select AND bloom_level range slider. code_completion cards: blank rendered as ____ in code block; user types into inline input. CROSS-STORY IMPACT: S140 prediction errors generate trace/debug cards. S143 objective coverage checks bloom_level>=3 cards to confirm applied (not just recalled) mastery. S144 Feynman sessions generate concept_explanation cards for gaps. S145 mastery score weights bloom_level (level 4-5 cards count more).",
+      "acceptanceCriteria": [
+        "flashcard_type and bloom_level columns added to flashcards table; migration sets existing rows to flashcard_type='definition', bloom_level=null",
+        "TECH_FLASHCARD_SYSTEM defined as a separate constant in flashcard.py; generate_technical() uses it exclusively",
+        "Unit test: chunk with has_code=True produces >=1 card with flashcard_type in ('trace','code_completion','debug') and bloom_level in (3,4,5)",
+        "Unit test: chunk with admonition_type='warning' produces >=1 card with flashcard_type='definition' and bloom_level=1",
+        "Unit test: section heading containing 'vs' or 'trade-off' produces >=1 design_decision card with bloom_level=5",
+        "Integration test: generate_technical() called on a tech_book document produces cards with both flashcard_type and bloom_level set",
+        "Frontend Study tab: syntax highlighting renders correctly for code in flashcard front/back",
+        "Filter by flashcard_type and bloom_level range works; selecting 'trace' shows only trace cards",
+        "code_completion card blank renders as ____ in a code block with inline input for answer",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S137.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S138",
+      "title": "Web reference grounding: LLM-suggested canonical references per technical concept with pedagogical ranking",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 138,
+      "featureRef": "F-TECH-STUDY",
+      "description": "CONTEXT: Technical terms in books point to external documentation that is the authoritative source of truth. A paragraph about numpy arrays implies numpy.org documentation. A discussion of the GIL implies the CPython documentation. Currently there is no mechanism to surface these references to the learner. More importantly, when a user fails a flashcard, they need a direct path back to the source material for that specific concept -- not just 'read the chapter again'. This story adds two things: (1) LLM-generated canonical reference URLs per technical concept extracted from section summaries, and (2) review-time integration -- failed flashcards show a reference panel. USER JOURNEY: User reads Chapter 3 on Python generators -> Document Reader sidebar shows a 'References' panel with 3-5 links: docs.python.org/3/glossary.html#term-generator (official, high-quality), peps.python.org/pep-0255 (spec), a tutorial link marked 'Not verified'. Each link shows quality badge. User fails a flashcard on generators -> Study tab shows 'Source' panel with section text + these links. IMPLEMENTATION: New WebReferenceModel table: id, document_id, section_id, term, url, title, excerpt, source_quality (official_docs | spec | wiki | tutorial | blog | unknown), is_llm_suggested (bool), created_at. New ReferenceEnricherService in backend/app/services/reference_enricher.py. Registered as Phase 2 enrichment job type 'web_refs'. Enrichment process: for each section summary, LLM extracts up to 5 key technical terms and for each generates a canonical reference URL from its training knowledge (provider=none default, no live web call). LLM prompt instructs quality ordering: prefer official language/framework docs > specification/RFC > recognized book publisher > trusted community wiki > tutorial > blog. Settings.web_search_provider = 'none' | 'brave' | 'tavily' | 'duckduckgo' (default 'none'). When provider != 'none', verify each URL is reachable via HEAD request; set is_llm_suggested=False if reachable. When provider='none', all references have is_llm_suggested=True. Stale detection: references with created_at > 18 months ago show 'Outdated?' badge with refresh button that re-runs LLM extraction for that section. Review-time integration: when Study tab shows a flashcard rated 'again', display a collapsible 'Source' panel below the answer: section excerpt, link to section in Document Reader, and web_references for that section ordered by source_quality. GET /documents/{id}/references and GET /sections/{id}/references endpoints. CROSS-STORY IMPACT: S142 tech chat web grounding reuses Settings.web_search_provider and WebReferenceModel source_quality ranking logic.",
+      "acceptanceCriteria": [
+        "WebReferenceModel migrated via db_init.py with all fields",
+        "Unit test: mock LLM; assert >=3 references extracted from a section summary containing 3+ technical terms",
+        "Unit test: references are ordered by source_quality (official_docs before tutorial before blog)",
+        "Integration test: enrichment runs for a tech document; web_references table has rows with source_quality set",
+        "When provider='none', all references have is_llm_suggested=True; no HTTP calls made during enrichment",
+        "GET /documents/{id}/references returns [] for a fiction book (empty state, not error)",
+        "Frontend Learning tab: References panel visible in Document Reader sidebar; grouped by section",
+        "Study tab: failed flashcard ('again' rating) shows 'Source' panel with section reference and web links",
+        "Outdated badge appears on references with created_at > 18 months; refresh button re-runs extraction",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S138.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S139",
+      "title": "Prerequisites and FSRS-aware study path: PREREQUISITE_OF graph edges and zone-of-proximal-development ordering",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 139,
+      "featureRef": "F-TECH-STUDY",
+      "description": "CONTEXT: Tech books embed prerequisite relationships implicitly. A chapter on decorators implicitly requires understanding of closures, which requires understanding of first-class functions. Exposing this dependency graph enables two critical learning behaviors: (1) a student new to the book can find the right starting point, and (2) a student who already knows some concepts can skip their prerequisite subtrees entirely. The skip decision must use the learner's FSRS state, not just a static prerequisite graph. If the average fsrs_stability of a concept's flashcards is >= 14 days, the concept is stable enough to treat as known -- its subtree in the prerequisite graph is skippable. This is the Zone of Proximal Development (Vygotsky): study what is just beyond your current ability, not what you already know and not what requires too many unknown prerequisites. USER JOURNEY: User ingests a Python textbook -> Learning tab shows 'Where to Start' panel for the book with 3 recommended entry-point concepts (those with no unskipped prerequisites). Each concept shows its prerequisite chain with FSRS stability indicators (green=known, yellow=shaky, gray=no cards). User requests study path for 'decorators' -> API returns ordered list starting from the earliest unknown concept in the chain, skipping already-stable ones. IMPLEMENTATION: New PrereqExtractorService in backend/app/services/prereq_extractor.py. Registered as Phase 2 enrichment job type 'prerequisites'. Extraction prompt per section summary (small LLM call, one per section): 'List concepts this section requires the reader to already understand. Be specific. Output JSON: [{\"requires\": \"concept name\", \"required_by\": \"concept name\", \"confidence\": 0.0-1.0}]. Only include prerequisites with confidence >= 0.7.' Store as PREREQUISITE_OF edges in Kuzu with properties: confidence (float), source_section_id. Difficulty estimate on sections: SectionModel gains difficulty_estimate (int 1-5) = prerequisite chain depth (number of hops from this concept back to a root concept in the PREREQUISITE_OF graph). Study path API: GET /study/path?document_id={id}&concept={name} returns: {concept, path: [{concept, mastery (0-1), skip (bool), reason, avg_stability_days}]}. Mastery per concept = average (fsrs_stability / 21.0) capped at 1.0 for all flashcards whose section maps to a section mentioning that concept. skip=True when avg_stability_days >= 14. 'Where to Start' endpoint: GET /study/start?document_id={id} returns 3 concepts with the shortest prerequisite chains where the user has fewest flashcards (highest learning ROI). Viz tab: PREREQUISITE_OF edges rendered as dashed directed arrows in a distinct color (purple); filterable toggle 'Prerequisites'. CROSS-STORY IMPACT: S143 objective coverage uses difficulty_estimate to weight objectives. S145 mastery dashboard uses prerequisite chain depth as difficulty_estimate input. Gap detector (S145) checks PREREQUISITE_OF graph to distinguish prerequisite gaps from direct gaps.",
+      "acceptanceCriteria": [
+        "PrereqExtractorService extracts prerequisite pairs from section summaries and writes PREREQUISITE_OF edges to Kuzu with confidence and source_section_id",
+        "Unit test: mock LLM response with known JSON; assert correct PREREQUISITE_OF edges created",
+        "FSRS-aware path test: concept whose flashcards have avg fsrs_stability >= 14 days is marked skip=True with reason='avg_stability=Xd'",
+        "Integration test: ingest a tech book with multi-chapter prerequisite chain; Kuzu MATCH (a)-[:PREREQUISITE_OF]->(b) RETURN a.name, b.name returns results",
+        "GET /study/path?document_id={id}&concept=decorators returns ordered list starting from earliest unskipped concept",
+        "GET /study/start?document_id={id} returns 3 entry-point concepts with rationale",
+        "SectionModel.difficulty_estimate column added; value set during enrichment based on prerequisite chain depth",
+        "Viz tab: PREREQUISITE_OF edges shown as purple dashed directed arrows; 'Prerequisites' toggle works",
+        "Learning tab: 'Where to Start' panel visible for tech books with >=1 extracted prerequisite; absent for fiction",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S139.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S140",
+      "title": "Code execution sandbox with Predict-then-Run: sandboxed subprocess, prediction events, and mistake-to-flashcard",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 140,
+      "featureRef": "F-TECH-INTERACTIVE",
+      "description": "CONTEXT: Reading a code example is passive verification behavior -- you read it, it looks right, you move on with an illusion of understanding. The most powerful technique for code comprehension is active prediction: form an expectation of what the code will do BEFORE running it. When your prediction is wrong, that prediction error is a high-signal learning moment that creates a strong memory trace. The sandbox provides local, zero-dependency code execution -- no cloud API, no Docker, no container. Python 3.13 is always available (backend's uv-managed venv). JavaScript requires Node.js (optional). USER JOURNEY: User reads a chapter on list comprehensions -> code block shows a 5-line Python example -> a 'Predict' toggle appears -> user types expected output -> clicks 'Run and Compare' -> side-by-side diff shows: expected 'hello' vs actual '' (they forgot print returns None) -> toast appears: 'Your prediction was wrong. Create a flashcard from this?' -> one click creates a 'trace' card with the code as front and the correct output with explanation as back. IMPLEMENTATION: New CodeExecutorService in backend/app/services/code_executor.py. Execution: subprocess.run(['python3', '-c', code], capture_output=True, timeout=10, shell=False, cwd=temp_dir, env={}) with resource.setrlimit for RLIMIT_CPU (10s) and RLIMIT_AS (256MB). No env vars inherited. No network access (subprocess has no inherent network -- no special sandboxing needed for basic isolation). Temp dir deleted after execution. JavaScript: subprocess.run(['node', '-e', code]) if shutil.which('node') else raise 503 with message 'Install Node.js (nodejs.org) to run JavaScript snippets'. New POST /code/execute endpoint: accepts CodeExecuteRequest(code: str, language: str, timeout_ms: int = 10000, expected_output: str | None = None). Response: CodeExecuteResponse(stdout, stderr, exit_code, elapsed_ms, prediction_correct: bool | None, prediction_diff: str | None). prediction_correct compares stripped stdout vs stripped expected. prediction_diff is a unified diff string. New PredictionEventModel: id, chunk_id, document_id, code_content (truncated 2000 chars), expected, actual, correct (bool), created_at. Frontend Document Reader: code blocks with code_language set show a 'Predict' toggle button. When toggled: input field 'What will this output?', 'Run and Compare' button. After run: diff panel. When prediction wrong: toast 'Create flashcard from this mistake?' -> pre-fills a 'trace' flashcard with code as front, correct output + diff explanation as back, source='prediction_error'. Kill button: aborts running subprocess (subprocess.kill()). CROSS-STORY IMPACT: PredictionEventModel feeds into S145 mastery dashboard as additional signal -- high prediction error rate on a concept lowers its mastery score.",
+      "acceptanceCriteria": [
+        "Unit test: execute('print(\"hello\")') returns stdout='hello\\n', exit_code=0",
+        "Security test: execute('import os; os.system(\"echo pwned\")') with shell=False -- os.system call itself runs but no shell injection possible; verify via subprocess.PIPE capture that no additional processes spawn",
+        "Timeout test: execute('while True: pass') returns non-zero exit_code within 12 seconds",
+        "Memory limit test: execute('x = [0]*10**9') terminates with non-zero exit_code (memory limit enforced)",
+        "Prediction test: expected='hello' with actual='hello\\n' yields prediction_correct=False (strip comparison normalizes trailing newline -> True -- document this edge case behavior)",
+        "PredictionEventModel migrated via db_init.py",
+        "Integration test: POST /code/execute with Python snippet and expected_output returns prediction_correct and prediction_diff",
+        "JavaScript 503 test: if node not found, returns 503 with message containing 'Install Node.js'",
+        "Frontend: Predict toggle visible on code chunks with code_language set; absent on prose chunks",
+        "Frontend: 'Create flashcard from mistake?' toast fires on wrong prediction; clicking it opens pre-filled flashcard create dialog with flashcard_type='trace'",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S140.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S141",
+      "title": "Cross-book concept linking: SAME_CONCEPT edges, contradiction detection, and temporal evolution tracking",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 141,
+      "featureRef": "F-TECH-GRAPH",
+      "description": "CONTEXT: A developer who has ingested 5 tech books has scattered, redundant CONCEPT nodes -- 'dependency injection' appears in a Java book, a Python book, a system design book, and an OOP patterns book as four completely separate nodes with no connection. This prevents the system from: (1) giving comprehensive answers that synthesize across all sources, (2) detecting when two books make contradictory claims about the same concept, and (3) tracking how a concept's meaning or best practices have evolved over time. USER JOURNEY: User has ingested a 2019 Python book and a 2024 Python book -> Viz tab shows SAME_CONCEPT edges (dotted lines) linking the 'asyncio' concept nodes from both books -> a red dotted edge indicates a contradiction between the two sources -> chat answer on asyncio surfaces both perspectives and notes 'Sources disagree: [2019 source says X], [2024 source says Y -- newer source preferred]'. IMPLEMENTATION: New ConceptLinkerService in backend/app/services/concept_linker.py. Registered as Phase 2 enrichment job type 'concept_link'. Runs after entity extraction is complete for all documents (triggered post-ingestion and also re-run when a new document is added). Linking logic: compare CONCEPT and ALGORITHM nodes from the new document against all existing CONCEPT and ALGORITHM nodes across all documents. Match criteria (same as EntityDisambiguator): (A) exact stripped match, (B) substring containment, (C) token overlap >= 2. Add SAME_CONCEPT edge in Kuzu with: source_doc_id, target_doc_id, confidence (float). Contradiction detection: when a SAME_CONCEPT edge is created, run a second LLM call comparing the two section summaries that most prominently mention the concept. Prompt: 'Do these two passages make contradictory claims about the same concept? If yes, describe the contradiction in one sentence and which is likely more current. Output JSON: {\"has_contradiction\": bool, \"note\": str, \"prefer_source\": \"a\" or \"b\"}'. If has_contradiction=True, add contradiction=True, contradiction_note (str), prefer_source to edge. DocumentModel gains publication_year (int nullable, parsed from document front matter or title). When prefer_source='b' (newer contradicts older), synthesize_node in chat graph notes the update. GET /graph/concepts/linked returns concept clusters: groups of nodes linked by SAME_CONCEPT. Viz tab: SAME_CONCEPT edges as dotted lines (gray=no contradiction, red=contradiction). 'Cross-book' toggle shows/hides SAME_CONCEPT edges (default off -- noisy with many books). CROSS-STORY IMPACT: Chat synthesize_node reads contradiction flag and prefer_source when scope=all. S145 mastery dashboard aggregates mastery across SAME_CONCEPT-linked nodes for a unified score.",
+      "acceptanceCriteria": [
+        "Unit test: two CONCEPT nodes named 'dependency injection' and 'DI' produce a SAME_CONCEPT edge with confidence > 0",
+        "Unit test: mock LLM contradiction response; assert edge gains contradiction=True and contradiction_note",
+        "Integration test: ingest two tech documents both mentioning the same concept; Kuzu SAME_CONCEPT edge exists",
+        "GET /graph/concepts/linked returns at least one cluster after ingesting 2 related tech docs",
+        "Viz tab: SAME_CONCEPT edges render as dotted lines; red when contradiction=True; 'Cross-book' toggle works (default off)",
+        "Chat scope=all answer includes note when two sources contradict each other on a key concept",
+        "Chat scope=all answer notes '[2024 source preferred]' when prefer_source indicates the newer document",
+        "DocumentModel.publication_year column added; parseable from common front-matter patterns (Copyright YYYY, Published YYYY)",
+        "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S141.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S142",
+      "title": "Tech chat web grounding: optional per-conversation web augmentation with version mismatch detection",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 142,
+      "featureRef": "F-TECH-CHAT",
+      "description": "CONTEXT: Local tech content ages. A Python book from 2021 describes asyncio patterns that have been superseded by Python 3.12+ improvements. A React book from 2020 describes class components that are now discouraged. When a user asks 'what is the current best practice for X?', local content alone may give a misleading answer. Optional web augmentation adds a current web result to the context, letting the answer surface the discrepancy between the book and current state of the art. USER JOURNEY: User asks 'What is the recommended way to handle async errors in Python?' -> web search toggle is ON -> system retrieves local chunks (book content from 2021) + 1 web result (Python 3.12 docs) -> answer says: 'Your book recommends X [Local]. As of Python 3.12, the preferred approach is Y [Web: docs.python.org] -- note this differs from the book.' Version mismatch badge appears on the local source. IMPLEMENTATION: New WebSearcher service in backend/app/services/web_searcher.py. WebSnippet TypedDict: url, title, content (first 500 chars), source_quality, version_info. Settings.web_search_provider = 'none' | 'brave' | 'tavily' | 'duckduckgo' (shared with S138). When provider='none', web toggle is silently disabled with tooltip in UI: 'Configure a web search provider in Settings -> Integrations to enable web search'. New chat graph node: web_augment_node. Runs only when web_enabled=True in ChatState AND confidence < 0.8 after first synthesize pass. Calls WebSearcher.search(query, k=3). Web snippets added to context as [Web: domain.com] labeled entries. Rate limiter: max 3 web calls per conversation (tracked in ChatState.web_calls_used). After 3, web_augment_node is bypassed -- local-only fallback, no error. Counter shown in Chat UI: 'Web: 2/3'. Version mismatch detection: LLM in synthesize_node is prompted to compare local content version signals (e.g. 'Python 3.9', 'React 16') against web result version signals. If mismatch detected, sets version_mismatch=True on that source reference in the answer. Frontend shows amber badge. Answer source section: local chunks labeled [Local: document_title > section_heading], web snippets labeled [Web: domain.com]. Privacy invariant: web content is not stored in DB, used only per turn. New ChatState fields: web_enabled (bool, default False), web_calls_used (int, default 0). CROSS-STORY IMPACT: Settings.web_search_provider is shared with S138 -- set once, used in both document enrichment references and live chat web search.",
+      "acceptanceCriteria": [
+        "WebSearcher.search(query) with mocked provider returns list of WebSnippet with url, title, content, source_quality",
+        "web_augment_node fires only when web_enabled=True AND confidence < 0.8; never fires when web_enabled=False",
+        "Rate limiter: after 3 web calls in one conversation, 4th query uses local-only path with no error or hang",
+        "When provider='none', web toggle in Chat UI is disabled with explanatory tooltip; no error on attempt",
+        "Version mismatch test: local content mentioning 'Python 3.9' + web result for Python 3.12 triggers version_mismatch flag",
+        "Answer sources section distinguishes [Local] vs [Web: domain.com] in frontend rendering",
+        "Web search counter visible in Chat UI: 'Web: X/3'",
+        "Privacy invariant: web snippets not present in any DB table after conversation ends",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S142.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S143",
+      "title": "Learning objectives tracking: chapter progress rings, coverage auto-update after FSRS review, and study shortcuts",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 143,
+      "featureRef": "F-TECH-LEARNING",
+      "description": "CONTEXT: S132 extracts LearningObjectiveModel rows during ingestion. S143 builds the tracking layer on top: automatically marking objectives as covered as the learner reviews flashcards, and surfacing per-chapter and per-book progress in the UI. This closes the loop between 'what should I learn' (objectives) and 'how much have I learned' (FSRS state). Without this tracking, objectives are just static text. With it, they become a living curriculum that updates as the learner works. The coverage threshold is conservative: an objective is covered when the average fsrs_stability of flashcards in its section reaches >= 10 days. This represents solid enough recall that the learner is not just passively remembering -- they have reviewed and retained the material at least twice. USER JOURNEY: User opens the Library -> each tech book card shows a progress ring (0-100%) based on covered objectives. User clicks a book -> Document Reader shows per-chapter progress rings -> clicking a chapter ring opens a 'Chapter Goals' panel showing objectives as checkboxes (checked=covered, unchecked=not yet mastered) -> each uncovered objective has a 'Study' button that opens a filtered flashcard session for that chapter at bloom_level >= 2. IMPLEMENTATION: New ObjectiveTrackerService in backend/app/services/objective_tracker.py. Coverage update trigger: after every FSRS review event (ReviewEventModel insert), run ObjectiveTrackerService.update_coverage(document_id) asynchronously (fire-and-forget). Coverage logic: for each LearningObjectiveModel row in the document, find all FlashcardModel rows whose section_id matches the objective's section_id AND flashcard_type is not 'definition' (bloom>=2). If avg(fsrs_stability) >= 10 days across those cards, set covered=True. GET /documents/{id}/progress returns: total_objectives, covered_objectives, progress_pct, by_chapter: [{section, objectives, covered}]. POST /documents/{id}/refresh_progress manually triggers recalculation. Frontend: library card shows progress ring (gray ring with pct label; ring absent for docs with 0 objectives, showing a plain dash '--' to distinguish from 0% progress). Document Reader: per-chapter header shows mini progress ring (12px). Chapter Goals panel: each objective as checkbox row; 'Study' button beside uncovered objectives. 'Study' button opens Study tab filtered to chapter + bloom_level >= 2. Library summary executive mode (scope=all): 'Progress Across Library' section lists each book's progress_pct. CROSS-STORY IMPACT: S144 Feynman sessions also set covered=True for objectives of sections where the learner demonstrated understanding (tutor confirms understanding in session summary).",
+      "acceptanceCriteria": [
+        "ObjectiveTrackerService.update_coverage(document_id) correctly marks objectives covered when avg flashcard stability >= 10 days",
+        "Unit test: section with 3 flashcards at stabilities [5, 12, 18] -> avg=11.67 >= 10 -> objective marked covered",
+        "Unit test: section with flashcards at stabilities [3, 6, 8] -> avg=5.67 < 10 -> objective stays uncovered",
+        "Coverage update fires as fire-and-forget after ReviewEventModel insert (does not block review response)",
+        "Integration test: complete review session with good ratings until stability >= 10; assert objective covered=True",
+        "GET /documents/{id}/progress returns correct total_objectives, covered_objectives, and by_chapter breakdown",
+        "Frontend: library card progress ring shows correct pct; absent (not 0%) for docs with no objectives",
+        "Chapter Goals panel shows objectives as checkboxes; 'Study' button opens filtered session at bloom_level >= 2",
+        "POST /documents/{id}/refresh_progress triggers recalculation and returns updated progress",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S143.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S144",
+      "title": "Feynman technique mode: guided explanation sessions, gap identification, and auto-generated remediation flashcards",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 144,
+      "featureRef": "F-TECH-LEARNING",
+      "description": "CONTEXT: The Feynman Technique is among the most well-validated active learning methods for technical understanding. It distinguishes recognition memory (you can recall facts when prompted) from generative understanding (you can explain a concept from scratch in your own words). Most learners overestimate their understanding until they try to explain something without notes. The Feynman technique exposes this gap immediately. The key mechanism: the learner explains a concept as if teaching a beginner, the tutor identifies exactly which aspects were missing or incorrect, and those specific gaps immediately become new flashcards targeted at the weakness. USER JOURNEY: User finishes reading Chapter 5 on closures -> clicks 'Feynman' button in the section outline -> split-pane dialog opens: left shows section summary as reference, right shows chat with tutor -> tutor asks 'Explain closures as if to someone who only knows basic functions.' -> user types explanation -> tutor responds: 'Good -- you captured lexical scope correctly. You missed that closures capture variables by reference, not value. Can you explain what that means for mutable objects?' -> after 3 exchanges, tutor says: 'You understand lexical scope well. Your understanding of reference capture and mutable state is weak.' -> 2 new flashcards are created targeting those gaps -> session summary saved and visible in 'Sessions' history. IMPLEMENTATION: New FeynmanService in backend/app/services/feynman_service.py. New tables: feynman_sessions (id, document_id, section_id, concept, status [active|complete], created_at) and feynman_turns (id, session_id, turn_index, role [tutor|learner], content, gaps_identified JSON, created_at). POST /feynman/sessions: creates session, returns opening tutor message. POST /feynman/sessions/{id}/message: accepts learner content, streams tutor response via SSE. LLM system prompt (tutor role): instructs 3-exchange structure -- exchange 1: ask for explanation; exchange 2: identify what was right, ask follow-up targeting biggest gap; exchange 3: final assessment naming exactly what the learner understands well and what is weak, recommend specific flashcard topics. Never give the answer directly -- ask guiding questions. Source material for session = section summary. Session completion: after exchange 3, FeynmanService.complete_session() parses gaps_identified from the final tutor turn. Calls FlashcardService.generate_technical() with the gap concepts as context, generating 2-3 targeted concept_explanation or trace cards per gap. Cards marked source='feynman'. Objective tracking integration: if the tutor's final assessment confirms understanding of the section's learning objectives, call ObjectiveTrackerService to mark them covered regardless of flashcard stability. GET /feynman/sessions?document_id={id} returns session history with gap summary. Frontend Study tab: 'Feynman' button on each section/chapter row in document outline (visible for tech books only). Split-pane dialog: left=section summary (read-only scroll), right=chat (SSE stream). Session history tab on document page. OFFLINE: Ollama unreachable -> 503 with message 'Start Ollama to use Feynman mode: ollama serve'.",
+      "acceptanceCriteria": [
+        "feynman_sessions and feynman_turns tables migrated via db_init.py",
+        "POST /feynman/sessions creates session and returns opening tutor message asking the learner to explain the concept",
+        "Unit test: complete_session() with 2 identified gaps generates >=2 flashcards with source='feynman' and flashcard_type='concept_explanation'",
+        "Unit test: tutor prompt includes section summary content in system context",
+        "Integration test: 3-turn session stored correctly in feynman_turns; gap flashcards present in flashcards table after completion",
+        "Objective coverage: if tutor final assessment confirms understanding, ObjectiveTrackerService marks those objectives covered",
+        "Frontend: 'Feynman' button visible in section outline for tech books; absent for fiction documents",
+        "Frontend: split-pane dialog renders section summary on left, SSE-streaming chat on right",
+        "GET /feynman/sessions?document_id={id} returns session list with gap_count and status",
+        "Offline test: POST /feynman/sessions with Ollama unreachable returns 503 with message containing 'ollama serve'",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S144.sh passes"
+      ],
+      "passes": false
+    },
+    {
+      "id": "S145",
+      "title": "Concept mastery dashboard: heatmap, weak-spot panel, gap detector extension, and unified mastery score",
+      "phase": "V2 Phase 10 - Tech Book Mastery",
+      "priority": 145,
+      "featureRef": "F-TECH-MASTERY",
+      "description": "CONTEXT: Effective learners practice metacognition -- they know what they know and what they don't. The current app shows FSRS due dates per flashcard but has no aggregated view of concept-level mastery. A user with 80 flashcards on Python has no way to see 'I know closures well, I'm weak on generators, and I have never made a flashcard on async iterators'. This dashboard provides that metacognitive view at the concept level, not the card level. Mastery formula: for a concept C, mastery = mean(min(fsrs_stability / 21.0, 1.0)) across all flashcards whose section_id maps to a section where C appears as a Kuzu entity. A card with stability=21 days represents roughly 100% mastery (retained for 3 weeks without review). Cards rated bloom_level 4-5 are weighted 1.5x in the mean (applied understanding matters more than recall). Prediction errors from S140 reduce mastery: each PredictionEventModel row with correct=False for a code chunk in concept C's section reduces mastery score by 0.05 (capped at -0.2 total reduction). Gap detector extension: GapDetectorService.detect_gaps() gains a third output category 'weak' (concepts present in notes but with mastery < 0.3 -- recognized but not retained). The GapReport TypedDict gains weak: list[str]. This distinguishes true gaps (not in notes) from retention weaknesses (in notes, low flashcard stability) from well-covered concepts (in notes, solid stability). USER JOURNEY: User opens Monitoring tab -> clicks 'Mastery' sub-tab -> sees heatmap grid: rows are chapters, columns are top-5 concepts per chapter (by entity frequency), cells colored gray (no cards), blue (low mastery), green-to-dark-green (high mastery) -> 'Weak spots' panel lists top 5 concepts with mastery < 0.4 and >=1 card -> 'No flashcards yet' panel lists concepts with 0 cards -> 'Quick study weak spots' button starts session filtered to weak concepts -> cross-book view shows same concept (via SAME_CONCEPT edges from S141) unified mastery across all books. IMPLEMENTATION: New MasteryService in backend/app/services/mastery_service.py. GET /mastery/concepts?document_ids=... computes and returns sorted mastery list. GET /mastery/heatmap?document_id={id} returns chapter x concept grid. Frontend Monitoring tab: new 'Mastery' sub-tab alongside existing Evaluation tab. Heatmap rendered using Recharts (already a dep) or a simple CSS grid with color interpolation. CROSS-STORY IMPACT: This is the synthesis story for the entire Phase 10 learning loop. It reads from: FlashcardModel (stability, bloom_level), PredictionEventModel (S140), Kuzu entities (S135), PREREQUISITE_OF edges (S139), SAME_CONCEPT edges (S141), LearningObjectiveModel coverage (S143). All prior stories feed into this view.",
+      "acceptanceCriteria": [
+        "MasteryService.compute_mastery(concept, document_ids) returns correct mastery score; unit test with known stability values verifies formula including bloom_level weighting and prediction error penalty",
+        "Unit test: concept with 3 cards at stabilities [7, 14, 21] with bloom_levels [2, 4, 5] returns mastery higher than same stabilities with bloom_levels [1, 1, 2]",
+        "Unit test: concept with correct=False PredictionEventModel row has mastery reduced by 0.05 vs same concept without prediction error",
+        "GapReport TypedDict gains 'weak: list[str]' field; detect_gaps() returns weak concepts separately from gaps and covered",
+        "Unit test: concept in notes with mastery < 0.3 appears in 'weak', not 'gaps'",
+        "GET /mastery/concepts returns sorted list with mastery, card_count, due_soon, no_flashcards fields",
+        "GET /mastery/heatmap returns chapter x concept grid with mastery values",
+        "Frontend Monitoring tab: 'Mastery' sub-tab renders heatmap with correct color coding (gray=no cards, blue=low, green=high)",
+        "'Weak spots' panel shows top 5 concepts with mastery < 0.4 and card_count >= 1",
+        "'Quick study weak spots' starts session containing only cards for concepts with mastery < 0.4",
+        "Cross-book unified mastery: SAME_CONCEPT-linked nodes from multiple documents contribute to a single unified mastery score",
+        "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S145.sh passes"
       ],
       "passes": false
     }
