@@ -1,4 +1,4 @@
-import { BookOpen, Code2, MessageSquare, ScrollText, StickyNote } from "lucide-react"
+import { BookOpen, Code2, MessageSquare, ScrollText, StickyNote, Volume2 } from "lucide-react"
 import type { ContentType, LearningStatus } from "./types"
 
 export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
@@ -7,6 +7,15 @@ export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
   conversation: MessageSquare,
   notes: StickyNote,
   code: Code2,
+  audio: Volume2,
+}
+
+export function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m`
+  return `${Math.round(seconds)}s`
 }
 
 export const STATUS_LABELS: Record<LearningStatus, string> = {

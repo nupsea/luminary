@@ -39,7 +39,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 _parser = DocumentParser()
 
-_ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx"})
+_ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx", "mp3", "m4a", "wav"})
 
 
 def _delete_raw_file(document_id: str) -> None:
@@ -98,6 +98,7 @@ class DocumentListItem(BaseModel):
     chapter_count: int | None
     chunk_count: int
     reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
+    audio_duration_seconds: float | None
 
 
 class DocumentListResponse(BaseModel):
@@ -310,6 +311,7 @@ async def list_documents(
                 chapter_count=doc.chapter_count,
                 chunk_count=chunk_count,
                 reading_progress_pct=reading_progress_pct,
+                audio_duration_seconds=doc.audio_duration_seconds,
             )
         )
 
@@ -382,7 +384,7 @@ async def ingest_document(
     content = await file.read()
     file_hash = hashlib.sha256(content).hexdigest()
 
-    fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
+    fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav") else "txt"
 
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.

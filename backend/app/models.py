@@ -31,6 +31,8 @@ class DocumentModel(Base):
     chapter_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Speaker roster and timeline for conversation documents (set during ingestion).
     conversation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Duration in seconds for audio documents (set during transcription).
+    audio_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

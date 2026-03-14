@@ -15,7 +15,7 @@ from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
 
-ContentType = Literal["book", "conversation", "notes"]
+ContentType = Literal["book", "conversation", "notes", "audio"]
 
 _parser = DocumentParser()
 
@@ -29,6 +29,7 @@ CHUNK_CONFIGS: dict[str, dict[str, int]] = {
 
 STAGE_PROGRESS: dict[str, int] = {
     "parsing": 10,
+    "transcribing": 15,
     "classifying": 25,
     "chunking": 40,
     "embedding": 70,
@@ -49,9 +50,13 @@ class IngestionState(TypedDict):
     status: str
     error: str | None
     section_summary_count: int | None
+    audio_duration_seconds: float | None
+    _audio_chunks: list[dict[str, Any]] | None
 
 
 def _classify(raw_text: str, sections: list[dict], word_count: int, file_ext: str) -> str:
+    if file_ext in ("mp3", "m4a", "wav"):
+        return "audio"
     if file_ext in ("py", "js", "ts", "go", "java", "rs", "cpp", "c", "rb"):
         return "code"
     headings_lower = " ".join(s.get("heading", "").lower() for s in sections)
@@ -85,6 +90,9 @@ async def _update_stage(document_id: str, stage: str) -> None:
 
 def parse_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
+    # Audio files: DocumentParser cannot handle them; transcribe_node takes over.
+    if Path(state["file_path"]).suffix.lstrip(".").lower() in ("mp3", "m4a", "wav"):
+        return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
         try:
             fp = Path(state["file_path"])
@@ -438,6 +446,134 @@ async def _chunk_conversation(
     return {**state, "chunks": chunks, "status": "embedding"}
 
 
+def _chunk_audio(
+    segments: list[dict],
+    doc_id: str,
+    window_seconds: float = 60.0,
+) -> list[dict]:
+    """Group Whisper segments into ~60-second windows.
+
+    Each returned dict has: id, document_id, text, index, start_time, end_time.
+    """
+    import uuid as _uuid  # noqa: PLC0415
+
+    chunks: list[dict] = []
+    bucket_texts: list[str] = []
+    bucket_start: float = 0.0
+    bucket_end: float = 0.0
+    chunk_idx: int = 0
+
+    def _flush(start: float, end: float, texts: list[str]) -> None:
+        nonlocal chunk_idx
+        if not texts:
+            return
+        chunks.append(
+            {
+                "id": str(_uuid.uuid4()),
+                "document_id": doc_id,
+                "text": " ".join(texts),
+                "index": chunk_idx,
+                "start_time": start,
+                "end_time": end,
+            }
+        )
+        chunk_idx += 1
+
+    for seg in segments:
+        if not bucket_texts:
+            bucket_start = seg["start"]
+        if seg["end"] - bucket_start >= window_seconds and bucket_texts:
+            _flush(bucket_start, bucket_end, bucket_texts)
+            bucket_texts = []
+            bucket_start = seg["start"]
+        bucket_texts.append(seg["text"])
+        bucket_end = seg["end"]
+
+    _flush(bucket_start, bucket_end, bucket_texts)
+    return chunks
+
+
+async def transcribe_node(state: IngestionState) -> IngestionState:
+    """Transcribe audio files using faster-whisper.
+
+    For non-audio content types this is a pass-through.
+    For audio files: calls AudioTranscriber, builds parsed_document from segments,
+    writes audio_duration_seconds to DocumentModel, stores pre-built _audio_chunks.
+    """
+    content_type = state.get("content_type")
+    if content_type != "audio":
+        return state
+
+    doc_id = state["document_id"]
+    await _update_stage(doc_id, "transcribing")
+    logger.info("transcribe_node: start", extra={"doc_id": doc_id})
+
+    try:
+        from sqlalchemy import update as _update  # noqa: PLC0415
+
+        from app.models import DocumentModel  # noqa: PLC0415
+        from app.services.audio_transcriber import get_audio_transcriber  # noqa: PLC0415
+
+        fp = Path(state["file_path"])
+        transcriber = get_audio_transcriber()
+        loop = asyncio.get_running_loop()
+        # CPU-bound -- run in thread pool to keep event loop free for status polls
+        segments, duration = await loop.run_in_executor(
+            None, transcriber.transcribe, fp
+        )
+
+        raw_text = " ".join(s["text"] for s in segments)
+        audio_chunks = _chunk_audio(segments, doc_id)
+
+        # Sections for section_summarize_node: one section per audio window
+        sections = [
+            {
+                "heading": f"Segment {i + 1} ({c['start_time']:.0f}s-{c['end_time']:.0f}s)",
+                "level": 1,
+                "text": c["text"],
+                "page_start": 0,
+                "page_end": 0,
+            }
+            for i, c in enumerate(audio_chunks)
+        ]
+
+        parsed_document = {
+            "title": fp.stem,
+            "format": fp.suffix.lstrip("."),
+            "pages": 0,
+            "word_count": len(raw_text.split()),
+            "sections": sections,
+            "raw_text": raw_text,
+        }
+
+        # Persist duration to DocumentModel
+        async with get_session_factory()() as session:
+            await session.execute(
+                _update(DocumentModel)
+                .where(DocumentModel.id == doc_id)
+                .values(
+                    audio_duration_seconds=duration,
+                    word_count=len(raw_text.split()),
+                )
+            )
+            await session.commit()
+
+        logger.info(
+            "transcribe_node: done",
+            extra={"doc_id": doc_id, "segments": len(segments), "duration": duration},
+        )
+        return {
+            **state,
+            "parsed_document": parsed_document,
+            "audio_duration_seconds": duration,
+            "_audio_chunks": audio_chunks,
+            "status": "chunking",
+        }
+    except Exception as exc:
+        logger.error("transcribe_node failed", exc_info=exc)
+        return {**state, "status": "error", "error": str(exc)}
+
+
 async def chunk_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
     with trace_ingestion_node("chunk", state):
@@ -446,6 +582,39 @@ async def chunk_node(state: IngestionState) -> IngestionState:
             content_type = state["content_type"] or "notes"
             doc_id = state["document_id"]
             file_path = state["file_path"]
+
+            if content_type == "audio":
+                audio_chunks = state.get("_audio_chunks") or []
+                chunks = []
+                async with get_session_factory()() as session:
+                    chunk_models: list[ChunkModel] = []
+                    for c in audio_chunks:
+                        chunk_models.append(ChunkModel(
+                            id=c["id"],
+                            document_id=doc_id,
+                            section_id=None,
+                            text=c["text"],
+                            token_count=len(c["text"].split()),
+                            page_number=0,
+                            speaker=None,
+                            chunk_index=c["index"],
+                        ))
+                        chunks.append(
+                            {
+                                "id": c["id"],
+                                "document_id": doc_id,
+                                "text": c["text"],
+                                "index": c["index"],
+                                "start_time": c["start_time"],
+                                "end_time": c["end_time"],
+                            }
+                        )
+                    session.add_all(chunk_models)
+                    await session.commit()
+                logger.info(
+                    "Audio chunked", extra={"doc_id": doc_id, "num_chunks": len(chunks)}
+                )
+                return {**state, "chunks": chunks, "status": "embedding"}
 
             if content_type == "code":
                 raw_text = pd["raw_text"] if pd else ""
@@ -897,6 +1066,7 @@ def _build_graph():
     builder: StateGraph = StateGraph(IngestionState)
     builder.add_node("parse", parse_node)
     builder.add_node("classify", classify_node)
+    builder.add_node("transcribe", transcribe_node)
     builder.add_node("chunk", chunk_node)
     builder.add_node("embed", embed_node)
     builder.add_node("keyword_index", keyword_index_node)
@@ -906,7 +1076,8 @@ def _build_graph():
     builder.add_node("error_finalize", error_finalize_node)
     builder.add_edge(START, "parse")
     builder.add_conditional_edges("parse", _route_on_status("classify"))
-    builder.add_conditional_edges("classify", _route_on_status("chunk"))
+    builder.add_conditional_edges("classify", _route_on_status("transcribe"))
+    builder.add_conditional_edges("transcribe", _route_on_status("chunk"))
     builder.add_conditional_edges("chunk", _route_on_status("embed"))
     builder.add_edge("embed", "keyword_index")
     builder.add_edge("keyword_index", "entity_extract")
@@ -933,6 +1104,8 @@ async def run_ingestion(
         "status": "parsing",
         "error": None,
         "section_summary_count": None,
+        "audio_duration_seconds": None,
+        "_audio_chunks": None,
     }
     logger.info(
         "Ingestion task started",

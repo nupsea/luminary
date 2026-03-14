@@ -8,6 +8,7 @@ dependencies = [
     "arize-phoenix>=13.3.0",
     "chardet>=6.0.0.post1",
     "fastapi>=0.132.0",
+    "faster-whisper>=1.2.1",
     "fsrs>=6.3.0",
     "gliner>=0.2.25",
     "httpx>=0.28.1",

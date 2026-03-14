@@ -1,4 +1,4 @@
-export type ContentType = "book" | "paper" | "conversation" | "notes" | "code"
+export type ContentType = "book" | "paper" | "conversation" | "notes" | "code" | "audio"
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
 export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed"
 export type ViewMode = "grid" | "list"
@@ -19,6 +19,7 @@ export interface DocumentListItem {
   learning_status: LearningStatus
   chunk_count: number
   reading_progress_pct: number  // 0.0 to 1.0
+  audio_duration_seconds: number | null
 }
 
 export interface DocumentListResponse {

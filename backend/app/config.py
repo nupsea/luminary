@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
+    WHISPER_MODEL_SIZE: str = "base"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

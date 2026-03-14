@@ -9,6 +9,7 @@ import {
   CONTENT_TYPE_ICONS,
   STATUS_LABELS,
   STATUS_VARIANTS,
+  formatDuration,
   formatWordCount,
   relativeDate,
 } from "./utils"
@@ -21,6 +22,7 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
   notes: { label: "Notes", className: "bg-gray-100 text-gray-600 hover:bg-gray-200" },
   paper: { label: "Paper", className: "bg-purple-100 text-purple-700 hover:bg-purple-200" },
   code: { label: "Code", className: "bg-orange-100 text-orange-700 hover:bg-orange-200" },
+  audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
 }
 
 const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes"]
@@ -218,6 +220,12 @@ export function DocumentCard({
         <span>{formatWordCount(doc.word_count)}</span>
         <span>·</span>
         <span>{relativeDate(doc.created_at)}</span>
+        {doc.audio_duration_seconds != null && (
+          <>
+            <span>·</span>
+            <span>{formatDuration(doc.audio_duration_seconds)}</span>
+          </>
+        )}
       </div>
 
       {doc.summary_one_sentence && (
