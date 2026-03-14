@@ -83,6 +83,22 @@ async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
     assert "yt-dlp" in resp.json()["detail"].lower()
 
 
+async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
+    """POST /documents/ingest-url returns 503 when ffmpeg is not on PATH."""
+    with (
+        patch("app.services.youtube_downloader.shutil.which", side_effect=lambda x: "/usr/bin/yt-dlp" if x == "yt-dlp" else None),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/documents/ingest-url",
+                json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+            )
+    assert resp.status_code == 503
+    assert "ffmpeg" in resp.json()["detail"].lower()
+
+
 async def test_ingest_url_returns_400_for_non_youtube_url(test_db):
     """POST /documents/ingest-url returns 400 for non-YouTube URLs."""
     with patch("app.services.youtube_downloader.shutil.which", return_value="/usr/bin/yt-dlp"):
@@ -112,6 +128,10 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     with (
         patch(
             "app.services.youtube_downloader.check_ytdlp_available",
+            return_value=True,
+        ),
+        patch(
+            "app.services.youtube_downloader.check_ffmpeg_available",
             return_value=True,
         ),
         patch(

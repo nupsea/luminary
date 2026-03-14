@@ -30,6 +30,11 @@ def check_ytdlp_available() -> bool:
     return shutil.which("yt-dlp") is not None
 
 
+def check_ffmpeg_available() -> bool:
+    """Return True if the ffmpeg binary is available on PATH."""
+    return shutil.which("ffmpeg") is not None
+
+
 async def fetch_metadata(url: str) -> dict:
     """Run yt-dlp --dump-json --no-download and return parsed JSON.
 

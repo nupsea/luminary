@@ -593,6 +593,7 @@ async def ingest_url(
 ):
     """Ingest a YouTube URL by downloading audio via yt-dlp and transcribing with Whisper."""
     from app.services.youtube_downloader import (  # noqa: PLC0415
+        check_ffmpeg_available,
         check_ytdlp_available,
         download_audio,
         fetch_metadata,
@@ -608,6 +609,15 @@ async def ingest_url(
             detail=(
                 "yt-dlp is not installed. Install it with: "
                 "uv tool install yt-dlp  or  brew install yt-dlp"
+            ),
+        )
+
+    if not check_ffmpeg_available():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "ffmpeg is not installed. Install it with: "
+                "brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
             ),
         )
 

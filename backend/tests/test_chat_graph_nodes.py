@@ -43,11 +43,29 @@ from app.runtime.chat_graph import (
     summary_node,
     synthesize_node,
 )
-from app.types import ScoredChunk
+from app.types import ChatState, ScoredChunk
 
 # ---------------------------------------------------------------------------
-# Shared fixture — in-memory DB
+# Shared fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def mock_llm_calls():
+    """Globally mock LLM calls in this file to avoid CI failures when Ollama is offline."""
+    with (
+        patch(
+            "app.runtime.chat_graph._llm_classify_fallback",
+            new=AsyncMock(side_effect=lambda q, d, **kwargs: d),
+        ),
+        patch(
+            "app.runtime.chat_graph._decompose_comparison",
+            new=AsyncMock(
+                return_value={"sides": ["side_a", "side_b"], "topic": "comparison"}
+            ),
+        ),
+    ):
+        yield
 
 
 @pytest.fixture

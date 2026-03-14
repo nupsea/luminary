@@ -124,41 +124,19 @@ async def _fts_insert(
     )
 
 
-async def _fts_delete_rows(note_id: str, session: AsyncSession) -> None:
-    """Delete FTS5 rows for a note_id.
-
-    Queries the FTS5 shadow content table (notes_fts_content) directly instead
-    of the FTS5 virtual table, because WHERE clauses on UNINDEXED columns in FTS5
-    virtual tables are unreliable when the table has accumulated many rows across
-    a long session. The shadow table is a plain SQLite table and filters correctly.
-    Column mapping: c0=content, c1=note_id, c2=document_id.
-    """
-    rows = (
-        await session.execute(
-            text("SELECT id FROM notes_fts_content WHERE c1 = :nid"),
-            {"nid": note_id},
-        )
-    ).fetchall()
-    logger.debug("_fts_delete_rows note_id=%s found %d rows", note_id, len(rows))
-    for (rowid,) in rows:
-        await session.execute(
-            text("DELETE FROM notes_fts WHERE rowid = :rowid"),
-            {"rowid": rowid},
-        )
+async def _fts_delete(note_id: str, session: AsyncSession) -> None:
+    """Delete rows from the FTS5 virtual table for a given note_id."""
+    await session.execute(
+        text("DELETE FROM notes_fts WHERE note_id = :nid"),
+        {"nid": note_id},
+    )
 
 
 async def _fts_update(
     note_id: str, content: str, document_id: str | None, session: AsyncSession
 ) -> None:
-    await _fts_delete_rows(note_id, session)
-    await session.execute(
-        text("INSERT INTO notes_fts(note_id, content, document_id) VALUES (:nid, :content, :doc)"),
-        {"nid": note_id, "content": content, "doc": document_id or ""},
-    )
-
-
-async def _fts_delete(note_id: str, session: AsyncSession) -> None:
-    await _fts_delete_rows(note_id, session)
+    await _fts_delete(note_id, session)
+    await _fts_insert(note_id, content, document_id, session)
 
 
 async def _embed_and_store_note(note_id: str, content: str, document_id: str | None) -> None:
