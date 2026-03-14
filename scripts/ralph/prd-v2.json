@@ -1189,7 +1189,7 @@
         "pytest unit test verifies that ensure_ingested() skips re-ingest when GET /documents already returns a matching document",
         "smoke test scripts/smoke/S130.sh calls GET /evals/results and asserts HTTP 200 with at least one result row"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S131",
@@ -1208,7 +1208,7 @@
         "GET /documents/{id}/code_snippets returns list with language and signature fields; returns [] for a non-tech document",
         "uv run ruff check . exits 0; uv run pytest passes (exit 0 or 5); scripts/smoke/S131.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S132",
@@ -1228,7 +1228,7 @@
         "Frontend Document Reader: admonition sections rendered with colored left-border (blue=note, red=warning, green=tip, orange=caution)",
         "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S132.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S133",

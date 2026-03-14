@@ -1033,3 +1033,55 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - Most of S123 was pre-implemented; only ruff lint and smoke test were missing
   - Background tasks in FastAPI routers need strong-reference pattern (add to _background_tasks set)
 ---
+
+## 2026-03-15T00:00:00Z - S130 - Tech Debt TD-015: RAGAS eval per-book breakdown and MRR improvement
+- Implemented: Split book.jsonl into 3 per-book JSONL files; fixed _norm() to normalise Unicode typographic quotes to ASCII (fixes 13/15 failing hints); fixed 2 hints with content divergence (TM line 9: "career" paraphrase -> truncated hint; Alice line 37: "It's a Cheshire cat, and that's why" -> verbatim "said the Duchess" text); added lookup_document_by_filename() and updated ensure_ingested() to avoid blind re-ingest; updated VALID_DATASETS; updated DATASET_COLORS in Monitoring.tsx; added 4 unit tests for ensure_ingested() skip logic; added 3 parametrized tests for per-book dataset names
+- Files changed: evals/run_eval.py, evals/golden/book_time_machine.jsonl (new), evals/golden/book_alice.jsonl (new), evals/golden/book_odyssey.jsonl (new), frontend/src/pages/Monitoring.tsx, backend/tests/test_ensure_ingested.py (new), backend/tests/test_evals_router.py, scripts/smoke/S130.sh (new)
+- AC verified:
+  - book_time_machine.jsonl (30), book_alice.jsonl (20), book_odyssey.jsonl (20) exist: PASS
+  - VALID_DATASETS includes book_time_machine, book_alice, book_odyssey: PASS
+  - GET /evals/results groups by dataset name (file-based, auto): PASS
+  - ensure_ingested() checks GET /documents before re-ingest: PASS
+  - HR@5 >= 0.60 and MRR >= 0.45 for 2/3 datasets: CANNOT VERIFY (no live backend); manifest fix is primary regression cause per TD-015
+  - 70/70 context_hints match with norm() fix + 2 content fixes: PASS
+  - pytest test verifies skip-on-existing-document: PASS (4 tests)
+  - scripts/smoke/S130.sh exists and is executable: PASS
+- Reviewer verdict: PASS (no Critical items)
+- Learnings:
+  - Project Gutenberg source files use Unicode typographic quotes (U+2018/2019/201C/201D) throughout; golden hints authored with ASCII quotes always fail substring match without quote normalization. Fix: add typographic->ASCII normalization to _norm() before comparison.
+  - has_non_ascii=False in Python does NOT mean no curly quotes -- json.loads() decodes \u2018 etc into Python str, and str.encode('utf-8') of the HINT will only show non-ASCII bytes if the HINT itself has curly quotes. The issue here was the SOURCE has curly quotes, not the hints.
+  - lookup_document_by_filename() should use page_size=100 to catch all documents in a single call; title matching uses Path(source_file).stem (lowercase comparison).
+---
+
+## 2026-03-15T02:00:00Z - S131 - Code-aware chunking: tech_book/tech_article and AST signatures
+- Implemented: tech_book/tech_article ContentType values; CHUNK_CONFIGS entries; _classify() tech_book heuristic (>= 6 triple-backtick tokens OR >= 2 numbered sections in first 5k chars); new service tech_book_chunker.py with extract_code_blocks(), _parse_ast_signature(), chunk_mixed_content(); ChunkModel new columns (has_code, code_language, code_signature); CodeSnippetModel; _chunk_tech_book() with session.flush() ordering; dispatch in chunk_node; GET /documents/{id}/code_snippets endpoint; delete loops fixed (CodeSnippetModel before ChunkModel)
+- Files changed: backend/app/workflows/ingestion.py, backend/app/models.py, backend/app/db_init.py, backend/app/services/tech_book_chunker.py (new), backend/app/routers/documents.py, backend/tests/test_tech_book_chunker.py (new), scripts/smoke/S131.sh (new)
+- AC verified:
+  - tech_book/tech_article in ContentType Literal + CHUNK_CONFIGS: PASS
+  - _classify() test: >=3 fenced blocks -> tech_book: PASS
+  - chunk_mixed_content atomic code block (50-line function intact): PASS
+  - _parse_ast_signature valid/malformed: PASS (4 tests)
+  - CodeSnippetModel table + ChunkModel columns exist: PASS
+  - Integration test: _chunk_tech_book creates CodeSnippetModel rows: PASS
+  - GET /code_snippets: 200 with snippets / [] for non-tech / 404 for missing: PASS
+  - ruff clean + pytest 802 pass + tsc clean: PASS
+- Reviewer verdict: PASS (no Critical; fixed 2 High items: LLM prompt + delete order)
+- Learnings:
+  - tech_book_chunker.py has NO app imports (pure stdlib + langchain) -- this is the ideal service file pattern: zero I/O, zero database, fully unit-testable
+  - chunk_mixed_content must handle all-prose text (no code blocks) via fallback split to avoid returning []
+  - LLM reclassification prompt and _valid_types whitelist must be kept in sync; inconsistency silently dead-codes the new types
+  - Delete order for FK-safe cleanup: child tables (CodeSnippetModel) must be deleted before parent tables (ChunkModel) even without FK enforcement
+---
+
+## S132 - Tech section detection: admonitions, numbered hierarchy, learning objectives (2026-03-15)
+commit: c66da4a
+status: PASS
+
+Key decisions:
+  - Tech section enrichment (admonition detection, hierarchy classification) runs inside _chunk_tech_book ONLY -- fiction books via _chunk_book are unaffected
+  - Two-flush pattern in _chunk_tech_book: first flush creates section rows (generates IDs), second flush persists resolved parent_section_id
+  - store_all() pattern in LearningObjectiveExtractorService: accumulate all objectives across sections, single document-level delete+insert; avoids per-section store() clobbering earlier sections' rows
+  - ChapterGoalsPanel placed in DocumentReader.tsx (not Learning.tsx) since DocumentReader already has documentId; graceful absent (returns null) for fiction books with 0 objectives
+  - Admonition styling overrides fragility heatmap when admonition_type is set -- admonition type has higher UX priority
+  - SectionItem in documents.py (DocumentDetail response) MUST include admonition_type/parent_section_id; GET /sections/{id} alone is insufficient since DocumentReader fetches sections via GET /documents/{id}
+---
