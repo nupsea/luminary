@@ -88,13 +88,14 @@ async def lifespan(app: FastAPI):
         )
 
     # ffmpeg check — required for video (MP4) ingestion.
-    if shutil.which("ffmpeg") is None:
+    _ffmpeg_path = shutil.which("ffmpeg")
+    if _ffmpeg_path is None:
         logger.warning(
             "ffmpeg not found at startup — video (MP4) ingestion will be unavailable. "
             "Install with: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
         )
     else:
-        logger.info("ffmpeg found at startup", extra={"path": shutil.which("ffmpeg")})
+        logger.info("ffmpeg found at startup", extra={"path": _ffmpeg_path})
 
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield

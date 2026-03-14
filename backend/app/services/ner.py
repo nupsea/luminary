@@ -225,8 +225,18 @@ class EntityExtractor:
 
         entities: list[dict] = []
 
-        # Filter empty chunks up front so batch indices stay aligned.
-        valid_chunks = [c for c in chunks if c["text"].strip()]
+        # Strip context headers [Book > Section] before entity extraction.
+        # These are injected during chunking for search but are noise for NER.
+        header_pattern = re.compile(r"^\[.*? > .*?\]\s*")
+        
+        valid_chunks = []
+        for c in chunks:
+            text = c.get("text", "").strip()
+            if not text:
+                continue
+            # Strip header only for NER, don't modify the original chunk dict
+            clean_text = header_pattern.sub("", text)
+            valid_chunks.append({**c, "text": clean_text})
 
         total_batches = (len(valid_chunks) + _NER_BATCH_SIZE - 1) // _NER_BATCH_SIZE
         for batch_idx in range(0, len(valid_chunks), _NER_BATCH_SIZE):

@@ -33,6 +33,9 @@ class DocumentModel(Base):
     conversation_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Duration in seconds for audio documents (set during transcription).
     audio_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Human-readable error detail written by error_finalize_node (e.g. "ffmpeg not found").
+    # Surfaced to the UI via GET /documents/{id}/status as error_message.
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

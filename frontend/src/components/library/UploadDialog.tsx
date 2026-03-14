@@ -9,11 +9,11 @@ import { Progress } from "@/components/ui/progress"
 
 const API_BASE = "http://localhost:8000"
 
-const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav"]
+const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4"]
 
 const STAGE_LABELS: Record<string, string> = {
   parsing: "Parsing document...",
-  transcribing: "Transcribing audio...",
+  transcribing: "Transcribing...",
   classifying: "Classifying content...",
   chunking: "Chunking text...",
   embedding: "Generating embeddings...",
@@ -43,9 +43,14 @@ const CONTENT_TYPE_OPTIONS = [
     label: "Audio",
     description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)",
   },
+  {
+    value: "video" as const,
+    label: "Video",
+    description: "For lecture recordings, screen captures, video talks (MP4)",
+  },
 ]
 
-type ContentTypeValue = "book" | "conversation" | "notes" | "audio"
+type ContentTypeValue = "book" | "conversation" | "notes" | "audio" | "video"
 type DialogTab = "upload" | "paste"
 type Mode = "idle" | "uploading" | "processing" | "success" | "error"
 

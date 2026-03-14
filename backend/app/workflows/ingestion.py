@@ -545,10 +545,16 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                 return {
                     **state,
                     "status": "error",
-                    "error": "ffmpeg audio extraction failed. Ensure the video file is a valid MP4.",
+                    "error": (
+                        "ffmpeg audio extraction failed. "
+                        "Ensure the video file is a valid MP4."
+                    ),
                 }
             transcribe_fp = wav_path
-            logger.info("transcribe_node: ffmpeg extracted audio", extra={"doc_id": doc_id, "wav": str(wav_path)})
+            logger.info(
+                "transcribe_node: ffmpeg extracted audio",
+                extra={"doc_id": doc_id, "wav": str(wav_path)},
+            )
         else:
             transcribe_fp = fp
 
@@ -1090,11 +1096,27 @@ async def summarize_node(state: IngestionState) -> IngestionState:
 
 
 async def error_finalize_node(state: IngestionState) -> IngestionState:
-    """Terminal node reached when any upstream node sets status='error'."""
-    await _update_stage(state["document_id"], "error")
+    """Terminal node reached when any upstream node sets status='error'.
+
+    Persists the human-readable error detail to DocumentModel.error_message so
+    GET /documents/{id}/status can surface it to the UI (e.g. 'ffmpeg not found').
+    """
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    doc_id = state["document_id"]
+    error_detail = state.get("error")
+    async with get_session_factory()() as session:
+        await session.execute(
+            _update(DocumentModel)
+            .where(DocumentModel.id == doc_id)
+            .values(stage="error", error_message=error_detail)
+        )
+        await session.commit()
     logger.error(
         "Ingestion failed at node",
-        extra={"document_id": state["document_id"], "error": state.get("error")},
+        extra={"document_id": doc_id, "error": error_detail},
     )
     return state
 

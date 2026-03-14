@@ -40,7 +40,9 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 _parser = DocumentParser()
 
-_ALLOWED_EXTENSIONS = frozenset({"pdf", "txt", "md", "markdown", "docx", "mp3", "m4a", "wav"})
+_ALLOWED_EXTENSIONS = frozenset(
+    {"pdf", "txt", "md", "markdown", "docx", "mp3", "m4a", "wav", "mp4"}
+)
 
 
 def _delete_raw_file(document_id: str) -> None:
@@ -386,7 +388,8 @@ async def ingest_document(
     content = await file.read()
     file_hash = hashlib.sha256(content).hexdigest()
 
-    fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav") else "txt"
+    _text_fmts = ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav", "mp4")
+    fmt = ext if ext in _text_fmts else "txt"
 
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.
@@ -565,6 +568,24 @@ async def serve_audio_file(document_id: str) -> FileResponse:
     mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "wav": "audio/wav"}
     mime = mime_map.get(ext, "audio/mpeg")
     return FileResponse(str(fp), media_type=mime)
+
+
+@router.get("/{document_id}/video")
+async def serve_video_file(document_id: str) -> FileResponse:
+    """Stream the raw video file for video documents (used by the HTML5 video player)."""
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.content_type != "video":
+        raise HTTPException(status_code=400, detail="Not a video document")
+    fp = Path(doc.file_path)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Video file not found on disk")
+    return FileResponse(str(fp), media_type="video/mp4")
 
 
 @router.post("/bulk-delete", status_code=200)

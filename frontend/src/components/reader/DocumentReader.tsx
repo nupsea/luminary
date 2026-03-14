@@ -786,6 +786,24 @@ function AudioMiniPlayer({
 }
 
 // ---------------------------------------------------------------------------
+// Video player (S121)
+// ---------------------------------------------------------------------------
+
+interface VideoPlayerProps {
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  videoUrl: string
+}
+
+function VideoPlayer({ videoRef, videoUrl }: VideoPlayerProps) {
+  return (
+    <div className="mb-4 overflow-hidden rounded-lg border border-border bg-black">
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <video ref={videoRef} src={videoUrl} controls className="w-full" />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // DocumentReader
 // ---------------------------------------------------------------------------
 
@@ -815,8 +833,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
 
+  // Video player state (S121) — only active for video documents
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+
   const isAudio = doc?.content_type === "audio"
+  const isVideo = doc?.content_type === "video"
   const audioUrl = isAudio ? `${API_BASE}/documents/${documentId}/audio` : null
+  const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
 
   function handleAudioPlayPause() {
     const el = audioRef.current
@@ -843,6 +866,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
     el.currentTime = t
     void el.play()
     setAudioPlaying(true)
+  }
+
+  function seekAndPlayVideo(t: number) {
+    const el = videoRef.current
+    if (!el) return
+    el.currentTime = t
+    void el.play()
   }
 
   // Scroll to initialSectionId once document sections are loaded (S114)
@@ -1042,8 +1072,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                           heatmapItem && heatmapItem.fragility_score !== null
                             ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
                             : undefined
-                        // Audio timestamp badge (S120)
-                        const audioStartTime = isAudio ? parseAudioStartTime(section.heading) : null
+                        // Timestamp badge for audio (S120) and video (S121)
+                        const mediaStartTime = (isAudio || isVideo) ? parseAudioStartTime(section.heading) : null
                         return (
                           <li
                             key={section.id}
@@ -1058,14 +1088,14 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                               >
                                 {section.heading || "(Untitled section)"}
                               </p>
-                              {/* Audio timestamp badge — seek on click */}
-                              {audioStartTime !== null && (
+                              {/* Timestamp badge — seek on click for audio/video */}
+                              {mediaStartTime !== null && (
                                 <button
-                                  onClick={() => seekAndPlay(audioStartTime)}
-                                  title={`Play from ${formatMmSs(audioStartTime)}`}
+                                  onClick={() => isAudio ? seekAndPlay(mediaStartTime) : seekAndPlayVideo(mediaStartTime)}
+                                  title={`Play from ${formatMmSs(mediaStartTime)}`}
                                   className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
                                 >
-                                  {formatMmSs(audioStartTime)}
+                                  {formatMmSs(mediaStartTime)}
                                 </button>
                               )}
                               {hasNote && (
@@ -1114,6 +1144,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
 
         {/* Right panel — 40%, sticky */}
         <div className="w-2/5 overflow-auto p-6">
+          {/* Video player for video documents (S121) */}
+          {isVideo && videoUrl && (
+            <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
+          )}
           <SummaryPanel documentId={documentId} contentType={doc.content_type} />
         </div>
       </div>

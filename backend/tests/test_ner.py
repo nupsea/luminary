@@ -118,6 +118,28 @@ def test_extract_assigns_chunk_and_doc_ids(extractor: EntityExtractor):
     assert result[0]["document_id"] == "doc-99"
 
 
+def test_extract_strips_context_header(extractor: EntityExtractor):
+    """NER should ignore [Book > Section] headers injected for search."""
+    mock_model = MagicMock()
+    # If the header is NOT stripped, the mock will receive the full text
+    # with the header. We'll check the call arguments.
+    mock_model.batch_predict_entities.return_value = [
+        [{"text": "Berlin", "label": "PLACE"}]
+    ]
+    extractor._model = mock_model
+
+    header = "[The Great Gatsby > Chapter 1] "
+    content = "Nick Carraway moved to West Egg."
+    chunks = [_make_chunk(header + content)]
+
+    extractor.extract(chunks)
+
+    # Check the first argument of the first call to batch_predict_entities
+    called_texts = mock_model.batch_predict_entities.call_args[0][0]
+    assert called_texts[0] == content
+    assert header not in called_texts[0]
+
+
 # ---------------------------------------------------------------------------
 # Integration test (skipped if model not cached)
 # ---------------------------------------------------------------------------
