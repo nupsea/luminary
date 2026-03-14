@@ -993,3 +993,23 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - Operator precedence: ?? has lower precedence than ===; always use explicit parentheses or prefer || for mixed conditions
 ---
+
+## 2026-03-14T00:00:00 - S122 - YouTube URL ingestion via yt-dlp
+
+- Implemented: POST /documents/ingest-url endpoint; youtube_downloader.py service with yt-dlp subprocess; DocumentModel source_url/video_title columns; DB migration; YouTube tab in UploadDialog; YouTube icon in DocumentCard/DocumentRow; buildYouTubeTimestampUrl in DocumentReader for timestamp deep-links; 8 tests
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/youtube_downloader.py, backend/app/routers/documents.py, backend/tests/test_youtube_ingestion.py, frontend/src/components/library/types.ts, utils.ts, DocumentCard.tsx, DocumentRow.tsx, UploadDialog.tsx, frontend/src/components/reader/types.ts, DocumentReader.tsx, scripts/smoke/S122.sh
+- AC verified:
+  - yt-dlp listed in pyproject.toml: PASS
+  - Upload dialog accepts YouTube URLs: PASS
+  - Backend downloads via yt-dlp subprocess, routes through transcribe_node: PASS
+  - Document stores source_url and video_title: PASS
+  - Library card shows YouTube icon: PASS
+  - Play from here opens YouTube at timestamp: PASS
+  - yt-dlp unavailable returns 503: PASS
+  - ruff check exits 0: PASS
+- Reviewer verdict: 2 Critical fixed (pip->uv in 503 msg; _background_tasks strong ref for YouTube task). No remaining critical issues.
+- Learnings:
+  - Lazy import patch location: patch at source module (app.services.youtube_downloader.download_audio) not call site (app.routers.documents.download_audio)
+  - asyncio.create_task() for background ingestion needs strong reference via _background_tasks set (same pattern as other ingest paths)
+  - YouTube docs stored as content_type="audio" + source_url field; frontend derives "isYouTube" from source_url presence -- no new content_type enum needed
+---

@@ -1134,7 +1134,7 @@
         "If yt-dlp is unavailable, upload returns a 503 with 'yt-dlp not installed' message",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S123",
