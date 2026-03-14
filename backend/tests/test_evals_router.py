@@ -165,3 +165,24 @@ async def test_post_run_invalid_dataset(test_db):
         resp = await client.post("/evals/run", json={"dataset": "invalid"})
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dataset", ["book_time_machine", "book_alice", "book_odyssey"])
+async def test_post_run_per_book_dataset(test_db, monkeypatch, dataset):
+    """POST /evals/run with per-book dataset names returns HTTP 202 when the JSONL file exists."""
+    golden_dir = test_db / "golden"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    (golden_dir / f"{dataset}.jsonl").write_text('{"question": "test"}')
+
+    monkeypatch.setattr(evals_module, "_fire_and_forget", lambda coro: coro.close())
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post("/evals/run", json={"dataset": dataset})
+
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "started"
+    assert body["dataset"] == dataset

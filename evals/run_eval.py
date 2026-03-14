@@ -32,7 +32,7 @@ import httpx
 GOLDEN_DIR = Path(__file__).parent / "golden"
 MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
 SCORES_HISTORY_PATH = Path(__file__).parent / "scores_history.jsonl"
-VALID_DATASETS = ["book", "paper", "conversation", "notes", "code"]
+VALID_DATASETS = ["book", "book_time_machine", "book_alice", "book_odyssey", "paper", "conversation", "notes", "code"]
 
 # Path to the repo root (two levels up from evals/)
 REPO_ROOT = Path(__file__).parent.parent
@@ -139,10 +139,48 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
     return None
 
 
+def lookup_document_by_filename(backend_url: str, source_file: str) -> str | None:
+    """Return the document_id for an already-ingested file, or None if not found.
+
+    Calls GET /documents?page_size=100 and matches by the stem of source_file
+    (e.g. "time_machine" for "DATA/books/time_machine.txt").  Only returns a
+    document_id when the document's stage is "complete".
+    """
+    stem = Path(source_file).stem.lower()
+    try:
+        resp = httpx.get(
+            f"{backend_url}/documents",
+            params={"page_size": 100},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        for doc in items:
+            title = (doc.get("title") or "").lower()
+            if title == stem and doc.get("stage") == "complete":
+                return doc["id"]
+    except Exception as exc:
+        print(f"  WARNING: GET /documents failed: {exc}", file=sys.stderr)
+    return None
+
+
 def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]) -> str | None:
-    """Return the document_id for source_file, ingesting if not yet in manifest."""
+    """Return the document_id for source_file, ingesting if not yet in manifest.
+
+    Before ingesting, checks GET /documents for an existing completed document
+    matching the source filename stem.  This prevents duplicate documents on
+    repeated eval runs when manifest.json was deleted or never written.
+    """
     if source_file in manifest:
         return manifest[source_file]
+
+    # Check whether the backend already has this document before re-ingesting
+    doc_id = lookup_document_by_filename(backend_url, source_file)
+    if doc_id:
+        print(f"  Found existing document for {source_file} -> {doc_id} (skipping re-ingest)")
+        manifest[source_file] = doc_id
+        save_manifest(manifest)
+        return doc_id
 
     print(f"  Ingesting {source_file} (not yet in manifest)...")
     doc_id = ingest_document(backend_url, source_file)
@@ -214,13 +252,18 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
 
 
 def _norm(s: str) -> str:
-    """Collapse all whitespace runs to a single space for robust substring matching.
+    """Collapse whitespace and normalise typographic quotes for robust substring matching.
 
     Project Gutenberg plain-text files wrap lines at ~70 chars, so a passage
     that reads "any real body" in the golden hint may appear as "any\nreal body"
-    inside a stored chunk.  Normalising before comparison eliminates these
-    false misses.
+    inside a stored chunk.  Normalising whitespace and Unicode quotation marks
+    (U+2018/2019/201C/201D) to their ASCII equivalents eliminates false misses
+    when hints were authored with straight quotes against a source that uses
+    typographic curly quotes, or vice versa.
     """
+    # Normalise typographic single/double quotes to ASCII equivalents
+    s = s.replace("\u2018", "'").replace("\u2019", "'")
+    s = s.replace("\u201c", '"').replace("\u201d", '"')
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
