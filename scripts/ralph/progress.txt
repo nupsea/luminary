@@ -960,3 +960,20 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - asyncio.get_running_loop() is the correct call inside a coroutine; get_event_loop() is deprecated in async contexts in Python 3.10+
   - classify_node fast-paths audio because content_type is user-provided for audio uploads (status set to 'chunking'), but transcribe_node checks content_type=='audio' and handles the pass-through for non-audio types
 ---
+
+## 2026-03-14T00:00:00Z - S120 - Audio timestamp playback in DocumentReader: mini-player with jump-to-chunk
+- Implemented: HTML5 audio mini-player sticky bar at bottom of DocumentReader (audio docs only). Play/pause, MM:SS current time, seek scrubber, duration display. parseAudioStartTime() parses "Segment N (Xs-Ys)" heading format to extract start seconds. Timestamp badge on each audio section row; clicking seeks + auto-plays. Backend: added audio_duration_seconds to DocumentDetail response; added GET /{document_id}/audio FileResponse endpoint.
+- Files changed: backend/app/routers/documents.py, backend/tests/test_api_contracts.py, frontend/src/components/reader/DocumentReader.tsx, frontend/src/components/reader/types.ts, scripts/smoke/S120.sh
+- AC verified:
+  - DocumentReader shows sticky mini-player at bottom for audio documents: PASS
+  - Mini-player has play/pause button, current time, duration, seek scrubber: PASS
+  - Each transcript chunk shows timestamp badge (MM:SS) from start_time metadata: PASS
+  - Clicking timestamp badge seeks audio to that position and starts playback: PASS
+  - Mini-player absent for non-audio documents: PASS (isAudio guard)
+  - npx tsc --noEmit exits 0: PASS; backend changes were minimal (expose existing data + file endpoint)
+- Reviewer verdict: PASS (Critical fixed: added 3 tests for audio endpoint + smoke script; High fixed: removed file_path from API response)
+- Learnings:
+  - Audio sections from S119 have headings like "Segment N (Xs-Ys)" -- parse start_time with /\((\d+(?:\.\d+)?)s-/ regex
+  - file_path should never appear in API responses (filesystem path exposure); audio served via dedicated endpoint
+  - FileResponse in Starlette has no range-request support -- note for future Safari compatibility
+---

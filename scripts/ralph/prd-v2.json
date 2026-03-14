@@ -1097,7 +1097,7 @@
         "Mini-player is absent for non-audio documents",
         "npx tsc --noEmit exits 0; no backend changes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S121",
