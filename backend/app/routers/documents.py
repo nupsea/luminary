@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 
@@ -153,6 +154,7 @@ class DocumentDetail(BaseModel):
     last_accessed_at: datetime
     sections: list[SectionItem]
     reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
+    audio_duration_seconds: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -540,7 +542,29 @@ async def get_document(document_id: str):
             for s in sections
         ],
         reading_progress_pct=reading_progress_pct,
+        audio_duration_seconds=doc.audio_duration_seconds,
     )
+
+
+@router.get("/{document_id}/audio")
+async def serve_audio_file(document_id: str) -> FileResponse:
+    """Stream the raw audio file for audio documents (used by the mini-player)."""
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.content_type != "audio":
+        raise HTTPException(status_code=400, detail="Not an audio document")
+    fp = Path(doc.file_path)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found on disk")
+    ext = fp.suffix.lower().lstrip(".")
+    mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "wav": "audio/wav"}
+    mime = mime_map.get(ext, "audio/mpeg")
+    return FileResponse(str(fp), media_type=mime)
 
 
 @router.post("/bulk-delete", status_code=200)

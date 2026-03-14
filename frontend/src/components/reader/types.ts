@@ -21,6 +21,7 @@ export interface DocumentDetail {
   last_accessed_at: string
   sections: SectionItem[]
   reading_progress_pct: number  // 0.0 to 1.0
+  audio_duration_seconds: number | null
 }
 
 export interface AnnotationItem {

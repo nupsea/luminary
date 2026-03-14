@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2 } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
@@ -693,6 +693,99 @@ function useReadingProgress(documentId: string, sectionCount: number) {
 }
 
 // ---------------------------------------------------------------------------
+// Audio mini-player (S120)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the start time (in seconds) from an audio section heading.
+ * Heading format: "Segment N (XYZs-ABCs)" — produced by _chunk_audio in ingestion.py.
+ * Returns null if the heading does not match the expected pattern.
+ */
+function parseAudioStartTime(heading: string): number | null {
+  const m = heading.match(/\((\d+(?:\.\d+)?)s-/)
+  if (!m) return null
+  return parseFloat(m[1])
+}
+
+function formatMmSs(seconds: number): string {
+  const s = Math.floor(seconds)
+  const mm = Math.floor(s / 60).toString().padStart(2, "0")
+  const ss = (s % 60).toString().padStart(2, "0")
+  return `${mm}:${ss}`
+}
+
+interface AudioMiniPlayerProps {
+  audioRef: React.RefObject<HTMLAudioElement | null>
+  audioUrl: string
+  playing: boolean
+  currentTime: number
+  duration: number
+  onPlayPause: () => void
+  onSeek: (t: number) => void
+  onTimeUpdate: () => void
+  onLoadedMetadata: () => void
+  onEnded: () => void
+}
+
+function AudioMiniPlayer({
+  audioRef,
+  audioUrl,
+  playing,
+  currentTime,
+  duration,
+  onPlayPause,
+  onSeek,
+  onTimeUpdate,
+  onLoadedMetadata,
+  onEnded,
+}: AudioMiniPlayerProps) {
+  return (
+    <div className="flex items-center gap-3 border-t border-border bg-background px-6 py-3">
+      {/* Hidden HTML5 audio element */}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        onTimeUpdate={onTimeUpdate}
+        onLoadedMetadata={onLoadedMetadata}
+        onEnded={onEnded}
+      />
+
+      {/* Play/Pause */}
+      <button
+        onClick={onPlayPause}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+        aria-label={playing ? "Pause" : "Play"}
+      >
+        {playing ? <Pause size={14} /> : <Play size={14} />}
+      </button>
+
+      {/* Current time */}
+      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {formatMmSs(currentTime)}
+      </span>
+
+      {/* Scrubber */}
+      <input
+        type="range"
+        min={0}
+        max={duration || 0}
+        step={0.5}
+        value={currentTime}
+        onChange={(e) => onSeek(parseFloat(e.target.value))}
+        className="flex-1 accent-primary"
+        aria-label="Audio seek"
+      />
+
+      {/* Duration */}
+      <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">
+        {formatMmSs(duration)}
+      </span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // DocumentReader
 // ---------------------------------------------------------------------------
 
@@ -715,6 +808,42 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
   const [leftTab, setLeftTab] = useState<"sections" | "highlights">("sections")
   const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
+
+  // Audio mini-player state (S120) — only active for audio documents
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [audioPlaying, setAudioPlaying] = useState(false)
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0)
+  const [audioDuration, setAudioDuration] = useState(0)
+
+  const isAudio = doc?.content_type === "audio"
+  const audioUrl = isAudio ? `${API_BASE}/documents/${documentId}/audio` : null
+
+  function handleAudioPlayPause() {
+    const el = audioRef.current
+    if (!el) return
+    if (audioPlaying) {
+      el.pause()
+      setAudioPlaying(false)
+    } else {
+      void el.play()
+      setAudioPlaying(true)
+    }
+  }
+
+  function handleAudioSeek(t: number) {
+    const el = audioRef.current
+    if (!el) return
+    el.currentTime = t
+    setAudioCurrentTime(t)
+  }
+
+  function seekAndPlay(t: number) {
+    const el = audioRef.current
+    if (!el) return
+    el.currentTime = t
+    void el.play()
+    setAudioPlaying(true)
+  }
 
   // Scroll to initialSectionId once document sections are loaded (S114)
   useEffect(() => {
@@ -814,7 +943,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const Icon = CONTENT_TYPE_ICONS[doc.content_type as ContentType] ?? CONTENT_TYPE_ICONS.notes
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Back button */}
       <div className="border-b border-border px-6 py-3">
         <button
@@ -913,6 +1042,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                           heatmapItem && heatmapItem.fragility_score !== null
                             ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
                             : undefined
+                        // Audio timestamp badge (S120)
+                        const audioStartTime = isAudio ? parseAudioStartTime(section.heading) : null
                         return (
                           <li
                             key={section.id}
@@ -927,6 +1058,16 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                               >
                                 {section.heading || "(Untitled section)"}
                               </p>
+                              {/* Audio timestamp badge — seek on click */}
+                              {audioStartTime !== null && (
+                                <button
+                                  onClick={() => seekAndPlay(audioStartTime)}
+                                  title={`Play from ${formatMmSs(audioStartTime)}`}
+                                  className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  {formatMmSs(audioStartTime)}
+                                </button>
+                              )}
                               {hasNote && (
                                 <span title="Has note" className="mt-0.5 shrink-0 text-primary">
                                   <StickyNote size={12} />
@@ -976,6 +1117,26 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
           <SummaryPanel documentId={documentId} contentType={doc.content_type} />
         </div>
       </div>
+
+      {/* Audio mini-player — sticky bottom bar, audio documents only (S120) */}
+      {isAudio && audioUrl && (
+        <AudioMiniPlayer
+          audioRef={audioRef}
+          audioUrl={audioUrl}
+          playing={audioPlaying}
+          currentTime={audioCurrentTime}
+          duration={audioDuration}
+          onPlayPause={handleAudioPlayPause}
+          onSeek={handleAudioSeek}
+          onTimeUpdate={() => {
+            if (audioRef.current) setAudioCurrentTime(audioRef.current.currentTime)
+          }}
+          onLoadedMetadata={() => {
+            if (audioRef.current) setAudioDuration(audioRef.current.duration)
+          }}
+          onEnded={() => setAudioPlaying(false)}
+        />
+      )}
 
       {/* Explanation sheet */}
       <ExplanationSheet
