@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import logging.config
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -85,6 +86,15 @@ async def lifespan(app: FastAPI):
             "Ensure Ollama is running at: %s",
             settings.OLLAMA_URL,
         )
+
+    # ffmpeg check — required for video (MP4) ingestion.
+    if shutil.which("ffmpeg") is None:
+        logger.warning(
+            "ffmpeg not found at startup — video (MP4) ingestion will be unavailable. "
+            "Install with: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
+        )
+    else:
+        logger.info("ffmpeg found at startup", extra={"path": shutil.which("ffmpeg")})
 
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield

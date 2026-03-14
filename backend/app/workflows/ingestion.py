@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -15,7 +16,7 @@ from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
 
-ContentType = Literal["book", "conversation", "notes", "audio"]
+ContentType = Literal["book", "conversation", "notes", "audio", "video"]
 
 _parser = DocumentParser()
 
@@ -57,6 +58,8 @@ class IngestionState(TypedDict):
 def _classify(raw_text: str, sections: list[dict], word_count: int, file_ext: str) -> str:
     if file_ext in ("mp3", "m4a", "wav"):
         return "audio"
+    if file_ext == "mp4":
+        return "video"
     if file_ext in ("py", "js", "ts", "go", "java", "rs", "cpp", "c", "rb"):
         return "code"
     headings_lower = " ".join(s.get("heading", "").lower() for s in sections)
@@ -90,8 +93,8 @@ async def _update_stage(document_id: str, stage: str) -> None:
 
 def parse_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
-    # Audio files: DocumentParser cannot handle them; transcribe_node takes over.
-    if Path(state["file_path"]).suffix.lstrip(".").lower() in ("mp3", "m4a", "wav"):
+    # Audio/video files: DocumentParser cannot handle them; transcribe_node takes over.
+    if Path(state["file_path"]).suffix.lstrip(".").lower() in ("mp3", "m4a", "wav", "mp4"):
         return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
         try:
@@ -494,19 +497,21 @@ def _chunk_audio(
 
 
 async def transcribe_node(state: IngestionState) -> IngestionState:
-    """Transcribe audio files using faster-whisper.
+    """Transcribe audio/video files using faster-whisper.
 
-    For non-audio content types this is a pass-through.
-    For audio files: calls AudioTranscriber, builds parsed_document from segments,
-    writes audio_duration_seconds to DocumentModel, stores pre-built _audio_chunks.
+    For non-audio/video content types this is a pass-through.
+    For audio files: calls AudioTranscriber directly.
+    For video files: runs ffmpeg to extract audio first, then transcribes.
+    Builds parsed_document from segments, writes audio_duration_seconds to
+    DocumentModel, stores pre-built _audio_chunks.
     """
     content_type = state.get("content_type")
-    if content_type != "audio":
+    if content_type not in ("audio", "video"):
         return state
 
     doc_id = state["document_id"]
     await _update_stage(doc_id, "transcribing")
-    logger.info("transcribe_node: start", extra={"doc_id": doc_id})
+    logger.info("transcribe_node: start", extra={"doc_id": doc_id, "content_type": content_type})
 
     try:
         from sqlalchemy import update as _update  # noqa: PLC0415
@@ -515,12 +520,51 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         from app.services.audio_transcriber import get_audio_transcriber  # noqa: PLC0415
 
         fp = Path(state["file_path"])
+
+        # For video: extract audio with ffmpeg before passing to Whisper
+        wav_path: Path | None = None
+        if content_type == "video":
+            if not shutil.which("ffmpeg"):
+                return {
+                    **state,
+                    "status": "error",
+                    "error": (
+                        "ffmpeg is not installed. Install ffmpeg to ingest video files. "
+                        "On macOS: brew install ffmpeg  On Linux: apt install ffmpeg"
+                    ),
+                }
+            wav_path = Path(f"/tmp/{doc_id}_audio.wav")
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", str(fp),
+                "-vn", "-ar", "16000", "-ac", "1", "-f", "wav", str(wav_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                return {
+                    **state,
+                    "status": "error",
+                    "error": "ffmpeg audio extraction failed. Ensure the video file is a valid MP4.",
+                }
+            transcribe_fp = wav_path
+            logger.info("transcribe_node: ffmpeg extracted audio", extra={"doc_id": doc_id, "wav": str(wav_path)})
+        else:
+            transcribe_fp = fp
+
         transcriber = get_audio_transcriber()
         loop = asyncio.get_running_loop()
         # CPU-bound -- run in thread pool to keep event loop free for status polls
         segments, duration = await loop.run_in_executor(
-            None, transcriber.transcribe, fp
+            None, transcriber.transcribe, transcribe_fp
         )
+
+        # Clean up temp wav extracted from video
+        if wav_path is not None:
+            try:
+                wav_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
         raw_text = " ".join(s["text"] for s in segments)
         audio_chunks = _chunk_audio(segments, doc_id)
@@ -583,7 +627,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
             doc_id = state["document_id"]
             file_path = state["file_path"]
 
-            if content_type == "audio":
+            if content_type in ("audio", "video"):
                 audio_chunks = state.get("_audio_chunks") or []
                 chunks = []
                 async with get_session_factory()() as session:
@@ -612,7 +656,9 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                     session.add_all(chunk_models)
                     await session.commit()
                 logger.info(
-                    "Audio chunked", extra={"doc_id": doc_id, "num_chunks": len(chunks)}
+                    "%s chunked",
+                    content_type,
+                    extra={"doc_id": doc_id, "num_chunks": len(chunks)},
                 )
                 return {**state, "chunks": chunks, "status": "embedding"}
 

@@ -124,8 +124,9 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
             status_resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
             status_resp.raise_for_status()
             stage = status_resp.json().get("stage", "")
-            if stage == "complete":
-                print(f"  Ingestion complete: {source_file} -> {doc_id}")
+            # entity_extract, summarize, and complete all mean core indexing is DONE
+            if stage in ["complete", "summarize", "entity_extract"]:
+                print(f"  Ingestion finished enough: {source_file} -> {doc_id} (stage={stage})")
                 return doc_id
             if stage == "error":
                 print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)
@@ -168,16 +169,22 @@ def search_chunks(backend_url: str, question: str, document_id: str | None) -> l
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=30.0)
         resp.raise_for_status()
         body = resp.json()
-        chunks: list[str] = []
+
+        # The backend groups results by document. To get the global top-k,
+        # we must extract all matches, sort them by relevance_score desc,
+        # and then pick the top 5.
+        all_matches = []
         for group in body.get("results", []):
             # If document_id specified, filter to that document only
             if document_id and group.get("document_id") != document_id:
                 continue
             for match in group.get("matches", []):
-                chunks.append(match.get("text", ""))
-                if len(chunks) >= 5:
-                    return chunks
-        return chunks
+                all_matches.append(match)
+
+        # Sort globally by score
+        all_matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
+
+        return [m.get("text", "") for m in all_matches[:5]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []

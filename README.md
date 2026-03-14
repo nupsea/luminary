@@ -5,14 +5,16 @@ Luminary is a local-first personal knowledge and learning assistant. It ingests 
 ## Features
 
 - **Document ingestion** -- Upload PDFs, plain text, and other formats. Luminary parses, chunks, embeds, and indexes them automatically.
-- **Hybrid search** -- Queries combine vector similarity (BGE-M3), BM25 keyword search (SQLite FTS5), and graph traversal (Kuzu) via Reciprocal Rank Fusion.
+- **Hybrid Contextual search** -- Queries combine vector similarity (`bge-small-en-v1.5`), BM25 keyword search (SQLite FTS5), and graph traversal (Kuzu).
+- **Smart Chunking** -- Uses structural splitting (paragraph/sentence boundaries) and **Context Injection** (prepending book/chapter titles to chunks) to improve retrieval accuracy.
+- **Parent-Child Retrieval** -- Automatically fetches neighboring chunks during search to provide coherent, high-quality context windows to the LLM.
 - **Knowledge graph** -- Entities and relationships are extracted with GLiNER and stored in an embedded graph DB. Explore visually in the Viz tab.
 - **Agentic chat** -- Ask questions across your library. The chat graph classifies intent, routes to the right retrieval path, and retries on low-confidence answers.
 - **Summaries** -- Executive and detailed summaries generated per document and per section, cached after the first run.
 - **Spaced repetition** -- Flashcards generated from document content, scheduled with FSRS (superior to SM-2 in retention accuracy).
 - **Notes** -- Markdown notes editor with side-by-side Write/Preview. Notes are searchable alongside your uploaded documents.
-- **Evaluation** -- RAGAS-based retrieval quality metrics (HR@5, MRR, Faithfulness) with a golden dataset runner and history sparklines in the Monitoring tab.
-- **Local by default** -- Runs entirely on your machine using Ollama. Optional cloud LLM keys (OpenAI, Anthropic, Gemini) can be configured via LiteLLM.
+- **Dynamic Evaluation** -- RAGAS-based retrieval quality metrics (HR@5, MRR, Faithfulness) with a golden dataset runner. The **Monitoring** tab allows selecting and running any golden dataset (`.jsonl`) found in the `evals/golden/` directory.
+- **Local by default** -- Runs entirely on your machine using Ollama. Optimized for performance with fast, 384-dimensional embeddings and batched vector storage.
 
 ## Architecture
 
@@ -24,12 +26,12 @@ Types -> Config -> Repo -> Service -> Runtime -> API
 Backend domains:
 
 | Domain     | Responsibility                                                         |
-|------------|------------------------------------------------------------------------|
-| Ingestion  | Parse, chunk, embed, NER (GLiNER), graph extraction, summarize         |
-| Retrieval  | Hybrid RRF: vector (LanceDB) + BM25 (FTS5) + graph (Kuzu)             |
+|------------|------------|
+| Ingestion  | Parse, **Hybrid Contextual chunking**, embed, NER (GLiNER), graph, summarize |
+| Retrieval  | **Parent-Child RRF**: vector (LanceDB v3) + BM25 (FTS5) + neighbors   |
 | LLM        | Cache-first summarization, Q&A, explanation via LiteLLM                |
 | Learning   | Flashcard generation, FSRS scheduling, gap detection                   |
-| Monitoring | Phoenix tracing, Langfuse evals, RAGAS quality metrics                 |
+| Monitoring | Phoenix tracing, Langfuse evals, **Dynamic RAGAS datasets**            |
 
 Navigation tabs: **Learning | Chat | Viz | Study | Notes | Monitoring**
 
@@ -37,10 +39,11 @@ Navigation tabs: **Learning | Chat | Viz | Study | Notes | Monitoring**
 
 | Layer    | Technology                                                                       |
 |----------|----------------------------------------------------------------------------------|
-| Backend  | Python 3.13, FastAPI, LangGraph, LanceDB, SQLite FTS5, Kuzu, GLiNER, LiteLLM   |
+| Backend  | Python 3.13, FastAPI, LangGraph, LanceDB (v3), SQLite FTS5, Kuzu, GLiNER, LiteLLM |
 | Frontend | React 18, TypeScript 5, Vite 5, shadcn/ui, Tailwind CSS, Sigma.js v3            |
 | Storage  | SQLite (documents, flashcards, history), LanceDB (vectors), Kuzu (graph)         |
 | LLM      | Ollama (local, default), OpenAI / Anthropic / Gemini (optional via LiteLLM)      |
+| Embedder | `BAAI/bge-small-en-v1.5` (384-dim, highly optimized for local CPU/MPS)         |
 
 ## Prerequisites
 
@@ -72,7 +75,7 @@ make backend
 make frontend
 
 # Open in browser
-open http://localhost:5173
+http://localhost:5173
 ```
 
 Or start backend + frontend together (Ollama must already be running):
@@ -107,7 +110,7 @@ Tests use a temporary `DATA_DIR` so they never touch `~/.luminary` and cannot co
 
 ### Integration Tests
 
-Integration tests run the full ingestion pipeline on real public-domain fixtures without downloading ML models. LiteLLM, BGE-M3 embeddings, and GLiNER are mocked; real SQLite FTS5, LanceDB, and Kuzu run in a temp directory.
+Integration tests run the full ingestion pipeline on real public-domain fixtures without downloading ML models. LiteLLM, embeddings, and GLiNER are mocked; real SQLite FTS5, LanceDB, and Kuzu run in a temp directory.
 
 ```bash
 cd backend && uv run pytest tests/test_integration.py -v
@@ -115,7 +118,7 @@ cd backend && uv run pytest tests/test_integration.py -v
 
 ### Full Integration Tests (slow)
 
-Full integration tests use the real BAAI/bge-m3 and GLiNER models. First run downloads the models (~5-10 min); subsequent runs reuse the cache.
+Full integration tests use the real `bge-small` and GLiNER models. First run downloads the models (~2-5 min); subsequent runs reuse the cache.
 
 ```bash
 make test-full
@@ -155,7 +158,7 @@ Run RAGAS evaluations against the bundled golden datasets:
 cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:8000
 ```
 
-View results in Langfuse at [http://localhost:3000](http://localhost:3000).
+You can run any `.jsonl` file in `evals/golden/` by passing its name as the `--dataset`.
 
 ### Quality Gates
 
@@ -176,6 +179,7 @@ make eval
 
 The **Monitoring** tab shows:
 
+- **Dynamic Eval Runner** -- Select any golden dataset and trigger a RAGAS run.
 - RAG quality metrics (HR@5, MRR, Faithfulness, Context Precision)
 - Ingestion queue status
 - Model usage breakdown (local vs cloud)
