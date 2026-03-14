@@ -1,6 +1,5 @@
 """Note search service: FTS5 keyword + BAAI/bge-m3 semantic + RRF fusion."""
 
-import asyncio
 import json
 import logging
 import re

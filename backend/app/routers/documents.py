@@ -571,7 +571,11 @@ async def ingest_kindle(
             session.add(doc)
             await session.commit()
 
-        asyncio.create_task(run_ingestion(doc_id, str(dest), "txt", "kindle_clippings"))
+        from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
+
+        _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "txt", "kindle_clippings"))
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
         document_ids.append(doc_id)
         logger.info(
             "Kindle book ingestion started",
