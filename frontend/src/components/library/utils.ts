@@ -1,5 +1,7 @@
-import { BookOpen, Code2, MessageSquare, ScrollText, StickyNote, Volume2 } from "lucide-react"
+import { BookOpen, Code2, MessageSquare, ScrollText, StickyNote, Volume2, Youtube } from "lucide-react"
 import type { ContentType, LearningStatus } from "./types"
+
+export { Youtube }
 
 export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
   book: BookOpen,
@@ -8,6 +10,10 @@ export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
   notes: StickyNote,
   code: Code2,
   audio: Volume2,
+}
+
+export function isYouTubeDoc(doc: { source_url?: string | null }): boolean {
+  return !!(doc.source_url?.includes("youtube") || doc.source_url?.includes("youtu.be"))
 }
 
 export function formatDuration(seconds: number): string {

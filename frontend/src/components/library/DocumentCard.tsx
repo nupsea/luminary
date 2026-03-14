@@ -7,10 +7,12 @@ import { useEffect, useRef, useState } from "react"
 import type { ContentType, DocumentListItem } from "./types"
 import {
   CONTENT_TYPE_ICONS,
+  Youtube,
   STATUS_LABELS,
   STATUS_VARIANTS,
   formatDuration,
   formatWordCount,
+  isYouTubeDoc,
   relativeDate,
 } from "./utils"
 
@@ -24,6 +26,8 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
   code: { label: "Code", className: "bg-orange-100 text-orange-700 hover:bg-orange-200" },
   audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
 }
+
+const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
 
 const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes"]
 
@@ -50,7 +54,9 @@ export function DocumentCard({
   onSelect,
   selectMode = false,
 }: DocumentCardProps) {
-  const Icon = CONTENT_TYPE_ICONS[doc.content_type]
+  const isYouTube = isYouTubeDoc(doc)
+  const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
+  const badge = isYouTube ? YOUTUBE_BADGE : CONTENT_TYPE_BADGE[doc.content_type]
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -130,8 +136,6 @@ export function DocumentCard({
       // Non-fatal — UI will revert on next query invalidation
     }
   }
-
-  const badge = CONTENT_TYPE_BADGE[doc.content_type] ?? CONTENT_TYPE_BADGE.notes
 
   return (
     <Card

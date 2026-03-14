@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
-import { CONTENT_TYPE_ICONS, formatWordCount, relativeDate } from "@/components/library/utils"
+import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import { FloatingToolbar } from "@/components/FloatingToolbar"
@@ -31,6 +31,11 @@ function fragilityBorderClass(score: number | null): string {
   if (score <= 0.3) return "border-l-4 border-l-green-500"
   if (score <= 0.6) return "border-l-4 border-l-yellow-500"
   return "border-l-4 border-l-red-500"
+}
+
+function buildYouTubeTimestampUrl(sourceUrl: string, seconds: number): string {
+  const t = Math.floor(seconds)
+  return sourceUrl.includes("?") ? `${sourceUrl}&t=${t}` : `${sourceUrl}?t=${t}`
 }
 
 // ---------------------------------------------------------------------------
@@ -838,7 +843,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
 
   const isAudio = doc?.content_type === "audio"
   const isVideo = doc?.content_type === "video"
-  const audioUrl = isAudio ? `${API_BASE}/documents/${documentId}/audio` : null
+  const isYouTube = isYouTubeDoc(doc ?? {})
+  const audioUrl = (isAudio && !isYouTube) ? `${API_BASE}/documents/${documentId}/audio` : null
   const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
 
   function handleAudioPlayPause() {
@@ -1072,8 +1078,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                           heatmapItem && heatmapItem.fragility_score !== null
                             ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
                             : undefined
-                        // Timestamp badge for audio (S120) and video (S121)
-                        const mediaStartTime = (isAudio || isVideo) ? parseAudioStartTime(section.heading) : null
+                        // Timestamp badge for audio (S120), video (S121), and YouTube (S122)
+                        const mediaStartTime = (isAudio || isVideo || isYouTube) ? parseAudioStartTime(section.heading) : null
                         return (
                           <li
                             key={section.id}
@@ -1088,15 +1094,27 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                               >
                                 {section.heading || "(Untitled section)"}
                               </p>
-                              {/* Timestamp badge — seek on click for audio/video */}
+                              {/* Timestamp badge — link out for YouTube, seek locally for audio/video */}
                               {mediaStartTime !== null && (
-                                <button
-                                  onClick={() => isAudio ? seekAndPlay(mediaStartTime) : seekAndPlayVideo(mediaStartTime)}
-                                  title={`Play from ${formatMmSs(mediaStartTime)}`}
-                                  className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                  {formatMmSs(mediaStartTime)}
-                                </button>
+                                isYouTube && doc?.source_url ? (
+                                  <a
+                                    href={buildYouTubeTimestampUrl(doc.source_url, mediaStartTime)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={`Open YouTube at ${formatMmSs(mediaStartTime)}`}
+                                    className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+                                  >
+                                    {formatMmSs(mediaStartTime)}
+                                  </a>
+                                ) : (
+                                  <button
+                                    onClick={() => isAudio ? seekAndPlay(mediaStartTime) : seekAndPlayVideo(mediaStartTime)}
+                                    title={`Play from ${formatMmSs(mediaStartTime)}`}
+                                    className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+                                  >
+                                    {formatMmSs(mediaStartTime)}
+                                  </button>
+                                )
                               )}
                               {hasNote && (
                                 <span title="Has note" className="mt-0.5 shrink-0 text-primary">

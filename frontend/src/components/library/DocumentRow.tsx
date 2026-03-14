@@ -2,9 +2,11 @@ import { Badge } from "@/components/ui/badge"
 import type { DocumentListItem } from "./types"
 import {
   CONTENT_TYPE_ICONS,
+  Youtube,
   STATUS_LABELS,
   STATUS_VARIANTS,
   formatWordCount,
+  isYouTubeDoc,
   relativeDate,
 } from "./utils"
 
@@ -14,7 +16,7 @@ interface DocumentRowProps {
 }
 
 export function DocumentRow({ doc, onClick }: DocumentRowProps) {
-  const Icon = CONTENT_TYPE_ICONS[doc.content_type]
+  const Icon = isYouTubeDoc(doc) ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
 
   return (
     <div

@@ -36,6 +36,11 @@ class DocumentModel(Base):
     # Human-readable error detail written by error_finalize_node (e.g. "ffmpeg not found").
     # Surfaced to the UI via GET /documents/{id}/status as error_message.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Original URL for YouTube-ingested documents (e.g. https://www.youtube.com/watch?v=...).
+    # Null for locally uploaded files.
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Human-readable title returned by yt-dlp metadata (YouTube video title).
+    video_title: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

@@ -51,7 +51,7 @@ const CONTENT_TYPE_OPTIONS = [
 ]
 
 type ContentTypeValue = "book" | "conversation" | "notes" | "audio" | "video"
-type DialogTab = "upload" | "paste"
+type DialogTab = "upload" | "paste" | "youtube"
 type Mode = "idle" | "uploading" | "processing" | "success" | "error"
 
 interface StatusResponse {
@@ -76,6 +76,20 @@ async function submitFile(file: File, contentType: ContentTypeValue): Promise<st
   return data.document_id
 }
 
+async function submitYouTubeUrl(url: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/documents/ingest-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  })
+  if (!res.ok) {
+    const data = (await res.json()) as { detail?: string }
+    throw new Error(data.detail ?? "YouTube ingestion failed")
+  }
+  const data = (await res.json()) as { document_id: string }
+  return data.document_id
+}
+
 export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -89,6 +103,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [pasteText, setPasteText] = useState("")
   const [pasteType, setPasteType] = useState<ContentTypeValue | null>(null)
   const [typeError, setTypeError] = useState(false)
+  const [youtubeUrl, setYoutubeUrl] = useState("")
+  const [youtubeUrlError, setYoutubeUrlError] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Upload progress state
@@ -136,6 +152,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setPasteText("")
     setPasteType(null)
     setTypeError(false)
+    setYoutubeUrl("")
+    setYoutubeUrlError("")
     setTab("upload")
     setMode("idle")
     setProgress(0)
@@ -302,12 +320,48 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     await doSubmit(file, pasteLabel.trim(), pasteType)
   }
 
+  async function handleYouTubeSubmit() {
+    const url = youtubeUrl.trim()
+    if (!url) {
+      setYoutubeUrlError("Enter a YouTube URL")
+      return
+    }
+    if (!url.includes("youtube.com/watch") && !url.includes("youtu.be/")) {
+      setYoutubeUrlError("Must be a YouTube watch URL (youtube.com/watch?v= or youtu.be/)")
+      return
+    }
+    setYoutubeUrlError("")
+    const startTime = Date.now()
+    uploadStartRef.current = startTime
+    setMode("uploading")
+    setProgress(0)
+    setStageLabel("Downloading audio from YouTube...")
+    setDocTitle(url)
+    logger.info("[Upload] youtube start", { url })
+    try {
+      const docId = await submitYouTubeUrl(url)
+      toast.loading("Processing YouTube video...", { id: docId })
+      setMode("processing")
+      setProgress(5)
+      setStageLabel("Transcribing...")
+      startPolling(docId, url, startTime)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "YouTube ingestion failed."
+      logger.error("[Upload] youtube failed", { error_message: errMsg, url })
+      setMode("error")
+      setErrorMessage(errMsg)
+      toast.error(errMsg)
+    }
+  }
+
   async function handleRetry() {
     setErrorMessage("")
     if (tab === "upload" && selectedFile && uploadType) {
       await handleUploadSubmit()
     } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim() && pasteType) {
       await handlePasteSubmit()
+    } else if (tab === "youtube" && youtubeUrl.trim()) {
+      await handleYouTubeSubmit()
     } else {
       setMode("idle")
     }
@@ -455,7 +509,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           <>
             {/* Tabs */}
             <div className="mb-4 flex gap-1 rounded-md bg-muted p-1">
-              {(["upload", "paste"] as const).map((t) => (
+              {(["upload", "paste", "youtube"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -466,12 +520,45 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {t === "upload" ? "Upload File" : "Paste Text"}
+                  {t === "upload" ? "Upload File" : t === "paste" ? "Paste Text" : "YouTube URL"}
                 </button>
               ))}
             </div>
 
-            {tab === "upload" ? (
+            {tab === "youtube" ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-foreground">
+                    YouTube URL <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={(e) => {
+                      setYoutubeUrl(e.target.value)
+                      setYoutubeUrlError("")
+                    }}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  {youtubeUrlError && (
+                    <p className="mt-1 text-xs text-red-600">{youtubeUrlError}</p>
+                  )}
+                  {!youtubeUrl && !youtubeUrlError && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Audio is downloaded and transcribed locally. No file is uploaded to any service.
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => void handleYouTubeSubmit()}
+                  disabled={!youtubeUrl.trim()}
+                  className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                >
+                  Ingest
+                </button>
+              </div>
+            ) : tab === "upload" ? (
               <div className="space-y-4">
                 {/* Content type selector */}
                 <ContentTypeRadioGroup

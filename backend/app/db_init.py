@@ -65,6 +65,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE study_sessions ADD COLUMN accuracy_pct REAL",
             "ALTER TABLE documents ADD COLUMN audio_duration_seconds REAL",
             "ALTER TABLE documents ADD COLUMN error_message TEXT",
+            "ALTER TABLE documents ADD COLUMN source_url TEXT",
+            "ALTER TABLE documents ADD COLUMN video_title TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

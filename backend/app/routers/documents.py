@@ -102,6 +102,8 @@ class DocumentListItem(BaseModel):
     chunk_count: int
     reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
     audio_duration_seconds: float | None
+    source_url: str | None = None
+    video_title: str | None = None
 
 
 class DocumentListResponse(BaseModel):
@@ -157,6 +159,12 @@ class DocumentDetail(BaseModel):
     sections: list[SectionItem]
     reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
     audio_duration_seconds: float | None = None
+    source_url: str | None = None
+    video_title: str | None = None
+
+
+class YouTubeIngestRequest(BaseModel):
+    url: str
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +324,8 @@ async def list_documents(
                 chunk_count=chunk_count,
                 reading_progress_pct=reading_progress_pct,
                 audio_duration_seconds=doc.audio_duration_seconds,
+                source_url=doc.source_url,
+                video_title=doc.video_title,
             )
         )
 
@@ -495,6 +505,84 @@ async def ingest_document(
     return {"document_id": doc_id, "status": "processing"}
 
 
+@router.post("/ingest-url")
+async def ingest_url(
+    body: YouTubeIngestRequest,
+    settings: Settings = Depends(get_settings),
+):
+    """Ingest a YouTube URL by downloading audio via yt-dlp and transcribing with Whisper."""
+    from app.services.youtube_downloader import (  # noqa: PLC0415
+        check_ytdlp_available,
+        download_audio,
+        fetch_metadata,
+        is_youtube_url,
+    )
+
+    if not is_youtube_url(body.url):
+        raise HTTPException(status_code=400, detail="URL must be a YouTube watch URL")
+
+    if not check_ytdlp_available():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "yt-dlp is not installed. Install it with: "
+                "uv tool install yt-dlp  or  brew install yt-dlp"
+            ),
+        )
+
+    try:
+        meta = await fetch_metadata(body.url)
+    except RuntimeError as exc:
+        logger.warning("yt-dlp metadata fetch failed: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    video_title = meta.get("title") or "YouTube Video"
+    doc_id = str(uuid.uuid4())
+
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    dest_stem = raw_dir / doc_id  # yt-dlp appends .wav
+
+    try:
+        await download_audio(body.url, dest_stem)
+    except RuntimeError as exc:
+        logger.error("yt-dlp download failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Audio download failed: {exc}",
+        ) from exc
+
+    dest = dest_stem.with_suffix(".wav")
+    if not dest.exists():
+        raise HTTPException(status_code=500, detail="Downloaded audio file not found")
+
+    async with get_session_factory()() as session:
+        doc = DocumentModel(
+            id=doc_id,
+            title=video_title,
+            format="wav",
+            content_type="audio",
+            word_count=0,
+            page_count=0,
+            file_path=str(dest),
+            file_hash=None,
+            stage="parsing",
+            source_url=body.url,
+            video_title=video_title,
+        )
+        session.add(doc)
+        await session.commit()
+
+    from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
+
+    _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "wav", "audio"))
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
+    logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
+    return {"document_id": doc_id, "status": "processing"}
+
+
 @router.get("/{document_id}", response_model=DocumentDetail)
 async def get_document(document_id: str):
     """Return document detail with sections list."""
@@ -546,6 +634,8 @@ async def get_document(document_id: str):
         ],
         reading_progress_pct=reading_progress_pct,
         audio_duration_seconds=doc.audio_duration_seconds,
+        source_url=doc.source_url,
+        video_title=doc.video_title,
     )
 
 

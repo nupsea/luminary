@@ -43,6 +43,7 @@ dependencies = [
     "tree-sitter-rust>=0.24.0",
     "tree-sitter-typescript>=0.23.2",
     "uvicorn[standard]>=0.41.0",
+    "yt-dlp>=2026.3.13",
 ]
 
 [tool.ruff]
