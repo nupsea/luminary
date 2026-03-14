@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from pathlib import Path
@@ -10,6 +11,18 @@ from markdown_it import MarkdownIt
 from app.services.book_parser import BookParser
 from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
+
+# HTML tag stripper for EPUB content
+_RE_HTML_TAGS = re.compile(r"<[^>]+>")
+_RE_WHITESPACE = re.compile(r"\s+")
+
+# Kindle clippings separator
+_KINDLE_SEP = "=========="
+# Highlight/note header: "- Your Highlight on page X | Added on Date"
+_RE_KINDLE_HEADER = re.compile(
+    r"^-\s+Your\s+(Highlight|Note|Bookmark)\s+.*\|\s+Added\s+on\s+(.+)$",
+    re.IGNORECASE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +51,8 @@ class DocumentParser:
             return self._parse_txt(file_path)
         elif fmt in ("md", "markdown"):
             return self._parse_md(file_path)
+        elif fmt == "epub":
+            return self._parse_epub(file_path)
         else:
             raise ValueError(f"Unsupported format: {format}")
 
@@ -46,13 +61,13 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument:
-        # Try UniversalParser first
-        result = _universal_parser.parse(file_path, "pdf")
+        # Try BookParser first (legacy regex families for classic books)
+        result = _book_parser.parse(file_path, "pdf")
         if result is not None:
             return result
 
-        # Try BookParser next
-        result = _book_parser.parse(file_path, "pdf")
+        # Try UniversalParser next (signature discovery)
+        result = _universal_parser.parse(file_path, "pdf")
         if result is not None:
             return result
 
@@ -201,13 +216,13 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_txt(self, file_path: Path) -> ParsedDocument:
-        # Try UniversalParser first
-        result = _universal_parser.parse(file_path, "txt")
+        # Try BookParser first (legacy regex families for classic books)
+        result = _book_parser.parse(file_path, "txt")
         if result is not None:
             return result
 
-        # Try BookParser next
-        result = _book_parser.parse(file_path, "txt")
+        # Try UniversalParser next (signature discovery)
+        result = _universal_parser.parse(file_path, "txt")
         if result is not None:
             return result
 
@@ -307,3 +322,172 @@ class DocumentParser:
             sections=sections,
             raw_text=text,
         )
+
+    # ------------------------------------------------------------------
+    # EPUB
+    # ------------------------------------------------------------------
+
+    def _parse_epub(self, file_path: Path) -> ParsedDocument:
+        """Extract chapters from an EPUB file using ebooklib."""
+        import ebooklib  # noqa: PLC0415
+        from ebooklib import epub  # noqa: PLC0415
+
+        book = epub.read_epub(str(file_path), options={"ignore_ncx": True})
+
+        # Derive title from metadata or filename
+        title_meta = book.get_metadata("DC", "title")
+        title = title_meta[0][0] if title_meta else file_path.stem.replace("_", " ").title()
+
+        sections: list[Section] = []
+        raw_parts: list[str] = []
+
+        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+            item_name = item.get_name()
+            # Skip navigation/toc documents
+            if any(k in item_name.lower() for k in ("nav", "toc", "ncx")):
+                continue
+
+            raw_html = item.get_content().decode("utf-8", errors="replace")
+            # Extract heading from first h1/h2/h3 tag
+            heading_match = re.search(
+                r"<h[1-3][^>]*>(.*?)</h[1-3]>", raw_html, re.IGNORECASE | re.DOTALL
+            )
+            if heading_match:
+                heading_text = _RE_HTML_TAGS.sub("", heading_match.group(1))
+                heading_text = html.unescape(heading_text).strip()
+            else:
+                # Use the item name as a fallback heading
+                heading_text = Path(item_name).stem.replace("_", " ").replace("-", " ").title()
+
+            # Strip all HTML tags from body
+            plain = _RE_HTML_TAGS.sub(" ", raw_html)
+            plain = html.unescape(plain)
+            plain = _RE_WHITESPACE.sub(" ", plain).strip()
+
+            if not plain or len(plain) < 50:
+                continue
+
+            sections.append(
+                Section(
+                    heading=heading_text,
+                    level=1,
+                    text=plain,
+                    page_start=0,
+                    page_end=0,
+                )
+            )
+            raw_parts.append(plain)
+
+        if not sections:
+            # Fallback: treat entire content as one section
+            logger.warning("_parse_epub: no usable chapters found in %s", file_path)
+            full_text = " ".join(raw_parts) if raw_parts else ""
+            sections = [
+                Section(
+                    heading="Content",
+                    level=1,
+                    text=full_text or "(empty)",
+                    page_start=0,
+                    page_end=0,
+                )
+            ]
+
+        raw_text = "\n\n".join(raw_parts)
+        word_count = len(raw_text.split())
+        logger.info(
+            "_parse_epub: %d sections, %d words from %s",
+            len(sections),
+            word_count,
+            file_path,
+        )
+        return ParsedDocument(
+            title=title,
+            format="epub",
+            pages=0,
+            word_count=word_count,
+            sections=sections,
+            raw_text=raw_text,
+        )
+
+    # ------------------------------------------------------------------
+    # Kindle My Clippings.txt
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def parse_kindle_clippings(text: str) -> list[ParsedDocument]:
+        """Parse a Kindle My Clippings.txt file into one ParsedDocument per book.
+
+        Returns a list of ParsedDocument objects, one per book title found.
+        Each section in the document is one highlight (with date as heading).
+        """
+        # Split on the separator line (lines starting with ==========)
+        entries = re.split(r"^==========[ \t]*$", text, flags=re.MULTILINE)
+
+        # Group highlights by book title (first non-empty line of each entry)
+        books: dict[str, list[Section]] = {}
+        book_order: list[str] = []
+
+        for entry in entries:
+            lines = [ln.strip() for ln in entry.strip().splitlines() if ln.strip()]
+            if len(lines) < 2:
+                continue
+
+            book_title = lines[0]
+            # Strip any author in parentheses: "Title (Author Name)" -> "Title"
+            book_title_clean = re.sub(r"\s*\([^)]*\)\s*$", "", book_title).strip()
+            if not book_title_clean:
+                continue
+
+            # Find the metadata header line (contains "Your Highlight" or "Your Note")
+            metadata_line = ""
+            content_lines: list[str] = []
+            header_found = False
+            for line in lines[1:]:
+                m = _RE_KINDLE_HEADER.match(line)
+                if m and not header_found:
+                    metadata_line = line
+                    header_found = True
+                elif header_found:
+                    content_lines.append(line)
+
+            if not content_lines:
+                continue
+
+            highlight_text = " ".join(content_lines).strip()
+            if not highlight_text:
+                continue
+
+            # Use "Added on <date>" as the section heading
+            date_str = ""
+            date_match = re.search(r"Added on (.+)$", metadata_line)
+            if date_match:
+                date_str = date_match.group(1).strip()
+
+            heading = f"Highlight ({date_str})" if date_str else "Highlight"
+
+            if book_title_clean not in books:
+                books[book_title_clean] = []
+                book_order.append(book_title_clean)
+
+            books[book_title_clean].append(
+                Section(heading=heading, level=1, text=highlight_text, page_start=0, page_end=0)
+            )
+
+        documents: list[ParsedDocument] = []
+        for book_title in book_order:
+            sections = books[book_title]
+            raw_text = "\n\n".join(s.text for s in sections)
+            word_count = len(raw_text.split())
+            documents.append(
+                ParsedDocument(
+                    title=book_title,
+                    format="txt",
+                    pages=0,
+                    word_count=word_count,
+                    sections=sections,
+                    raw_text=raw_text,
+                )
+            )
+
+        logger.info("parse_kindle_clippings: found %d books", len(documents))
+        return documents

@@ -1,7 +1,16 @@
 import { cn } from "@/lib/utils"
 import type { ContentType } from "./types"
 
-const CONTENT_TYPES: ContentType[] = ["book", "paper", "conversation", "notes", "code", "audio"]
+const CONTENT_TYPES: ContentType[] = [
+  "book",
+  "paper",
+  "conversation",
+  "notes",
+  "code",
+  "audio",
+  "epub",
+  "kindle_clippings",
+]
 
 const LABELS: Record<ContentType, string> = {
   book: "Book",
@@ -10,6 +19,8 @@ const LABELS: Record<ContentType, string> = {
   notes: "Notes",
   code: "Code",
   audio: "Audio",
+  epub: "EPUB",
+  kindle_clippings: "Kindle Highlights",
 }
 
 interface FilterBarProps {

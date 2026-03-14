@@ -25,9 +25,12 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
   paper: { label: "Paper", className: "bg-purple-100 text-purple-700 hover:bg-purple-200" },
   code: { label: "Code", className: "bg-orange-100 text-orange-700 hover:bg-orange-200" },
   audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
+  epub: { label: "EPUB", className: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
+  kindle_clippings: { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
+const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
 
 const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes"]
 
@@ -55,8 +58,9 @@ export function DocumentCard({
   selectMode = false,
 }: DocumentCardProps) {
   const isYouTube = isYouTubeDoc(doc)
+  const isKindleSource = doc.tags.includes("kindle")
   const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
-  const badge = isYouTube ? YOUTUBE_BADGE : CONTENT_TYPE_BADGE[doc.content_type]
+  const badge = isYouTube ? YOUTUBE_BADGE : (isKindleSource ? KINDLE_SOURCE_BADGE : CONTENT_TYPE_BADGE[doc.content_type])
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)

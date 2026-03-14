@@ -401,6 +401,7 @@ def test_html_parsing(tmp_path):
     result = bp.parse(html_file, "html")
     assert result is not None
     assert len(result.sections) == 2
-    assert "CHAPTER I. — Introduction" in result.sections[0].heading
-    assert "CHAPTER II. — The Second Part" in result.sections[1].heading
+    # Dot is stripped by _clean_heading
+    assert "CHAPTER I — Introduction" in result.sections[0].heading
+    assert "CHAPTER II — The Second Part" in result.sections[1].heading
     assert result.format == "html"

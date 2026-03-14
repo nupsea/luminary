@@ -16,7 +16,7 @@ from app.telemetry import trace_chain, trace_ingestion_node
 
 logger = logging.getLogger(__name__)
 
-ContentType = Literal["book", "conversation", "notes", "audio", "video"]
+ContentType = Literal["book", "conversation", "notes", "audio", "video", "epub", "kindle_clippings"]
 
 _parser = DocumentParser()
 
@@ -26,6 +26,8 @@ CHUNK_CONFIGS: dict[str, dict[str, int]] = {
     "conversation": {"chunk_size": 450, "chunk_overlap": 90},
     "notes": {"chunk_size": 300, "chunk_overlap": 75},
     "code": {"chunk_size": 300, "chunk_overlap": 75},
+    "epub": {"chunk_size": 600, "chunk_overlap": 120},
+    "kindle_clippings": {"chunk_size": 300, "chunk_overlap": 75},
 }
 
 STAGE_PROGRESS: dict[str, int] = {
@@ -55,13 +57,23 @@ class IngestionState(TypedDict):
     _audio_chunks: list[dict[str, Any]] | None
 
 
-def _classify(raw_text: str, sections: list[dict], word_count: int, file_ext: str) -> str:
+def _classify(
+    raw_text: str, sections: list[dict], word_count: int, file_ext: str, filename: str = ""
+) -> str:
     if file_ext in ("mp3", "m4a", "wav"):
         return "audio"
     if file_ext == "mp4":
         return "video"
+    if file_ext == "epub":
+        return "book"
+
     if file_ext in ("py", "js", "ts", "go", "java", "rs", "cpp", "c", "rb"):
         return "code"
+    # Kindle My Clippings.txt detection: filename pattern or content signature
+    if re.search(r"clippings", filename, re.IGNORECASE) or re.search(
+        r"^==========", raw_text[:2000], re.MULTILINE
+    ):
+        return "kindle_clippings"
     headings_lower = " ".join(s.get("heading", "").lower() for s in sections)
     text_lower = raw_text[:5000].lower()
     speaker_pattern = re.compile(r"\b[A-Z][a-zA-Z]+:\s")
@@ -94,6 +106,7 @@ async def _update_stage(document_id: str, stage: str) -> None:
 def parse_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
     # Audio/video files: DocumentParser cannot handle them; transcribe_node takes over.
+    # EPUB and other text-based formats are handled by DocumentParser below.
     if Path(state["file_path"]).suffix.lstrip(".").lower() in ("mp3", "m4a", "wav", "mp4"):
         return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
@@ -142,8 +155,12 @@ async def classify_node(state: IngestionState) -> IngestionState:
             pd = state["parsed_document"]
             if pd is None:
                 return {**state, "content_type": "notes", "status": "chunking"}
-            file_ext = Path(state["file_path"]).suffix.lstrip(".")
-            content_type = _classify(pd["raw_text"], pd["sections"], pd["word_count"], file_ext)
+            fp_obj = Path(state["file_path"])
+            file_ext = fp_obj.suffix.lstrip(".")
+            filename = fp_obj.name
+            content_type = _classify(
+                pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
+            )
 
             # LLM reclassification: heuristic result is uncertain for large documents.
             # 'notes' on a long doc may be book/paper; 'conversation' on a very long doc

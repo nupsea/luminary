@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress"
 
 const API_BASE = "http://localhost:8000"
 
-const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4"]
+const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4", ".epub"]
 
 const STAGE_LABELS: Record<string, string> = {
   parsing: "Parsing document...",
@@ -48,9 +48,14 @@ const CONTENT_TYPE_OPTIONS = [
     label: "Video",
     description: "For lecture recordings, screen captures, video talks (MP4)",
   },
+  {
+    value: "epub" as const,
+    label: "EPUB",
+    description: "For EPUB e-books (auto-detected from .epub files)",
+  },
 ]
 
-type ContentTypeValue = "book" | "conversation" | "notes" | "audio" | "video"
+type ContentTypeValue = "book" | "conversation" | "notes" | "audio" | "video" | "epub"
 type DialogTab = "upload" | "paste" | "youtube"
 type Mode = "idle" | "uploading" | "processing" | "success" | "error"
 
@@ -74,6 +79,21 @@ async function submitFile(file: File, contentType: ContentTypeValue): Promise<st
   if (!res.ok) throw new Error("Upload failed")
   const data = (await res.json()) as { document_id: string }
   return data.document_id
+}
+
+async function submitKindleFile(file: File): Promise<{ document_ids: string[]; book_count: number }> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await fetch(`${API_BASE}/documents/ingest-kindle`, { method: "POST", body: form })
+  if (!res.ok) {
+    const data = (await res.json()) as { detail?: string }
+    throw new Error(data.detail ?? "Kindle import failed")
+  }
+  return res.json() as Promise<{ document_ids: string[]; book_count: number }>
+}
+
+function isKindleClippings(filename: string): boolean {
+  return /clippings/i.test(filename)
 }
 
 async function submitYouTubeUrl(url: string): Promise<string> {
@@ -179,12 +199,20 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     e.preventDefault()
     setIsDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file && isAccepted(file)) setSelectedFile(file)
+    if (file && isAccepted(file)) {
+      setSelectedFile(file)
+      // Auto-set type for EPUB files
+      if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file && isAccepted(file)) setSelectedFile(file)
+    if (file && isAccepted(file)) {
+      setSelectedFile(file)
+      // Auto-set type for EPUB files
+      if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
+    }
   }
 
   // Time estimate — stage-aware.
@@ -298,6 +326,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function handleUploadSubmit() {
     if (!selectedFile) return
+
+    // Kindle My Clippings.txt: bypass normal content type selection
+    if (isKindleClippings(selectedFile.name)) {
+      await doSubmitKindle(selectedFile)
+      return
+    }
+
     if (!uploadType) {
       setTypeError(true)
       return
@@ -305,6 +340,37 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setTypeError(false)
     const title = selectedFile.name.replace(/\.[^/.]+$/, "")
     await doSubmit(selectedFile, title, uploadType)
+  }
+
+  async function doSubmitKindle(file: File) {
+    const startTime = Date.now()
+    uploadStartRef.current = startTime
+    setMode("uploading")
+    setProgress(0)
+    setStageLabel("Uploading Kindle clippings...")
+    setDocTitle(file.name)
+    logger.info("[Upload] kindle start", { filename: file.name })
+    try {
+      const result = await submitKindleFile(file)
+      const bookCount = result.book_count
+      logger.info("[Upload] kindle uploaded", { filename: file.name, book_count: bookCount })
+      setProgress(100)
+      setStageLabel(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""}!`)
+      setMode("success")
+      toast.success(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""} from Kindle clippings`)
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      autoCloseTimerRef.current = setTimeout(() => {
+        reset()
+        onClose()
+      }, 3000)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Kindle import failed."
+      logger.error("[Upload] kindle failed", { error_message: errMsg, filename: file.name })
+      setMode("error")
+      setErrorMessage(errMsg)
+      toast.error(errMsg)
+    }
   }
 
   async function handlePasteSubmit() {
@@ -560,11 +626,20 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               </div>
             ) : tab === "upload" ? (
               <div className="space-y-4">
-                {/* Content type selector */}
-                <ContentTypeRadioGroup
-                  value={uploadType}
-                  onChange={setUploadType}
-                />
+                {/* Content type selector — hidden for auto-detected formats */}
+                {selectedFile && isKindleClippings(selectedFile.name) ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-sm font-medium text-amber-800">Kindle clippings detected</p>
+                    <p className="text-xs text-amber-700">
+                      Each book's highlights will be imported as a separate document tagged with Kindle.
+                    </p>
+                  </div>
+                ) : (
+                  <ContentTypeRadioGroup
+                    value={uploadType}
+                    onChange={setUploadType}
+                  />
+                )}
 
                 {/* Drop zone */}
                 <div
@@ -607,7 +682,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handleUploadSubmit()}
-                  disabled={!selectedFile || !uploadType}
+                  disabled={!selectedFile || (!uploadType && !(selectedFile && isKindleClippings(selectedFile.name)))}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Ingest

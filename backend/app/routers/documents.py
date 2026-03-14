@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import shutil
 import uuid
 from datetime import datetime
@@ -41,7 +42,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 _parser = DocumentParser()
 
 _ALLOWED_EXTENSIONS = frozenset(
-    {"pdf", "txt", "md", "markdown", "docx", "mp3", "m4a", "wav", "mp4"}
+    {"pdf", "txt", "md", "markdown", "docx", "mp3", "m4a", "wav", "mp4", "epub"}
 )
 
 
@@ -165,6 +166,11 @@ class DocumentDetail(BaseModel):
 
 class YouTubeIngestRequest(BaseModel):
     url: str
+
+
+class KindleIngestResponse(BaseModel):
+    document_ids: list[str]
+    book_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +404,7 @@ async def ingest_document(
     content = await file.read()
     file_hash = hashlib.sha256(content).hexdigest()
 
-    _text_fmts = ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav", "mp4")
+    _text_fmts = ("pdf", "docx", "txt", "md", "markdown", "mp3", "m4a", "wav", "mp4", "epub")
     fmt = ext if ext in _text_fmts else "txt"
 
     async with get_session_factory()() as session:
@@ -503,6 +509,81 @@ async def ingest_document(
     asyncio.create_task(run_ingestion(doc_id, str(dest), fmt, content_type))
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
+
+
+@router.post("/ingest-kindle", response_model=KindleIngestResponse)
+async def ingest_kindle(
+    file: UploadFile = File(...),
+    settings: Settings = Depends(get_settings),
+):
+    """Ingest a Kindle My Clippings.txt file.
+
+    Parses highlights grouped by book title and creates one document per book.
+    Each created document is tagged with 'kindle' and uses content_type='kindle_clippings'.
+    """
+    filename = file.filename or "My Clippings.txt"
+    if not re.search(r"clippings", filename, re.IGNORECASE):
+        # Also accept any .txt file — the user may have renamed it
+        ext = Path(filename).suffix.lstrip(".").lower()
+        if ext != "txt":
+            raise HTTPException(
+                status_code=400,
+                detail="File must be a Kindle My Clippings.txt export (a plain text file).",
+            )
+
+    content_bytes = await file.read()
+    text = content_bytes.decode("utf-8", errors="replace")
+
+    documents = _parser.parse_kindle_clippings(text)
+    if not documents:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No Kindle highlights found. "
+                "Make sure you uploaded a valid My Clippings.txt file."
+            ),
+        )
+
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    document_ids: list[str] = []
+    for parsed_doc in documents:
+        doc_id = str(uuid.uuid4())
+        # Write each book's highlights as a plain text file
+        dest = raw_dir / f"{doc_id}.txt"
+        dest.write_text(parsed_doc.raw_text, encoding="utf-8")
+
+        async with get_session_factory()() as session:
+            doc = DocumentModel(
+                id=doc_id,
+                title=parsed_doc.title,
+                format="txt",
+                content_type="kindle_clippings",
+                word_count=parsed_doc.word_count,
+                page_count=0,
+                file_path=str(dest),
+                file_hash=None,  # No hash — derived from a multi-book file
+                stage="parsing",
+                tags=["kindle"],
+            )
+            session.add(doc)
+            await session.commit()
+
+        asyncio.create_task(run_ingestion(doc_id, str(dest), "txt", "kindle_clippings"))
+        document_ids.append(doc_id)
+        logger.info(
+            "Kindle book ingestion started",
+            extra={"doc_id": doc_id, "title": parsed_doc.title},
+        )
+
+    logger.info(
+        "Kindle ingestion started: %d books from %s",
+        len(document_ids),
+        filename,
+    )
+    return KindleIngestResponse(document_ids=document_ids, book_count=len(document_ids))
 
 
 @router.post("/ingest-url")

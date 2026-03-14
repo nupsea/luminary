@@ -1,4 +1,4 @@
-export type ContentType = "book" | "paper" | "conversation" | "notes" | "code" | "audio"
+export type ContentType = "book" | "paper" | "conversation" | "notes" | "code" | "audio" | "epub" | "kindle_clippings"
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
 export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed"
 export type ViewMode = "grid" | "list"
