@@ -977,3 +977,19 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - file_path should never appear in API responses (filesystem path exposure); audio served via dedicated endpoint
   - FileResponse in Starlette has no range-request support -- note for future Safari compatibility
 ---
+
+## 2026-03-14T00:00:00Z - S121 - Video ingestion (MP4): ffmpeg audio extraction + Whisper transcription with video player
+- Implemented: Fixed AC4 gap -- get_document_status() now propagates doc.error_message (ffmpeg error) instead of hardcoded fallback. Added test_status_endpoint_returns_ffmpeg_error_message. Reviewer fixed Critical operator precedence bug in UploadDialog.tsx line 203 (data.stage === "error" || data.error_message).
+- Files changed: backend/app/routers/documents.py, backend/tests/test_video_ingestion.py, frontend/src/components/library/UploadDialog.tsx
+- AC verified:
+  - Content-type classifier returns 'video' for .mp4: PASS (test_classify_returns_video_for_mp4)
+  - transcribe_node runs ffmpeg subprocess: PASS (test_transcribe_node_video_with_ffmpeg)
+  - lifespan startup checks for ffmpeg: PASS (verified in main.py)
+  - Ingestion returns user-friendly error if ffmpeg unavailable: PASS (test_status_endpoint_returns_ffmpeg_error_message)
+  - DocumentReader renders HTML5 video element: PASS (VideoPlayer in DocumentReader.tsx)
+  - Chat can answer questions about video transcript content: PASS (transcript chunked and indexed same as audio)
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed inline - UploadDialog.tsx operator precedence)
+- Learnings:
+  - Operator precedence: ?? has lower precedence than ===; always use explicit parentheses or prefer || for mixed conditions
+---

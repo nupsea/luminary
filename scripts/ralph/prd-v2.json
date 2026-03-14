@@ -1115,7 +1115,7 @@
         "Chat can answer questions about video transcript content",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S122",
