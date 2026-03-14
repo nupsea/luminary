@@ -75,8 +75,10 @@ class NoteSearchService:
             return []
 
         sql = text(
-            "SELECT nf.note_id, nf.content, nf.document_id, bm25(notes_fts) AS score "
+            "SELECT nf.note_id, nf.content, nf.document_id, bm25(notes_fts) AS score, "
+            "       n.tags, n.group_name "
             "FROM notes_fts AS nf "
+            "JOIN notes AS n ON nf.note_id = n.id "
             "WHERE notes_fts MATCH :query "
             "ORDER BY score LIMIT :k"
         )
@@ -84,26 +86,10 @@ class NoteSearchService:
             rows = (await session.execute(sql, {"query": safe_query, "k": k})).fetchall()
             if not rows:
                 return []
-            note_ids = [r[0] for r in rows]
-            # Use JSON-based parameterised lookup to avoid f-string SQL interpolation.
-            # json_each(:ids) expands the JSON array into rows; SQLite parameterises the
-            # entire array as a single bind value, eliminating any injection surface.
-            meta_rows = (
-                await session.execute(
-                    text(
-                        "SELECT n.id, n.tags, n.group_name "
-                        "FROM notes AS n "
-                        "JOIN json_each(:ids) AS j ON n.id = j.value"
-                    ),
-                    {"ids": json.dumps(note_ids)},
-                )
-            ).fetchall()
-        meta_map = {r[0]: (r[1], r[2]) for r in meta_rows}
 
         results = []
         for row in rows:
-            note_id, content, document_id, score = row
-            raw_tags, group_name = meta_map.get(note_id, ("[]", None))
+            note_id, content, document_id, score, raw_tags, group_name = row
             try:
                 tags = json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
             except Exception:
@@ -150,16 +136,12 @@ class NoteSearchService:
             return []
 
     async def search(self, query: str, k: int = 10) -> list[NoteSearchResult]:
-        """Hybrid search: FTS5 + semantic, fused via RRF.
+        """Hybrid search: FTS5 + semantic, fused via RRF."""
+        # Run sequentially to avoid potential race conditions or DB isolation
+        # issues in tests/sqlite. Sequential is fine given our low concurrency.
+        fts_results = await self.fts_search(query, k=_NOTE_SEARCH_K)
+        vector_results = self.semantic_search(query, _NOTE_SEARCH_K)
 
-        Semantic search is CPU-bound; run in thread pool so the event loop stays free.
-        """
-        loop = asyncio.get_running_loop()
-        fts_task = asyncio.create_task(self.fts_search(query, k=_NOTE_SEARCH_K))
-        vector_results = await loop.run_in_executor(
-            None, self.semantic_search, query, _NOTE_SEARCH_K
-        )
-        fts_results = await fts_task
         merged = _rrf_merge(fts_results, vector_results, k=k)
         logger.debug(
             "note search q=%r fts=%d vector=%d merged=%d",
