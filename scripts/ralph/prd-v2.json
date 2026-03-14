@@ -1080,7 +1080,7 @@
         "Test: transcribe a short synthetic audio file (or use a fixture transcript); assert chunks have start_time metadata",
         "uv run ruff check . exits 0"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S120",

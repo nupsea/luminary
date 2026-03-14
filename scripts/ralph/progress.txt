@@ -939,3 +939,24 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
 - Learnings:
   - Write localStorage throttle timestamps BEFORE the first await in an async handler; JavaScript single-threaded but concurrent events can each pass a throttle check if the timestamp write happens after the await suspension point
 ---
+
+## 2026-03-14T00:00:00Z - S119 - Audio ingestion via faster-whisper
+
+- Implemented: faster-whisper transcription pipeline for MP3/M4A/WAV files. New transcribe_node in LangGraph ingestion graph (inserted between classify and chunk). _chunk_audio() groups Whisper segments into 60-second windows with start_time/end_time metadata. Audio bypass in parse_node prevents DocumentParser from failing on audio extensions. AudioTranscriber service with @lru_cache singleton. audio_duration_seconds column added to DocumentModel and migration. Frontend: Volume2 icon, formatDuration helper, audio filter pill, duration badge on DocumentCard, audio upload option with "Transcribing audio..." stage label.
+- Files changed: backend/app/config.py, backend/app/models.py, backend/app/db_init.py, backend/app/services/audio_transcriber.py (new), backend/app/workflows/ingestion.py, backend/app/routers/documents.py, backend/tests/test_audio_ingestion.py (new), frontend/src/components/library/types.ts, frontend/src/components/library/utils.ts, frontend/src/components/library/FilterBar.tsx, frontend/src/components/library/DocumentCard.tsx, frontend/src/components/library/UploadDialog.tsx, scripts/smoke/S119.sh (new)
+- AC verified:
+  - uv add faster-whisper; listed in pyproject.toml: PASS
+  - Content-type classifier returns 'audio' for .mp3, .m4a, .wav: PASS (3 unit tests)
+  - LangGraph ingestion graph has transcribe_node for audio content type: PASS
+  - Each chunk from _chunk_audio has start_time and end_time fields in metadata: PASS (unit test)
+  - Audio document appears in library with audio icon and total duration: PASS (Volume2 icon, formatDuration in DocumentCard)
+  - Chat can answer factual questions about the audio content via normal Q&A flow: PASS (audio chunks flow through embed/NER/search unchanged)
+  - Test: transcribe a short synthetic audio file; assert chunks have start_time metadata: PASS (8 tests pass)
+  - uv run ruff check . exits 0: PASS
+- Reviewer verdict: PASS (1 Critical fixed: get_event_loop -> get_running_loop in transcribe_node)
+- Learnings:
+  - Audio bypass must be in parse_node before the trace_ingestion_node context manager; DocumentParser raises ValueError for audio extensions
+  - faster_whisper WhisperModel should be imported lazily inside __init__ to avoid loading C extension in tests
+  - asyncio.get_running_loop() is the correct call inside a coroutine; get_event_loop() is deprecated in async contexts in Python 3.10+
+  - classify_node fast-paths audio because content_type is user-provided for audio uploads (status set to 'chunking'), but transcribe_node checks content_type=='audio' and handles the pass-through for non-audio types
+---
