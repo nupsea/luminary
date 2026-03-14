@@ -8,7 +8,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-TABLE_NAME = "chunk_vectors"
+TABLE_NAME = "chunk_vectors_v3"
 
 SCHEMA = pa.schema(
     [
@@ -17,20 +17,21 @@ SCHEMA = pa.schema(
         pa.field("content_type", pa.string()),
         pa.field("section_heading", pa.string()),
         pa.field("page", pa.int32()),
+        pa.field("chunk_index", pa.int32()),
         pa.field("speaker", pa.string()),
         pa.field("text", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 1024)),
+        pa.field("vector", pa.list_(pa.float32(), 384)),
     ]
 )
 
-NOTE_TABLE_NAME = "note_vectors"
+NOTE_TABLE_NAME = "note_vectors_v2"
 
 NOTE_SCHEMA = pa.schema(
     [
         pa.field("note_id", pa.string()),
         pa.field("document_id", pa.string()),
         pa.field("content", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 1024)),
+        pa.field("vector", pa.list_(pa.float32(), 384)),
     ]
 )
 

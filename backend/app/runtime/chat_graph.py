@@ -790,15 +790,30 @@ async def _fetch_section_summaries(
         return {(row.document_id, row.heading): row.content for row in rows}
 
 
-async def search_node(state: ChatState) -> dict:
-    """Hybrid retrieval with section summary augmentation.
+async def _fetch_neighbor_chunks(
+    chunk_id: str, document_id: str, chunk_index: int
+) -> list[tuple[int, str]]:
+    """Fetch immediate neighbors (index-1, index+1) for a chunk to expand context."""
+    async with get_session_factory()() as session:
+        from app.models import ChunkModel  # noqa: PLC0415
+        stmt = (
+            select(ChunkModel.chunk_index, ChunkModel.text)
+            .where(
+                ChunkModel.document_id == document_id,
+                ChunkModel.chunk_index.in_([chunk_index - 1, chunk_index + 1]),
+            )
+        )
+        rows = await session.execute(stmt)
+        return [(row.chunk_index, row.text) for row in rows]
 
-    For each retrieved chunk that has a section_heading, looks up its
-    SectionSummaryModel row and prepends the summary:
-        ### {heading}
-        {section_summary}
-        ---
-        {chunk_text}
+
+async def search_node(state: ChatState) -> dict:
+    """Hybrid retrieval with context expansion and section summary augmentation.
+
+    Context Expansion (Parent-Child):
+    For each retrieved chunk, we fetch its immediate neighbors (index-1 and index+1)
+    to provide a more coherent window to the LLM. This prevents "chopped up"
+    information from hurting the answer quality.
     """
     q = state.get("rewritten_question") or state["question"]
     doc_ids = state.get("doc_ids") or []
@@ -826,19 +841,34 @@ async def search_node(state: ChatState) -> dict:
         ]
         section_summary_map = await _fetch_section_summaries(pairs)
 
-        for c in chunks:
+        # Context Expansion: fetch neighbors for each chunk
+        neighbor_tasks = [
+            _fetch_neighbor_chunks(c.chunk_id, c.document_id, c.chunk_index)
+            if hasattr(c, "chunk_index") else asyncio.sleep(0, result=[])
+            for c in chunks
+        ]
+        neighbors_list = await asyncio.gather(*neighbor_tasks)
+
+        for c, neighbors in zip(chunks, neighbors_list, strict=False):
+            # Sort and combine neighbors with the current chunk
+            all_parts = [(c.chunk_index, c.text)] + (
+                neighbors if isinstance(neighbors, list) else []
+            )
+            all_parts.sort(key=lambda x: x[0])
+            expanded_text = "\n\n".join([p[1] for p in all_parts])
+
             section_summary = (
                 section_summary_map.get((c.document_id, c.section_heading))
                 if c.section_heading
                 else None
             )
-            augmented_text = c.text
+            augmented_text = expanded_text
             if section_summary:
                 augmented_text = (
                     f"### {c.section_heading}\n"
                     f"{section_summary}\n"
                     f"---\n"
-                    f"{c.text}"
+                    f"{expanded_text}"
                 )
 
             chunks_dicts.append(

@@ -922,3 +922,20 @@ Patterns are now maintained in `scripts/ralph/patterns.md` — read that file in
   - GET /graph/learning-path MUST be declared before GET /{document_id} in FastAPI router or it gets captured as a path param
   - Single-char entity names fail _ENTITY_FRAG regex (requires 2+ chars); tests must use realistic multi-char names
 ---
+
+## 2026-03-14T00:00:00 - S118 - Desktop push notifications for FSRS due cards
+- Implemented: GET /study/due-count endpoint (DueCountResponse schema, func.count() query, due_date <= now filter); useReviewNotification hook (visibilitychange listener, 4h throttle, permission guard, reviewRemindersEnabled toggle, navigateRef pattern); SettingsDrawer Notifications section; Zustand store reviewRemindersEnabled with localStorage persistence; useReviewNotification() called from AppShell
+- Files changed: backend/app/routers/study.py, frontend/src/store.ts, frontend/src/hooks/useReviewNotification.ts (new), frontend/src/components/SettingsDrawer.tsx, frontend/src/App.tsx, backend/tests/test_due_count.py (new), scripts/smoke/S118.sh (new)
+- AC verified:
+  - GET /study/due-count returns {due_today: int} counting cards with due_date <= today: PASS
+  - App requests Notification.requestPermission() once on first mount: PASS
+  - On visibilitychange visible, if due_today > 0 and last-notified > 4h ago, fires browser notification: PASS
+  - Notification title: 'Luminary' body: 'X cards due for review today': PASS
+  - Clicking notification activates Study tab: PASS
+  - Settings page has 'Review reminders' toggle: PASS
+  - No notification fired if permission denied or toggle off: PASS
+  - uv run ruff check . exits 0; npx tsc --noEmit exits 0: PASS
+- Reviewer verdict: 1 Critical fixed (throttle timestamp moved before await fetch() to prevent concurrent visibilitychange race condition)
+- Learnings:
+  - Write localStorage throttle timestamps BEFORE the first await in an async handler; JavaScript single-threaded but concurrent events can each pass a throttle check if the timestamp write happens after the await suspension point
+---

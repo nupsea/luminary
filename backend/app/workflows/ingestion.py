@@ -235,39 +235,46 @@ def _chunk_code_file(
 async def _chunk_book(
     state: IngestionState, pd: dict | None, doc_id: str
 ) -> IngestionState:
-    """Book-specific chunking: process each section independently and link chunks to sections.
+    """Book-specific chunking: process each section independently with context injection.
 
-    This ensures:
-    - No chunk crosses a section (chapter) boundary.
-    - Every chunk has section_id set to its parent SectionModel.
-    - DocumentModel.chapter_count is set to the number of detected sections.
-    - Flat books (no sections in parsed_document) get a single 'Full Text' section.
+    Implements Hybrid Contextual strategy:
+    1. Structural Splitting: Paragraph-first, then sentence, then characters.
+    2. Context Injection: Prepend [Book Title > Chapter] to every chunk text.
+    3. Cross-Boundary Protection: No chunk crosses a section (chapter) boundary.
     """
-    from sqlalchemy import update as _update  # noqa: PLC0415
+    from sqlalchemy import select  # noqa: PLC0415
+    from sqlalchemy import update as _update
 
     from app.models import DocumentModel  # noqa: PLC0415
 
     cfg = CHUNK_CONFIGS["book"]
+    # Smart splitting: try paragraphs, then sentences, then words.
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
+        chunk_size=cfg["chunk_size"],
+        chunk_overlap=cfg["chunk_overlap"],
+        separators=["\n\n", "\n", ". ", " ", ""],
     )
 
-    raw_sections = pd["sections"] if pd else []
-    # Flat book: no sections detected → create a single "Full Text" section
-    if not raw_sections:
-        raw_text = pd["raw_text"] if pd else ""
-        raw_sections = [
-            {
-                "heading": "Full Text",
-                "level": 1,
-                "text": raw_text,
-                "page_start": 0,
-                "page_end": 0,
-            }
-        ]
-
-    chunks: list[dict] = []
     async with get_session_factory()() as session:
+        # Fetch book title for context injection
+        doc_result = await session.execute(
+            select(DocumentModel.title).where(DocumentModel.id == doc_id)
+        )
+        book_title = doc_result.scalar_one_or_none() or "Unknown Book"
+
+        raw_sections = pd["sections"] if pd else []
+        if not raw_sections:
+            raw_text = pd["raw_text"] if pd else ""
+            raw_sections = [
+                {
+                    "heading": "Full Text",
+                    "level": 1,
+                    "text": raw_text,
+                    "page_start": 0,
+                    "page_end": 0,
+                }
+            ]
+
         section_models: list[SectionModel] = []
         for s_idx, s in enumerate(raw_sections):
             section_model = SectionModel(
@@ -283,48 +290,58 @@ async def _chunk_book(
             session.add(section_model)
             section_models.append(section_model)
 
-        # Flush to assign IDs before linking chunks
         await session.flush()
 
+        chunks: list[dict] = []
         chunk_idx = 0
         chunk_models: list[ChunkModel] = []
         for section_model, s in zip(section_models, raw_sections, strict=False):
             section_text = s.get("text", "")
             if not section_text.strip():
                 continue
-            for text in splitter.split_text(section_text):
+
+            section_heading = section_model.heading
+            context_header = f"[{book_title} > {section_heading}] "
+
+            for raw_chunk_text in splitter.split_text(section_text):
+                # Inject context into the text that will be embedded/indexed
+                enriched_text = context_header + raw_chunk_text
                 chunk_id = str(uuid.uuid4())
                 chunk_models.append(ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
                     section_id=section_model.id,
-                    text=text,
-                    token_count=len(text.split()),
+                    text=enriched_text,
+                    token_count=len(enriched_text.split()),
                     page_number=s.get("page_start", 0),
                     speaker=None,
                     chunk_index=chunk_idx,
                 ))
                 chunks.append(
-                    {"id": chunk_id, "document_id": doc_id, "text": text, "index": chunk_idx}
+                    {
+                        "id": chunk_id,
+                        "document_id": doc_id,
+                        "text": enriched_text,
+                        "index": chunk_idx,
+                    }
                 )
                 chunk_idx += 1
-        session.add_all(chunk_models)
 
-        # Store chapter count on the document
-        chapter_count = len(section_models)
+        session.add_all(chunk_models)
         await session.execute(
             _update(DocumentModel)
             .where(DocumentModel.id == doc_id)
-            .values(chapter_count=chapter_count)
+            .values(chapter_count=len(section_models))
         )
         await session.commit()
 
     logger.info(
-        "Book chunked with section linking",
+        "Hybrid Book chunking complete",
         extra={
             "doc_id": doc_id,
             "num_chunks": len(chunks),
-            "chapter_count": chapter_count,
+            "context_injected": True,
+            "chapter_count": len(section_models),
         },
     )
     return {**state, "chunks": chunks, "status": "embedding"}
@@ -560,13 +577,27 @@ async def embed_node(state: IngestionState) -> IngestionState:
                     "content_type": content_type,
                     "section_heading": "",
                     "page": 0,
+                    "chunk_index": c.get("index", 0),
                     "speaker": "",
                     "text": c["text"],
                     "vector": embeddings[i],
                 }
                 for i, c in enumerate(chunks)
             ]
-            get_lancedb_service().upsert_chunks(lancedb_rows)
+
+            # Upsert in batches to avoid memory/spill issues in LanceDB/DataFusion
+            # with very large documents (like the Bible with 9400+ chunks).
+            batch_size = 1000
+            lancedb_svc = get_lancedb_service()
+            for start_idx in range(0, len(lancedb_rows), batch_size):
+                end_idx = start_idx + batch_size
+                batch = lancedb_rows[start_idx:end_idx]
+                lancedb_svc.upsert_chunks(batch)
+                logger.info(
+                    "Upserted batch %d-%d to LanceDB",
+                    start_idx,
+                    min(end_idx, len(lancedb_rows)),
+                )
 
             logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
             return {**state, "status": "indexing"}

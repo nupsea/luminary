@@ -11,7 +11,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -151,6 +151,13 @@ async def run_eval(req: EvalRunRequest) -> dict:
     Returns HTTP 202 immediately. The eval subprocess runs asynchronously
     via asyncio.to_thread so it never blocks the event loop.
     """
+    golden_file = _EVALS_DIR / "golden" / f"{req.dataset}.jsonl"
+    if not golden_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset '{req.dataset}' not found (missing {golden_file.name})",
+        )
+
     _fire_and_forget(_run_eval_subprocess(req.dataset, req.assert_thresholds))
     logger.info(
         "eval run started: dataset=%s assert_thresholds=%s", req.dataset, req.assert_thresholds

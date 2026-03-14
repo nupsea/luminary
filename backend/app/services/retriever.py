@@ -288,7 +288,7 @@ class HybridRetriever:
                         page=int(row.get("page", 0)),
                         score=1.0 - distance,
                         source="vector",
-                        chunk_index=0,
+                        chunk_index=int(row.get("chunk_index", 0)),
                         speaker=row.get("speaker") or None,
                     )
                 )

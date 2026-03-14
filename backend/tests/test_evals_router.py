@@ -136,6 +136,11 @@ async def test_get_results_returns_latest_per_dataset(test_db, tmp_path, monkeyp
 @pytest.mark.asyncio
 async def test_post_run_returns_202(test_db, monkeypatch):
     """POST /evals/run {dataset: 'book'} returns HTTP 202 with status='started'."""
+    # Ensure golden file exists so the 404 check passes
+    golden_dir = test_db / "golden"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    (golden_dir / "book.jsonl").write_text('{"question": "test"}')
+
     # Patch the background subprocess so tests don't actually run evals.
     # Close the coroutine explicitly to suppress 'coroutine was never awaited' warnings.
     monkeypatch.setattr(evals_module, "_fire_and_forget", lambda coro: coro.close())
@@ -153,10 +158,10 @@ async def test_post_run_returns_202(test_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_post_run_invalid_dataset(test_db):
-    """POST /evals/run with invalid dataset returns HTTP 422."""
+    """POST /evals/run with invalid dataset returns HTTP 404."""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post("/evals/run", json={"dataset": "invalid"})
 
-    assert resp.status_code == 422
+    assert resp.status_code == 404
