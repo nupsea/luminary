@@ -249,6 +249,38 @@ async def test_video_endpoint_returns_404_for_missing_doc(test_db):
     assert resp.status_code == 404
 
 
+async def test_status_endpoint_returns_ffmpeg_error_message(test_db):
+    """GET /documents/{id}/status propagates ffmpeg error_message when stage=error."""
+    doc_id = str(uuid.uuid4())
+    engine, factory, _ = test_db
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Video",
+                format="mp4",
+                content_type="video",
+                word_count=0,
+                page_count=0,
+                file_path="/tmp/lecture.mp4",
+                stage="error",
+                error_message="ffmpeg is not installed. Install it with: brew install ffmpeg",
+                tags=[],
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get(f"/documents/{doc_id}/status")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage"] == "error"
+    assert "ffmpeg" in body["error_message"].lower()
+
+
 async def test_video_endpoint_returns_400_for_non_video_doc(test_db, tmp_path, monkeypatch):
     """GET /documents/{id}/video returns 400 when document is not video type."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

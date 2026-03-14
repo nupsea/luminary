@@ -200,7 +200,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           if (!res.ok) return
           const data = (await res.json()) as StatusResponse
 
-          if (data.error_message ?? data.stage === "error") {
+          if (data.stage === "error" || data.error_message) {
             clearPolling()
             const errMsg = data.error_message ?? "Ingestion failed"
             logger.error("[Upload] failed", { stage: data.stage, error_message: errMsg, doc_id: docId })
