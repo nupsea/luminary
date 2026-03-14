@@ -56,6 +56,9 @@ class SectionModel(Base):
     page_end: Mapped[int] = mapped_column(Integer, default=0)
     section_order: Mapped[int] = mapped_column(Integer, nullable=False)
     preview: Mapped[str] = mapped_column(Text, default="")
+    # Tech section detection fields (set by tech_book/tech_article content type)
+    admonition_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    parent_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class ChunkModel(Base):
@@ -295,6 +298,26 @@ class CodeSnippetModel(Base):
     language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     signature: Mapped[str | None] = mapped_column(Text, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class LearningObjectiveModel(Base):
+    """Learning objective extracted from a tech_book/tech_article chapter introduction.
+
+    Rows are created by LearningObjectiveExtractorService as a background task
+    during ingestion.  They are shown in the Learning tab Chapter Goals panel.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "learning_objectives"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    section_id: Mapped[str] = mapped_column(String, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    covered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

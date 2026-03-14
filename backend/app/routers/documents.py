@@ -23,6 +23,7 @@ from app.models import (
     DocumentModel,
     FlashcardModel,
     LearningGoalModel,
+    LearningObjectiveModel,
     MisconceptionModel,
     NoteModel,
     QAHistoryModel,
@@ -137,6 +138,8 @@ class SectionItem(BaseModel):
     page_end: int
     section_order: int
     preview: str
+    admonition_type: str | None = None
+    parent_section_id: str | None = None
 
 
 class DocumentDiagnostics(BaseModel):
@@ -734,6 +737,8 @@ async def get_document(document_id: str):
                 page_end=s.page_end,
                 section_order=s.section_order,
                 preview=s.preview,
+                admonition_type=s.admonition_type,
+                parent_section_id=s.parent_section_id,
             )
             for s in sections
         ],
@@ -800,6 +805,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 {"doc_id": document_id},
             )
             for model in (
+                LearningObjectiveModel,
                 CodeSnippetModel,
                 ChunkModel,
                 SectionModel,
@@ -894,6 +900,7 @@ async def delete_document(document_id: str):
             {"doc_id": document_id},
         )
         for model in (
+            LearningObjectiveModel,
             CodeSnippetModel,
             ChunkModel,
             SectionModel,
@@ -1071,3 +1078,50 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
         )
         for s in snippets
     ]
+
+
+class LearningObjectiveItem(BaseModel):
+    id: str
+    section_id: str
+    text: str
+    covered: bool
+
+
+class LearningObjectivesResponse(BaseModel):
+    document_id: str
+    objectives: list[LearningObjectiveItem]
+
+
+@router.get("/{document_id}/objectives", response_model=LearningObjectivesResponse)
+async def get_objectives(document_id: str) -> LearningObjectivesResponse:
+    """Return extracted learning objectives for a document.
+
+    Returns empty list for fiction books (no rows).
+    Returns 404 if the document does not exist.
+    """
+    async with get_session_factory()() as session:
+        doc_check = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        result = await session.execute(
+            select(LearningObjectiveModel)
+            .where(LearningObjectiveModel.document_id == document_id)
+            .order_by(LearningObjectiveModel.created_at)
+        )
+        objectives = result.scalars().all()
+
+    return LearningObjectivesResponse(
+        document_id=document_id,
+        objectives=[
+            LearningObjectiveItem(
+                id=obj.id,
+                section_id=obj.section_id,
+                text=obj.text,
+                covered=obj.covered,
+            )
+            for obj in objectives
+        ],
+    )

@@ -6,6 +6,8 @@ export interface SectionItem {
   page_end: number
   section_order: number
   preview: string
+  admonition_type: string | null
+  parent_section_id: string | null
 }
 
 export interface DocumentDetail {

@@ -20,6 +20,8 @@ class SectionResponse(BaseModel):
     section_order: int
     chunk_count: int
     has_summary: bool
+    admonition_type: str | None = None
+    parent_section_id: str | None = None
 
 
 @router.get("/{document_id}", response_model=list[SectionResponse])
@@ -58,6 +60,8 @@ async def get_sections(document_id: str) -> list[SectionResponse]:
             chunk_count=chunk_counts.get(s.id, 0),
             # Section-level summaries not yet implemented — always False.
             has_summary=False,
+            admonition_type=s.admonition_type,
+            parent_section_id=s.parent_section_id,
         )
         for s in sections
     ]

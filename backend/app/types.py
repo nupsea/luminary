@@ -9,6 +9,8 @@ class Section:
     text: str
     page_start: int
     page_end: int
+    admonition_type: str | None = None   # 'note'|'warning'|'tip'|'caution'|'important' or None
+    parent_heading: str | None = None    # heading string of the logical parent section
 
 
 @dataclass

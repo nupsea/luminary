@@ -12,6 +12,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     EvalRunModel,
     FlashcardModel,
     LearningGoalModel,
+    LearningObjectiveModel,
     LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
@@ -71,6 +72,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN has_code INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE chunks ADD COLUMN code_language TEXT",
             "ALTER TABLE chunks ADD COLUMN code_signature TEXT",
+            "ALTER TABLE sections ADD COLUMN admonition_type TEXT",
+            "ALTER TABLE sections ADD COLUMN parent_section_id TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

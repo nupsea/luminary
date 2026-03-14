@@ -12,6 +12,7 @@ import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { AnnotationPopover } from "./AnnotationPopover"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const API_BASE = "http://localhost:8000"
 
@@ -31,6 +32,27 @@ function fragilityBorderClass(score: number | null): string {
   if (score <= 0.3) return "border-l-4 border-l-green-500"
   if (score <= 0.6) return "border-l-4 border-l-yellow-500"
   return "border-l-4 border-l-red-500"
+}
+
+const ADMONITION_STYLES: Record<string, string> = {
+  note:      "border-l-4 border-l-blue-500 bg-blue-50/40",
+  warning:   "border-l-4 border-l-red-500 bg-red-50/40",
+  tip:       "border-l-4 border-l-green-500 bg-green-50/40",
+  caution:   "border-l-4 border-l-orange-500 bg-orange-50/40",
+  important: "border-l-4 border-l-purple-500 bg-purple-50/40",
+}
+
+const ADMONITION_LABEL_COLORS: Record<string, string> = {
+  note:      "#3b82f6",
+  warning:   "#ef4444",
+  tip:       "#22c55e",
+  caution:   "#f97316",
+  important: "#a855f7",
+}
+
+function admonitionClass(type: string | null): string {
+  if (!type) return ""
+  return ADMONITION_STYLES[type] ?? ""
 }
 
 function buildYouTubeTimestampUrl(sourceUrl: string, seconds: number): string {
@@ -259,6 +281,63 @@ function GlossaryPanel({ documentId }: GlossaryPanelProps) {
           </tbody>
         </table>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Chapter Goals panel (right side, tech books only)
+// ---------------------------------------------------------------------------
+
+interface LearningObjective {
+  id: string
+  section_id: string
+  text: string
+  covered: boolean
+}
+
+interface ChapterGoalsPanelProps {
+  documentId: string
+}
+
+function ChapterGoalsPanel({ documentId }: ChapterGoalsPanelProps) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["objectives", documentId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/documents/${documentId}/objectives`)
+      if (!res.ok) throw new Error("Failed to fetch objectives")
+      return res.json() as Promise<{ objectives: LearningObjective[] }>
+    },
+    staleTime: 300_000,
+  })
+
+  if (isLoading) {
+    return (
+      <div className="mb-4 flex flex-col gap-1.5 py-2">
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-4 w-full" />)}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return <p className="mb-4 text-xs text-destructive">Could not load chapter goals.</p>
+  }
+
+  if (!data || data.objectives.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mb-4 rounded-lg border border-border bg-card p-4">
+      <h3 className="mb-2 text-sm font-semibold text-foreground">Chapter Goals</h3>
+      <ul className="space-y-1.5">
+        {data.objectives.map((obj) => (
+          <li key={obj.id} className="flex items-start gap-2 text-xs text-foreground/80">
+            <span className="mt-0.5 shrink-0 text-muted-foreground">-</span>
+            {obj.text}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -1073,7 +1152,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                         const hasNote = notedSections.has(section.id)
                         const editorOpen = openNoteEditor === section.id
                         const heatmapItem = heatmapData?.[section.id] ?? null
-                        const borderClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
+                        const fragilityClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
+                        // Admonition styling takes priority over fragility heatmap
+                        const sectionBorderClass = section.admonition_type
+                          ? admonitionClass(section.admonition_type)
+                          : fragilityClass
                         const tooltipText =
                           heatmapItem && heatmapItem.fragility_score !== null
                             ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
@@ -1085,13 +1168,21 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                             key={section.id}
                             data-section-id={section.id}
                             title={tooltipText}
-                            className={cn("rounded-md border border-border p-3", borderClass)}
+                            className={cn("rounded-md border border-border p-3", sectionBorderClass)}
                           >
                             <div className="flex items-start gap-1">
                               <p
                                 className="flex-1 text-sm font-semibold text-foreground"
                                 style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
                               >
+                                {section.admonition_type && (
+                                  <span
+                                    className="mr-1 rounded px-1 py-0.5 text-xs font-bold uppercase tracking-wide"
+                                    style={{ color: ADMONITION_LABEL_COLORS[section.admonition_type] ?? "inherit" }}
+                                  >
+                                    {section.admonition_type}
+                                  </span>
+                                )}
                                 {section.heading || "(Untitled section)"}
                               </p>
                               {/* Timestamp badge — link out for YouTube, seek locally for audio/video */}
@@ -1166,6 +1257,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
           {isVideo && videoUrl && (
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
           )}
+          {/* Chapter Goals panel — only visible for tech_book/tech_article with extracted objectives */}
+          <ChapterGoalsPanel documentId={documentId} />
           <SummaryPanel documentId={documentId} contentType={doc.content_type} />
         </div>
       </div>

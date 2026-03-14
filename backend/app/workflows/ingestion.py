@@ -407,6 +407,11 @@ async def _chunk_tech_book(
 
     from app.models import DocumentModel  # noqa: PLC0415
     from app.services.tech_book_chunker import chunk_mixed_content  # noqa: PLC0415
+    from app.services.tech_section_parser import (  # noqa: PLC0415
+        assign_parent_headings_dicts,
+        detect_admonition,
+        is_objective_candidate,
+    )
 
     content_type = state.get("content_type") or "tech_book"
     cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["tech_book"])
@@ -430,21 +435,36 @@ async def _chunk_tech_book(
                 }
             ]
 
+        # Enrich section dicts with level, parent_heading, and admonition_type
+        assign_parent_headings_dicts(raw_sections)
+        for s in raw_sections:
+            s["admonition_type"] = detect_admonition(s.get("text", ""))
+
         section_models: list[SectionModel] = []
         for s_idx, s in enumerate(raw_sections):
             section_model = SectionModel(
                 id=str(uuid.uuid4()),
                 document_id=doc_id,
                 heading=s.get("heading", "") or f"Section {s_idx + 1}",
-                level=s.get("level", 1),
+                level=s.get("level", 2),
                 page_start=s.get("page_start", 0),
                 page_end=s.get("page_end", 0),
                 section_order=s_idx,
                 preview=s.get("text", "")[:10000],
+                admonition_type=s.get("admonition_type"),
+                parent_section_id=None,  # resolved after flush below
             )
             session.add(section_model)
             section_models.append(section_model)
 
+        await session.flush()
+
+        # Resolve parent_section_id: build heading->id map, then update
+        heading_to_id: dict[str, str] = {sm.heading: sm.id for sm in section_models}
+        for s, sm in zip(raw_sections, section_models, strict=False):
+            ph = s.get("parent_heading")
+            if ph:
+                sm.parent_section_id = heading_to_id.get(ph)
         await session.flush()
 
         chunks: list[dict] = []
@@ -515,6 +535,19 @@ async def _chunk_tech_book(
             .values(chapter_count=len(section_models))
         )
         await session.commit()
+
+    # Fire-and-forget objective extraction for qualifying sections
+    qualifying_sections = [
+        (sm.id, sm.heading, s.get("text", ""))
+        for sm, s in zip(section_models, raw_sections, strict=False)
+        if is_objective_candidate(s.get("text", ""))
+    ]
+    if qualifying_sections:
+        task = asyncio.create_task(
+            _run_objective_extraction(doc_id, qualifying_sections)
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     logger.info(
         "Tech-book chunking complete",
@@ -1208,6 +1241,34 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
 # Strong references to background tasks — prevents GC before they complete.
 # asyncio only holds weak refs to tasks; without this they can be collected mid-run.
 _background_tasks: set[asyncio.Task] = set()
+
+
+async def _run_objective_extraction(
+    doc_id: str, sections: list[tuple[str, str, str]]
+) -> None:
+    """Background task: extract and store learning objectives for qualifying sections.
+
+    sections is a list of (section_id, section_heading, section_text) tuples.
+    Non-fatal: failure is logged and does not interrupt ingestion.
+    """
+    from app.services.learning_objective_extractor import (  # noqa: PLC0415
+        LearningObjectiveExtractorService,
+    )
+
+    extractor = LearningObjectiveExtractorService()
+    # Accumulate all extracted objectives first, then store in a single transaction
+    # to avoid successive store() calls overwriting each other's rows.
+    all_section_objectives: list[tuple[str, list[str]]] = []
+    for section_id, section_heading, section_text in sections:
+        objectives = await extractor.extract(doc_id, section_id, section_heading, section_text)
+        if objectives:
+            all_section_objectives.append((section_id, objectives))
+            logger.info(
+                "Objectives extracted for section",
+                extra={"doc_id": doc_id, "section_id": section_id, "count": len(objectives)},
+            )
+    if all_section_objectives:
+        await extractor.store_all(doc_id, all_section_objectives)
 
 
 async def _run_pregenerate(doc_id: str) -> None:

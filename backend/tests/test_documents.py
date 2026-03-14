@@ -561,3 +561,69 @@ async def test_documents_chunk_count_is_zero_for_fresh_doc(test_db):
     items = resp.json()["items"]
     assert len(items) == 1
     assert items[0]["chunk_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# GET /documents/{id}/objectives endpoint tests (S132)
+# ---------------------------------------------------------------------------
+
+
+async def test_objectives_returns_empty_for_fiction(test_db):
+    """GET /documents/{id}/objectives returns empty list for non-tech documents (not 404)."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="book"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/documents/{doc_id}/objectives")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["document_id"] == doc_id
+    assert data["objectives"] == []
+
+
+async def test_objectives_returns_404_for_missing_document(test_db):
+    """GET /documents/{id}/objectives returns 404 for an unknown document ID."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents/nonexistent-id/objectives")
+
+    assert resp.status_code == 404
+
+
+async def test_objectives_returns_populated_list(test_db):
+    """GET /documents/{id}/objectives returns inserted rows with correct fields."""
+    from app.models import LearningObjectiveModel
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    section_id = str(uuid.uuid4())
+    obj_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="tech_book"))
+        session.add(
+            LearningObjectiveModel(
+                id=obj_id,
+                document_id=doc_id,
+                section_id=section_id,
+                text="You will understand closures.",
+                covered=False,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/documents/{doc_id}/objectives")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["document_id"] == doc_id
+    assert len(data["objectives"]) == 1
+    obj = data["objectives"][0]
+    assert obj["id"] == obj_id
+    assert obj["section_id"] == section_id
+    assert obj["text"] == "You will understand closures."
+    assert obj["covered"] is False
