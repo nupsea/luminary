@@ -43,7 +43,7 @@ from app.runtime.chat_graph import (
     summary_node,
     synthesize_node,
 )
-from app.types import ChatState, ScoredChunk
+from app.types import ScoredChunk
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

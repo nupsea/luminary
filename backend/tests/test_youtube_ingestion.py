@@ -85,9 +85,11 @@ async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
 
 async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
     """POST /documents/ingest-url returns 503 when ffmpeg is not on PATH."""
-    with (
-        patch("app.services.youtube_downloader.shutil.which", side_effect=lambda x: "/usr/bin/yt-dlp" if x == "yt-dlp" else None),
-    ):
+
+    def _mock_which(cmd):
+        return "/usr/bin/yt-dlp" if cmd == "yt-dlp" else None
+
+    with patch("app.services.youtube_downloader.shutil.which", side_effect=_mock_which):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
