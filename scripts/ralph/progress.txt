@@ -1106,3 +1106,15 @@ Key decisions:
   - EnrichmentJobModel.status values are "pending"/"running"/"done"/"failed" -- "enriching" only appears in DocumentModel.stage. Frontend badge must check job status values, not document stage values.
   - enrichment_enqueue_node calls worker._dispatch_pending() directly (private method); add a public kick() in future to avoid coupling (High, tracked for S134)
 ---
+
+## S134 - Vision LLM image analysis: diagram classification, description embedding, and retrieval integration
+- Status: PASSED
+- Files changed: backend/app/config.py, backend/app/db_init.py, backend/app/main.py, backend/app/runtime/chat_graph.py, backend/app/services/image_extractor.py, backend/app/services/image_enricher.py (NEW), backend/app/services/qa.py, backend/app/services/retriever.py, backend/app/services/vector_store.py, backend/app/types.py, backend/tests/test_chat_graph_nodes.py, backend/tests/test_image_enricher.py (NEW), frontend/src/pages/Chat.tsx, scripts/smoke/S134.sh (NEW)
+- Tests: 852 passed, 1 skipped (integration test gated on llava:13b availability)
+- Learnings:
+  - When patching lazy imports (imports inside function bodies), patch at the source module (app.services.vector_store.get_lancedb_service), NOT the consuming module (app.services.image_enricher.get_lancedb_service) -- the latter has no attribute at module level
+  - Integration test gating: checking `shutil.which("ollama")` is insufficient -- must also run `ollama list` and check model name in output, otherwise test runs but fails because the model hasn't been pulled
+  - Atomic SQLite + FTS5: embed description BEFORE any DB writes; do UPDATE + FTS5 INSERT in a single session.commit() so both succeed or both roll back -- prevents stuck rows with description set but not in FTS5
+  - LanceDB image table is separate from chunk_vectors table; schema: image_id (str), document_id (str), vector (384-dim float32 from BAAI/bge-m3 description embedding)
+  - retrieve_with_images() returns (list[ScoredChunk], list[str]) tuple; search_node must unpack both and return image_ids in state dict
+---

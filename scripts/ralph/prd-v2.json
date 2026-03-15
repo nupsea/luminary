@@ -1269,7 +1269,7 @@
         "Chat context includes image_id when similarity search matches image description; frontend renders thumbnail",
         "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S134.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S135",
