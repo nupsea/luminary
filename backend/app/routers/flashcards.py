@@ -82,6 +82,13 @@ class ReviewRequest(BaseModel):
     session_id: str | None = None
 
 
+class GenerateTechnicalRequest(BaseModel):
+    document_id: str
+    scope: Literal["full", "section"] = "full"
+    section_heading: str | None = None
+    count: int = 10
+
+
 class FlashcardResponse(BaseModel):
     id: str
     document_id: str | None
@@ -99,6 +106,9 @@ class FlashcardResponse(BaseModel):
     reps: int
     lapses: int
     created_at: datetime
+    # S137: Bloom's Taxonomy fields
+    flashcard_type: str | None = None
+    bloom_level: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -126,6 +136,8 @@ def _to_response(card: FlashcardModel) -> FlashcardResponse:
         reps=card.reps,
         lapses=card.lapses,
         created_at=card.created_at,
+        flashcard_type=getattr(card, "flashcard_type", None),
+        bloom_level=getattr(card, "bloom_level", None),
     )
 
 
@@ -267,6 +279,37 @@ async def generate_flashcards_from_graph(
         ) from exc
     logger.info(
         "Generated graph flashcards",
+        extra={"document_id": req.document_id, "count": len(cards)},
+    )
+    return [_to_response(c) for c in cards]
+
+
+@router.post("/generate-technical", response_model=list[FlashcardResponse], status_code=201)
+async def generate_technical_flashcards(
+    req: GenerateTechnicalRequest,
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> list[FlashcardResponse]:
+    """Generate Bloom's-taxonomy-typed flashcards for technical documents. HTTP 201."""
+    try:
+        cards = await service.generate_technical(
+            document_id=req.document_id,
+            scope=req.scope,
+            section_heading=req.section_heading,
+            count=req.count,
+            session=session,
+        )
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is not running. Start it with: ollama serve",
+        ) from exc
+    logger.info(
+        "Generated technical flashcards",
         extra={"document_id": req.document_id, "count": len(cards)},
     )
     return [_to_response(c) for c in cards]

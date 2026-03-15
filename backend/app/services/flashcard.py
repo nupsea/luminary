@@ -267,6 +267,46 @@ def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
     return []
 
 
+TECH_FLASHCARD_SYSTEM = (
+    "You are a technical learning assistant creating flashcards based on Bloom's Taxonomy. "
+    "For each card choose exactly one of these flashcard types: "
+    "definition (L1), syntax_recall (L1), concept_explanation (L2), analogy (L2), "
+    "code_completion (L3), api_signature (L3), trace (L4), pattern_recognition (L4), "
+    "design_decision (L5), complexity (L5), implementation (L6). "
+    "Choose the type that best matches what the card asks the learner to do. "
+    "For code_completion cards: show a code block with a blank rendered as ____ where the "
+    "learner must supply the missing part. "
+    "For trace cards: show a code snippet and ask the learner to predict its output. "
+    "For design_decision cards: ask the learner to justify a technical choice. "
+    "For complexity cards: ask the learner to state and justify Big-O for an algorithm. "
+    "Questions must be self-contained. "
+    "NEVER use phrases like 'in this passage' or 'in this text'. "
+    "Output a JSON array starting with [ and ending with ]. "
+    'Each element: {"question": "...", "answer": "...", '
+    '"source_excerpt": "...", "flashcard_type": "...", "bloom_level": N}. '
+    "bloom_level is an integer 1-6. "
+    "Write no explanation, preamble, or markdown fences."
+)
+
+TECH_FLASHCARD_USER_TMPL = (
+    "Generate {count} technical flashcards from the text below.\n"
+    "Prefer higher Bloom levels (trace, code_completion, design_decision) when the text "
+    "contains code blocks, API signatures, or trade-off discussions.\n"
+    "When the section heading contains 'vs' or 'trade-off', generate at least one "
+    "design_decision card (bloom_level=5).\n"
+    "When the text contains an admonition type of 'warning', generate at least one "
+    "definition card (bloom_level=1) that captures the warning.\n"
+    "Each card must be answerable from the provided text only.\n"
+    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "...", '
+    '"flashcard_type": "...", "bloom_level": N}}]\n\n'
+    "Section heading: {section_heading}\n"
+    "Has code blocks: {has_code}\n"
+    "Admonition type: {admonition_type}\n\n"
+    "Text:\n{text}\n\n"
+    "JSON array:"
+)
+
+
 GAP_FLASHCARD_SYSTEM = (
     "You are a learning assistant. Generate exactly ONE flashcard for the given knowledge gap. "
     'Output ONLY a JSON object with two keys: {"front": "...", "back": "..."} '
@@ -705,6 +745,118 @@ class FlashcardService:
             )
 
         return all_cards
+
+
+    async def generate_technical(
+        self,
+        document_id: str,
+        scope: Literal["full", "section"],
+        section_heading: str | None,
+        count: int,
+        session: AsyncSession,
+    ) -> list[FlashcardModel]:
+        """Generate Bloom's-taxonomy-typed flashcards for tech_book/tech_article documents.
+
+        Uses TECH_FLASHCARD_SYSTEM exclusively. Stores flashcard_type and bloom_level
+        on every generated card.
+        """
+        llm = get_llm_service()
+
+        doc_result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = doc_result.scalar_one_or_none()
+        content_type = doc.content_type if doc else "unknown"
+
+        chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
+        if not chunks:
+            return []
+
+        # Determine context signals for the prompt
+        has_code = any(c.has_code for c in chunks)
+        admonition_type: str | None = None
+        if scope == "section" and section_heading:
+            sec_result = await session.execute(
+                select(SectionModel)
+                .where(SectionModel.document_id == document_id)
+                .where(SectionModel.heading == section_heading)
+                .limit(1)
+            )
+            sec = sec_result.scalar_one_or_none()
+            if sec:
+                admonition_type = sec.admonition_type
+
+        combined_text, first_chunk_id = _build_text(chunks)
+        if not combined_text:
+            return []
+
+        prompt = TECH_FLASHCARD_USER_TMPL.format(
+            count=count,
+            section_heading=section_heading or "(none)",
+            has_code=str(has_code),
+            admonition_type=admonition_type or "(none)",
+            text=combined_text,
+        )
+
+        with trace_chain(
+            "flashcard.generate_technical",
+            input_value=f"doc={document_id} scope={scope} count={count}",
+        ) as span:
+            span.set_attribute("flashcard.document_id", document_id)
+            span.set_attribute("flashcard.scope", scope)
+            span.set_attribute("flashcard.requested_count", count)
+            span.set_attribute("flashcard.mode", "technical")
+
+            raw = await llm.generate(prompt, system=TECH_FLASHCARD_SYSTEM, stream=False)
+            cards_data = _parse_llm_response(raw, document_id)
+            span.set_attribute("flashcard.generated_count", len(cards_data))
+
+        now = datetime.now(UTC)
+        flashcards: list[FlashcardModel] = []
+        for item in cards_data:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question", "")).strip()
+            answer = str(item.get("answer", "")).strip()
+            source_excerpt = str(item.get("source_excerpt", "")).strip()
+            flashcard_type = str(item.get("flashcard_type", "definition")).strip()
+            raw_bloom = item.get("bloom_level")
+            # Coerce bloom_level defensively: LLM may return int, float, or "4" string
+            if isinstance(raw_bloom, (int, float)):
+                bloom_level: int | None = int(raw_bloom)
+            elif isinstance(raw_bloom, str) and raw_bloom.isdigit():
+                bloom_level = int(raw_bloom)
+            else:
+                bloom_level = None
+            if not question or not answer:
+                continue
+            card = FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=document_id,
+                chunk_id=first_chunk_id,
+                question=question,
+                answer=answer,
+                source_excerpt=source_excerpt,
+                difficulty="medium",
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=now,
+                reps=0,
+                lapses=0,
+                created_at=now,
+                flashcard_type=flashcard_type,
+                bloom_level=bloom_level,
+            )
+            session.add(card)
+            flashcards.append(card)
+
+        if flashcards:
+            await session.commit()
+            for card in flashcards:
+                await session.refresh(card)
+
+        return flashcards
 
 
 _flashcard_service: FlashcardService | None = None

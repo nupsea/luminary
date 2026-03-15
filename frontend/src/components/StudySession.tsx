@@ -9,6 +9,7 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 import { Loader2, Check, AlertTriangle, X as XIcon, Mic, MicOff } from "lucide-react"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
 // ---------------------------------------------------------------------------
 // Web Speech API types (not included in all TS lib targets)
@@ -358,31 +359,31 @@ interface FlashCardProps {
 function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
   return (
     <div
-      className="relative h-64 w-full max-w-2xl cursor-pointer"
+      className="relative min-h-64 w-full max-w-2xl cursor-pointer"
       style={{ perspective: "1000px", position: "relative" }}
       onClick={onFlip}
     >
-      {/* Front — question */}
+      {/* Front — question (MarkdownRenderer for syntax highlighting in code blocks) */}
       <motion.div
-        className="absolute flex h-full w-full flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center shadow-md"
+        className="absolute flex min-h-64 w-full flex-col items-center justify-center overflow-auto rounded-xl border border-border bg-card p-8 text-center shadow-md"
         animate={{ rotateY: showAnswer ? -180 : 0 }}
         transition={{ duration: 0.4, ease: "easeInOut" }}
         style={{ backfaceVisibility: "hidden" }}
       >
-        <p className="text-xl font-semibold text-foreground">{card.question}</p>
+        <MarkdownRenderer className="text-xl font-semibold text-foreground">{card.question}</MarkdownRenderer>
       </motion.div>
 
-      {/* Back — question + answer */}
+      {/* Back — question + answer (MarkdownRenderer for syntax highlighting in code blocks) */}
       <motion.div
-        className="absolute flex h-full w-full flex-col items-center justify-center gap-4 rounded-xl border border-border bg-card p-8 text-center shadow-md"
+        className="absolute flex min-h-64 w-full flex-col items-center justify-center gap-4 overflow-auto rounded-xl border border-border bg-card p-8 text-center shadow-md"
         initial={{ rotateY: 180 }}
         animate={{ rotateY: showAnswer ? 0 : 180 }}
         transition={{ duration: 0.4, ease: "easeInOut" }}
         style={{ backfaceVisibility: "hidden" }}
       >
-        <p className="text-sm text-muted-foreground">{card.question}</p>
+        <MarkdownRenderer className="text-sm text-muted-foreground">{card.question}</MarkdownRenderer>
         <hr className="w-3/4 border-border" />
-        <p className="text-lg font-medium text-foreground">{card.answer}</p>
+        <MarkdownRenderer className="text-lg font-medium text-foreground">{card.answer}</MarkdownRenderer>
       </motion.div>
     </div>
   )

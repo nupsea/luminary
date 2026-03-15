@@ -74,6 +74,9 @@ interface Flashcard {
   lapses: number
   due_date: string | null
   created_at: string
+  // S137: Bloom's Taxonomy fields
+  flashcard_type: string | null
+  bloom_level: number | null
 }
 
 interface SectionItem {
@@ -447,11 +450,21 @@ function FlashcardCard({
         </div>
       )}
 
-      {/* Footer: FSRS state badge */}
-      <div className="flex items-center gap-2 border-t border-border pt-2">
+      {/* Footer: FSRS state badge + Bloom type/level badges */}
+      <div className="flex items-center gap-2 border-t border-border pt-2 flex-wrap">
         <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground capitalize">
           {card.fsrs_state}
         </span>
+        {card.flashcard_type && (
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 capitalize">
+            {card.flashcard_type.replace(/_/g, " ")}
+          </span>
+        )}
+        {card.bloom_level != null && (
+          <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">
+            L{card.bloom_level}
+          </span>
+        )}
         {card.is_user_edited && (
           <span className="text-xs text-muted-foreground italic">edited</span>
         )}
@@ -460,6 +473,93 @@ function FlashcardCard({
         </span>
       </div>
     </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FilterBar
+// ---------------------------------------------------------------------------
+
+const FLASHCARD_TYPE_OPTIONS = [
+  "(All)",
+  "definition",
+  "syntax_recall",
+  "concept_explanation",
+  "analogy",
+  "code_completion",
+  "api_signature",
+  "trace",
+  "pattern_recognition",
+  "design_decision",
+  "complexity",
+  "implementation",
+]
+
+interface FilterBarProps {
+  filterType: string | null
+  filterBloomMin: number
+  filterBloomMax: number
+  onTypeChange: (v: string | null) => void
+  onBloomMinChange: (v: number) => void
+  onBloomMaxChange: (v: number) => void
+  onClear: () => void
+}
+
+function FilterBar({
+  filterType,
+  filterBloomMin,
+  filterBloomMax,
+  onTypeChange,
+  onBloomMinChange,
+  onBloomMaxChange,
+  onClear,
+}: FilterBarProps) {
+  const hasFilter = filterType !== null || filterBloomMin !== 1 || filterBloomMax !== 6
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/20 p-3">
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Type</label>
+        <select
+          value={filterType ?? "(All)"}
+          onChange={(e) => onTypeChange(e.target.value === "(All)" ? null : e.target.value)}
+          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          {FLASHCARD_TYPE_OPTIONS.map((opt) => (
+            <option key={opt} value={opt}>{opt === "(All)" ? "All types" : opt.replace(/_/g, " ")}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Bloom level (min)</label>
+        <input
+          type="number"
+          min={1}
+          max={6}
+          value={filterBloomMin}
+          onChange={(e) => onBloomMinChange(Math.min(Number(e.target.value), filterBloomMax))}
+          className="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Bloom level (max)</label>
+        <input
+          type="number"
+          min={1}
+          max={6}
+          value={filterBloomMax}
+          onChange={(e) => onBloomMaxChange(Math.max(Number(e.target.value), filterBloomMin))}
+          className="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      </div>
+      {hasFilter && (
+        <button
+          onClick={onClear}
+          className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -1290,6 +1390,9 @@ export default function Study() {
   const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
   const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
   const [studySubTab, setStudySubTab] = useState<"flashcards" | "history">("flashcards")
+  const [filterType, setFilterType] = useState<string | null>(null)
+  const [filterBloomMin, setFilterBloomMin] = useState(1)
+  const [filterBloomMax, setFilterBloomMax] = useState(6)
   const mountTime = useRef(Date.now())
 
   // Document list for the in-tab picker
@@ -1544,6 +1647,19 @@ export default function Study() {
           </div>
         )}
 
+        {/* Filter bar — only shown when there are cards with type/level data */}
+        {cards.length > 0 && (
+          <FilterBar
+            filterType={filterType}
+            filterBloomMin={filterBloomMin}
+            filterBloomMax={filterBloomMax}
+            onTypeChange={setFilterType}
+            onBloomMinChange={setFilterBloomMin}
+            onBloomMaxChange={setFilterBloomMax}
+            onClear={() => { setFilterType(null); setFilterBloomMin(1); setFilterBloomMax(6) }}
+          />
+        )}
+
         {cardsLoading ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
             <Loader2 size={24} className="animate-spin" />
@@ -1559,26 +1675,56 @@ export default function Study() {
               No flashcards yet. Generate some above.
             </p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {cards.map((card) => (
-              <FlashcardCard
-                key={card.id}
-                card={card}
-                onUpdate={(id, data) => updateMutation.mutate({ id, data })}
-                onDelete={(id) => deleteMutation.mutate(id)}
-                isUpdating={updateMutation.isPending}
-                isDeleting={deleteMutation.isPending}
-              />
-            ))}
-          </div>
-        )}
+        ) : (() => {
+          const filteredCards = cards.filter((c) => {
+            const typeMatch = filterType === null || c.flashcard_type === filterType
+            const bloomMatch =
+              c.bloom_level == null ||
+              (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
+            return typeMatch && bloomMatch
+          })
+          if (filteredCards.length === 0) {
+            return (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No cards match the selected type/level filters. Try adjusting the filter.
+                </p>
+              </div>
+            )
+          }
+          return (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {filteredCards.map((card) => (
+                <FlashcardCard
+                  key={card.id}
+                  card={card}
+                  onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                  isUpdating={updateMutation.isPending}
+                  isDeleting={deleteMutation.isPending}
+                />
+              ))}
+            </div>
+          )
+        })()}
 
         {/* Bottom bar */}
         {cards.length > 0 && (
           <div className="flex items-center gap-3 border-t border-border pt-4">
             <span className="text-sm text-muted-foreground">
-              {cards.length} card{cards.length !== 1 ? "s" : ""}
+              {(() => {
+                const filteredCount = cards.filter((c) => {
+                  const typeMatch = filterType === null || c.flashcard_type === filterType
+                  const bloomMatch =
+                    c.bloom_level == null ||
+                    (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
+                  return typeMatch && bloomMatch
+                }).length
+                const total = cards.length
+                return filteredCount === total
+                  ? `${total} card${total !== 1 ? "s" : ""}`
+                  : `${filteredCount} of ${total} card${total !== 1 ? "s" : ""}`
+              })()}
             </span>
             <div className="ml-auto flex gap-2">
               <button

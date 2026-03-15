@@ -112,6 +112,9 @@ class FlashcardModel(Base):
     reps: Mapped[int] = mapped_column(Integer, default=0)
     lapses: Mapped[int] = mapped_column(Integer, default=0)
     last_review: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # S137: Bloom's Taxonomy fields — set by generate_technical(); null for non-tech cards
+    flashcard_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    bloom_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

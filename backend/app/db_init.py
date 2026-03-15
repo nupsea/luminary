@@ -86,6 +86,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN code_signature TEXT",
             "ALTER TABLE sections ADD COLUMN admonition_type TEXT",
             "ALTER TABLE sections ADD COLUMN parent_section_id TEXT",
+            # S137: Bloom's Taxonomy flashcard type/level — nullable; generate_technical() sets them
+            "ALTER TABLE flashcards ADD COLUMN flashcard_type TEXT",
+            "ALTER TABLE flashcards ADD COLUMN bloom_level INTEGER",
         ]:
             try:
                 await conn.execute(text(ddl))
