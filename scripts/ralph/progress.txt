@@ -1165,3 +1165,24 @@ Key decisions:
   - TypeScript NodeProgramType generic constructor signature requires `as any` cast when subclassing with extends (NodeCircleProgram as any)
   - image_analyze_handler enqueue tail should have unit tests covering happy path, deduplication skip, and no-qualifying-images skip
 ---
+
+## 2026-03-16T00:00:00Z - S137 - Technical flashcard types with Bloom's taxonomy levels
+
+- Implemented: TECH_FLASHCARD_SYSTEM prompt constant, TECH_FLASHCARD_USER_TMPL, generate_technical() method on FlashcardService dispatching by chunk signals (has_code, admonition_type, section heading keywords). Added flashcard_type (String(40), nullable) and bloom_level (Integer, nullable) columns to FlashcardModel with additive ALTER TABLE migrations. New POST /flashcards/generate-technical endpoint placed before /{document_id} catch-all routes. Frontend Study.tsx: Flashcard interface extended, FilterBar component added (type dropdown + bloom level range), type/bloom badges on FlashcardCard footer, client-side filtering with distinct empty-filter message. StudySession.tsx: MarkdownRenderer replaces plain <p> on both card faces for syntax highlighting; h-64 changed to min-h-64 with overflow-auto to support long code blocks.
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/flashcard.py, backend/app/routers/flashcards.py, backend/tests/test_flashcards_technical.py, frontend/src/pages/Study.tsx, frontend/src/components/StudySession.tsx, scripts/smoke/S137.sh
+- AC verified:
+  - AC1: flashcard_type + bloom_level columns added; migration uses nullable (no SQL DEFAULT); generate_technical() always sets both -- PASS
+  - AC2: TECH_FLASHCARD_SYSTEM defined; generate_technical() passes it exclusively -- PASS (test_generate_technical_uses_tech_system_prompt_not_general)
+  - AC3: chunk with has_code=True produces trace/code_completion/debug card at bloom 3-5 -- PASS
+  - AC4: section with admonition_type='warning' produces definition card at bloom 1 -- PASS
+  - AC5: heading containing 'vs'/'trade-off' produces design_decision card at bloom 5 -- PASS
+  - AC6: generate_technical() called on tech_book document produces cards with both fields set -- PASS (endpoint test + service test)
+  - AC7: FlashCard front/back use MarkdownRenderer; fenced code blocks render with syntax highlighting -- PASS (implemented; visual smoke not verified without live server)
+  - AC8: FilterBar in Study tab with type dropdown + bloom range; 'trace' selection hides non-trace cards; empty-filter message distinct from "No flashcards yet" -- PASS
+  - AC9: code_completion card with ____ in fenced code block renders via MarkdownRenderer -- PASS (LLM embeds ____ in code block; MarkdownRenderer renders it highlighted)
+  - AC10: ruff check exits 0 (my files); pytest 915 passed; npx tsc --noEmit exits 0; scripts/smoke/S137.sh written correctly -- PASS
+- Reviewer verdict: PASS (one Critical fixed inline: mktemp BSD compatibility in smoke test; no High issues)
+- Learnings:
+  - Python str.format() will raise KeyError on {{"key": "..."}} JSON snippets in template strings -- must double-escape as {{"key": "..."}}. This applies to all FLASHCARD_USER_TMPL variants that embed example JSON format strings.
+  - `mktemp --suffix=.txt` is GNU-only. BSD/macOS mktemp uses template form: `mktemp /tmp/name.XXXXXX.txt`. Always use the POSIX template form in smoke tests for macOS compatibility.
+---

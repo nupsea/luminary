@@ -1330,7 +1330,7 @@
         "code_completion card blank renders as ____ in a code block with inline input for answer",
         "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S137.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S138",
