@@ -1186,3 +1186,23 @@ Key decisions:
   - Python str.format() will raise KeyError on {{"key": "..."}} JSON snippets in template strings -- must double-escape as {{"key": "..."}}. This applies to all FLASHCARD_USER_TMPL variants that embed example JSON format strings.
   - `mktemp --suffix=.txt` is GNU-only. BSD/macOS mktemp uses template form: `mktemp /tmp/name.XXXXXX.txt`. Always use the POSIX template form in smoke tests for macOS compatibility.
 ---
+
+## 2026-03-16T00:00:00Z - S138 - Web reference grounding: LLM-suggested canonical references per technical concept with pedagogical ranking
+- Implemented: WebReferenceModel (models.py, db_init.py), WEB_SEARCH_PROVIDER setting (config.py), ReferenceEnricherService + sort_by_quality + web_refs_handler (services/reference_enricher.py), GET /references/documents/{id} + GET /references/sections/{id} + POST /references/sections/{id}/refresh (routers/references.py), registered handler in main.py, added WebReferenceModel to delete cascade in documents.py (2 places), enqueue web_refs job in section_summarizer.py after >0 summaries written, section_id field added to FlashcardResponse and populated via chunk join in GET /study/due, ReferencesPanel.tsx (loading/error/empty states, quality badges, outdated badge + refresh), References tab in DocumentReader SummaryPanel, SourcePanel in StudySession shown when lastRating==="again" with advanceCard() "Continue" button, scripts/smoke/S138.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/config.py, backend/app/services/reference_enricher.py (NEW), backend/app/services/section_summarizer.py, backend/app/routers/references.py (NEW), backend/app/routers/documents.py, backend/app/routers/flashcards.py, backend/app/routers/study.py, backend/app/main.py, backend/tests/test_reference_enricher.py (NEW), frontend/src/components/reader/ReferencesPanel.tsx (NEW), frontend/src/components/reader/DocumentReader.tsx, frontend/src/components/StudySession.tsx, scripts/smoke/S138.sh (NEW)
+- AC verified:
+  - AC1 WebReferenceModel migrated via db_init.py: PASS
+  - AC2 Unit test: >=3 refs from 3+ term summary: PASS
+  - AC3 Unit test: sort_by_quality ordering: PASS
+  - AC4 Integration test: rows have source_quality set: PASS
+  - AC5 provider=none: is_llm_suggested=True, no HTTP calls: PASS
+  - AC6 GET /documents/{id}/references returns [] for fiction: PASS
+  - AC7 References panel in Document Reader sidebar: PASS
+  - AC8 Study tab "again" shows Source panel: PASS (reviewer fixed Critical: React batching race -- "again" now stays on card with SourcePanel + Continue button)
+  - AC9 Outdated badge + refresh button: PASS
+  - AC10 ruff/pytest/tsc/build/smoke: PASS (7/7 new tests pass, 922 total passing, pre-existing E501 in test_diagram_extractor.py not introduced by this story)
+- Reviewer verdict: PASS after Critical fix (SourcePanel not rendering due to React 18 state batching; fixed by keeping card on screen after "again" rating and adding advanceCard() + Continue button)
+- Learnings:
+  - React 18 automatic batching means multiple setX() calls in an async function apply in a single render. If you set state A then immediately clear it (setLastRating(null)) in the same microtask, the UI never sees state A. Solution: guard advancement behind a user action (Continue button) instead of resetting in handleRate.
+  - For enrichment handlers that are only called from background workers, docstrings should say "raises ServiceUnavailableError (propagates to worker)" not "raises HTTPException" -- only service methods called from API routers should raise HTTPException.
+---
