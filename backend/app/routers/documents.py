@@ -21,7 +21,9 @@ from app.models import (
     ChunkModel,
     CodeSnippetModel,
     DocumentModel,
+    EnrichmentJobModel,
     FlashcardModel,
+    ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
     MisconceptionModel,
@@ -107,6 +109,7 @@ class DocumentListItem(BaseModel):
     audio_duration_seconds: float | None
     source_url: str | None = None
     video_title: str | None = None
+    enrichment_status: str | None = None  # None if no enrichment job; else latest job status
 
 
 class DocumentListResponse(BaseModel):
@@ -295,6 +298,14 @@ async def list_documents(
             .correlate(DocumentModel)
             .scalar_subquery()
         )
+        enrichment_status_sq = (
+            select(EnrichmentJobModel.status)
+            .where(EnrichmentJobModel.document_id == DocumentModel.id)
+            .order_by(EnrichmentJobModel.created_at.desc())
+            .limit(1)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
 
         stmt = select(
             DocumentModel,
@@ -305,6 +316,7 @@ async def list_documents(
             chunk_count_sq.label("chunk_count"),
             section_count_sq.label("section_count"),
             read_section_count_sq.label("read_section_count"),
+            enrichment_status_sq.label("enrichment_status"),
         )
 
         result = await session.execute(stmt)
@@ -321,6 +333,7 @@ async def list_documents(
         chunk_count = row[5] or 0
         section_count = row[6] or 0
         read_section_count = row[7] or 0
+        enrichment_status = row[8]
         reading_progress_pct = (read_section_count / section_count) if section_count > 0 else 0.0
         all_items.append(
             DocumentListItem(
@@ -345,6 +358,7 @@ async def list_documents(
                 audio_duration_seconds=doc.audio_duration_seconds,
                 source_url=doc.source_url,
                 video_title=doc.video_title,
+                enrichment_status=enrichment_status,
             )
         )
 
@@ -805,6 +819,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 {"doc_id": document_id},
             )
             for model in (
+                EnrichmentJobModel,
+                ImageModel,
                 LearningObjectiveModel,
                 CodeSnippetModel,
                 ChunkModel,
@@ -836,6 +852,11 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
             get_graph_service().delete_document(document_id)
         except Exception:
             logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
+        # Remove extracted images directory
+        settings = get_settings()
+        images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
+        if images_dir.exists():
+            shutil.rmtree(images_dir, ignore_errors=True)
         _delete_raw_file(document_id)
         deleted.append(document_id)
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
@@ -900,6 +921,8 @@ async def delete_document(document_id: str):
             {"doc_id": document_id},
         )
         for model in (
+            EnrichmentJobModel,
+            ImageModel,
             LearningObjectiveModel,
             CodeSnippetModel,
             ChunkModel,
@@ -935,6 +958,12 @@ async def delete_document(document_id: str):
         get_graph_service().delete_document(document_id)
     except Exception:
         logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
+
+    # Remove extracted images directory
+    settings = get_settings()
+    images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
+    if images_dir.exists():
+        shutil.rmtree(images_dir, ignore_errors=True)
 
     _delete_raw_file(document_id)
     logger.info("Deleted document %s", document_id)

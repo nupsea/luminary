@@ -43,6 +43,7 @@ STAGE_PROGRESS: dict[str, int] = {
     "embedding": 70,
     "indexing": 80,
     "entity_extract": 90,
+    "enriching": 95,
     "complete": 100,
     "error": 0,
 }
@@ -1355,6 +1356,69 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
     return state
 
 
+async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
+    """Create an image_extract enrichment job and set stage='enriching'.
+
+    Only runs for formats that may contain images (PDF, EPUB).
+    For all other formats, returns without changing state.
+    Non-fatal: enrichment failure does not prevent document from being usable.
+    """
+    import uuid as _uuid  # noqa: PLC0415
+
+    from sqlalchemy import update as _update  # noqa: PLC0415
+
+    from app.models import DocumentModel, EnrichmentJobModel  # noqa: PLC0415
+
+    doc_id = state["document_id"]
+    fmt = state.get("format", "").lower()
+    _IMAGE_FORMATS = {"pdf", "epub"}
+
+    if fmt not in _IMAGE_FORMATS:
+        logger.info(
+            "enrichment_enqueue_node: skipping (format=%s has no images)", fmt,
+            extra={"doc_id": doc_id},
+        )
+        return state
+
+    try:
+        job_id = str(_uuid.uuid4())
+        async with get_session_factory()() as session:
+            session.add(
+                EnrichmentJobModel(
+                    id=job_id,
+                    document_id=doc_id,
+                    job_type="image_extract",
+                    status="pending",
+                )
+            )
+            await session.execute(
+                _update(DocumentModel)
+                .where(DocumentModel.id == doc_id)
+                .values(stage="enriching")
+            )
+            await session.commit()
+
+        from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
+
+        worker = get_enrichment_worker()
+        task = asyncio.create_task(worker._dispatch_pending())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+        logger.info(
+            "enrichment_enqueue_node: enqueued image_extract job=%s doc=%s",
+            job_id,
+            doc_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "enrichment_enqueue_node failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+    return state
+
+
 def _route_on_status(next_node: str):
     """Return a router that goes to error_finalize if status=='error', else next_node."""
 
@@ -1375,6 +1439,7 @@ def _build_graph():
     builder.add_node("entity_extract", entity_extract_node)
     builder.add_node("section_summarize", section_summarize_node)
     builder.add_node("summarize", summarize_node)
+    builder.add_node("enrichment_enqueue", enrichment_enqueue_node)
     builder.add_node("error_finalize", error_finalize_node)
     builder.add_edge(START, "parse")
     builder.add_conditional_edges("parse", _route_on_status("classify"))
@@ -1385,7 +1450,8 @@ def _build_graph():
     builder.add_edge("keyword_index", "entity_extract")
     builder.add_edge("entity_extract", "section_summarize")
     builder.add_edge("section_summarize", "summarize")
-    builder.add_edge("summarize", END)
+    builder.add_edge("summarize", "enrichment_enqueue")
+    builder.add_edge("enrichment_enqueue", END)
     builder.add_edge("error_finalize", END)
     return builder.compile()
 

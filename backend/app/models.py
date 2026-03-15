@@ -24,7 +24,7 @@ class DocumentModel(Base):
     # SHA-256 hex digest of the original file — used for upload deduplication.
     # Nullable so rows created before this column was added are not affected.
     file_hash: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    # parsing|chunking|embedding|complete|error
+    # parsing|chunking|embedding|complete|enriching|error
     stage: Mapped[str] = mapped_column(String, default="parsing")
     tags: Mapped[list] = mapped_column(JSON, default=list)
     # Number of detected sections/chapters (set during book ingestion).
@@ -343,4 +343,68 @@ class AnnotationModel(Base):
     note_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class EnrichmentJobModel(Base):
+    """Async enrichment job queue entry.
+
+    job_type values registered so far:
+      image_extract  -- S133: PDF/EPUB image extraction
+      image_analyze  -- S134: vision LLM image description
+      prerequisites  -- S139: prerequisite graph extraction
+      web_refs       -- S138: web reference resolution
+      concept_link   -- S141: cross-document concept linking
+
+    status values:
+      pending  -- queued, not yet started
+      running  -- worker has picked this job up
+      done     -- completed successfully
+      failed   -- error_message contains the cause
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without FK pragma enforcement).
+    """
+
+    __tablename__ = "enrichment_jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    job_type: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class ImageModel(Base):
+    """Extracted image from a PDF or EPUB document.
+
+    chunk_id is the nearest preceding prose chunk by page/index (set during
+    extraction; null if no prose chunk precedes the image on the same page).
+    image_type and description are null until S134 (vision analysis) runs.
+
+    Note: any new delete path in documents.py must also delete these rows.
+    """
+
+    __tablename__ = "images"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    page: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Relative path from DATA_DIR, e.g. "images/{doc_id}/{page}_{index}.png"
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # null until S134 vision analysis populates it
+    image_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    # null until S134 vision analysis populates it
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "content_hash", name="uq_image_doc_hash"),
     )

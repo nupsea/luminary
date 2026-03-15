@@ -31,6 +31,7 @@ from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
 from app.routers.reading import router as reading_router
 from app.routers.search import router as search_router
+from app.routers.images import router as images_router
 from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
@@ -56,7 +57,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
     data_dir = Path(settings.DATA_DIR).expanduser()
-    for subdir in ("raw", "models", "vectors"):
+    for subdir in ("raw", "models", "vectors", "images"):
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
     engine = get_engine()
     await create_all_tables(engine)
@@ -66,6 +67,14 @@ async def lifespan(app: FastAPI):
     # SQLAlchemy engines globally, including Phoenix's own phoenix.db, creating
     # a trace-feedback loop (Phoenix traces → phoenix.db write → new trace → …).
     get_graph_service()  # initialise KuzuService and create schema on startup
+
+    # Start enrichment queue worker and register job handlers
+    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
+    from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
+
+    worker = get_enrichment_worker()
+    worker.register("image_extract", image_extract_handler)
+    await worker.start()
 
     # Ollama startup health-check — warn early if the local LLM is unreachable.
     try:
@@ -100,6 +109,9 @@ async def lifespan(app: FastAPI):
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
+    from app.services.enrichment_worker import get_enrichment_worker as _get_worker  # noqa: PLC0415
+
+    await _get_worker().stop()
 
 
 app = FastAPI(title="Luminary", lifespan=lifespan)
