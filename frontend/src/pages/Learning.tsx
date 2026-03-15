@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { MapPin } from "lucide-react"
 import {
   BookPlus,
   ChevronDown,
@@ -537,6 +538,93 @@ function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Where to Start panel (S139) -- shown for tech_book / tech_article documents
+// ---------------------------------------------------------------------------
+
+interface StartConceptItem {
+  concept: string
+  prereq_chain_length: number
+  flashcard_count: number
+  rationale: string
+}
+
+interface StartConceptsData {
+  document_id: string
+  concepts: StartConceptItem[]
+}
+
+async function fetchStartConcepts(documentId: string): Promise<StartConceptsData> {
+  const res = await fetch(
+    `${API_BASE}/study/start?document_id=${encodeURIComponent(documentId)}`
+  )
+  if (!res.ok) throw new Error("Failed to fetch start concepts")
+  return res.json() as Promise<StartConceptsData>
+}
+
+function WhereToStartPanel({
+  documentId,
+  contentType,
+}: {
+  documentId: string
+  contentType: string
+}) {
+  const isTechDoc = contentType === "tech_book" || contentType === "tech_article"
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["start-concepts", documentId],
+    queryFn: () => fetchStartConcepts(documentId),
+    staleTime: 60_000,
+    enabled: isTechDoc,
+  })
+
+  if (!isTechDoc) return null
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-border bg-card mb-4">
+        <p className="text-sm font-semibold px-4 py-2 border-b">Where to Start</p>
+        <div className="flex flex-col gap-2 p-4">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-5 w-1/2" />
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 mb-4 text-xs text-amber-800">
+        Could not load starting concepts.{" "}
+        <button
+          onClick={() => void refetch()}
+          className="underline hover:no-underline"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (!data || data.concepts.length === 0) return null
+
+  return (
+    <div className="rounded-lg border border-border bg-card mb-4">
+      <div className="flex items-center gap-2 px-4 py-2 border-b">
+        <MapPin size={14} className="text-muted-foreground" />
+        <p className="text-sm font-semibold">Where to Start</p>
+      </div>
+      <div className="flex flex-col gap-2 p-4">
+        {data.concepts.map((c) => (
+          <div key={c.concept} className="flex items-center justify-between text-sm">
+            <span className="font-medium">{c.concept}</span>
+            <span className="text-xs text-muted-foreground">{c.rationale}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
@@ -669,12 +757,28 @@ export default function Learning() {
   }
 
   if (activeDocumentId) {
+    // Look up content_type for the active document from cached data
+    const allKnownDocs = [
+      ...(pageData?.items ?? []),
+      ...(recentItems ?? []),
+    ]
+    const activeDoc = allKnownDocs.find((d) => d.id === activeDocumentId)
+    const activeContentType = activeDoc?.content_type ?? ""
+
     return (
-      <DocumentReader
-        documentId={activeDocumentId}
-        onBack={() => setActiveDocument(null)}
-        initialSectionId={initialSectionId}
-      />
+      <div className="flex h-full flex-col">
+        <WhereToStartPanel
+          documentId={activeDocumentId}
+          contentType={activeContentType}
+        />
+        <div className="flex-1 min-h-0">
+          <DocumentReader
+            documentId={activeDocumentId}
+            onBack={() => setActiveDocument(null)}
+            initialSectionId={initialSectionId}
+          />
+        </div>
+      </div>
     )
   }
 

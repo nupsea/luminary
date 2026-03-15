@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
     from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
     from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
     from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
+    from app.services.prereq_extractor import prereq_extract_handler  # noqa: PLC0415
     from app.services.reference_enricher import web_refs_handler  # noqa: PLC0415
 
     worker = get_enrichment_worker()
@@ -81,6 +82,7 @@ async def lifespan(app: FastAPI):
     worker.register("image_analyze", image_analyze_handler)
     worker.register("diagram_extract", diagram_extract_handler)
     worker.register("web_refs", web_refs_handler)
+    worker.register("prerequisites", prereq_extract_handler)
     await worker.start()
 
     # Ollama startup health-check — warn early if the local LLM is unreachable.

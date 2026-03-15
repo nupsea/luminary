@@ -400,6 +400,127 @@ class KuzuService:
             logger.debug("get_prerequisite_edges_for_document failed", exc_info=True)
             return []
 
+    def add_prerequisite_with_section(
+        self,
+        dependent_id: str,
+        prerequisite_id: str,
+        document_id: str,
+        confidence: float,
+        source_section_id: str,
+    ) -> None:
+        """Create a PREREQUISITE_OF edge with source_section_id; fallback for old DBs.
+
+        Idempotent: if the edge already exists, it is left unchanged.
+        Falls back to 2-property form for databases created before S139 (no source_section_id).
+        """
+        result = self._conn.execute(
+            "MATCH (a:Entity {id: $dep})-[r:PREREQUISITE_OF]->(b:Entity {id: $pre})"
+            " WHERE r.document_id = $did RETURN r.confidence",
+            {"dep": dependent_id, "pre": prerequisite_id, "did": document_id},
+        )
+        if not result.has_next():
+            try:
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
+                    " CREATE (a)-[:PREREQUISITE_OF {document_id: $did,"
+                    " confidence: $conf, source_section_id: $sid}]->(b)",
+                    {
+                        "dep": dependent_id, "pre": prerequisite_id,
+                        "did": document_id, "conf": confidence, "sid": source_section_id,
+                    },
+                )
+            except Exception:
+                # Old DB without source_section_id column -- fall back to 2-property form
+                logger.debug(
+                    "add_prerequisite_with_section: source_section_id absent, fallback",
+                    exc_info=True,
+                )
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
+                    " CREATE (a)-[:PREREQUISITE_OF {document_id: $did, confidence: $conf}]->(b)",
+                    {"dep": dependent_id, "pre": prerequisite_id,
+                     "did": document_id, "conf": confidence},
+                )
+
+    def has_prerequisite_edges(self, document_id: str) -> bool:
+        """Return True if the document has any PREREQUISITE_OF edges."""
+        try:
+            result = self._conn.execute(
+                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
+                " WHERE r.document_id = $did RETURN r LIMIT 1",
+                {"did": document_id},
+            )
+            return result.has_next()
+        except Exception:
+            return False
+
+    def get_entry_point_concepts(self, document_id: str, limit: int = 10) -> list[str]:
+        """Return entity names that have no outgoing PREREQUISITE_OF edges for this document.
+
+        These are root concepts (no listed prerequisites) that ARE referenced as
+        prerequisites by other concepts -- valid entry-point starting concepts.
+        Returns at most `limit` names, ordered by MENTIONED_IN count desc.
+        """
+        try:
+            # All concepts with MENTIONED_IN this doc
+            all_result = self._conn.execute(
+                "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
+                " RETURN e.id, e.name, r.count",
+                {"did": document_id},
+            )
+            all_entities: dict[str, tuple[str, int]] = {}  # id -> (name, count)
+            while all_result.has_next():
+                row = all_result.get_next()
+                all_entities[row[0]] = (row[1], int(row[2] or 1))
+
+            # Concepts with outgoing PREREQUISITE_OF edges (they have prerequisites)
+            dep_result = self._conn.execute(
+                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
+                " WHERE r.document_id = $did RETURN DISTINCT a.id",
+                {"did": document_id},
+            )
+            has_prereqs: set[str] = set()
+            while dep_result.has_next():
+                has_prereqs.add(dep_result.get_next()[0])
+
+            # Concepts pointed to as prerequisites (targets in the graph)
+            referenced_result = self._conn.execute(
+                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
+                " WHERE r.document_id = $did RETURN DISTINCT b.id",
+                {"did": document_id},
+            )
+            referenced: set[str] = set()
+            while referenced_result.has_next():
+                referenced.add(referenced_result.get_next()[0])
+
+            # Entry points: in the doc, no outgoing prereq edges, AND are referenced as prereqs
+            entry = [
+                (eid, name, count)
+                for eid, (name, count) in all_entities.items()
+                if eid not in has_prereqs and eid in referenced
+            ]
+            entry.sort(key=lambda x: x[2], reverse=True)
+            return [name for _, name, _ in entry[:limit]]
+        except Exception:
+            logger.debug("get_entry_point_concepts failed", exc_info=True)
+            return []
+
+    def get_prerequisite_edges_for_graph(self, document_id: str) -> list[dict]:
+        """Return PREREQUISITE_OF edges in the graph wire format for Viz rendering.
+
+        Returns list of {source, target, weight, relation} dicts.
+        """
+        raw = self.get_prerequisite_edges_for_document(document_id)
+        return [
+            {
+                "source": e["from_id"],
+                "target": e["to_id"],
+                "weight": e["confidence"],
+                "relation": "PREREQUISITE_OF",
+            }
+            for e in raw
+        ]
+
     def get_learning_path(self, start_entity_name: str, document_id: str) -> dict:
         """Return topologically sorted prerequisite chain starting from start_entity_name.
 
@@ -659,6 +780,8 @@ class KuzuService:
 
         edges = self._get_co_occurrence_edges(entity_ids, document_id)
         edges.extend(self._get_tech_relation_edges(entity_ids, document_id))
+        # Include PREREQUISITE_OF edges for Viz tab (S139)
+        edges.extend(self.get_prerequisite_edges_for_graph(document_id))
 
         # Include diagram-derived nodes and edges (S136)
         diagram_nodes = self.get_diagram_nodes_for_document(document_id)

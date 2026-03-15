@@ -535,3 +535,93 @@ def test_entities_endpoint_not_captured_by_document_id_route(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "entities" in data  # entity list response, not graph document response
+
+
+# ---------------------------------------------------------------------------
+# S139: add_prerequisite_with_section, has_prerequisite_edges,
+#       get_entry_point_concepts, get_prerequisite_edges_for_graph
+# ---------------------------------------------------------------------------
+
+
+def test_add_prerequisite_with_section_creates_edge(graph_svc: KuzuService):
+    """add_prerequisite_with_section writes a PREREQUISITE_OF edge."""
+    graph_svc.upsert_entity("e1", "closures", "CONCEPT")
+    graph_svc.upsert_entity("e2", "functions", "CONCEPT")
+    graph_svc.add_prerequisite_with_section(
+        dependent_id="e1",
+        prerequisite_id="e2",
+        document_id="d1",
+        confidence=0.85,
+        source_section_id="sec-1",
+    )
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:PREREQUISITE_OF]->(b:Entity {id: 'e2'})"
+        " WHERE r.document_id = 'd1' RETURN r.confidence"
+    )
+    assert result.has_next()
+    assert result.get_next()[0] == pytest.approx(0.85)
+
+
+def test_add_prerequisite_with_section_idempotent(graph_svc: KuzuService):
+    """add_prerequisite_with_section is idempotent; calling twice writes one edge."""
+    graph_svc.upsert_entity("e1", "decorators", "CONCEPT")
+    graph_svc.upsert_entity("e2", "functions", "CONCEPT")
+    graph_svc.add_prerequisite_with_section("e1", "e2", "d1", 0.9, "sec-1")
+    graph_svc.add_prerequisite_with_section("e1", "e2", "d1", 0.9, "sec-1")
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:PREREQUISITE_OF]->(b:Entity {id: 'e2'})"
+        " WHERE r.document_id = 'd1' RETURN count(r)"
+    )
+    assert result.get_next()[0] == 1
+
+
+def test_has_prerequisite_edges_true(graph_svc: KuzuService):
+    """has_prerequisite_edges returns True when at least one edge exists."""
+    graph_svc.upsert_entity("e1", "async", "CONCEPT")
+    graph_svc.upsert_entity("e2", "coroutines", "CONCEPT")
+    graph_svc.add_prerequisite("e1", "e2", "d1", 0.8)
+    assert graph_svc.has_prerequisite_edges("d1") is True
+
+
+def test_has_prerequisite_edges_false_no_edges(graph_svc: KuzuService):
+    """has_prerequisite_edges returns False when no PREREQUISITE_OF edges exist for doc."""
+    assert graph_svc.has_prerequisite_edges("no-such-doc") is False
+
+
+def test_get_entry_point_concepts_returns_roots(graph_svc: KuzuService):
+    """get_entry_point_concepts returns entities that are prereqs for others but have none."""
+    # Chain: closures -> functions -> variables
+    # 'variables' has no prereqs and IS a prereq for 'functions' -> entry point
+    # 'functions' has a prereq ('variables') -> not an entry point
+    # 'closures' has a prereq ('functions') -> not an entry point
+    graph_svc.upsert_entity("e1", "closures", "CONCEPT")
+    graph_svc.upsert_entity("e2", "functions", "CONCEPT")
+    graph_svc.upsert_entity("e3", "variables", "CONCEPT")
+    graph_svc.upsert_document("d1", "Python 101", "tech_book")
+    for eid in ("e1", "e2", "e3"):
+        graph_svc.add_mention(eid, "d1")
+    graph_svc.add_prerequisite("e1", "e2", "d1")   # closures requires functions
+    graph_svc.add_prerequisite("e2", "e3", "d1")   # functions requires variables
+
+    concepts = graph_svc.get_entry_point_concepts("d1", limit=10)
+    assert "variables" in concepts
+    assert "closures" not in concepts
+    assert "functions" not in concepts
+
+
+def test_get_prerequisite_edges_for_graph_wire_format(graph_svc: KuzuService):
+    """get_prerequisite_edges_for_graph returns {source, target, weight, relation} dicts."""
+    graph_svc.upsert_entity("e1", "iterators", "CONCEPT")
+    graph_svc.upsert_entity("e2", "generators", "CONCEPT")
+    graph_svc.upsert_document("d1", "Advanced Python", "tech_book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_prerequisite("e1", "e2", "d1", 0.95)
+
+    edges = graph_svc.get_prerequisite_edges_for_graph("d1")
+    assert len(edges) == 1
+    e = edges[0]
+    assert e["source"] == "e1"
+    assert e["target"] == "e2"
+    assert e["weight"] == pytest.approx(0.95)
+    assert e["relation"] == "PREREQUISITE_OF"

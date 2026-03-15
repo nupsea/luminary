@@ -37,6 +37,7 @@ from app.models import (
 from app.routers.flashcards import FlashcardResponse, _to_response
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
+from app.services.study_path_service import StudyPathService
 
 logger = logging.getLogger(__name__)
 
@@ -979,6 +980,78 @@ async def get_section_heatmap(
         len(heatmap),
     )
     return SectionHeatmapResponse(heatmap=heatmap)
+
+
+# ---------------------------------------------------------------------------
+# Study path endpoints (S139)
+# ---------------------------------------------------------------------------
+
+
+class StudyPathItemResponse(BaseModel):
+    concept: str
+    mastery: float
+    skip: bool
+    reason: str
+    avg_stability_days: float
+
+
+class StudyPathAPIResponse(BaseModel):
+    concept: str
+    document_id: str
+    path: list[StudyPathItemResponse]
+
+
+class StartConceptItemResponse(BaseModel):
+    concept: str
+    prereq_chain_length: int
+    flashcard_count: int
+    rationale: str
+
+
+class StartConceptsAPIResponse(BaseModel):
+    document_id: str
+    concepts: list[StartConceptItemResponse]
+
+
+@router.get("/path", response_model=StudyPathAPIResponse)
+async def get_study_path(
+    document_id: str = Query(...),
+    concept: str = Query(...),
+    session: AsyncSession = Depends(get_db),
+) -> StudyPathAPIResponse:
+    """Return FSRS-aware prerequisite study path for a concept in a document.
+
+    Path is ordered from earliest prerequisite to the requested concept.
+    Each item includes mastery (0-1), skip flag (avg_stability >= 14 days),
+    and reason string.
+
+    Returns empty path (not 404) when the concept has no PREREQUISITE_OF edges.
+    """
+    svc = StudyPathService()
+    result = await svc.get_study_path(document_id, concept, session)
+    return StudyPathAPIResponse(
+        concept=result["concept"],
+        document_id=result["document_id"],
+        path=[StudyPathItemResponse(**vars(item)) for item in result["path"]],
+    )
+
+
+@router.get("/start", response_model=StartConceptsAPIResponse)
+async def get_start_concepts(
+    document_id: str = Query(...),
+    session: AsyncSession = Depends(get_db),
+) -> StartConceptsAPIResponse:
+    """Return up to 3 entry-point concepts for a document with highest learning ROI.
+
+    Entry-point concepts are those with no unsatisfied prerequisites.
+    Returns empty concepts list (not 404) when no PREREQUISITE_OF edges exist.
+    """
+    svc = StudyPathService()
+    result = await svc.get_start_concepts(document_id, session)
+    return StartConceptsAPIResponse(
+        document_id=result["document_id"],
+        concepts=[StartConceptItemResponse(**vars(item)) for item in result["concepts"]],
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -147,6 +147,7 @@ interface GraphEdge {
   source: string
   target: string
   weight: number
+  relation?: string  // e.g. "PREREQUISITE_OF", "CO_OCCURS", "IMPLEMENTS"
 }
 
 interface GraphData {
@@ -208,8 +209,12 @@ async function fetchDocList(): Promise<DocListItem[]> {
 // Graph builder
 // ---------------------------------------------------------------------------
 
+// Purple color for PREREQUISITE_OF edges (S139)
+const PREREQ_EDGE_COLOR = "#a855f7"  // purple-500
+
 function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
-  const g = new Graph()
+  // Use mixed graph to support both undirected (CO_OCCURS) and directed (PREREQUISITE_OF) edges
+  const g = new Graph({ type: "mixed" })
   const frequencies = nodes.map((n) => n.size)
   const minFreq = Math.min(...frequencies, 1)
   const maxFreq = Math.max(...frequencies, 1)
@@ -237,7 +242,19 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   edges.forEach((edge, idx) => {
     if (g.hasNode(edge.source) && g.hasNode(edge.target) && edge.source !== edge.target) {
       if (!g.hasEdge(edge.source, edge.target)) {
-        g.addEdge(edge.source, edge.target, { key: `e-${idx}`, weight: edge.weight ?? 1 })
+        const isPrereq = edge.relation === "PREREQUISITE_OF"
+        const edgeAttrs: Record<string, unknown> = {
+          key: `e-${idx}`,
+          weight: edge.weight ?? 1,
+          color: isPrereq ? PREREQ_EDGE_COLOR : "#e2e8f0",
+          relation: edge.relation ?? "CO_OCCURS",
+        }
+        if (isPrereq) {
+          // Directed edge for PREREQUISITE_OF to show arrow direction
+          g.addDirectedEdge(edge.source, edge.target, edgeAttrs)
+        } else {
+          g.addUndirectedEdge(edge.source, edge.target, edgeAttrs)
+        }
       }
     }
   })
@@ -339,6 +356,8 @@ export default function Viz() {
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
   // Diagrams layer toggle: show/hide diagram-derived nodes (S136)
   const [showDiagramNodes, setShowDiagramNodes] = useState(true)
+  // Prerequisites layer toggle: show/hide PREREQUISITE_OF edges (S139)
+  const [showPrerequisites, setShowPrerequisites] = useState(true)
   // Learning path state (S117)
   const [learningPathStart, setLearningPathStart] = useState("")
   const [lpInputDraft, setLpInputDraft] = useState("")
@@ -398,10 +417,13 @@ export default function Viz() {
     })
     const visibleIds = new Set(visibleNodes.map((n) => n.id))
     const visibleEdges = data.edges.filter(
-      (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
+      (e) =>
+        visibleIds.has(e.source) &&
+        visibleIds.has(e.target) &&
+        (showPrerequisites || e.relation !== "PREREQUISITE_OF"),
     )
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes, viewMode, lpData, showDiagramNodes])
+  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites])
 
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
@@ -698,20 +720,35 @@ export default function Viz() {
             />
           </div>
 
-          {/* Diagrams layer toggle (S136) */}
+          {/* Layer toggles (S136, S139) */}
           <div>
             <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Layers
             </p>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showDiagramNodes}
-                onChange={() => setShowDiagramNodes((v) => !v)}
-                className="accent-primary"
-              />
-              <span className="text-xs text-foreground">Diagrams</span>
-            </label>
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showDiagramNodes}
+                  onChange={() => setShowDiagramNodes((v) => !v)}
+                  className="accent-primary"
+                />
+                <span className="text-xs text-foreground">Diagrams</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showPrerequisites}
+                  onChange={() => setShowPrerequisites((v) => !v)}
+                  className="accent-primary"
+                />
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: PREREQ_EDGE_COLOR }}
+                />
+                <span className="text-xs text-foreground">Prerequisites</span>
+              </label>
+            </div>
           </div>
 
           {/* Entity type filter */}

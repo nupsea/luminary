@@ -90,6 +90,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S137: Bloom's Taxonomy flashcard type/level — nullable; generate_technical() sets them
             "ALTER TABLE flashcards ADD COLUMN flashcard_type TEXT",
             "ALTER TABLE flashcards ADD COLUMN bloom_level INTEGER",
+            # S139: prerequisite chain depth per section (set by PrereqExtractorService)
+            "ALTER TABLE sections ADD COLUMN difficulty_estimate INTEGER",
         ]:
             try:
                 await conn.execute(text(ddl))

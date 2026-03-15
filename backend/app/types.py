@@ -140,3 +140,36 @@ class LearningPathResponse(TypedDict):
     # nodes: topologically sorted LearningPathNode dataclasses (serialized to dicts on wire)
     nodes: list[LearningPathNode]
     edges: list[dict]  # list of {from_entity, to_entity, confidence}
+
+
+# ---------------------------------------------------------------------------
+# Study path (S139)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StudyPathItem:
+    concept: str
+    mastery: float        # 0.0 to 1.0 -- avg(fsrs_stability / 21.0) capped at 1.0
+    skip: bool            # True when avg_stability_days >= 14
+    reason: str           # e.g. "avg_stability=18d" or "no flashcards"
+    avg_stability_days: float
+
+
+class StudyPathResponse(TypedDict):
+    concept: str
+    document_id: str
+    path: list[StudyPathItem]  # ordered from earliest prereq to start concept
+
+
+@dataclass
+class StartConceptItem:
+    concept: str
+    prereq_chain_length: int
+    flashcard_count: int
+    rationale: str  # e.g. "0 prerequisites unskipped; 3 flashcards"
+
+
+class StartConceptsResponse(TypedDict):
+    document_id: str
+    concepts: list[StartConceptItem]  # up to 3, sorted by shortest chain then fewest cards
