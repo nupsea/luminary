@@ -1249,7 +1249,7 @@
         "GET /documents/{id}/enrichment returns list of enrichment job rows with status",
         "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S133.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S134",

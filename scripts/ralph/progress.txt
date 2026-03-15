@@ -1085,3 +1085,24 @@ Key decisions:
   - Admonition styling overrides fragility heatmap when admonition_type is set -- admonition type has higher UX priority
   - SectionItem in documents.py (DocumentDetail response) MUST include admonition_type/parent_section_id; GET /sections/{id} alone is insufficient since DocumentReader fetches sections via GET /documents/{id}
 ---
+
+## 2026-03-15T04:00:00Z - S133 - PDF and EPUB image extraction with async enrichment queue foundation
+- Implemented: EnrichmentJobModel and ImageModel (already in models.py/db_init.py); ImageExtractor service (image_extractor.py); EnrichmentQueueWorker (enrichment_worker.py); images.py router (3 endpoints); enrichment_enqueue_node in ingestion graph; enrichment_status field in DocumentListItem; delete path cleanup; frontend enrichment badge in DocumentCard and DocumentRow
+- Files changed: backend/app/services/image_extractor.py (fix: page_count before doc.close()), backend/app/services/enrichment_worker.py (fix: line length + UP031), backend/app/main.py (import order + register images_router), backend/tests/test_image_extractor.py (new), backend/tests/test_enrichment_worker.py (new), backend/tests/test_images_api.py (new), frontend/src/components/library/types.ts, frontend/src/components/library/DocumentCard.tsx, frontend/src/components/library/DocumentRow.tsx, scripts/smoke/S133.sh (new)
+- AC verified:
+  - EnrichmentJobModel and ImageModel migrated via db_init.py: PASS
+  - DocumentModel.stage accepts 'enriching' without ORM error: PASS
+  - EnrichmentQueueWorker sequential per-doc, parallel across docs: PASS (test + architecture)
+  - Integration test: ImageModel count > 0, content_hash set, dedup: PASS
+  - Images below 150x100 not stored; above 4000x4000 skipped with warning: PASS
+  - EnrichmentJobModel transitions pending->running->done: PASS
+  - GET /documents/{id}/images returns [] for text-only (not 404): PASS
+  - GET /images/{id}/raw returns 200 Content-Type image/*: PASS
+  - GET /documents/{id}/enrichment returns job rows: PASS
+  - ruff clean + 844 pytest pass + tsc clean + smoke test exists: PASS
+- Reviewer verdict: 2 Critical fixed (page_count before doc.close(); frontend badge checked "enriching" but job status is "pending"/"running"); 2 High noted for S134
+- Learnings:
+  - PyMuPDF: always capture len(doc) into a local variable before doc.close(); calling len() on a closed fitz.Document raises ValueError and would leave documents stuck at stage="enriching"
+  - EnrichmentJobModel.status values are "pending"/"running"/"done"/"failed" -- "enriching" only appears in DocumentModel.stage. Frontend badge must check job status values, not document stage values.
+  - enrichment_enqueue_node calls worker._dispatch_pending() directly (private method); add a public kick() in future to avoid coupling (High, tracked for S134)
+---
