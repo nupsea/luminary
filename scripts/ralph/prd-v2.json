@@ -1289,7 +1289,7 @@
         "Integration test: ingest a Python tutorial; graph query returns >=1 LIBRARY entity",
         "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S135.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S136",

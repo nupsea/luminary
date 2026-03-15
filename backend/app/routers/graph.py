@@ -3,6 +3,7 @@
 import logging
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from app.services.graph import get_graph_service
 from app.types import LearningPathResponse
@@ -28,6 +29,32 @@ async def get_learning_path(
     """
     svc = get_graph_service()
     return svc.get_learning_path(start_entity, document_id)
+
+
+class EntityItem(BaseModel):
+    id: str
+    name: str
+    type: str
+    frequency: int
+
+
+class EntityListResponse(BaseModel):
+    entities: list[EntityItem]
+
+
+@router.get("/entities/{document_id}")
+async def get_entities_by_type(
+    document_id: str,
+    type: str = Query(..., description="Entity type to filter by (e.g. LIBRARY, ALGORITHM)"),
+) -> EntityListResponse:
+    """Return entities of a specific type for a document.
+
+    IMPORTANT: This route must be declared before GET /{document_id} to prevent
+    FastAPI from matching 'entities' as a document_id path parameter.
+    """
+    svc = get_graph_service()
+    raw = svc.get_entities_by_type(document_id, type)
+    return EntityListResponse(entities=[EntityItem(**e) for e in raw])
 
 
 @router.get("/{document_id}")

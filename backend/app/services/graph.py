@@ -7,6 +7,12 @@ Schema:
          RELATED_TO(Entity->Entity, relation_label, confidence),
          CALLS(Entity->Entity, document_id)  -- function call graph for code documents
          PREREQUISITE_OF(Entity->Entity, document_id, confidence)  -- S117
+         IMPLEMENTS(Entity->Entity, document_id)   -- tech relation (S135)
+         EXTENDS(Entity->Entity, document_id)       -- tech relation (S135)
+         USES(Entity->Entity, document_id)          -- tech relation (S135)
+         REPLACES(Entity->Entity, document_id)      -- tech relation (S135)
+         DEPENDS_ON(Entity->Entity, document_id)    -- tech relation (S135)
+         VERSION_OF(Entity->Entity, document_id)    -- versioned library links (S135)
 
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
@@ -59,6 +65,19 @@ class KuzuService:
             "FROM Entity TO Entity, document_id STRING)",
             "CREATE REL TABLE IF NOT EXISTS PREREQUISITE_OF("
             "FROM Entity TO Entity, document_id STRING, confidence FLOAT)",
+            # Tech relation edges (S135)
+            "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS("
+            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS EXTENDS("
+            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS USES("
+            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS REPLACES("
+            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS DEPENDS_ON("
+            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS VERSION_OF("
+            "FROM Entity TO Entity, document_id STRING)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)
@@ -606,6 +625,7 @@ class KuzuService:
             entity_ids.add(eid)
 
         edges = self._get_co_occurrence_edges(entity_ids, document_id)
+        edges.extend(self._get_tech_relation_edges(entity_ids, document_id))
         return {"nodes": nodes, "edges": edges}
 
     def get_graph_for_documents(self, document_ids: list[str]) -> dict:
@@ -681,6 +701,174 @@ class KuzuService:
                 " CREATE (a)-[:CALLS {document_id: $did}]->(b)",
                 {"cid": caller_id, "eid": callee_id, "did": document_id},
             )
+
+    # -------------------------------------------------------------------------
+    # Tech relation edges (S135)
+    # -------------------------------------------------------------------------
+
+    _TECH_REL_TYPES: frozenset[str] = frozenset({
+        "IMPLEMENTS", "EXTENDS", "USES", "REPLACES", "DEPENDS_ON",
+    })
+
+    def add_tech_relation(
+        self,
+        entity_id_a: str,
+        entity_id_b: str,
+        relation_label: str,
+        document_id: str,
+    ) -> None:
+        """Create a directed tech relation edge from entity_id_a to entity_id_b.
+
+        relation_label must be one of: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON.
+        Idempotent: if the edge already exists for this document, it is left unchanged.
+        Raises ValueError for unknown relation labels.
+        """
+        if relation_label not in self._TECH_REL_TYPES:
+            raise ValueError(
+                f"Unknown tech relation label: {relation_label!r}."
+                f" Must be one of {sorted(self._TECH_REL_TYPES)}"
+            )
+        # Check existence first (idempotency)
+        # Kuzu does not support parameterized rel-type names, so use explicit branches.
+        if relation_label == "IMPLEMENTS":
+            result = self._conn.execute(
+                "MATCH (a:Entity {id: $aid})-[r:IMPLEMENTS]->(b:Entity {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+            )
+            if not result.has_next():
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                    " CREATE (a)-[:IMPLEMENTS {document_id: $did}]->(b)",
+                    {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+                )
+        elif relation_label == "EXTENDS":
+            result = self._conn.execute(
+                "MATCH (a:Entity {id: $aid})-[r:EXTENDS]->(b:Entity {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+            )
+            if not result.has_next():
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                    " CREATE (a)-[:EXTENDS {document_id: $did}]->(b)",
+                    {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+                )
+        elif relation_label == "USES":
+            result = self._conn.execute(
+                "MATCH (a:Entity {id: $aid})-[r:USES]->(b:Entity {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+            )
+            if not result.has_next():
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                    " CREATE (a)-[:USES {document_id: $did}]->(b)",
+                    {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+                )
+        elif relation_label == "REPLACES":
+            result = self._conn.execute(
+                "MATCH (a:Entity {id: $aid})-[r:REPLACES]->(b:Entity {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+            )
+            if not result.has_next():
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                    " CREATE (a)-[:REPLACES {document_id: $did}]->(b)",
+                    {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+                )
+        elif relation_label == "DEPENDS_ON":
+            result = self._conn.execute(
+                "MATCH (a:Entity {id: $aid})-[r:DEPENDS_ON]->(b:Entity {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+            )
+            if not result.has_next():
+                self._conn.execute(
+                    "MATCH (a:Entity {id: $aid}), (b:Entity {id: $bid})"
+                    " CREATE (a)-[:DEPENDS_ON {document_id: $did}]->(b)",
+                    {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
+                )
+
+    def add_version_of(
+        self, versioned_entity_id: str, base_entity_id: str, document_id: str
+    ) -> None:
+        """Create a VERSION_OF edge from a versioned entity to its major-version base.
+
+        Example: 'Python 3.13' -[VERSION_OF]-> 'Python 3'
+        Idempotent: if the edge already exists, it is left unchanged.
+        """
+        result = self._conn.execute(
+            "MATCH (a:Entity {id: $vid})-[r:VERSION_OF]->(b:Entity {id: $bid})"
+            " WHERE r.document_id = $did RETURN r",
+            {"vid": versioned_entity_id, "bid": base_entity_id, "did": document_id},
+        )
+        if not result.has_next():
+            self._conn.execute(
+                "MATCH (a:Entity {id: $vid}), (b:Entity {id: $bid})"
+                " CREATE (a)-[:VERSION_OF {document_id: $did}]->(b)",
+                {"vid": versioned_entity_id, "bid": base_entity_id, "did": document_id},
+            )
+
+    def get_entities_by_type(self, document_id: str, entity_type: str) -> list[dict]:
+        """Return entities of a specific type for a document.
+
+        Returns list of {id, name, type, frequency} dicts.
+        Returns [] on any error (non-fatal).
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                " WHERE e.type = $etype"
+                " RETURN e.id, e.name, e.type, e.frequency",
+                {"did": document_id, "etype": entity_type},
+            )
+            entities: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                entities.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "type": row[2],
+                    "frequency": int(row[3] or 1),
+                })
+            return entities
+        except Exception:
+            logger.debug("get_entities_by_type failed", exc_info=True)
+            return []
+
+    def _get_tech_relation_edges(
+        self, entity_ids: set[str], document_id: str
+    ) -> list[dict]:
+        """Return tech relation edges (IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON)
+        among the given entity IDs for a document."""
+        if not entity_ids:
+            return []
+        placeholders = ", ".join(f"$eid{i}" for i in range(len(entity_ids)))
+        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
+        params["did"] = document_id
+        edges: list[dict] = []
+        for rel in ("IMPLEMENTS", "EXTENDS", "USES", "REPLACES", "DEPENDS_ON"):
+            try:
+                result = self._conn.execute(
+                    f"MATCH (a:Entity)-[r:{rel}]->(b:Entity)"
+                    f" WHERE a.id IN [{placeholders}] AND b.id IN [{placeholders}]"
+                    f" AND r.document_id = $did"
+                    f" RETURN a.id, b.id",
+                    params,
+                )
+                while result.has_next():
+                    row = result.get_next()
+                    edges.append({
+                        "source": row[0],
+                        "target": row[1],
+                        "weight": 1.0,
+                        "relation": rel,
+                    })
+            except Exception:
+                logger.debug("_get_tech_relation_edges failed for %s", rel, exc_info=True)
+        return edges
 
     def get_call_graph(self, document_id: str) -> dict:
         """Return call graph nodes and edges for a code document."""

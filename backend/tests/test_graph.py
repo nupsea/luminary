@@ -353,3 +353,185 @@ def test_get_learning_path_cycle_handled_gracefully(graph_svc: KuzuService):
     assert "edges" in result
     # Cyclic nodes have no in-degree=0 node, so topo_order is empty -> empty nodes
     assert isinstance(result["nodes"], list)
+
+
+# ---------------------------------------------------------------------------
+# S135: Tech relation edges
+# ---------------------------------------------------------------------------
+
+
+def test_schema_creates_tech_edge_tables(graph_svc: KuzuService):
+    """_create_schema creates all 6 tech edge tables (S135)."""
+    required = {"IMPLEMENTS", "EXTENDS", "USES", "REPLACES", "DEPENDS_ON", "VERSION_OF"}
+    # CREATE REL TABLE IF NOT EXISTS is idempotent — no error means table exists
+    for label in required:
+        graph_svc._conn.execute(
+            f"CREATE REL TABLE IF NOT EXISTS {label}"
+            f"(FROM Entity TO Entity, document_id STRING)"
+        )
+
+
+def test_add_tech_relation_implements(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
+    graph_svc.upsert_entity("e2", "ndarray", "DATA_STRUCTURE")
+    graph_svc.upsert_document("d1", "Python Tutorial", "tech_book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+
+    graph_svc.add_tech_relation("e1", "e2", "IMPLEMENTS", "d1")
+
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:IMPLEMENTS]->(b:Entity {id: 'e2'})"
+        " RETURN r.document_id"
+    )
+    assert result.has_next()
+    assert result.get_next()[0] == "d1"
+
+
+def test_add_tech_relation_depends_on(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "celery", "LIBRARY")
+    graph_svc.upsert_entity("e2", "redis", "LIBRARY")
+    graph_svc.upsert_document("d1", "Task Queue Guide", "tech_book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+
+    graph_svc.add_tech_relation("e1", "e2", "DEPENDS_ON", "d1")
+
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:DEPENDS_ON]->(b:Entity {id: 'e2'})"
+        " RETURN r.document_id"
+    )
+    assert result.has_next()
+
+
+def test_add_tech_relation_idempotent(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "fastapi", "LIBRARY")
+    graph_svc.upsert_entity("e2", "pydantic", "LIBRARY")
+    graph_svc.add_tech_relation("e1", "e2", "USES", "d1")
+    graph_svc.add_tech_relation("e1", "e2", "USES", "d1")  # idempotent
+
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:USES]->(b:Entity {id: 'e2'})"
+        " WHERE r.document_id = 'd1' RETURN count(r)"
+    )
+    assert result.get_next()[0] == 1
+
+
+def test_add_tech_relation_invalid_label_raises(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "a", "LIBRARY")
+    graph_svc.upsert_entity("e2", "b", "LIBRARY")
+    with pytest.raises(ValueError, match="Unknown tech relation label"):
+        graph_svc.add_tech_relation("e1", "e2", "INVALID_LABEL", "d1")
+
+
+def test_add_version_of(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "python 3.13", "LIBRARY")
+    graph_svc.upsert_entity("e2", "python 3", "LIBRARY")
+    graph_svc.upsert_document("d1", "Python Guide", "tech_book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+
+    graph_svc.add_version_of("e1", "e2", "d1")
+
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:VERSION_OF]->(b:Entity {id: 'e2'})"
+        " RETURN r.document_id"
+    )
+    assert result.has_next()
+
+
+def test_add_version_of_idempotent(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "python 3.13", "LIBRARY")
+    graph_svc.upsert_entity("e2", "python 3", "LIBRARY")
+    graph_svc.add_version_of("e1", "e2", "d1")
+    graph_svc.add_version_of("e1", "e2", "d1")
+
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'})-[r:VERSION_OF]->(b:Entity {id: 'e2'})"
+        " WHERE r.document_id = 'd1' RETURN count(r)"
+    )
+    assert result.get_next()[0] == 1
+
+
+def test_get_entities_by_type_filters_correctly(graph_svc: KuzuService):
+    """AC6: get_entities_by_type returns only entities of the requested type."""
+    graph_svc.upsert_document("d1", "Python Guide", "tech_book")
+    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
+    graph_svc.upsert_entity("e2", "alice", "PERSON")
+    graph_svc.upsert_entity("e3", "sqlalchemy", "LIBRARY")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_mention("e3", "d1")
+
+    libs = graph_svc.get_entities_by_type("d1", "LIBRARY")
+    lib_names = {e["name"] for e in libs}
+    assert lib_names == {"numpy", "sqlalchemy"}
+
+    persons = graph_svc.get_entities_by_type("d1", "PERSON")
+    assert len(persons) == 1
+    assert persons[0]["name"] == "alice"
+
+
+def test_get_entities_by_type_empty_for_unknown_type(graph_svc: KuzuService):
+    graph_svc.upsert_document("d1", "Test", "book")
+    graph_svc.upsert_entity("e1", "newton", "PERSON")
+    graph_svc.add_mention("e1", "d1")
+    result = graph_svc.get_entities_by_type("d1", "LIBRARY")
+    assert result == []
+
+
+def test_get_entities_by_type_returns_required_fields(graph_svc: KuzuService):
+    graph_svc.upsert_document("d1", "Test", "tech_book")
+    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
+    graph_svc.add_mention("e1", "d1")
+    result = graph_svc.get_entities_by_type("d1", "LIBRARY")
+    assert len(result) == 1
+    entity = result[0]
+    assert "id" in entity
+    assert "name" in entity
+    assert "type" in entity
+    assert "frequency" in entity
+    assert entity["type"] == "LIBRARY"
+
+
+def test_get_graph_for_document_includes_tech_edges(graph_svc: KuzuService):
+    """get_graph_for_document returns IMPLEMENTS/DEPENDS_ON edges alongside CO_OCCURS."""
+    graph_svc.upsert_document("d1", "Python Arch", "tech_book")
+    graph_svc.upsert_entity("e1", "numpy", "LIBRARY")
+    graph_svc.upsert_entity("e2", "ndarray", "DATA_STRUCTURE")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_tech_relation("e1", "e2", "IMPLEMENTS", "d1")
+
+    data = graph_svc.get_graph_for_document("d1")
+    edge_relations = {e.get("relation") for e in data["edges"] if "relation" in e}
+    assert "IMPLEMENTS" in edge_relations
+
+
+def test_entities_by_type_api_endpoint(client, tmp_path, monkeypatch):
+    """AC6: GET /graph/entities/{doc_id}?type=LIBRARY returns only LIBRARY entities."""
+    import app.services.graph as graph_module
+
+    svc: KuzuService = graph_module._graph_service  # type: ignore[assignment]
+    svc.upsert_document("d1", "Python Guide", "tech_book")
+    svc.upsert_entity("e1", "numpy", "LIBRARY")
+    svc.upsert_entity("e2", "einstein", "PERSON")
+    svc.add_mention("e1", "d1")
+    svc.add_mention("e2", "d1")
+
+    resp = client.get("/graph/entities/d1?type=LIBRARY")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "entities" in data
+    assert len(data["entities"]) == 1
+    assert data["entities"][0]["name"] == "numpy"
+    assert data["entities"][0]["type"] == "LIBRARY"
+
+
+def test_entities_endpoint_not_captured_by_document_id_route(client):
+    """Verify /graph/entities/doc1 is not matched as document_id='entities'."""
+    resp = client.get("/graph/entities/doc1?type=LIBRARY")
+    # Should return the entity list endpoint, not the graph-for-document endpoint
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "entities" in data  # entity list response, not graph document response

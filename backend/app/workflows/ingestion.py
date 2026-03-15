@@ -1219,6 +1219,73 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                     exc_info=prereq_exc,
                 )
 
+            # Tech relationship extraction: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON
+            # Only run for tech-relevant content types to avoid false edges in prose.
+            content_type_for_tech = state.get("content_type") or ""
+            if content_type_for_tech in ("code", "tech_book", "tech_article"):
+                try:
+                    from app.services.tech_relation_extractor import (
+                        extract_tech_relations,  # noqa: PLC0415
+                    )
+
+                    canonical_name_to_id_tech: dict[str, str] = {
+                        ent["name"]: ent["id"] for ent in canonical_entities
+                    }
+                    known_names_tech: set[str] = set(canonical_name_to_id_tech.keys())
+                    tech_rel_pairs = extract_tech_relations(ner_chunks, known_names_tech)
+                    tech_rel_count = 0
+                    for name_a, name_b, rel_label in tech_rel_pairs:
+                        id_a = canonical_name_to_id_tech.get(name_a)
+                        id_b = canonical_name_to_id_tech.get(name_b)
+                        if id_a and id_b and id_a != id_b:
+                            try:
+                                graph.add_tech_relation(id_a, id_b, rel_label, doc_id)
+                                tech_rel_count += 1
+                            except ValueError:
+                                logger.debug(
+                                    "Skipped unknown tech relation label: %r", rel_label
+                                )
+                    logger.info(
+                        "tech relation edges created: %d",
+                        tech_rel_count,
+                        extra={"doc_id": doc_id},
+                    )
+
+                    # Version-of edges: for LIBRARY entities with version qualifiers,
+                    # link the versioned entity to its major-version base entity.
+                    from app.services.entity_disambiguator import (
+                        _extract_version_qualifier,  # noqa: PLC0415
+                    )
+
+                    version_base_count = 0
+                    for ent in canonical_entities:
+                        if ent["type"] != "LIBRARY":
+                            continue
+                        name = ent["name"]
+                        base_name, version_str = _extract_version_qualifier(name)
+                        if version_str is None or base_name == name:
+                            continue
+                        # Create or find the base entity node
+                        import uuid as _uuid  # noqa: PLC0415
+                        base_id = str(_uuid.uuid5(_uuid.NAMESPACE_DNS, f"{doc_id}:{base_name}"))
+                        # Upsert base entity if it doesn't exist yet
+                        graph.upsert_entity(base_id, base_name, "LIBRARY")
+                        graph.add_mention(base_id, doc_id)
+                        graph.add_version_of(ent["id"], base_id, doc_id)
+                        version_base_count += 1
+                    if version_base_count:
+                        logger.info(
+                            "version_of edges created: %d",
+                            version_base_count,
+                            extra={"doc_id": doc_id},
+                        )
+                except Exception as tech_exc:
+                    logger.warning(
+                        "tech relation extraction failed (non-fatal)",
+                        extra={"doc_id": doc_id},
+                        exc_info=tech_exc,
+                    )
+
             # Build call graph for code documents
             content_type = state.get("content_type") or ""
             if content_type == "code":

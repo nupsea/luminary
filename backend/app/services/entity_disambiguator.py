@@ -11,8 +11,15 @@ Public API:
 """
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+# Matches a version qualifier at the end of a name: 'numpy 1.26', 'Python 3.13', 'React 18'.
+# Group 1: text before the version  Group 2: major number  Group 3: rest of version (e.g. '.13.1')
+# Using a separate group for the dotted tail avoids the repeated-group capture problem where
+# only the last match of (?:\.(\d+))* is retained.
+_VERSION_RE = re.compile(r"^(.*?)\s+(\d+)((?:\.\d+)+)?$")
 
 # Honorifics that may appear at the FRONT of a name and should be stripped
 # before matching.  "sr" is intentionally NOT included.
@@ -37,6 +44,35 @@ _HONORIFICS: frozenset[str] = frozenset(
         "lt",
     }
 )
+
+
+def _extract_version_qualifier(name: str) -> tuple[str, str | None]:
+    """Split a versioned library name into (base_name, version_string | None).
+
+    The base name retains the major version number only, so that patch versions
+    ('Python 3.11', 'Python 3.13') are stored as separate nodes but both link
+    to a shared major-version base ('Python 3').
+
+    Examples:
+        'Python 3.13' -> ('Python 3', '3.13')
+        'numpy 1.26'  -> ('numpy 1', '1.26')
+        'React 18'    -> ('React 18', None)   -- single-part: already canonical
+        'numpy'       -> ('numpy', None)       -- no version
+    """
+    m = _VERSION_RE.match(name)
+    if not m:
+        return name, None
+    base_text = m.group(1).strip()
+    major = m.group(2)
+    dotted_tail = m.group(3)  # e.g. '.13' for 'Python 3.13', '.13.1' for 'Python 3.13.1'
+    if dotted_tail is None:
+        # Single-component version (e.g. 'React 18') — already canonical, no split
+        return name, None
+    # Reconstruct the full version string: major + dotted tail
+    full_version = major + dotted_tail  # e.g. '3.13' or '3.13.1'
+    # Multi-component version: base = "name major"
+    base_name = f"{base_text} {major}"
+    return base_name, full_version
 
 
 def _strip_honorifics(name: str) -> str:
@@ -73,6 +109,11 @@ def find_canonical(name: str, entity_type: str, existing_names: list[str]) -> st
          the longer stripped form wins.
       C. Token overlap >= 2:    at least two tokens shared; the longer
          stripped form wins.
+
+    Special case for LIBRARY entities: version-qualified names with different
+    patch versions ('Python 3.11' vs 'Python 3.13') naturally stay separate
+    because Rules B and C require exact substring containment or >=2 shared tokens
+    respectively.  Version strings like '3.11' and '3.13' are not shared tokens.
 
     Returns *name* unchanged if no rule matches.
     """

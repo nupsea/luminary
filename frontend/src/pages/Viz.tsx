@@ -86,6 +86,13 @@ const ALL_ENTITY_TYPES = [
   "EVENT",
   "TECHNOLOGY",
   "DATE",
+  // Tech-specific types (S135)
+  "LIBRARY",
+  "DESIGN_PATTERN",
+  "ALGORITHM",
+  "DATA_STRUCTURE",
+  "PROTOCOL",
+  "API_ENDPOINT",
 ] as const
 
 type EntityType = (typeof ALL_ENTITY_TYPES)[number]
@@ -98,6 +105,13 @@ const TYPE_COLORS: Record<EntityType, string> = {
   EVENT: "#ef4444",
   TECHNOLOGY: "#06b6d4",
   DATE: "#6b7280",
+  // Tech-specific types (S135)
+  LIBRARY: "#0ea5e9",
+  DESIGN_PATTERN: "#d946ef",
+  ALGORITHM: "#f97316",
+  DATA_STRUCTURE: "#84cc16",
+  PROTOCOL: "#a78bfa",
+  API_ENDPOINT: "#fb7185",
 }
 
 const DEFAULT_COLOR = "#94a3b8"
