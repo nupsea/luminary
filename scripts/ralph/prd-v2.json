@@ -1372,7 +1372,7 @@
         "Learning tab: 'Where to Start' panel visible for tech books with >=1 extracted prerequisite; absent for fiction",
         "uv run ruff check . exits 0; uv run pytest passes; scripts/smoke/S139.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S140",

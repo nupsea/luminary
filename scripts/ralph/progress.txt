@@ -1206,3 +1206,21 @@ Key decisions:
   - React 18 automatic batching means multiple setX() calls in an async function apply in a single render. If you set state A then immediately clear it (setLastRating(null)) in the same microtask, the UI never sees state A. Solution: guard advancement behind a user action (Continue button) instead of resetting in handleRate.
   - For enrichment handlers that are only called from background workers, docstrings should say "raises ServiceUnavailableError (propagates to worker)" not "raises HTTPException" -- only service methods called from API routers should raise HTTPException.
 ---
+
+## S139 - Prerequisites and FSRS-aware study path
+Date: 2026-03-16
+Status: PASS
+- New PrereqExtractorService: LLM per section summary extracts PREREQUISITE_OF edges with confidence >= 0.7
+- New StudyPathService: FSRS-aware ordering (skip when avg_stability >= 14 days); mastery = avg(stability/21) capped at 1.0
+- SectionModel.difficulty_estimate: prerequisite chain depth (1-5) via BFS
+- GET /study/path and GET /study/start endpoints added to study router
+- Viz tab: PREREQUISITE_OF edges rendered as purple directed arrows with Prerequisites layer toggle
+- Learning tab: WhereToStartPanel for tech_book/tech_article with loading/error/empty states
+- 24 new tests: 8 prereq_extractor unit + 1 integration, 9 study_path (pure + FSRS integration), 6 graph methods
+- Reviewer Critical fix: added KuzuService method tests (add_prerequisite_with_section, has_prerequisite_edges, get_entry_point_concepts, get_prerequisite_edges_for_graph)
+- Learnings:
+  - Kuzu backward compatibility: try 3-property PREREQUISITE_OF INSERT, fall back to 2-property when source_section_id column absent
+  - buildGraph must use `new Graph({ type: "mixed" })` to support both directed (PREREQUISITE_OF) and undirected (CO_OCCURS) edges in Sigma.js
+  - section_entity_map tracked during enrich() loop to compute difficulty without re-querying edges for section ownership
+  - ruff E501 in test docstrings: extract long patch-target strings to local vars before `with patch(...):`
+---
