@@ -327,6 +327,7 @@ class QAService:
                     "retry_attempted": False,
                     "primary_strategy": None,
                     "conversation_history": conversation_history or [],
+                    "image_ids": [],
                 }
 
                 try:
@@ -518,6 +519,7 @@ class QAService:
                 "citations": citations,
                 "confidence": confidence,
                 "qa_id": qa_id,
+                "image_ids": result.get("image_ids") or [],
             }
             yield f"data: {json.dumps(final)}\n\n"
 

@@ -292,6 +292,28 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
             session.add_all(new_images)
             await session.commit()
 
+        # Enqueue image_analyze job for vision LLM analysis (S134)
+        import uuid as _uuid  # noqa: PLC0415
+
+        from app.models import EnrichmentJobModel  # noqa: PLC0415
+
+        analyze_job_id = str(_uuid.uuid4())
+        async with get_session_factory()() as session:
+            session.add(
+                EnrichmentJobModel(
+                    id=analyze_job_id,
+                    document_id=document_id,
+                    job_type="image_analyze",
+                    status="pending",
+                )
+            )
+            await session.commit()
+        logger.info(
+            "image_extract_handler: enqueued image_analyze job=%s doc=%s",
+            analyze_job_id,
+            document_id,
+        )
+
     async with get_session_factory()() as session:
         await session.execute(
             _update(DocumentModel)

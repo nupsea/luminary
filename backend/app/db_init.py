@@ -47,12 +47,22 @@ USING fts5(
 )
 """
 
+IMAGES_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS images_fts
+USING fts5(
+    body,
+    image_id UNINDEXED,
+    document_id UNINDEXED
+)
+"""
+
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(FTS5_DDL))
         await conn.execute(text(NOTES_FTS5_DDL))
+        await conn.execute(text(IMAGES_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
         # Additive migrations — safe to run on existing databases.

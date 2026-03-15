@@ -426,6 +426,93 @@ class HybridRetriever:
                 span.set_attribute("retrieval.top_score", round(results[0].score, 4))
         return results
 
+    def _image_vector_search(
+        self,
+        query_vector: list[float],
+        document_ids: list[str] | None,
+        k: int = 5,
+        threshold: float = 0.5,
+    ) -> list[str]:
+        """Search image_vectors_v1 by embedding similarity; return matching image_ids."""
+        try:
+            from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+            rows = get_lancedb_service().search_image_vectors(
+                query_vector, document_ids, k=k, threshold=threshold
+            )
+            return [row["image_id"] for row in rows if row.get("image_id")]
+        except Exception as exc:
+            logger.warning("_image_vector_search failed: %s", exc)
+            return []
+
+    async def _image_keyword_search(
+        self,
+        query: str,
+        document_ids: list[str] | None,
+        k: int = 5,
+    ) -> list[str]:
+        """BM25 search images_fts; return matching image_ids."""
+        safe_query = _sanitize_fts_query(query)
+        if not safe_query:
+            return []
+
+        if document_ids:
+            id_list = ", ".join(f"'{did}'" for did in document_ids)
+            sql = text(
+                "SELECT image_id FROM images_fts "
+                f"WHERE images_fts MATCH :query AND document_id IN ({id_list}) "
+                "LIMIT :k"
+            )
+        else:
+            sql = text(
+                "SELECT image_id FROM images_fts "
+                "WHERE images_fts MATCH :query "
+                "LIMIT :k"
+            )
+
+        try:
+            async with get_session_factory()() as session:
+                result = await session.execute(sql, {"query": safe_query, "k": k})
+                return [row[0] for row in result.fetchall() if row[0]]
+        except Exception as exc:
+            logger.warning("_image_keyword_search failed: %s", exc)
+            return []
+
+    async def retrieve_with_images(
+        self,
+        query: str,
+        document_ids: list[str] | None,
+        k: int,
+    ) -> tuple[list[ScoredChunk], list[str]]:
+        """Hybrid retrieval returning chunks and matched image_ids.
+
+        Runs the standard retrieve() pipeline and in parallel searches image
+        embeddings and image FTS5 index for visually matching content.
+        Returns (chunks, deduplicated_image_ids).
+        """
+        try:
+            from app.services.embedder import get_embedding_service  # noqa: PLC0415
+
+            chunks = await self.retrieve(query, document_ids, k)
+            query_vector = get_embedding_service().encode([query])[0]
+            image_ids_vec = self._image_vector_search(
+                query_vector, document_ids, k=5, threshold=0.5
+            )
+            image_ids_fts = await self._image_keyword_search(query, document_ids, k=5)
+
+            seen: set[str] = set()
+            image_ids: list[str] = []
+            for iid in image_ids_vec + image_ids_fts:
+                if iid not in seen:
+                    seen.add(iid)
+                    image_ids.append(iid)
+
+            return chunks, image_ids
+        except Exception as exc:
+            logger.warning("retrieve_with_images: falling back to retrieve() only: %s", exc)
+            chunks = await self.retrieve(query, document_ids, k)
+            return chunks, []
+
 
 _retriever: HybridRetriever | None = None
 

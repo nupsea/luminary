@@ -89,6 +89,10 @@ class ChatState(TypedDict):
     retry_attempted: bool
     primary_strategy: str | None
 
+    # Image retrieval (S134): image_ids matched by similarity search on image descriptions.
+    # Set by search_node; included in the SSE done event so Chat.tsx can render thumbnails.
+    image_ids: list[str]
+
 
 # ---------------------------------------------------------------------------
 # Notes search (S91)

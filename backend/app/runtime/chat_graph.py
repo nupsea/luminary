@@ -829,9 +829,11 @@ async def search_node(state: ChatState) -> dict:
     k = 6 if scope == "all" else 10
 
     chunks_dicts: list[dict] = []
+    image_ids: list[str] = []
     try:
         retriever = get_retriever()
-        chunks: list[ScoredChunk] = await retriever.retrieve(q, effective_doc_ids, k=k)
+        chunks: list[ScoredChunk]
+        chunks, image_ids = await retriever.retrieve_with_images(q, effective_doc_ids, k=k)
 
         # Batch-fetch section summaries for all (document_id, section_heading) pairs
         pairs = [
@@ -892,8 +894,8 @@ async def search_node(state: ChatState) -> dict:
 
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 
-    logger.info("search_node: returning %d chunks", len(chunks_dicts))
-    return {"chunks": chunks_dicts}
+    logger.info("search_node: returning %d chunks, %d image_ids", len(chunks_dicts), len(image_ids))
+    return {"chunks": chunks_dicts, "image_ids": image_ids}
 
 
 # ---------------------------------------------------------------------------

@@ -109,6 +109,7 @@ interface ChatMessage {
   confidence?: Confidence
   not_found?: boolean
   isStreaming?: boolean
+  image_ids?: string[]
 }
 
 interface ConfusionSignal {
@@ -514,6 +515,7 @@ export default function Chat() {
               const finalAnswer = typeof payload["answer"] === "string" ? payload["answer"] : undefined
               const citations = (payload["citations"] as Citation[] | undefined) ?? []
               const confidence = (payload["confidence"] as Confidence | undefined) ?? "low"
+              const image_ids = (payload["image_ids"] as string[] | undefined) ?? []
               setMessages((m) =>
                 m.map((msg) =>
                   msg.id === assistantId
@@ -526,6 +528,7 @@ export default function Chat() {
                         citations,
                         confidence,
                         not_found,
+                        image_ids,
                       }
                     : msg,
                 ),
@@ -771,6 +774,25 @@ export default function Chat() {
                           {msg.confidence} confidence
                         </Badge>
                       )}
+                    </div>
+                  )}
+
+                  {/* Image thumbnails — shown when retrieval matched image descriptions (S134) */}
+                  {!msg.isStreaming && msg.image_ids && msg.image_ids.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {msg.image_ids.map((id) => (
+                        <img
+                          key={id}
+                          src={`${API_BASE}/images/${id}/raw`}
+                          alt="Diagram from document"
+                          className="h-24 w-auto rounded border border-border object-contain"
+                          loading="lazy"
+                          onError={(e) => {
+                            // Hide the broken image element if the file is missing on disk
+                            ;(e.currentTarget as HTMLImageElement).style.display = "none"
+                          }}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
