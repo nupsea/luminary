@@ -22,6 +22,7 @@ export interface DocumentListItem {
   audio_duration_seconds: number | null
   source_url: string | null
   video_title: string | null
+  enrichment_status: string | null
 }
 
 export interface DocumentListResponse {

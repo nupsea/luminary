@@ -236,6 +236,19 @@ export function DocumentCard({
         )}
       </div>
 
+      {doc.enrichment_status && (
+        <span className={cn(
+          "mt-1.5 inline-block rounded-full px-2 py-0.5 text-xs",
+          (doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "animate-pulse bg-blue-100 text-blue-600",
+          doc.enrichment_status === "done" && "bg-green-100 text-green-700",
+          doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700",
+        )}>
+          {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching..."}
+          {doc.enrichment_status === "done" && "Images ready"}
+          {doc.enrichment_status === "failed" && "Enrichment failed"}
+        </span>
+      )}
+
       {doc.summary_one_sentence && (
         <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
           {doc.summary_one_sentence}

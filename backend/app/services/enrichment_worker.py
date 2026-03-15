@@ -70,7 +70,7 @@ class EnrichmentQueueWorker:
             await asyncio.sleep(self._poll_interval_s)
 
     async def _dispatch_pending(self) -> None:
-        """Find pending jobs and launch per-document task runners for any doc not already running."""
+        """Find pending jobs; launch per-document runners for any doc not already active."""
         async with get_session_factory()() as session:
             result = await session.execute(
                 select(EnrichmentJobModel.document_id)
@@ -127,7 +127,7 @@ class EnrichmentQueueWorker:
         )
 
         if handler is None:
-            error_msg = "No handler registered for job_type=%s" % job_type
+            error_msg = f"No handler registered for job_type={job_type}"
             logger.warning(error_msg)
             async with get_session_factory()() as session:
                 await session.execute(

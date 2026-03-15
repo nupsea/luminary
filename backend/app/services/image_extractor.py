@@ -121,11 +121,12 @@ def extract_images_pdf(
                 )
             )
 
+    page_count = len(doc)
     doc.close()
     logger.info(
         "PDF image extraction complete doc=%s pages=%d images=%d",
         doc_id,
-        len(doc),
+        page_count,
         len(results),
     )
     return results
@@ -215,6 +216,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     Non-fatal: failures are caught by the worker and set job status='failed'.
     """
     from pathlib import Path as _Path  # noqa: PLC0415
+
     from sqlalchemy import select as _select  # noqa: PLC0415
     from sqlalchemy import update as _update  # noqa: PLC0415
 
@@ -232,7 +234,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
         )
         doc = doc_result.scalar_one_or_none()
         if doc is None:
-            raise ValueError("Document not found: %s" % document_id)
+            raise ValueError(f"Document not found: {document_id}")
 
         existing_hashes_result = await session.execute(
             _select(ImageModel.content_hash).where(ImageModel.document_id == document_id)
