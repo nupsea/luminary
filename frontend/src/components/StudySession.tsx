@@ -8,7 +8,8 @@
 
 import { AnimatePresence, motion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
-import { Loader2, Check, AlertTriangle, X as XIcon, Mic, MicOff } from "lucide-react"
+import { ChevronDown, ChevronUp, ExternalLink, Loader2, Check, AlertTriangle, X as XIcon, Mic, MicOff } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
 // ---------------------------------------------------------------------------
@@ -64,7 +65,136 @@ interface Flashcard {
   id: string
   question: string
   answer: string
+  source_excerpt: string
   due_date: string | null
+  // S138: section_id populated by /study/due join with ChunkModel
+  section_id: string | null
+}
+
+// ---------------------------------------------------------------------------
+// S138: SourcePanel types
+// ---------------------------------------------------------------------------
+
+type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
+
+interface WebRef {
+  id: string
+  term: string
+  url: string
+  title: string
+  source_quality: SourceQuality
+  is_llm_suggested: boolean
+  is_outdated: boolean
+}
+
+interface SectionReferencesResponse {
+  section_id: string
+  references: WebRef[]
+}
+
+const QUALITY_LABEL: Record<SourceQuality, string> = {
+  official_docs: "Official",
+  spec: "Spec",
+  wiki: "Wiki",
+  tutorial: "Tutorial",
+  blog: "Blog",
+  unknown: "Unknown",
+}
+
+const QUALITY_CLASS: Record<SourceQuality, string> = {
+  official_docs: "bg-green-100 text-green-800",
+  spec: "bg-blue-100 text-blue-800",
+  wiki: "bg-gray-100 text-gray-800",
+  tutorial: "bg-gray-100 text-gray-700",
+  blog: "bg-gray-100 text-gray-600",
+  unknown: "bg-gray-100 text-gray-500",
+}
+
+interface SourcePanelProps {
+  card: Flashcard
+}
+
+function SourcePanel({ card }: SourcePanelProps) {
+  const [expanded, setExpanded] = useState(true)
+
+  const { data, isLoading, isError } = useQuery<SectionReferencesResponse>({
+    queryKey: ["section-references", card.section_id],
+    queryFn: async () => {
+      if (!card.section_id) return { section_id: "", references: [] }
+      const res = await fetch(`${API_BASE}/references/sections/${card.section_id}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json() as Promise<SectionReferencesResponse>
+    },
+    enabled: !!card.section_id,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+
+  return (
+    <div className="w-full max-w-2xl rounded-lg border border-border bg-muted/30">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="flex w-full items-center justify-between px-4 py-2 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"
+      >
+        Source
+        {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+
+      {expanded && (
+        <div className="flex flex-col gap-3 px-4 pb-4">
+          {/* Source excerpt */}
+          {card.source_excerpt && (
+            <blockquote className="border-l-2 border-border pl-3 text-xs text-muted-foreground italic">
+              {card.source_excerpt}
+            </blockquote>
+          )}
+
+          {/* Web references */}
+          {!card.section_id ? (
+            <p className="text-xs text-muted-foreground">No web references for this card.</p>
+          ) : isLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" />
+              Loading references...
+            </div>
+          ) : isError ? (
+            <p className="text-xs text-amber-700">Source references unavailable.</p>
+          ) : (data?.references ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No web references for this section yet.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {(data?.references ?? []).slice(0, 5).map((ref) => (
+                <a
+                  key={ref.id}
+                  href={ref.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 rounded border border-border px-2 py-1 text-xs hover:bg-accent"
+                >
+                  <ExternalLink size={10} className="shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate font-medium text-primary">
+                    {ref.title}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${QUALITY_CLASS[ref.source_quality]}`}
+                  >
+                    {QUALITY_LABEL[ref.source_quality]}
+                  </span>
+                  {ref.is_llm_suggested && (
+                    <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700">
+                      ~
+                    </span>
+                  )}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 type Rating = "again" | "hard" | "good" | "easy"
@@ -482,6 +612,8 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
   const [correct, setCorrect] = useState(0)
   const [isRating, setIsRating] = useState(false)
   const [teachbackMode, setTeachbackMode] = useState(false)
+  // S138: track last rating to show SourcePanel on "again"
+  const [lastRating, setLastRating] = useState<Rating | null>(null)
   // Track next review date as minimum due_date across remaining cards
   const [nextReviewDate, setNextReviewDate] = useState<string | null>(null)
 
@@ -531,17 +663,39 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
         setNextReviewDate(card.due_date)
       }
 
+      // S138: show SourcePanel when "again" was rated.
+      // Do NOT advance the card yet -- the user reads the SourcePanel first and
+      // clicks "Continue" which calls advanceCard().
+      setLastRating(rating)
+
       const nextIndex = currentIndex + 1
-      if (nextIndex >= queue.length) {
-        // End session
-        await endSession(sessionId)
-        setSessionState("complete")
-      } else {
-        setCurrentIndex(nextIndex)
-        setShowAnswer(false)
+      if (rating !== "again") {
+        // Non-"again" ratings advance immediately
+        if (nextIndex >= queue.length) {
+          await endSession(sessionId)
+          setSessionState("complete")
+        } else {
+          setCurrentIndex(nextIndex)
+          setShowAnswer(false)
+          setLastRating(null)
+        }
       }
+      // "again" stays on current card with SourcePanel visible; advanceCard() drives next step
     } finally {
       setIsRating(false)
+    }
+  }
+
+  async function advanceCard() {
+    // Called by the "Continue" button after viewing the SourcePanel on an "again" rating.
+    const nextIndex = currentIndex + 1
+    if (nextIndex >= queue.length) {
+      if (sessionId) await endSession(sessionId)
+      setSessionState("complete")
+    } else {
+      setCurrentIndex(nextIndex)
+      setShowAnswer(false)
+      setLastRating(null)
     }
   }
 
@@ -647,7 +801,7 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
             </motion.div>
           </AnimatePresence>
 
-          {/* Show Answer / Rating buttons */}
+          {/* Show Answer / Rating buttons -- hidden once a rating is recorded (lastRating set) */}
           {!showAnswer ? (
             <button
               onClick={() => setShowAnswer(true)}
@@ -655,7 +809,7 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
             >
               Show Answer
             </button>
-          ) : (
+          ) : lastRating === null ? (
             <div className="flex gap-3">
               {RATINGS.map(({ label, value, className }) => (
                 <button
@@ -668,6 +822,19 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
                 </button>
               ))}
             </div>
+          ) : null}
+
+          {/* S138: Source panel -- shown after "again" rating; user clicks Continue to advance */}
+          {lastRating === "again" && (
+            <>
+              <SourcePanel card={currentCard} />
+              <button
+                onClick={() => void advanceCard()}
+                className="rounded bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Continue
+              </button>
+            </>
           )}
         </>
       )}

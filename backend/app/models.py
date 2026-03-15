@@ -412,3 +412,41 @@ class ImageModel(Base):
     __table_args__ = (
         UniqueConstraint("document_id", "content_hash", name="uq_image_doc_hash"),
     )
+
+
+class WebReferenceModel(Base):
+    """LLM-generated canonical web reference for a technical term in a section.
+
+    source_quality values (ordered best to worst):
+      official_docs | spec | wiki | tutorial | blog | unknown
+
+    is_llm_suggested=True means URL was produced by the LLM from training knowledge
+    and has not been verified via a live HEAD request.
+    is_llm_suggested=False means a HEAD request confirmed the URL is reachable.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "web_references"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    term: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    excerpt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # official_docs | spec | wiki | tutorial | blog | unknown
+    source_quality: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    is_llm_suggested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id", "section_id", "term", "url",
+            name="uq_web_ref_doc_section_term_url",
+        ),
+    )

@@ -12,6 +12,7 @@ import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { AnnotationPopover } from "./AnnotationPopover"
+import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const API_BASE = "http://localhost:8000"
@@ -346,7 +347,7 @@ function ChapterGoalsPanel({ documentId }: ChapterGoalsPanelProps) {
 // Summary + Glossary panel (right side)
 // ---------------------------------------------------------------------------
 
-type PanelTab = SummaryMode | "glossary"
+type PanelTab = SummaryMode | "glossary" | "references"
 
 interface SummaryPanelProps {
   documentId: string
@@ -356,7 +357,11 @@ interface SummaryPanelProps {
 function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
   const summaryTabs: SummaryTabDef[] =
     contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
-  const allTabs = [...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })), { mode: "glossary" as PanelTab, label: "Glossary" }]
+  const allTabs = [
+    ...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })),
+    { mode: "glossary" as PanelTab, label: "Glossary" },
+    { mode: "references" as PanelTab, label: "References" },
+  ]
 
   const [activeTab, setActiveTab] = useState<PanelTab>(allTabs[0].mode)
   const [summaries, setSummaries] = useState<SummaryMap>({})
@@ -454,8 +459,9 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
     }
   }
 
-  const currentSummary = activeTab !== "glossary" ? summaries[activeTab as SummaryMode] : undefined
-  const isStreaming = activeTab !== "glossary" ? (streaming[activeTab as SummaryMode] ?? false) : false
+  const isSidePanel = activeTab === "glossary" || activeTab === "references"
+  const currentSummary = !isSidePanel ? summaries[activeTab as SummaryMode] : undefined
+  const isStreaming = !isSidePanel ? (streaming[activeTab as SummaryMode] ?? false) : false
 
   return (
     <div className="flex h-full flex-col">
@@ -479,12 +485,14 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 
       {/* Content area */}
       <div className="flex-1 overflow-auto">
-        {summaryError && (
+        {summaryError && activeTab !== "references" && (
           <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {summaryError}
           </div>
         )}
-        {activeTab === "glossary" ? (
+        {activeTab === "references" ? (
+          <ReferencesPanel documentId={documentId} />
+        ) : activeTab === "glossary" ? (
           <GlossaryPanel documentId={documentId} />
         ) : cacheLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">

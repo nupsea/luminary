@@ -25,6 +25,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     SettingsModel,
     StudySessionModel,
     SummaryModel,
+    WebReferenceModel,
 )
 
 logger = logging.getLogger(__name__)

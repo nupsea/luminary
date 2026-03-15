@@ -172,7 +172,59 @@ class SectionSummarizerService:
             total_inserted,
             extra={"doc_id": document_id},
         )
+
+        # Enqueue web_refs enrichment only when at least one section summary was written.
+        # This guarantees the source data exists before the enrichment job runs.
+        if total_inserted > 0:
+            await self._enqueue_web_refs(document_id)
+
         return total_inserted
+
+    async def _enqueue_web_refs(self, document_id: str) -> None:
+        """Enqueue a web_refs enrichment job for document_id.
+
+        Deduplication: skip if a pending/running job already exists.
+        Non-fatal: exceptions are logged and swallowed.
+        """
+        try:
+            from sqlalchemy import func as _func  # noqa: PLC0415
+            from sqlalchemy import select as _select  # noqa: PLC0415
+
+            from app.models import EnrichmentJobModel as _EJM  # noqa: PLC0415
+
+            async with get_session_factory()() as session:
+                dup_result = await session.execute(
+                    _select(_func.count(_EJM.id)).where(
+                        _EJM.document_id == document_id,
+                        _EJM.job_type == "web_refs",
+                        _EJM.status.in_(["pending", "running"]),
+                    )
+                )
+                if dup_result.scalar_one() > 0:
+                    logger.debug(
+                        "section_summarizer: web_refs job already pending/running for doc=%s",
+                        document_id,
+                    )
+                    return
+
+                job = _EJM(
+                    id=str(uuid.uuid4()),
+                    document_id=document_id,
+                    job_type="web_refs",
+                    status="pending",
+                    created_at=datetime.now(UTC),
+                )
+                session.add(job)
+                await session.commit()
+                logger.info(
+                    "section_summarizer: enqueued web_refs job for doc=%s", document_id
+                )
+        except Exception as exc:
+            logger.warning(
+                "section_summarizer: failed to enqueue web_refs for doc=%s: %s",
+                document_id,
+                exc,
+            )
 
     def _group_sections(self, sections: list[SectionModel]) -> list[dict]:
         """Group qualifying sections into at most MAX_UNITS summarization units."""

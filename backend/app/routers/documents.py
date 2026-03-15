@@ -33,6 +33,7 @@ from app.models import (
     SectionModel,
     StudySessionModel,
     SummaryModel,
+    WebReferenceModel,
 )
 from app.services.parser import DocumentParser
 from app.services.vector_store import get_lancedb_service
@@ -823,6 +824,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 ImageModel,
                 LearningObjectiveModel,
                 CodeSnippetModel,
+                WebReferenceModel,
                 ChunkModel,
                 SectionModel,
                 SummaryModel,
@@ -925,6 +927,7 @@ async def delete_document(document_id: str):
             ImageModel,
             LearningObjectiveModel,
             CodeSnippetModel,
+            WebReferenceModel,
             ChunkModel,
             SectionModel,
             SummaryModel,

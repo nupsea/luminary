@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
     VISION_MODEL: str = "ollama/llava:13b"
+    WEB_SEARCH_PROVIDER: str = "none"  # "none" | "brave" | "tavily" | "duckduckgo"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

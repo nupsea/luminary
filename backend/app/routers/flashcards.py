@@ -109,6 +109,8 @@ class FlashcardResponse(BaseModel):
     # S137: Bloom's Taxonomy fields
     flashcard_type: str | None = None
     bloom_level: int | None = None
+    # S138: section_id derived from chunk -- populated by endpoints that do the join
+    section_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -118,7 +120,9 @@ class FlashcardResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _to_response(card: FlashcardModel) -> FlashcardResponse:
+def _to_response(
+    card: FlashcardModel, section_id: str | None = None
+) -> FlashcardResponse:
     return FlashcardResponse(
         id=card.id,
         document_id=card.document_id,
@@ -138,6 +142,7 @@ def _to_response(card: FlashcardModel) -> FlashcardResponse:
         created_at=card.created_at,
         flashcard_type=getattr(card, "flashcard_type", None),
         bloom_level=getattr(card, "bloom_level", None),
+        section_id=section_id,
     )
 
 

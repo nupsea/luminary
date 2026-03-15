@@ -31,6 +31,7 @@ from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
 from app.routers.reading import router as reading_router
+from app.routers.references import router as references_router
 from app.routers.search import router as search_router
 from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
@@ -73,11 +74,13 @@ async def lifespan(app: FastAPI):
     from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
     from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
     from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
+    from app.services.reference_enricher import web_refs_handler  # noqa: PLC0415
 
     worker = get_enrichment_worker()
     worker.register("image_extract", image_extract_handler)
     worker.register("image_analyze", image_analyze_handler)
     worker.register("diagram_extract", diagram_extract_handler)
+    worker.register("web_refs", web_refs_handler)
     await worker.start()
 
     # Ollama startup health-check — warn early if the local LLM is unreachable.
@@ -142,6 +145,7 @@ app.include_router(monitoring_router)
 app.include_router(notes_router)
 app.include_router(qa_router)
 app.include_router(reading_router)
+app.include_router(references_router)
 app.include_router(search_router)
 app.include_router(sections_router)
 app.include_router(settings_router)

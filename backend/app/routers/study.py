@@ -417,8 +417,21 @@ async def get_due_cards(
         stmt = stmt.where(FlashcardModel.document_id == document_id)
     stmt = stmt.order_by(FlashcardModel.due_date.asc()).limit(limit)
     result = await session.execute(stmt)
-    cards = result.scalars().all()
-    return [_to_response(c) for c in cards]
+    cards = list(result.scalars().all())
+
+    # Build chunk_id -> section_id map for S138 SourcePanel
+    chunk_ids = [c.chunk_id for c in cards if c.chunk_id]
+    chunk_to_section: dict[str, str | None] = {}
+    if chunk_ids:
+        chunk_result = await session.execute(
+            select(ChunkModel.id, ChunkModel.section_id).where(
+                ChunkModel.id.in_(chunk_ids)
+            )
+        )
+        for cid, sid in chunk_result:
+            chunk_to_section[cid] = sid
+
+    return [_to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in cards]
 
 
 @router.get("/session-plan", response_model=SessionPlanResponse)
