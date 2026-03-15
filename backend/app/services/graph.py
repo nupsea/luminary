@@ -2,6 +2,7 @@
 
 Schema:
   Nodes: Entity(id, name, type, frequency, aliases), Document(id, title, content_type)
+         DiagramNode(id, name, node_type, source_image_id, document_id, frequency) -- S136
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
          RELATED_TO(Entity->Entity, relation_label, confidence),
@@ -13,6 +14,13 @@ Schema:
          REPLACES(Entity->Entity, document_id)      -- tech relation (S135)
          DEPENDS_ON(Entity->Entity, document_id)    -- tech relation (S135)
          VERSION_OF(Entity->Entity, document_id)    -- versioned library links (S135)
+         CONNECTS_TO(DiagramNode->DiagramNode, document_id, label)  -- S136
+         STORES_IN(DiagramNode->DiagramNode, document_id)            -- S136
+         SENDS_TO(DiagramNode->DiagramNode, document_id, message)    -- S136
+         HAS_FIELD(DiagramNode->DiagramNode, document_id)            -- S136
+         REFERENCES_DM(DiagramNode->DiagramNode, document_id)        -- S136
+         LEADS_TO(DiagramNode->DiagramNode, document_id, condition)  -- S136
+         DEPICTS(DiagramNode->Entity, document_id)                   -- S136
 
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
@@ -54,6 +62,10 @@ class KuzuService:
             "id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64, aliases STRING)",
             "CREATE NODE TABLE IF NOT EXISTS Document("
             "id STRING PRIMARY KEY, title STRING, content_type STRING)",
+            # Diagram-derived node table (S136) -- must be created before DEPICTS edge
+            "CREATE NODE TABLE IF NOT EXISTS DiagramNode("
+            "id STRING PRIMARY KEY, name STRING, node_type STRING,"
+            " source_image_id STRING, document_id STRING, frequency INT64)",
             # Edge tables
             "CREATE REL TABLE IF NOT EXISTS MENTIONED_IN("
             "FROM Entity TO Document, count INT64)",
@@ -78,6 +90,22 @@ class KuzuService:
             "FROM Entity TO Entity, document_id STRING)",
             "CREATE REL TABLE IF NOT EXISTS VERSION_OF("
             "FROM Entity TO Entity, document_id STRING)",
+            # Diagram-derived edge tables (S136)
+            "CREATE REL TABLE IF NOT EXISTS CONNECTS_TO("
+            "FROM DiagramNode TO DiagramNode, document_id STRING, label STRING)",
+            "CREATE REL TABLE IF NOT EXISTS STORES_IN("
+            "FROM DiagramNode TO DiagramNode, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS SENDS_TO("
+            "FROM DiagramNode TO DiagramNode, document_id STRING, message STRING)",
+            "CREATE REL TABLE IF NOT EXISTS HAS_FIELD("
+            "FROM DiagramNode TO DiagramNode, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS REFERENCES_DM("
+            "FROM DiagramNode TO DiagramNode, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS LEADS_TO("
+            "FROM DiagramNode TO DiagramNode, document_id STRING, condition STRING)",
+            # DEPICTS: links a diagram-derived node to an existing Entity (S136)
+            "CREATE REL TABLE IF NOT EXISTS DEPICTS("
+            "FROM DiagramNode TO Entity, document_id STRING)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)
@@ -602,7 +630,11 @@ class KuzuService:
     # -------------------------------------------------------------------------
 
     def get_graph_for_document(self, document_id: str) -> dict:
-        """Return nodes and edges for a single document."""
+        """Return nodes and edges for a single document.
+
+        Includes Entity nodes (with CO_OCCURS + tech-relation edges) and
+        DiagramNode rows (with diagram edges) merged into a single graph.
+        """
         result = self._conn.execute(
             "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
             " RETURN e.id, e.name, e.type, e.frequency, r.count",
@@ -619,6 +651,7 @@ class KuzuService:
                     "label": name,
                     "type": etype,
                     "size": freq or 1,
+                    "source_image_id": "",
                     "mention_count": count or 1,
                 }
             )
@@ -626,10 +659,19 @@ class KuzuService:
 
         edges = self._get_co_occurrence_edges(entity_ids, document_id)
         edges.extend(self._get_tech_relation_edges(entity_ids, document_id))
+
+        # Include diagram-derived nodes and edges (S136)
+        diagram_nodes = self.get_diagram_nodes_for_document(document_id)
+        nodes.extend(diagram_nodes)
+        edges.extend(self.get_diagram_edges_for_document(document_id))
+
         return {"nodes": nodes, "edges": edges}
 
     def get_graph_for_documents(self, document_ids: list[str]) -> dict:
-        """Return merged nodes and edges for multiple documents."""
+        """Return merged nodes and edges for multiple documents.
+
+        Includes Entity nodes and DiagramNode rows from all specified documents.
+        """
         if not document_ids:
             return {"nodes": [], "edges": []}
 
@@ -651,6 +693,7 @@ class KuzuService:
                     "label": name,
                     "type": etype,
                     "size": freq or 1,
+                    "source_image_id": "",
                     "mention_count": count or 1,
                 }
             else:
@@ -660,6 +703,11 @@ class KuzuService:
         edges: list[dict] = []
         for doc_id in document_ids:
             edges.extend(self._get_co_occurrence_edges(entity_ids, doc_id))
+            # Include diagram-derived nodes and edges for this document (S136)
+            for dnode in self.get_diagram_nodes_for_document(doc_id):
+                if dnode["id"] not in nodes_map:
+                    nodes_map[dnode["id"]] = dnode
+            edges.extend(self.get_diagram_edges_for_document(doc_id))
 
         return {"nodes": list(nodes_map.values()), "edges": edges}
 
@@ -811,12 +859,19 @@ class KuzuService:
                 {"vid": versioned_entity_id, "bid": base_entity_id, "did": document_id},
             )
 
+    # Diagram-derived node types (S136) -- queried from DiagramNode table, not Entity
+    _DIAGRAM_NODE_TYPES: frozenset[str] = frozenset({"COMPONENT", "ACTOR", "ENTITY_DM", "STEP"})
+
     def get_entities_by_type(self, document_id: str, entity_type: str) -> list[dict]:
         """Return entities of a specific type for a document.
 
+        For diagram node types (COMPONENT, ACTOR, ENTITY_DM, STEP), queries the
+        DiagramNode table filtered by node_type. For all other types, queries Entity.
         Returns list of {id, name, type, frequency} dicts.
         Returns [] on any error (non-fatal).
         """
+        if entity_type in self._DIAGRAM_NODE_TYPES:
+            return self._get_diagram_nodes_by_type(document_id, entity_type)
         try:
             result = self._conn.execute(
                 "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
@@ -837,6 +892,271 @@ class KuzuService:
         except Exception:
             logger.debug("get_entities_by_type failed", exc_info=True)
             return []
+
+    def _get_diagram_nodes_by_type(self, document_id: str, node_type: str) -> list[dict]:
+        """Return DiagramNode rows of a specific node_type for a document.
+
+        Returns list of {id, name, type, frequency} dicts (same shape as get_entities_by_type).
+        Returns [] on any error.
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (n:DiagramNode)"
+                " WHERE n.document_id = $did AND n.node_type = $ntype"
+                " RETURN n.id, n.name, n.node_type, n.frequency",
+                {"did": document_id, "ntype": node_type},
+            )
+            nodes: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                nodes.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "type": row[2],
+                    "frequency": int(row[3] or 1),
+                })
+            return nodes
+        except Exception:
+            logger.debug("_get_diagram_nodes_by_type failed", exc_info=True)
+            return []
+
+    # -------------------------------------------------------------------------
+    # Diagram-derived nodes and edges (S136)
+    # -------------------------------------------------------------------------
+
+    def upsert_diagram_node(
+        self,
+        node_id: str,
+        name: str,
+        node_type: str,
+        source_image_id: str,
+        document_id: str,
+    ) -> None:
+        """Create or increment frequency for a DiagramNode.
+
+        node_id should be deterministic: f"{source_image_id}:{name.lower()}"
+        Idempotent: re-running increments frequency.
+        """
+        result = self._conn.execute(
+            "MATCH (n:DiagramNode {id: $id}) RETURN n.frequency",
+            {"id": node_id},
+        )
+        if result.has_next():
+            row = result.get_next()
+            freq = (row[0] or 0) + 1
+            self._conn.execute(
+                "MATCH (n:DiagramNode {id: $id}) SET n.frequency = $freq",
+                {"id": node_id, "freq": freq},
+            )
+        else:
+            self._conn.execute(
+                "CREATE (:DiagramNode {id: $id, name: $name, node_type: $ntype,"
+                " source_image_id: $siid, document_id: $did, frequency: 1})",
+                {
+                    "id": node_id, "name": name, "ntype": node_type,
+                    "siid": source_image_id, "did": document_id,
+                },
+            )
+
+    def add_diagram_edge(
+        self,
+        from_id: str,
+        to_id: str,
+        edge_type: str,
+        document_id: str,
+        **properties: str,
+    ) -> None:
+        """Create a diagram edge between two DiagramNode rows.
+
+        edge_type must be one of: CONNECTS_TO, STORES_IN, SENDS_TO, HAS_FIELD,
+        REFERENCES_DM, LEADS_TO.
+        Idempotent: skips creation if an identical edge already exists.
+        Kuzu does not support parameterised relation types, so explicit branches are used.
+        """
+        # Nodes referenced by from/to must exist; caller guarantees this
+        if edge_type == "CONNECTS_TO":
+            r = self._conn.execute(
+                "MATCH (a:DiagramNode {id: $aid})-[r:CONNECTS_TO]->(b:DiagramNode {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": from_id, "bid": to_id, "did": document_id},
+            )
+            if not r.has_next():
+                label = properties.get("label", "")
+                self._conn.execute(
+                    "MATCH (a:DiagramNode {id: $aid}), (b:DiagramNode {id: $bid})"
+                    " CREATE (a)-[:CONNECTS_TO {document_id: $did, label: $lbl}]->(b)",
+                    {"aid": from_id, "bid": to_id, "did": document_id, "lbl": label},
+                )
+        elif edge_type == "STORES_IN":
+            r = self._conn.execute(
+                "MATCH (a:DiagramNode {id: $aid})-[r:STORES_IN]->(b:DiagramNode {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": from_id, "bid": to_id, "did": document_id},
+            )
+            if not r.has_next():
+                self._conn.execute(
+                    "MATCH (a:DiagramNode {id: $aid}), (b:DiagramNode {id: $bid})"
+                    " CREATE (a)-[:STORES_IN {document_id: $did}]->(b)",
+                    {"aid": from_id, "bid": to_id, "did": document_id},
+                )
+        elif edge_type == "SENDS_TO":
+            r = self._conn.execute(
+                "MATCH (a:DiagramNode {id: $aid})-[r:SENDS_TO]->(b:DiagramNode {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": from_id, "bid": to_id, "did": document_id},
+            )
+            if not r.has_next():
+                message = properties.get("message", "")
+                self._conn.execute(
+                    "MATCH (a:DiagramNode {id: $aid}), (b:DiagramNode {id: $bid})"
+                    " CREATE (a)-[:SENDS_TO {document_id: $did, message: $msg}]->(b)",
+                    {"aid": from_id, "bid": to_id, "did": document_id, "msg": message},
+                )
+        elif edge_type == "HAS_FIELD":
+            r = self._conn.execute(
+                "MATCH (a:DiagramNode {id: $aid})-[r:HAS_FIELD]->(b:DiagramNode {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": from_id, "bid": to_id, "did": document_id},
+            )
+            if not r.has_next():
+                self._conn.execute(
+                    "MATCH (a:DiagramNode {id: $aid}), (b:DiagramNode {id: $bid})"
+                    " CREATE (a)-[:HAS_FIELD {document_id: $did}]->(b)",
+                    {"aid": from_id, "bid": to_id, "did": document_id},
+                )
+        elif edge_type == "REFERENCES_DM":
+            r = self._conn.execute(
+                "MATCH (a:DiagramNode {id: $aid})-[r:REFERENCES_DM]->(b:DiagramNode {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": from_id, "bid": to_id, "did": document_id},
+            )
+            if not r.has_next():
+                self._conn.execute(
+                    "MATCH (a:DiagramNode {id: $aid}), (b:DiagramNode {id: $bid})"
+                    " CREATE (a)-[:REFERENCES_DM {document_id: $did}]->(b)",
+                    {"aid": from_id, "bid": to_id, "did": document_id},
+                )
+        elif edge_type == "LEADS_TO":
+            r = self._conn.execute(
+                "MATCH (a:DiagramNode {id: $aid})-[r:LEADS_TO]->(b:DiagramNode {id: $bid})"
+                " WHERE r.document_id = $did RETURN r",
+                {"aid": from_id, "bid": to_id, "did": document_id},
+            )
+            if not r.has_next():
+                condition = properties.get("condition", "")
+                self._conn.execute(
+                    "MATCH (a:DiagramNode {id: $aid}), (b:DiagramNode {id: $bid})"
+                    " CREATE (a)-[:LEADS_TO {document_id: $did, condition: $cond}]->(b)",
+                    {"aid": from_id, "bid": to_id, "did": document_id, "cond": condition},
+                )
+        else:
+            logger.warning(
+                "add_diagram_edge: unknown edge_type=%r, skipping", edge_type
+            )
+
+    def add_depicts_edge(
+        self, diagram_node_id: str, entity_id: str, document_id: str
+    ) -> None:
+        """Create a DEPICTS edge from a DiagramNode to an Entity.
+
+        DEPICTS represents that a diagram component visually depicts a known entity
+        (e.g. COMPONENT 'PostgreSQL' depicts LIBRARY Entity 'postgresql').
+        Idempotent: if the edge already exists, it is left unchanged.
+        """
+        r = self._conn.execute(
+            "MATCH (d:DiagramNode {id: $did_n})-[r:DEPICTS]->(e:Entity {id: $eid})"
+            " WHERE r.document_id = $did RETURN r",
+            {"did_n": diagram_node_id, "eid": entity_id, "did": document_id},
+        )
+        if not r.has_next():
+            self._conn.execute(
+                "MATCH (d:DiagramNode {id: $did_n}), (e:Entity {id: $eid})"
+                " CREATE (d)-[:DEPICTS {document_id: $did}]->(e)",
+                {"did_n": diagram_node_id, "eid": entity_id, "did": document_id},
+            )
+
+    def match_entity_by_name(self, node_name: str, document_id: str) -> str | None:
+        """Return Entity.id if an Entity with a name containing node_name exists.
+
+        Case-insensitive substring match: returns the first Entity in document_id
+        whose lowercase name contains the lowercase node_name, or None.
+        Pure Kuzu query; no LLM.
+        """
+        try:
+            name_lower = node_name.lower()
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                " RETURN e.id, e.name",
+                {"did": document_id},
+            )
+            while result.has_next():
+                row = result.get_next()
+                eid, ename = row[0], row[1]
+                if ename and name_lower in ename.lower():
+                    return eid
+            return None
+        except Exception:
+            logger.debug("match_entity_by_name failed", exc_info=True)
+            return None
+
+    def get_diagram_nodes_for_document(self, document_id: str) -> list[dict]:
+        """Return all DiagramNode rows for a document.
+
+        Returns list of dicts: {id, name, type, size, source_image_id, mention_count}
+        where type = node_type and size = frequency.
+        Returns [] on any Kuzu error.
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (n:DiagramNode) WHERE n.document_id = $did"
+                " RETURN n.id, n.name, n.node_type, n.frequency, n.source_image_id",
+                {"did": document_id},
+            )
+            nodes: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                nodes.append({
+                    "id": row[0],
+                    "label": row[1],
+                    "type": row[2],
+                    "size": int(row[3] or 1),
+                    "source_image_id": row[4] or "",
+                    "mention_count": int(row[3] or 1),
+                })
+            return nodes
+        except Exception:
+            logger.debug("get_diagram_nodes_for_document failed", exc_info=True)
+            return []
+
+    def get_diagram_edges_for_document(self, document_id: str) -> list[dict]:
+        """Return all diagram edges for a document (across all diagram edge types).
+
+        Returns list of {source, target, weight, relation} dicts.
+        Returns [] on any error.
+        """
+        edges: list[dict] = []
+        _DIAGRAM_RELS = (
+            "CONNECTS_TO", "STORES_IN", "SENDS_TO", "HAS_FIELD", "REFERENCES_DM", "LEADS_TO"
+        )
+        for rel in _DIAGRAM_RELS:
+            try:
+                result = self._conn.execute(
+                    f"MATCH (a:DiagramNode)-[r:{rel}]->(b:DiagramNode)"
+                    f" WHERE r.document_id = $did"
+                    f" RETURN a.id, b.id",
+                    {"did": document_id},
+                )
+                while result.has_next():
+                    row = result.get_next()
+                    edges.append({
+                        "source": row[0],
+                        "target": row[1],
+                        "weight": 1.0,
+                        "relation": rel,
+                    })
+            except Exception:
+                logger.debug("get_diagram_edges_for_document failed for %s", rel, exc_info=True)
+        return edges
 
     def _get_tech_relation_edges(
         self, entity_ids: set[str], document_id: str

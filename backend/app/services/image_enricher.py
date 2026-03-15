@@ -230,6 +230,11 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
     Called by EnrichmentQueueWorker for each image_analyze job.
     Delegates to ImageEnricherService.enrich().
     Non-fatal wrapper: ServiceUnavailableError propagates to mark job 'failed'.
+
+    After enrich() completes, enqueues a 'diagram_extract' job if any qualifying
+    diagram images (architecture_diagram, sequence_diagram, er_diagram, flowchart)
+    were produced. Uses a deduplication check to avoid enqueueing multiple jobs on
+    retry (checks for existing pending/running diagram_extract jobs).
     """
     logger.info(
         "image_analyze_handler: starting doc=%s job=%s", document_id, job_id
@@ -239,3 +244,76 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
     logger.info(
         "image_analyze_handler: done doc=%s job=%s", document_id, job_id
     )
+
+    # Enqueue diagram_extract if qualifying diagram images now exist (S136)
+    _QUALIFYING_DIAGRAM_TYPES = [
+        "architecture_diagram", "sequence_diagram", "er_diagram", "flowchart"
+    ]
+    try:
+        import uuid as _uuid  # noqa: PLC0415
+        from datetime import UTC  # noqa: PLC0415
+        from datetime import datetime as _dt
+
+        from sqlalchemy import func as _func  # noqa: PLC0415
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        from app.database import get_session_factory as _get_sf  # noqa: PLC0415
+        from app.models import EnrichmentJobModel as _EJM  # noqa: PLC0415
+        from app.models import ImageModel as _ImageModel  # noqa: PLC0415
+
+        async with _get_sf()() as session:
+            # Check if any qualifying diagram images exist for this document
+            has_diagrams_result = await session.execute(
+                _select(_ImageModel.id).where(
+                    _ImageModel.document_id == document_id,
+                    _ImageModel.image_type.in_(_QUALIFYING_DIAGRAM_TYPES),
+                    _ImageModel.description.is_not(None),
+                ).limit(1)
+            )
+            has_diagrams = has_diagrams_result.scalar_one_or_none() is not None
+
+        if not has_diagrams:
+            logger.debug(
+                "image_analyze_handler: no qualifying diagram images for doc=%s, "
+                "skipping diagram_extract enqueue",
+                document_id,
+            )
+            return
+
+        async with _get_sf()() as session:
+            # Deduplication: skip if a pending/running diagram_extract job already exists
+            dup_result = await session.execute(
+                _select(_func.count(_EJM.id)).where(
+                    _EJM.document_id == document_id,
+                    _EJM.job_type == "diagram_extract",
+                    _EJM.status.in_(["pending", "running"]),
+                )
+            )
+            dup_count = dup_result.scalar_one_or_none() or 0
+
+        if dup_count > 0:
+            logger.debug(
+                "image_analyze_handler: diagram_extract already queued for doc=%s", document_id
+            )
+            return
+
+        async with _get_sf()() as session:
+            job = _EJM(
+                id=str(_uuid.uuid4()),
+                document_id=document_id,
+                job_type="diagram_extract",
+                status="pending",
+                created_at=_dt.now(UTC),
+            )
+            session.add(job)
+            await session.commit()
+            logger.info(
+                "image_analyze_handler: enqueued diagram_extract for doc=%s", document_id
+            )
+    except Exception as exc:
+        # Non-fatal: failure to enqueue diagram_extract should not fail image_analyze
+        logger.warning(
+            "image_analyze_handler: failed to enqueue diagram_extract for doc=%s: %s",
+            document_id,
+            exc,
+        )

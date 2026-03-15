@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
     get_graph_service()  # initialise KuzuService and create schema on startup
 
     # Start enrichment queue worker and register job handlers
+    from app.services.diagram_extractor import diagram_extract_handler  # noqa: PLC0415
     from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
     from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
     from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
@@ -76,6 +77,7 @@ async def lifespan(app: FastAPI):
     worker = get_enrichment_worker()
     worker.register("image_extract", image_extract_handler)
     worker.register("image_analyze", image_analyze_handler)
+    worker.register("diagram_extract", diagram_extract_handler)
     await worker.start()
 
     # Ollama startup health-check — warn early if the local LLM is unreachable.

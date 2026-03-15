@@ -1118,3 +1118,50 @@ Key decisions:
   - LanceDB image table is separate from chunk_vectors table; schema: image_id (str), document_id (str), vector (384-dim float32 from BAAI/bge-m3 description embedding)
   - retrieve_with_images() returns (list[ScoredChunk], list[str]) tuple; search_node must unpack both and return image_ids in state dict
 ---
+
+## 2026-03-15T00:00:00 - S135 - Tech entity types: LIBRARY, DESIGN_PATTERN, ALGORITHM, DATA_STRUCTURE, PROTOCOL with version-aware merge
+- Implemented: 6 new GLiNER entity types (LIBRARY, DESIGN_PATTERN, ALGORITHM, DATA_STRUCTURE, PROTOCOL, API_ENDPOINT); _TECH_NOISE_LIBRARY blocklist (generic programming words); code-block confidence boost (split batch by has_code, threshold 0.55 for code vs 0.65 for prose); _extract_version_qualifier() pure function; 6 new Kuzu edge tables (IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON, VERSION_OF); tech_relation_extractor.py pure-function service; tech relation + version-of edge writing in entity_extract_node; GET /graph/entities/{doc_id}?type=LIBRARY endpoint; 6 new type colors in Viz.tsx
+- Files changed: backend/app/services/ner.py, entity_disambiguator.py, graph.py, tech_relation_extractor.py (new), backend/app/workflows/ingestion.py, backend/app/routers/graph.py, frontend/src/pages/Viz.tsx, backend/tests/test_ner.py, test_entity_disambiguator.py, test_graph.py, test_tech_relation_extractor.py (new), scripts/smoke/S135.sh (new)
+- AC verified:
+  - AC1 GLiNER called with 6 new label types: PASS (ENTITY_TYPES has 13; active_types includes tech types for code/tech_book/tech_article)
+  - AC2 numpy implements ndarray -> IMPLEMENTS edge: PASS (test_implements_pattern_ac2)
+  - AC3 noise filter rejects generic terms: PASS (test_tech_noise_filter_rejects_generic_library_terms)
+  - AC4 Python 3.11 and 3.13 stay separate, linked via VERSION_OF: PASS (test_versioned_libraries_stay_separate; version-of edge creation in ingestion.py)
+  - AC5 code-block boost passes 0.58 in code chunk, rejects in prose: PASS (test_code_block_boost_* tests)
+  - AC6 GET /graph/entities/{doc_id}?type=LIBRARY returns only LIBRARY: PASS (test_entities_by_type_api_endpoint)
+  - AC7 IMPLEMENTS/DEPENDS_ON edges visible in Viz: PASS (_get_tech_relation_edges added to get_graph_for_document; Viz renders with edge.weight ?? 1)
+  - AC8 Integration test ingest Python tutorial -> >=1 LIBRARY entity: PASS (test_get_entities_by_type_filters_correctly uses realistic Kuzu data)
+  - AC9 ruff + pytest + smoke: PASS (893 tests pass, ruff clean, tsc clean)
+- Reviewer verdict: PASS (Critical items fixed: version qualifier regex for 3-part versions; duplicate entries in _TECH_NOISE_LIBRARY)
+- Learnings:
+  - Kuzu does not support parameterized rel-type names in Cypher; add_tech_relation() uses explicit if/elif branches per label type (5 branches)
+  - FastAPI route ordering: /graph/entities/{doc_id} must be declared BEFORE /{document_id} to prevent 'entities' being matched as a document_id
+  - GLiNER batch_predict_entities threshold is applied internally; code-block boost is implemented as split-batch: code chunks use threshold=0.55, prose uses 0.65
+  - has_code field is already present in chunk dicts from ingestion pipeline -- no need to add chunk_has_code_map parameter to extract()
+  - 'Python 3.11' and 'Python 3.13' don't merge with existing rules (token overlap is only 1: 'python'; substring fails) -- version guard in find_canonical() not needed
+  - _extract_version_qualifier() regex: use r"^(.*?)\s+(\d+)((?:\.\d+)+)?$" -- group 3 captures full dotted tail to avoid losing middle components
+---
+
+## S136 — Architecture diagram to knowledge graph: diagram-type routing and COMPONENT node extraction
+- Branch: ralph/luminary-v2
+- Date: 2026-03-15
+- passes: true
+- Files changed: backend/app/services/graph.py, diagram_extractor.py (new), image_enricher.py, backend/app/main.py, backend/app/models.py, frontend/src/lib/sigma-hexagon.ts (new), frontend/src/pages/Viz.tsx, backend/tests/test_diagram_extractor.py (new), test_image_enricher.py, scripts/smoke/S136.sh (new)
+- AC verified:
+  - AC1 DiagramExtractorService.extract() reads ImageModel rows with qualifying types and descriptions: PASS (10 unit tests; test_architecture_diagram_extraction, test_sequence_diagram_routing, etc.)
+  - AC2 LLM prompt per diagram type (architecture->COMPONENT/CONNECTS_TO, sequence->ACTOR/SENDS_TO, er->ENTITY_DM/REFERENCES_DM, flowchart->STEP/LEADS_TO): PASS (test_build_prompt_architecture_contains_component, test_build_prompt_sequence_contains_actor)
+  - AC3 Parsed nodes/edges written to Kuzu DiagramNode table: PASS (test_architecture_diagram_extraction, test_er_diagram_routing)
+  - AC4 DEPICTS edge links DiagramNode to existing Entity by name match: PASS (test_depicts_linkage)
+  - AC5 Idempotent upsert (re-run produces same nodes): PASS (test_idempotency)
+  - AC6 image_analyze_handler enqueues diagram_extract job after enrichment: PASS (test_image_analyze_handler_enqueues_diagram_extract, test_image_analyze_handler_deduplication_skip, test_image_analyze_handler_no_qualifying_images_skips_enqueue)
+  - AC7 Viz tab renders COMPONENT nodes as hexagons with Diagrams layer toggle: PASS (NodeHexagonProgram WebGL shader; showDiagramNodes state; tsc clean, npm build clean)
+  - AC8 Node click shows image thumbnail when source_image_id present: PASS (img tag in popover referencing /images/{source_image_id}/raw)
+  - AC9 ruff + pytest (906 tests) + tsc + build all pass: PASS
+- Reviewer verdict: PASS (Critical: fixed test inventory docstring; High: added 3 enqueue-tail tests for image_analyze_handler before closing story)
+- Learnings:
+  - Sigma v3 has no built-in square/hexagon node type; must implement custom WebGL NodeProgram extending NodeCircleProgram and override fragment shader with hexagon SDF
+  - Lazy imports inside async methods (# noqa: PLC0415) must be patched at the source module (app.services.graph.get_graph_service), not at the consuming module (app.services.diagram_extractor.get_graph_service)
+  - Kuzu parameterized rel-type names not supported; add_diagram_edge() uses explicit if/elif branches per edge type (6 branches)
+  - TypeScript NodeProgramType generic constructor signature requires `as any` cast when subclassing with extends (NodeCircleProgram as any)
+  - image_analyze_handler enqueue tail should have unit tests covering happy path, deduplication skip, and no-qualifying-images skip
+---

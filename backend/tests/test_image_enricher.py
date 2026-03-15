@@ -361,6 +361,163 @@ async def test_images_fts_keyword_search(
 
 
 # ---------------------------------------------------------------------------
+# image_analyze_handler enqueue tail tests (S136)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_image_analyze_handler_enqueues_diagram_extract(
+    session_factory,
+) -> None:
+    """After image_analyze completes, a diagram_extract job is enqueued when
+    qualifying diagram images with descriptions exist.
+    """
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models import EnrichmentJobModel  # noqa: PLC0415
+    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
+
+    doc_id = "doc-enqueue-test"
+    image_id = "img-enqueue-001"
+
+    async with session_factory() as session:
+        session.add(DocumentModel(
+            id=doc_id, title="Enqueue Doc", file_path="/tmp/enqueue.pdf",
+            format="pdf", content_type="book", stage="complete",
+        ))
+        session.add(ImageModel(
+            id=image_id, document_id=doc_id, chunk_id=None, page=0,
+            path=f"images/{doc_id}/0_0.png", width=200, height=200,
+            content_hash="eq123",
+            image_type="architecture_diagram",
+            description="A component diagram showing Service A and Service B",
+        ))
+        await session.commit()
+
+    with (
+        patch(
+            "app.services.image_enricher.ImageEnricherService.enrich",
+            new_callable=AsyncMock, return_value=1,
+        ),
+        patch("app.database.get_session_factory", return_value=session_factory),
+    ):
+        await image_analyze_handler(doc_id, "job-enqueue-001")
+
+    async with session_factory() as session:
+        jobs = (await session.execute(
+            select(EnrichmentJobModel).where(
+                EnrichmentJobModel.document_id == doc_id,
+                EnrichmentJobModel.job_type == "diagram_extract",
+            )
+        )).scalars().all()
+    assert len(jobs) == 1
+    assert jobs[0].status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_image_analyze_handler_deduplication_skip(
+    session_factory,
+) -> None:
+    """No duplicate diagram_extract job when one is already pending."""
+    import uuid as _uuid  # noqa: PLC0415
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models import EnrichmentJobModel  # noqa: PLC0415
+    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
+
+    doc_id = "doc-dedup-test"
+    image_id = "img-dedup-001"
+
+    async with session_factory() as session:
+        session.add(DocumentModel(
+            id=doc_id, title="Dedup Doc", file_path="/tmp/dedup.pdf",
+            format="pdf", content_type="book", stage="complete",
+        ))
+        session.add(ImageModel(
+            id=image_id, document_id=doc_id, chunk_id=None, page=0,
+            path=f"images/{doc_id}/0_0.png", width=200, height=200,
+            content_hash="dd123",
+            image_type="sequence_diagram",
+            description="A sequence diagram for auth flow",
+        ))
+        session.add(EnrichmentJobModel(
+            id=str(_uuid.uuid4()),
+            document_id=doc_id,
+            job_type="diagram_extract",
+            status="pending",
+            created_at=datetime.now(UTC),
+        ))
+        await session.commit()
+
+    with (
+        patch(
+            "app.services.image_enricher.ImageEnricherService.enrich",
+            new_callable=AsyncMock, return_value=1,
+        ),
+        patch("app.database.get_session_factory", return_value=session_factory),
+    ):
+        await image_analyze_handler(doc_id, "job-dedup-001")
+
+    async with session_factory() as session:
+        jobs = (await session.execute(
+            select(EnrichmentJobModel).where(
+                EnrichmentJobModel.document_id == doc_id,
+                EnrichmentJobModel.job_type == "diagram_extract",
+            )
+        )).scalars().all()
+    assert len(jobs) == 1  # still only 1, not 2
+
+
+@pytest.mark.asyncio
+async def test_image_analyze_handler_no_qualifying_images_skips_enqueue(
+    session_factory,
+) -> None:
+    """No diagram_extract job enqueued when no qualifying diagram images exist."""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models import EnrichmentJobModel  # noqa: PLC0415
+    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
+
+    doc_id = "doc-no-diag"
+    image_id = "img-no-diag-001"
+
+    async with session_factory() as session:
+        session.add(DocumentModel(
+            id=doc_id, title="No Diag Doc", file_path="/tmp/nodiag.pdf",
+            format="pdf", content_type="book", stage="complete",
+        ))
+        session.add(ImageModel(
+            id=image_id, document_id=doc_id, chunk_id=None, page=0,
+            path=f"images/{doc_id}/0_0.png", width=200, height=200,
+            content_hash="nd123",
+            image_type="chart",
+            description="A bar chart",
+        ))
+        await session.commit()
+
+    with (
+        patch(
+            "app.services.image_enricher.ImageEnricherService.enrich",
+            new_callable=AsyncMock, return_value=1,
+        ),
+        patch("app.database.get_session_factory", return_value=session_factory),
+    ):
+        await image_analyze_handler(doc_id, "job-nodiag-001")
+
+    async with session_factory() as session:
+        jobs = (await session.execute(
+            select(EnrichmentJobModel).where(
+                EnrichmentJobModel.document_id == doc_id,
+                EnrichmentJobModel.job_type == "diagram_extract",
+            )
+        )).scalars().all()
+    assert len(jobs) == 0
+
+
+# ---------------------------------------------------------------------------
 # Integration test — requires ollama with llava model
 # ---------------------------------------------------------------------------
 

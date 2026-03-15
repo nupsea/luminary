@@ -8,6 +8,7 @@ import Sigma from "sigma"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
 import { useNavigate } from "react-router-dom"
 import { Skeleton } from "@/components/ui/skeleton"
+import NodeHexagonProgram from "@/lib/sigma-hexagon"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 
@@ -93,9 +94,17 @@ const ALL_ENTITY_TYPES = [
   "DATA_STRUCTURE",
   "PROTOCOL",
   "API_ENDPOINT",
+  // Diagram-derived types (S136) -- rendered as hexagons for COMPONENT
+  "COMPONENT",
+  "ACTOR",
+  "ENTITY_DM",
+  "STEP",
 ] as const
 
 type EntityType = (typeof ALL_ENTITY_TYPES)[number]
+
+// Diagram-derived node types that use the hexagon renderer (S136)
+const DIAGRAM_NODE_TYPES: ReadonlySet<string> = new Set(["COMPONENT", "ACTOR", "ENTITY_DM", "STEP"])
 
 const TYPE_COLORS: Record<EntityType, string> = {
   PERSON: "#3b82f6",
@@ -112,6 +121,11 @@ const TYPE_COLORS: Record<EntityType, string> = {
   DATA_STRUCTURE: "#84cc16",
   PROTOCOL: "#a78bfa",
   API_ENDPOINT: "#fb7185",
+  // Diagram-derived types (S136)
+  COMPONENT: "#14b8a6",   // teal-500
+  ACTOR: "#f43f5e",       // rose-500
+  ENTITY_DM: "#a3e635",   // lime-400
+  STEP: "#fbbf24",        // amber-400
 }
 
 const DEFAULT_COLOR = "#94a3b8"
@@ -126,6 +140,7 @@ interface GraphNode {
   label: string
   type: string
   size: number
+  source_image_id?: string  // set for diagram-derived nodes (S136)
 }
 
 interface GraphEdge {
@@ -146,6 +161,7 @@ interface SelectedNodeInfo {
   frequency: number
   screenX: number
   screenY: number
+  source_image_id?: string  // set for diagram-derived nodes (S136)
 }
 
 interface DocListItem {
@@ -201,15 +217,21 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
     maxFreq === minFreq ? 10 : 4 + ((freq - minFreq) / (maxFreq - minFreq)) * 16
 
   nodes.forEach((node) => {
-    g.addNode(node.id, {
+    const attrs: Record<string, unknown> = {
       label: node.label,
       entityType: node.type,
       frequency: node.size,
+      source_image_id: node.source_image_id ?? "",
       x: Math.random() * 200 - 100,
       y: Math.random() * 200 - 100,
       size: scaleSize(node.size),
       color: TYPE_COLORS[node.type as EntityType] ?? DEFAULT_COLOR,
-    })
+    }
+    // COMPONENT nodes use the hexagon renderer (S136)
+    if (node.type === "COMPONENT") {
+      attrs.type = "hexagon"
+    }
+    g.addNode(node.id, attrs)
   })
 
   edges.forEach((edge, idx) => {
@@ -315,6 +337,8 @@ export default function Viz() {
   const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
+  // Diagrams layer toggle: show/hide diagram-derived nodes (S136)
+  const [showDiagramNodes, setShowDiagramNodes] = useState(true)
   // Learning path state (S117)
   const [learningPathStart, setLearningPathStart] = useState("")
   const [lpInputDraft, setLpInputDraft] = useState("")
@@ -365,13 +389,19 @@ export default function Viz() {
       return buildLearningPathGraph(lpData)
     }
     if (!data) return null
-    const visibleNodes = data.nodes.filter((n) => activeTypes.has(n.type as EntityType))
+    const visibleNodes = data.nodes.filter((n) => {
+      if (DIAGRAM_NODE_TYPES.has(n.type)) {
+        // Diagram nodes are hidden when showDiagramNodes=false OR type not in activeTypes
+        return showDiagramNodes && activeTypes.has(n.type as EntityType)
+      }
+      return activeTypes.has(n.type as EntityType)
+    })
     const visibleIds = new Set(visibleNodes.map((n) => n.id))
     const visibleEdges = data.edges.filter(
       (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
     )
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes, viewMode, lpData])
+  }, [data, activeTypes, viewMode, lpData, showDiagramNodes])
 
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
@@ -391,6 +421,12 @@ export default function Viz() {
       defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
       labelSize: 12,
       labelWeight: "normal",
+      // Register hexagon node program for COMPONENT nodes (S136).
+      // Nodes without a type attribute use sigma's default renderer (NodePointProgram).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sigma generic variance
+      nodeProgramClasses: {
+        hexagon: NodeHexagonProgram as any,
+      },
     })
 
     // Node click → popover
@@ -408,6 +444,7 @@ export default function Viz() {
         frequency: filteredGraph.getNodeAttribute(node, "frequency") as number,
         screenX: rect.left + pos.x,
         screenY: rect.top + pos.y,
+        source_image_id: (filteredGraph.getNodeAttribute(node, "source_image_id") as string | undefined) ?? "",
       })
       event.preventSigmaDefault()
     })
@@ -661,6 +698,22 @@ export default function Viz() {
             />
           </div>
 
+          {/* Diagrams layer toggle (S136) */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Layers
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showDiagramNodes}
+                onChange={() => setShowDiagramNodes((v) => !v)}
+                className="accent-primary"
+              />
+              <span className="text-xs text-foreground">Diagrams</span>
+            </label>
+          </div>
+
           {/* Entity type filter */}
           <div>
             <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -851,6 +904,19 @@ export default function Viz() {
                 <p className="text-xs text-muted-foreground mb-2">
                   Mentions: {selectedNode.frequency}
                 </p>
+              )}
+              {/* Image thumbnail for diagram-derived nodes (S136) */}
+              {selectedNode.source_image_id && (
+                <div className="mb-2">
+                  <img
+                    src={`${API_BASE}/images/${selectedNode.source_image_id}/raw`}
+                    alt="Source diagram"
+                    className="w-full rounded border border-border object-contain max-h-40"
+                    onError={(e) => {
+                      ;(e.target as HTMLImageElement).style.display = "none"
+                    }}
+                  />
+                </div>
               )}
               <button
                 onClick={() => {

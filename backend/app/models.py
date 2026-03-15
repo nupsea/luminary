@@ -350,11 +350,12 @@ class EnrichmentJobModel(Base):
     """Async enrichment job queue entry.
 
     job_type values registered so far:
-      image_extract  -- S133: PDF/EPUB image extraction
-      image_analyze  -- S134: vision LLM image description
-      prerequisites  -- S139: prerequisite graph extraction
-      web_refs       -- S138: web reference resolution
-      concept_link   -- S141: cross-document concept linking
+      image_extract    -- S133: PDF/EPUB image extraction
+      image_analyze    -- S134: vision LLM image description
+      diagram_extract  -- S136: diagram-type routing and COMPONENT node extraction
+      prerequisites    -- S139: prerequisite graph extraction
+      web_refs         -- S138: web reference resolution
+      concept_link     -- S141: cross-document concept linking
 
     status values:
       pending  -- queued, not yet started
