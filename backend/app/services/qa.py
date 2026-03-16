@@ -333,6 +333,8 @@ class QAService:
                     "web_enabled": web_enabled,
                     "web_calls_used": 0,
                     "web_snippets": [],
+                    # S148: chunk-derived source citations (populated by synthesize_node)
+                    "source_citations": [],
                 }
 
                 try:
@@ -528,6 +530,8 @@ class QAService:
                 # Web augmentation fields (S142) -- web_snippets not stored in DB
                 "web_sources": result.get("web_snippets") or [],
                 "web_calls_used": result.get("web_calls_used") or 0,
+                # S148: chunk-derived source citations for trust/navigation
+                "source_citations": result.get("source_citations") or [],
             }
             yield f"data: {json.dumps(final)}\n\n"
 

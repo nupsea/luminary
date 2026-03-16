@@ -1242,9 +1242,10 @@ interface DocumentReaderProps {
   documentId: string
   onBack: () => void
   initialSectionId?: string
+  initialPage?: number  // S148: PDF page to navigate to on mount (from citation deep-link)
 }
 
-export function DocumentReader({ documentId, onBack, initialSectionId }: DocumentReaderProps) {
+export function DocumentReader({ documentId, onBack, initialSectionId, initialPage }: DocumentReaderProps) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { data: doc, isLoading } = useQuery({
@@ -1334,6 +1335,14 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
       el.scrollIntoView({ behavior: "smooth", block: "start" })
     }
   }, [initialSectionId, doc])
+
+  // S148: auto-switch to PDF view when arriving via citation deep-link with a page number
+  useEffect(() => {
+    if (initialPage && initialPage > 0 && doc?.format === "pdf") {
+      setPdfViewVisited(true)
+      setLeftTab("pdfview")
+    }
+  }, [initialPage, doc?.format])
 
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
@@ -1578,7 +1587,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
           {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-              <PDFViewer documentId={documentId} sections={doc.sections} />
+              <PDFViewer documentId={documentId} sections={doc.sections} initialPage={initialPage} />
             </div>
           )}
 

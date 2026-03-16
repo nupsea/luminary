@@ -635,6 +635,14 @@ export default function Learning() {
   const [searchParams, setSearchParams] = useSearchParams()
   const tagFilter = searchParams.get("tag")
   const initialSectionId = searchParams.get("section_id") ?? undefined
+  // S148: citation deep-link params — doc opens DocumentReader, page sets initial PDF page
+  const docParam = searchParams.get("doc")
+  const initialPageParam = (() => {
+    const raw = searchParams.get("page")
+    if (!raw) return undefined
+    const n = parseInt(raw, 10)
+    return isNaN(n) ? undefined : n
+  })()
 
   const [search, setSearch] = useState("")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
@@ -756,6 +764,22 @@ export default function Learning() {
     setPage(1)
   }
 
+  // S148: when arriving from a citation deep-link, open the referenced document
+  // then clear doc/section_id/page params so the Back button and next doc-open work correctly
+  useEffect(() => {
+    if (docParam) {
+      setActiveDocument(docParam)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("doc")
+        next.delete("section_id")  // prevent stale scroll when user opens a different doc
+        next.delete("page")        // prevent stale PDF page when user opens a different doc
+        return next
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docParam])
+
   if (activeDocumentId) {
     // Look up content_type for the active document from cached data
     const allKnownDocs = [
@@ -776,6 +800,7 @@ export default function Learning() {
             documentId={activeDocumentId}
             onBack={() => setActiveDocument(null)}
             initialSectionId={initialSectionId}
+            initialPage={initialPageParam}
           />
         </div>
       </div>

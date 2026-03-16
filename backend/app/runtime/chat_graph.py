@@ -33,7 +33,13 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, LibrarySummaryModel, SectionSummaryModel, SummaryModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    LibrarySummaryModel,
+    SectionSummaryModel,
+    SummaryModel,
+)
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
@@ -1265,6 +1271,28 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
         return {row.id: row.title for row in rows}
 
 
+async def _fetch_section_ids_and_pages_for_chunks(
+    chunk_ids: list[str],
+) -> dict[str, tuple[str | None, int | None]]:
+    """Return {chunk_id: (section_id, pdf_page_number)} for the given chunk_ids.
+
+    Used by synthesize_node to build SourceCitation entries from retrieved chunks.
+    Returns {} on any DB error (non-fatal).
+    """
+    if not chunk_ids:
+        return {}
+    try:
+        async with get_session_factory()() as session:
+            rows = await session.execute(
+                select(ChunkModel.id, ChunkModel.section_id, ChunkModel.pdf_page_number)
+                .where(ChunkModel.id.in_(chunk_ids))
+            )
+            return {row.id: (row.section_id, row.pdf_page_number) for row in rows}
+    except Exception:
+        logger.warning("_fetch_section_ids_and_pages_for_chunks: DB lookup failed", exc_info=True)
+        return {}
+
+
 async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
     """Return a formatted context block of SAME_CONCEPT contradictions for the given documents.
 
@@ -1464,10 +1492,47 @@ async def synthesize_node(state: ChatState) -> dict:
                 "a version discrepancy is detected between local and web content."
             )
 
+    # S148: collect SourceCitations from context chunks for post-stream emission.
+    # Deduplicate by section_id (first occurrence wins); when section_id is None,
+    # fall back to chunk_id so each unlinked chunk gets its own citation entry.
+    source_citations_out: list[dict] = []
+    if chunks_dicts:
+        chunk_ids = [c["chunk_id"] for c in chunks_dicts if c.get("chunk_id")]
+        chunk_meta = await _fetch_section_ids_and_pages_for_chunks(chunk_ids)
+        doc_titles_map = await _fetch_doc_titles_for_chunks(chunks_dicts)
+
+        seen_dedup_keys: set[str] = set()
+        for c in chunks_dicts:
+            cid = c.get("chunk_id", "")
+            meta = chunk_meta.get(cid, (None, None))
+            section_id, pdf_page = meta
+            doc_id = c.get("document_id", "")
+            doc_title = doc_titles_map.get(doc_id, "")
+            section_heading = c.get("section_heading", "")
+
+            # Dedup key: section_id when present; else chunk_id (each uncategorised chunk unique)
+            dedup_key = section_id if section_id else cid
+            if dedup_key in seen_dedup_keys:
+                continue
+            seen_dedup_keys.add(dedup_key)
+
+            source_citations_out.append({
+                "chunk_id": cid,
+                "document_id": doc_id,
+                "document_title": doc_title,
+                "section_id": section_id,
+                "section_heading": section_heading,
+                "pdf_page_number": pdf_page,
+            })
+
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent
     # as the LLM generates it, not after all tokens are buffered.
-    return {"_llm_prompt": prompt, "_system_prompt": system_prompt}
+    return {
+        "_llm_prompt": prompt,
+        "_system_prompt": system_prompt,
+        "source_citations": source_citations_out,
+    }
 
 
 # ---------------------------------------------------------------------------

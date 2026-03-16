@@ -35,7 +35,7 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import DocumentModel, SectionSummaryModel, SummaryModel
+from app.models import ChunkModel, DocumentModel, SectionModel, SectionSummaryModel, SummaryModel
 from app.runtime.chat_graph import (
     comparative_node,
     graph_node,
@@ -108,6 +108,7 @@ def _make_state(**overrides) -> dict:
         "not_found": False,
         "_llm_prompt": None,
         "_system_prompt": None,
+        "source_citations": [],
     }
     base.update(overrides)
     return base
@@ -410,3 +411,75 @@ async def test_summary_intent_end_to_end(test_db):
     assert done_payload.get("confidence") in ("high", "medium"), (
         f"Expected confidence='high' or 'medium', got: {done_payload.get('confidence')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# test_synthesize_node_collects_citations_deduplicated — S148 AC
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_collects_citations_deduplicated(test_db):
+    """synthesize_node with 3 chunks across 2 sections emits exactly 2 SourceCitation entries.
+
+    Chunks c1 and c3 share section_id S1; chunk c2 has section_id S2.
+    Expected: source_citations list has 2 entries (one per unique section_id).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    section_id_1 = str(uuid.uuid4())
+    section_id_2 = str(uuid.uuid4())
+    chunk_id_1 = str(uuid.uuid4())
+    chunk_id_2 = str(uuid.uuid4())
+    chunk_id_3 = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(SectionModel(
+            id=section_id_1, document_id=doc_id, heading="Chapter One",
+            level=1, section_order=0,
+        ))
+        session.add(SectionModel(
+            id=section_id_2, document_id=doc_id, heading="Chapter Two",
+            level=1, section_order=1,
+        ))
+        session.add(ChunkModel(
+            id=chunk_id_1, document_id=doc_id, section_id=section_id_1,
+            text="text1", chunk_index=0, pdf_page_number=5,
+        ))
+        session.add(ChunkModel(
+            id=chunk_id_2, document_id=doc_id, section_id=section_id_2,
+            text="text2", chunk_index=1, pdf_page_number=10,
+        ))
+        session.add(ChunkModel(
+            id=chunk_id_3, document_id=doc_id, section_id=section_id_1,
+            text="text3", chunk_index=2, pdf_page_number=5,
+        ))
+        await session.commit()
+
+    chunks = [
+        {"chunk_id": chunk_id_1, "document_id": doc_id, "text": "text1",
+         "section_heading": "Chapter One", "page": 5, "score": 0.9, "source": "vector"},
+        {"chunk_id": chunk_id_2, "document_id": doc_id, "text": "text2",
+         "section_heading": "Chapter Two", "page": 10, "score": 0.8, "source": "vector"},
+        {"chunk_id": chunk_id_3, "document_id": doc_id, "text": "text3",
+         "section_heading": "Chapter One", "page": 5, "score": 0.7, "source": "vector"},
+    ]
+    state = _make_state(
+        question="What happens in these chapters?",
+        chunks=chunks,
+        doc_ids=[doc_id],
+        intent="factual",
+    )
+
+    result = await synthesize_node(state)
+
+    assert result.get("_llm_prompt"), "Expected _llm_prompt to be set"
+    source_citations = result.get("source_citations", [])
+    assert len(source_citations) == 2, (
+        f"Expected 2 deduplicated source citations, got {len(source_citations)}: {source_citations}"
+    )
+    section_ids_in_citations = {c["section_id"] for c in source_citations}
+    assert section_id_1 in section_ids_in_citations
+    assert section_id_2 in section_ids_in_citations

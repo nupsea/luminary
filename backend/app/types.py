@@ -99,6 +99,11 @@ class ChatState(TypedDict):
     web_calls_used: int
     web_snippets: list[dict]
 
+    # S148: chunk-derived source citations (SourceCitation dicts) collected by synthesize_node.
+    # Separate from 'citations' (LLM-extracted prose citations) to avoid field collision.
+    # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
+    source_citations: list[dict]
+
 
 # ---------------------------------------------------------------------------
 # Notes search (S91)
@@ -140,6 +145,21 @@ class WebSnippet(TypedDict):
     source_quality: str  # "official_docs" | "spec" | "wiki" | "blog" | "unknown"
     version_info: str   # e.g. "Python 3.12" or "" if not detected
     domain: str         # extracted domain for [Web: domain.com] label
+
+
+# ---------------------------------------------------------------------------
+# Citation deep-links (S148)
+# ---------------------------------------------------------------------------
+
+
+class SourceCitation(TypedDict):
+    """Chunk-derived citation emitted by synthesize_node for trust/navigation."""
+    chunk_id: str
+    document_id: str
+    document_title: str
+    section_id: str | None
+    section_heading: str
+    pdf_page_number: int | None
 
 
 # ---------------------------------------------------------------------------

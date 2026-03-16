@@ -96,6 +96,16 @@ interface WebSource {
   version_info: string
 }
 
+// S148: chunk-derived source citations for deep-link navigation
+interface SourceCitation {
+  chunk_id: string
+  document_id: string
+  document_title: string
+  section_id: string | null
+  section_heading: string
+  pdf_page_number: number | null
+}
+
 interface WebSearchSettings {
   provider: string
   enabled: boolean
@@ -125,6 +135,7 @@ interface ChatMessage {
   isStreaming?: boolean
   image_ids?: string[]
   web_sources?: WebSource[]  // S142: web augmentation sources
+  source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
 }
 
 interface ConfusionSignal {
@@ -326,6 +337,7 @@ function buildModelOptions(settings: LLMSettings | undefined): string[] {
 
 export default function Chat() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const chatPreload = useAppStore((s) => s.chatPreload)
   const clearChatPreload = useAppStore((s) => s.clearChatPreload)
   const navigate = useNavigate()
@@ -562,6 +574,7 @@ export default function Chat() {
               const confidence = (payload["confidence"] as Confidence | undefined) ?? "low"
               const image_ids = (payload["image_ids"] as string[] | undefined) ?? []
               const web_sources = (payload["web_sources"] as WebSource[] | undefined) ?? []
+              const source_citations = (payload["source_citations"] as SourceCitation[] | undefined) ?? []
               const newWebCallsUsed = (payload["web_calls_used"] as number | undefined) ?? webCallsUsed
               setWebCallsUsed(newWebCallsUsed)
               setMessages((m) =>
@@ -578,6 +591,7 @@ export default function Chat() {
                         not_found,
                         image_ids,
                         web_sources,
+                        source_citations,
                       }
                     : msg,
                 ),
@@ -607,6 +621,16 @@ export default function Chat() {
       e.preventDefault()
       void sendMessage(input)
     }
+  }
+
+  // S148: navigate to Learning tab with DocumentReader open at the cited section/page
+  function navigateToCitation(c: SourceCitation) {
+    setActiveDocument(c.document_id)
+    const params = new URLSearchParams()
+    params.set("doc", c.document_id)
+    if (c.section_id) params.set("section_id", c.section_id)
+    if (c.pdf_page_number) params.set("page", String(c.pdf_page_number))
+    navigate(`/learning?${params.toString()}`)
   }
 
   const effectiveDocId = selectedDocId ?? activeDocumentId
@@ -874,6 +898,34 @@ export default function Chat() {
                           [Web: {s.domain}] {s.title}
                         </a>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Source citations — deep-links to exact section/page (S148) */}
+                  {!msg.isStreaming && msg.source_citations && msg.source_citations.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">Sources:</span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {msg.source_citations.map((c, i) => {
+                          const titleAbbrev = c.document_title
+                            ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "..." : ""}`
+                            : "Doc"
+                          const headingAbbrev = c.section_heading
+                            ? ` / ${c.section_heading.slice(0, 30)}${c.section_heading.length > 30 ? "..." : ""}`
+                            : ""
+                          const pageLabel = c.pdf_page_number ? ` (p.${c.pdf_page_number})` : ""
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => navigateToCitation(c)}
+                              className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-0.5 text-xs text-primary hover:bg-primary/10 transition-colors animate-in fade-in duration-300"
+                              title={`${c.document_title} — ${c.section_heading}`}
+                            >
+                              {titleAbbrev}{headingAbbrev}{pageLabel}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
                   )}
 

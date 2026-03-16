@@ -11,11 +11,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
 interface PDFViewerProps {
   documentId: string
   sections: SectionItem[]
+  initialPage?: number  // S148: navigate to this page after PDF loads (from citation deep-link)
 }
 
 type LoadStatus = "loading" | "error" | "ready"
 
-export function PDFViewer({ documentId, sections }: PDFViewerProps) {
+export function PDFViewer({ documentId, sections, initialPage }: PDFViewerProps) {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -56,6 +57,17 @@ export function PDFViewer({ documentId, sections }: PDFViewerProps) {
       task.destroy().catch(() => undefined)
     }
   }, [documentId])
+
+  // S148: navigate to initialPage once the PDF is loaded (from citation deep-link)
+  useEffect(() => {
+    if (!initialPage || loadStatus !== "ready" || !totalPages) return
+    if (initialPage >= 1 && initialPage <= totalPages) {
+      setCurrentPage(initialPage)
+      setPageInput(String(initialPage))
+    }
+  // Only fire once after load — intentionally exclude initialPage from deps to avoid re-triggering
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadStatus, totalPages])
 
   // Render the current page (and pre-render current+1 for fast navigation)
   useEffect(() => {
