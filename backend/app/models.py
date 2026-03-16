@@ -77,6 +77,9 @@ class ChunkModel(Base):
     page_number: Mapped[int] = mapped_column(Integer, default=0)
     speaker: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    # S146: PDF page number (1-based) for chunks from PDF documents.
+    # Null for non-PDF content types (txt, docx, epub, audio, code, etc.).
+    pdf_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Code-aware chunking fields (set by tech_book/tech_article content type)
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)

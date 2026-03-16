@@ -97,6 +97,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE sections ADD COLUMN difficulty_estimate INTEGER",
             # S141: publication year for contradiction prefer_source temporal ordering
             "ALTER TABLE documents ADD COLUMN publication_year INTEGER",
+            # S146: PDF page number per chunk for PDF viewer deep-links
+            "ALTER TABLE chunks ADD COLUMN pdf_page_number INTEGER",
         ]:
             try:
                 await conn.execute(text(ddl))

@@ -13,6 +13,7 @@ import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { AnnotationPopover } from "./AnnotationPopover"
 import { FeynmanDialog } from "./FeynmanDialog"
+import { PDFViewer } from "./PDFViewer"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -1251,7 +1252,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [leftTab, setLeftTab] = useState<"sections" | "highlights">("sections")
+  const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview">("sections")
+  // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
+  const [pdfViewVisited, setPdfViewVisited] = useState(false)
   const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
   // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
@@ -1390,6 +1393,17 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   // Track reading progress via IntersectionObserver (3-second dwell per section)
   useReadingProgress(documentId, doc?.sections.length ?? 0)
 
+  // S146: mark PDF view visited for lazy mounting; guard against pdfview on non-PDF docs
+  useEffect(() => {
+    if (leftTab === "pdfview") {
+      if (doc?.format !== "pdf") {
+        setLeftTab("sections")
+      } else {
+        setPdfViewVisited(true)
+      }
+    }
+  }, [leftTab, doc?.format])
+
   function handleExplain(text: string, mode: ExplainMode) {
     setSheetText(text)
     setSheetMode(mode)
@@ -1462,14 +1476,17 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
             </div>
           </div>
 
-          {/* Left panel tab bar — Sections / Highlights */}
+          {/* Left panel tab bar — Sections / Highlights / PDF View (PDF only) */}
           <div className="flex border-b border-border">
-            {(["sections", "highlights"] as const).map((tab) => (
+            {(doc.format === "pdf"
+              ? (["sections", "highlights", "pdfview"] as const)
+              : (["sections", "highlights"] as const)
+            ).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setLeftTab(tab)}
                 className={cn(
-                  "flex-1 py-2 text-xs font-medium capitalize transition-colors",
+                  "flex-1 py-2 text-xs font-medium transition-colors",
                   leftTab === tab
                     ? "border-b-2 border-primary text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -1477,13 +1494,28 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
               >
                 {tab === "highlights"
                   ? `Highlights${(docAnnotations ?? []).length > 0 ? ` (${(docAnnotations ?? []).length})` : ""}`
-                  : "Sections"}
+                  : tab === "pdfview"
+                    ? "PDF View"
+                    : "Sections"}
               </button>
             ))}
           </div>
 
+          {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
+          {doc.format === "pdf" && pdfViewVisited && (
+            <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
+              <PDFViewer documentId={documentId} sections={doc.sections} />
+            </div>
+          )}
+
           {/* Section list / Highlights — relative for FloatingToolbar + AnnotationPopover positioning */}
-          <div ref={sectionListRef} className="relative flex-1 overflow-auto pb-6">
+          <div
+            ref={sectionListRef}
+            className={cn(
+              "relative flex-1 overflow-auto pb-6",
+              leftTab === "pdfview" && "hidden",
+            )}
+          >
             {leftTab === "highlights" ? (
               <HighlightsPanel
                 annotations={docAnnotations ?? []}

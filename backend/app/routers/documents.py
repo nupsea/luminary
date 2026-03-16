@@ -192,6 +192,11 @@ class CodeSnippetItem(BaseModel):
     content: str
 
 
+class PDFMetaResponse(BaseModel):
+    page_count: int
+    has_toc: bool
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -826,6 +831,66 @@ async def serve_video_file(document_id: str) -> FileResponse:
     if not fp.exists():
         raise HTTPException(status_code=404, detail="Video file not found on disk")
     return FileResponse(str(fp), media_type="video/mp4")
+
+
+@router.get("/{document_id}/file")
+async def serve_document_file(document_id: str) -> FileResponse:
+    """Serve the raw uploaded file for a document.
+
+    Used by the PDF.js viewer (S146) to stream PDF bytes.
+    Returns 404 if the document does not exist or the file is not found on disk.
+    Returns the file with the appropriate Content-Type based on document format.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    fp = Path(doc.file_path)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Document file not found on disk")
+    mime_map = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "txt": "text/plain",
+        "md": "text/markdown",
+        "epub": "application/epub+zip",
+    }
+    mime = mime_map.get(doc.format.lower(), "application/octet-stream")
+    return FileResponse(str(fp), media_type=mime)
+
+
+@router.get("/{document_id}/pdf-meta", response_model=PDFMetaResponse)
+async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
+    """Return PDF metadata: page count and whether a TOC (sections) exists.
+
+    Returns 404 if document not found.
+    Returns 400 if the document is not a PDF (format != 'pdf').
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.format.lower() != "pdf":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document is not a PDF (format={doc.format})",
+            )
+        section_count_result = await session.execute(
+            select(func.count(SectionModel.id))
+            .where(SectionModel.document_id == document_id)
+        )
+        section_count = section_count_result.scalar_one() or 0
+
+    return PDFMetaResponse(
+        page_count=doc.page_count,
+        has_toc=section_count > 0,
+    )
 
 
 @router.post("/bulk-delete", status_code=200)

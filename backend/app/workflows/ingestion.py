@@ -348,6 +348,12 @@ async def _chunk_book(
             section_heading = section_model.heading
             context_header = f"[{book_title} > {section_heading}] "
 
+            # S146: populate pdf_page_number for PDF-format documents (1-based page)
+            fmt = state.get("format", "").lower()
+            chunk_pdf_page: int | None = None
+            if fmt == "pdf":
+                chunk_pdf_page = s.get("page_start", 0) or 1  # ensure at least page 1
+
             for raw_chunk_text in splitter.split_text(section_text):
                 # Inject context into the text that will be embedded/indexed
                 enriched_text = context_header + raw_chunk_text
@@ -361,6 +367,7 @@ async def _chunk_book(
                     page_number=s.get("page_start", 0),
                     speaker=None,
                     chunk_index=chunk_idx,
+                    pdf_page_number=chunk_pdf_page,
                 ))
                 chunks.append(
                     {
@@ -473,12 +480,19 @@ async def _chunk_tech_book(
         chunk_models: list[ChunkModel] = []
         snippet_models: list[CodeSnippetModel] = []
 
+        # S146: populate pdf_page_number for PDF-format documents (1-based page)
+        tech_fmt = state.get("format", "").lower()
+
         for section_model, s in zip(section_models, raw_sections, strict=False):
             section_text = s.get("text", "")
             if not section_text.strip():
                 continue
 
             context_header = f"[{doc_title} > {section_model.heading}] "
+            # S146: pdf_page_number for this section (None for non-PDF)
+            section_pdf_page: int | None = None
+            if tech_fmt == "pdf":
+                section_pdf_page = s.get("page_start", 0) or 1  # ensure at least page 1
 
             for chunk_dict in chunk_mixed_content(
                 section_text,
@@ -502,6 +516,7 @@ async def _chunk_tech_book(
                     has_code=chunk_dict["has_code"],
                     code_language=chunk_dict["code_language"],
                     code_signature=chunk_dict["code_signature"],
+                    pdf_page_number=section_pdf_page,
                 )
                 chunk_models.append(chunk_model)
                 chunks.append(
