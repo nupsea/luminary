@@ -1298,3 +1298,18 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - TypedDicts are plain dicts at runtime; `dict(s)` conversion of a WebSnippet is a no-op but kept for explicitness
   - The `test_note_search.py::test_fts_sync_on_delete` failure is a pre-existing test-ordering flakiness (passes in isolation)
 ---
+
+## S143 — Learning objectives tracking (2026-03-16)
+- Status: PASSED
+- Files changed: backend/app/services/objective_tracker.py (new), backend/app/routers/documents.py, backend/app/routers/flashcards.py, backend/tests/test_objective_tracker.py (new), frontend/src/components/library/types.ts, frontend/src/components/library/DocumentCard.tsx, frontend/src/components/reader/DocumentReader.tsx, frontend/src/store.ts, frontend/src/pages/Study.tsx, scripts/smoke/S143.sh (new)
+- Key decisions:
+  - FlashcardModel has no section_id; resolved via ChunkModel join (flashcard.chunk_id -> chunk.id -> chunk.section_id)
+  - NULL flashcard_type treated as non-definition (included in stability avg) using SQLAlchemy or_() condition
+  - ObjectiveTrackerService opens its own session via get_session_factory()() -- safe for fire-and-forget background task
+  - list_documents adds two correlated subqueries for objectives_total/covered; obj_progress_pct = None when total=0
+  - list_flashcards preserves existing no-join path when no section_id filter; adds join only when filter active
+- Learnings:
+  - SQLAlchemy: `col != 'value'` in WHERE clause produces NULL (not FALSE) for NULL col values; must use or_(col.is_(None), col != 'value') to include NULLs
+  - Mini SVG rings need strokeDashoffset + rotate(-90) for correct clockwise fill from top
+  - studySectionFilter store pattern: write in DocumentReader handleStudyClick, read+clear in Study useEffect on mount
+---
