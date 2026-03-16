@@ -1434,7 +1434,7 @@
         "Privacy invariant: web snippets not present in any DB table after conversation ends",
         "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S142.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S143",

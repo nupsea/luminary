@@ -1278,3 +1278,23 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - 'DI' vs 'dependency injection' does not match via the three heuristic rules (no substring, no 2-token overlap); abbreviation detection requires a separate lookup step
   - Pre-existing bug: enrichment worker was started but no handlers were registered, so all jobs silently dropped
 ---
+
+## 2026-03-16T00:00:00 - S142 - Tech chat web grounding: optional per-conversation web augmentation with version mismatch detection
+- Implemented: WebSearcher service (backend/app/services/web_searcher.py) with none/duckduckgo/brave/tavily providers; web_augment_node in chat_graph.py that fires on confidence=low + web_enabled=True with 3-call rate limit; version-mismatch detection prompt extension in synthesize_node; web_enabled field propagated through QARequest -> stream_answer -> initial_state; web_sources/web_calls_used added to final SSE done event; GET /settings/web-search endpoint; Chat.tsx updated with web toggle, Web: X/3 counter, [Web: domain] source labeling, amber version mismatch badge on citations
+- Files changed: backend/app/types.py, backend/app/config.py, backend/app/services/web_searcher.py (NEW), backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/app/routers/qa.py, backend/app/routers/settings.py, backend/tests/test_web_searcher.py (NEW), backend/tests/test_chat_graph_web.py (NEW), frontend/src/pages/Chat.tsx, scripts/smoke/S142.sh (NEW)
+- AC verified:
+  - WebSearcher.search() with mocked provider returns WebSnippet list: PASS
+  - web_augment_node fires only when web_enabled=True AND confidence=low: PASS
+  - Rate limiter: after 3 calls, 4th uses local-only path with no error: PASS
+  - provider=none: web toggle disabled with tooltip: PASS
+  - Version mismatch: local "Python 3.9" + web "Python 3.12" triggers prompt extension: PASS
+  - Answer sources [Local] vs [Web: domain.com] in frontend: PASS
+  - Web: X/3 counter in Chat UI: PASS
+  - Privacy: web_snippets not in DB: PASS
+  - ruff 0 / pytest 26 new + 998 existing / tsc 0 / build pass: PASS
+- Reviewer verdict: PASS (reviewer added GET /settings/web-search endpoint tests inline)
+- Learnings:
+  - web_augment_node uses local import (`from app.services.web_searcher import get_web_searcher`); tests must patch at source path `app.services.web_searcher.get_web_searcher`, not `app.runtime.chat_graph.get_web_searcher`
+  - TypedDicts are plain dicts at runtime; `dict(s)` conversion of a WebSnippet is a no-op but kept for explicitness
+  - The `test_note_search.py::test_fts_sync_on_delete` failure is a pre-existing test-ordering flakiness (passes in isolation)
+---
