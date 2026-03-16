@@ -7,13 +7,13 @@ Test inventory:
   1. test_build_prompt_architecture_contains_component  -- _build_prompt includes COMPONENT keyword
   2. test_build_prompt_sequence_contains_actor          -- _build_prompt includes ACTOR keyword
   3. test_parse_llm_response_valid_json                 -- _parse_llm_response parses plain JSON
-  4. test_parse_llm_response_fenced_json                -- _parse_llm_response strips markdown fences
+  4. test_parse_llm_response_fenced_json                -- _parse_llm_response strips fences
   5. test_parse_llm_response_invalid_json               -- _parse_llm_response raises ValueError
-  6. test_architecture_diagram_extraction               -- COMPONENT nodes + CONNECTS_TO edges created
-  7. test_sequence_diagram_routing                      -- ACTOR nodes + SENDS_TO edges created
-  8. test_er_diagram_routing                            -- ENTITY_DM nodes + REFERENCES_DM edges created
-  9. test_depicts_linkage                               -- DEPICTS edge from COMPONENT to Entity if name matches
- 10. test_idempotency                                   -- calling _write_to_kuzu twice does not double node count
+  6. test_architecture_diagram_extraction               -- COMPONENT + CONNECTS_TO edges created
+  7. test_sequence_diagram_routing                      -- ACTOR + SENDS_TO edges created
+  8. test_er_diagram_routing                            -- ENTITY_DM + REFERENCES_DM edges created
+  9. test_depicts_linkage                               -- DEPICTS edge from COMPONENT to Entity
+ 10. test_idempotency                                   -- _write_to_kuzu twice doesn't double nodes
 """
 
 from pathlib import Path

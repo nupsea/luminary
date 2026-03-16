@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +38,6 @@ from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
-from app.services.graph import get_graph_service
 from app.telemetry import setup_tracing
 
 
@@ -48,7 +47,9 @@ def configure_logging(log_level: str = "INFO") -> None:
         handler.setFormatter(JsonFormatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
     else:
         handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-    logging.basicConfig(level=log_level, handlers=[handler])
+    logger = logging.getLogger()
+    logger.handlers = [handler]
+    logger.setLevel(log_level)
 
 
 logger = logging.getLogger(__name__)
@@ -58,44 +59,30 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
-    data_dir = Path(settings.DATA_DIR).expanduser()
-    for subdir in ("raw", "models", "vectors", "images"):
-        (data_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    # Initial DB setup
     engine = get_engine()
     await create_all_tables(engine)
-    setup_tracing(settings.PHOENIX_ENABLED, data_dir=str(data_dir))
-    FastAPIInstrumentor.instrument_app(app)
-    # SQLAlchemyInstrumentor is intentionally omitted — it instruments all
-    # SQLAlchemy engines globally, including Phoenix's own phoenix.db, creating
-    # a trace-feedback loop (Phoenix traces → phoenix.db write → new trace → …).
-    get_graph_service()  # initialise KuzuService and create schema on startup
 
-    # Start enrichment queue worker and register job handlers
-    from app.services.diagram_extractor import diagram_extract_handler  # noqa: PLC0415
-    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
-    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
-    from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
-    from app.services.prereq_extractor import prereq_extract_handler  # noqa: PLC0415
-    from app.services.reference_enricher import web_refs_handler  # noqa: PLC0415
+    # Telemetry setup
+    if settings.PHOENIX_ENABLED:
+        setup_tracing()
+        FastAPIInstrumentor.instrument_app(app)
 
-    worker = get_enrichment_worker()
-    worker.register("image_extract", image_extract_handler)
-    worker.register("image_analyze", image_analyze_handler)
-    worker.register("diagram_extract", diagram_extract_handler)
-    worker.register("web_refs", web_refs_handler)
-    worker.register("prerequisites", prereq_extract_handler)
-    await worker.start()
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "corpus").mkdir(exist_ok=True)
+    (data_dir / "images").mkdir(exist_ok=True)
+    (data_dir / "notes").mkdir(exist_ok=True)
+    (data_dir / "audio").mkdir(exist_ok=True)
 
-    # Ollama startup health-check — warn early if the local LLM is unreachable.
+    # Startup health check (Ollama)
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
-                logger.info("Ollama reachable at startup", extra={"url": settings.OLLAMA_URL})
-            else:
-                logger.warning(
-                    "Ollama returned non-200 at startup; LLM features may be degraded. "
-                    "URL: %s  status: %s",
+                logger.info(
+                    "Ollama check: reachable at %s (status %s)",
                     settings.OLLAMA_URL,
                     resp.status_code,
                 )
@@ -183,12 +170,17 @@ async def read_settings(settings: Settings = Depends(get_settings)):
     }
 
 
+class SettingsUpdate(RootModel[dict[str, str]]):
+    pass
+
+
 @app.patch("/settings")
 async def patch_settings(
-    updates: dict[str, str],
+    request: SettingsUpdate,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     # TODO: migrate to OS keychain — see tech-debt-tracker.md
+    updates = request.root
     for key, value in updates.items():
         setting = SettingsModel(key=key, value=value)
         await session.merge(setting)
@@ -234,8 +226,11 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
         return round(total / (1024 * 1024), 2)
 
     return {
-        "data_dir": str(data_dir),
-        "raw_mb": dir_size_mb(data_dir / "raw"),
-        "vectors_mb": dir_size_mb(data_dir / "vectors"),
-        "models_mb": dir_size_mb(data_dir / "models"),
+        "corpus_mb": dir_size_mb(data_dir / "corpus"),
+        "images_mb": dir_size_mb(data_dir / "images"),
+        "notes_mb": dir_size_mb(data_dir / "notes"),
+        "audio_mb": dir_size_mb(data_dir / "audio"),
+        "db_mb": dir_size_mb(data_dir / "luminary.db")
+        if (data_dir / "luminary.db").exists()
+        else 0.0,
     }
