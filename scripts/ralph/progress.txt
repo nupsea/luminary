@@ -1420,3 +1420,27 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - `AnnotationCreateRequest.section_id` is required (non-nullable); Highlight action must be disabled (canHighlight=false) when sectionId is undefined
   - FloatingToolbar.tsx and AnnotationPopover.tsx are now dead code but cannot be deleted without moving `ExplainMode` type to a shared location first
 ---
+
+## 2026-03-17T00:00:00Z - S148 - Citation deep-links: chunk-to-location metadata in chat answers with click-to-navigate to document
+- Implemented: SourceCitation TypedDict in types.py; source_citations field in ChatState; _fetch_section_ids_and_pages_for_chunks helper in chat_graph.py; synthesize_node collects deduplicated source citations from context chunks; qa.py emits source_citations in the done SSE event; Chat.tsx shows clickable citation chips with navigateToCitation; DocumentReader.tsx and PDFViewer.tsx accept initialPage prop and auto-switch to PDF view; Learning.tsx reads doc/section_id/page URL params and opens the referenced document via Zustand store
+- Files changed: backend/app/types.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/tests/test_chat_graph_nodes.py, frontend/src/pages/Chat.tsx, frontend/src/components/reader/PDFViewer.tsx, frontend/src/components/reader/DocumentReader.tsx, frontend/src/pages/Learning.tsx, scripts/smoke/S148.sh
+- AC verified:
+  - SourceCitation TypedDict in app/types.py: PASS
+  - ChatState.source_citations field initialized to []: PASS
+  - synthesize_node deduplicates by section_id and populates source_citations: PASS
+  - Unit test: 3 chunks across 2 sections emits 2 SourceCitation entries: PASS
+  - Sources section rendered below AI message when source_citations present: PASS
+  - Each chip shows abbreviated title, truncated heading (30 chars), page number: PASS
+  - Chip click navigates to /learning?doc=...&section_id=...&page=...: PASS
+  - DocumentReader scrolls to section_id on mount when section URL param present: PASS (existing initialSectionId mechanism)
+  - PDF viewer navigates to page on mount when page param present: PASS
+  - No Sources section during streaming (!msg.isStreaming guard): PASS
+  - No Sources section if citations list is empty: PASS
+  - ruff check exits 0; pytest exits 0 (1040 passed); tsc --noEmit exits 0: PASS
+  - scripts/smoke/S148.sh exists and is executable: PASS
+- Reviewer verdict: PASS (one High issue fixed: also clear section_id and page params in Learning.tsx useEffect to prevent stale scroll/page on subsequent doc-opens)
+- Learnings:
+  - ChatState already had a `citations` field for LLM-extracted prose citations; used `source_citations` as a new field to avoid collision -- pattern: always check for existing field names before adding to ChatState
+  - `page` is already a useState variable in Learning.tsx for pagination; named the URL param reader `initialPageParam` to avoid shadowing
+  - When clearing citation deep-link URL params after use (doc, section_id, page), clear ALL related params in a single setSearchParams call to prevent stale state when user opens a different document
+---
