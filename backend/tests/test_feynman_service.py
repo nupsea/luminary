@@ -27,7 +27,6 @@ from app.services.feynman_service import (
     _strip_gaps_block,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test DB fixture
 # ---------------------------------------------------------------------------
@@ -63,7 +62,10 @@ async def test_db(tmp_path, monkeypatch):
 
 
 def test_parse_gaps_extracts_list():
-    raw = 'Good attempt. You missed the key part.\ngaps: ["lexical scope", "closure captures by reference"]'
+    raw = (
+        'Good attempt. You missed the key part.\n'
+        'gaps: ["lexical scope", "closure captures by reference"]'
+    )
     result = _parse_gaps(raw)
     assert result == ["lexical scope", "closure captures by reference"]
 
@@ -98,7 +100,9 @@ async def test_complete_session_generates_feynman_flashcards(test_db):
     session_id = str(uuid.uuid4())
 
     # Mock LLM response for flashcard generation
-    gap_flashcard_response = '{"front": "What is lexical scope?", "back": "Scope defined at definition time."}'
+    gap_flashcard_response = (
+        '{"front": "What is lexical scope?", "back": "Scope defined at definition time."}'
+    )
 
     async with factory() as session:
         # Create session row

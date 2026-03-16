@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Brain, Loader2, Send, X } from "lucide-react"
+import { Brain, Loader2, Send } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"

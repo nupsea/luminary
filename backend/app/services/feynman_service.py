@@ -18,14 +18,15 @@ import json
 import logging
 import re
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import AsyncGenerator
 
 import litellm
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     FeynmanSessionModel,
     FeynmanTurnModel,
@@ -229,7 +230,7 @@ class FeynmanService:
         session_id: str,
         learner_content: str,
         db_session: AsyncSession,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str]:
         """Stream a tutor response to a learner message.
 
         Yields SSE data strings:
@@ -288,18 +289,10 @@ class FeynmanService:
 
         # Stream LLM response
         accumulated = ""
-        import litellm as _litellm  # noqa: PLC0415
-
-        settings_module = None
-        try:
-            from app.config import get_settings  # noqa: PLC0415
-            settings_module = get_settings()
-        except Exception:
-            pass
+        model = get_settings().LITELLM_DEFAULT_MODEL
 
         try:
-            model = settings_module.LITELLM_DEFAULT_MODEL if settings_module else "ollama/mistral"
-            stream_resp = await _litellm.acompletion(
+            stream_resp = await litellm.acompletion(
                 model=model,
                 messages=messages,
                 stream=True,
@@ -312,16 +305,16 @@ class FeynmanService:
                     if "\ngaps:" not in accumulated and "gaps:" not in accumulated[-20:]:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (_litellm.ServiceUnavailableError, _litellm.APIConnectionError) as exc:
+        except (litellm.ServiceUnavailableError, litellm.APIConnectionError) as exc:
             logger.warning("Feynman stream_turn: Ollama unavailable: %s", exc)
+            # Learner turn was flushed but not committed; roll back so no orphan row
+            await db_session.rollback()
             error_msg = (
                 "Ollama is not running. "
                 "Start Ollama to use Feynman mode: ollama serve"
             )
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
-        finally:
-            pass
 
         # Parse gaps and persist tutor turn
         gaps = _parse_gaps(accumulated)

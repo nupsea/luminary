@@ -19,7 +19,6 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, FeynmanSessionModel, FeynmanTurnModel, FlashcardModel
 
-
 # ---------------------------------------------------------------------------
 # Test DB fixture
 # ---------------------------------------------------------------------------
@@ -77,7 +76,10 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
 
     opening_message = "Please explain closures as if teaching a beginner."
     tutor_response = 'Good attempt. You missed reference capture.\ngaps: ["reference capture"]'
-    gap_flashcard_json = '{"front": "What is reference capture in closures?", "back": "Closures capture variables by reference."}'
+    gap_flashcard_json = (
+        '{"front": "What is reference capture in closures?",'
+        ' "back": "Closures capture variables by reference."}'
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
