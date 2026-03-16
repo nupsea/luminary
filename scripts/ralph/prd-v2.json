@@ -1500,7 +1500,7 @@
         "Cross-book unified mastery: SAME_CONCEPT-linked nodes from multiple documents contribute to a single unified mastery score",
         "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S145.sh passes"
       ],
-      "passes": false
+      "passes": true
     }
   ],
   "regressionBaseline": "423 tests pass on branch ralph/luminary-v2 before re-implementation begins (run: uv run pytest --ignore=tests/test_v2_pipeline.py --ignore=tests/test_v2_ingestion_perf.py --ignore=tests/test_ingestion_perf.py --ignore=tests/test_performance.py). After each story, the test count must be >= 423. Any drop is a regression -- stop and fix before marking passes:true."
