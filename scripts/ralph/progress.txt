@@ -1224,3 +1224,27 @@ Status: PASS
   - section_entity_map tracked during enrich() loop to compute difficulty without re-querying edges for section ownership
   - ruff E501 in test docstrings: extract long patch-target strings to local vars before `with patch(...):`
 ---
+
+## 2026-03-16T00:00:00Z - S140 - Code execution sandbox with Predict-then-Run
+- Implemented: CodeExecutorService (sandboxed subprocess, RLIMIT_AS/RLIMIT_CPU via preexec_fn, wall-clock timeout), POST /code/execute endpoint, PredictionEventModel ORM model, POST /flashcards/create-trace endpoint, PredictPanel React component in DocumentReader
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/code_executor.py, backend/app/routers/code_executor.py, backend/app/routers/flashcards.py, backend/app/main.py, backend/tests/test_code_executor.py, frontend/src/components/reader/DocumentReader.tsx, scripts/smoke/S140.sh
+- AC verified:
+  - AC1 (execute hello): PASS
+  - AC2 (shell=False security): PASS
+  - AC3 (timeout): PASS
+  - AC4 (memory limit): PASS (skipped on macOS, enforced on Linux via RLIMIT_AS)
+  - AC5 (strip comparison): PASS -- documented in _compare_prediction docstring
+  - AC6 (PredictionEventModel migration): PASS
+  - AC7 (integration test): PASS
+  - AC8 (JS 503): PASS
+  - AC9 (frontend predict toggle on code sections): PASS
+  - AC10 (flashcard from mistake): PASS
+  - AC11 (ruff/pytest/tsc/smoke): PASS
+- Reviewer verdict: PASS after 2 Critical fixes applied:
+  1. service.execute() offloaded to ThreadPoolExecutor via run_in_executor (was blocking event loop)
+  2. stdout/stderr truncated to 10000 chars before response/DB (was unbounded)
+- Learnings:
+  - Synchronous subprocess.run() in an async FastAPI handler blocks the event loop; always use loop.run_in_executor() for blocking subprocess calls
+  - Truncate subprocess output before returning in HTTP response to prevent large memory allocations
+  - RLIMIT_AS memory enforcement is Linux-only; macOS virtual memory allocator bypasses it for anonymous maps; test must accept both exit_code!=0 and MemoryError in stderr
+---

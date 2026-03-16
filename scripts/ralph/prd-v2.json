@@ -1394,7 +1394,7 @@
         "Frontend: 'Create flashcard from mistake?' toast fires on wrong prediction; clicking it opens pre-filled flashcard create dialog with flashcard_type='trace'",
         "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S140.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S141",

@@ -2,6 +2,8 @@
 
 POST /code/execute  — run a code snippet in an isolated subprocess, compare to expected output.
 """
+import asyncio
+import functools
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -16,6 +18,10 @@ from app.services.code_executor import CodeExecutorService, get_code_executor_se
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/code", tags=["code"])
+
+# Max bytes returned to the caller per stream to prevent huge HTTP responses.
+# User code that produces more output (e.g. print("x"*10**8)) will be truncated.
+_MAX_OUTPUT_CHARS = 10_000
 
 
 class CodeExecuteRequest(BaseModel):
@@ -49,12 +55,20 @@ async def execute_code(req: CodeExecuteRequest) -> CodeExecuteResponse:
     JavaScript returns HTTP 503 if Node.js is not installed.
     """
     service: CodeExecutorService = get_code_executor_service()
+    loop = asyncio.get_event_loop()
     try:
-        result = service.execute(
-            code=req.code,
-            language=req.language,
-            timeout_ms=req.timeout_ms,
-            expected_output=req.expected_output,
+        # service.execute() calls subprocess.run() which blocks the calling thread.
+        # Run it in the default ThreadPoolExecutor so the event loop stays free
+        # to serve other requests during the (up to 30 s) sandbox wall time.
+        result = await loop.run_in_executor(
+            None,
+            functools.partial(
+                service.execute,
+                code=req.code,
+                language=req.language,
+                timeout_ms=req.timeout_ms,
+                expected_output=req.expected_output,
+            ),
         )
     except LookupError:
         raise HTTPException(
@@ -63,6 +77,10 @@ async def execute_code(req: CodeExecuteRequest) -> CodeExecuteResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # Truncate output streams before returning to prevent large HTTP responses.
+    stdout_out = result.stdout[:_MAX_OUTPUT_CHARS]
+    stderr_out = result.stderr[:_MAX_OUTPUT_CHARS]
 
     # Persist prediction event when expected_output is provided
     if req.expected_output is not None:
@@ -73,7 +91,7 @@ async def execute_code(req: CodeExecuteRequest) -> CodeExecuteResponse:
                 document_id=req.document_id,
                 code_content=req.code[:2000],
                 expected=req.expected_output,
-                actual=result.stdout,
+                actual=stdout_out,
                 correct=bool(result.prediction_correct),
                 language=req.language,
                 created_at=datetime.now(UTC),
@@ -82,8 +100,8 @@ async def execute_code(req: CodeExecuteRequest) -> CodeExecuteResponse:
             await session.commit()
 
     return CodeExecuteResponse(
-        stdout=result.stdout,
-        stderr=result.stderr,
+        stdout=stdout_out,
+        stderr=stderr_out,
         exit_code=result.exit_code,
         elapsed_ms=result.elapsed_ms,
         prediction_correct=result.prediction_correct,
