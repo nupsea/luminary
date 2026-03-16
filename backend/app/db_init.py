@@ -93,6 +93,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE flashcards ADD COLUMN bloom_level INTEGER",
             # S139: prerequisite chain depth per section (set by PrereqExtractorService)
             "ALTER TABLE sections ADD COLUMN difficulty_estimate INTEGER",
+            # S141: publication year for contradiction prefer_source temporal ordering
+            "ALTER TABLE documents ADD COLUMN publication_year INTEGER",
         ]:
             try:
                 await conn.execute(text(ddl))

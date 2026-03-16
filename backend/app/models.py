@@ -41,6 +41,9 @@ class DocumentModel(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Human-readable title returned by yt-dlp metadata (YouTube video title).
     video_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Approximate publication year parsed from document front matter (Copyright YYYY).
+    # Nullable: most documents will not have explicit year information.
+    publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

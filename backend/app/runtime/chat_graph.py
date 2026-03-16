@@ -1265,6 +1265,63 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
         return {row.id: row.title for row in rows}
 
 
+async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
+    """Return a formatted context block of SAME_CONCEPT contradictions for the given documents.
+
+    Fetches SAME_CONCEPT edges with contradiction=True that involve any of the given doc_ids.
+    Looks up publication_year to include '[YYYY source preferred]' when available.
+    Returns empty string if no contradictions exist or on any error.
+    Caps output at 3 contradictions to avoid prompt bloat.
+    """
+    from app.services.graph import get_graph_service  # noqa: PLC0415
+
+    try:
+        svc = get_graph_service()
+        all_edges = svc.get_same_concept_edges()
+        relevant = [
+            e for e in all_edges
+            if e["contradiction"]
+            and (e["source_doc_id"] in doc_ids or e["target_doc_id"] in doc_ids)
+        ]
+        if not relevant:
+            return ""
+
+        # Look up publication years for the documents involved
+        all_doc_ids: set[str] = set()
+        for e in relevant:
+            all_doc_ids.add(e["source_doc_id"])
+            all_doc_ids.add(e["target_doc_id"])
+
+        doc_years: dict[str, int | None] = {}
+        try:
+            async with get_session_factory()() as session:
+                rows = await session.execute(
+                    select(DocumentModel.id, DocumentModel.publication_year)
+                    .where(DocumentModel.id.in_(list(all_doc_ids)))
+                )
+                for row in rows:
+                    doc_years[row.id] = row.publication_year
+        except Exception:
+            logger.debug("_fetch_contradiction_context: year lookup failed", exc_info=True)
+
+        lines: list[str] = ["[Cross-source contradictions detected:]"]
+        for e in relevant[:3]:
+            prefer = ""
+            if e["prefer_source"] == "b":
+                year = doc_years.get(e["target_doc_id"])
+                prefer = f" [{year} source preferred]" if year else " (newer source preferred)"
+            elif e["prefer_source"] == "a":
+                year = doc_years.get(e["source_doc_id"])
+                prefer = f" [{year} source preferred]" if year else " (first source preferred)"
+            lines.append(
+                f'- Concept "{e["name_a"]}": {e["contradiction_note"]}{prefer}'
+            )
+        return "\n".join(lines)
+    except Exception:
+        logger.debug("_fetch_contradiction_context failed", exc_info=True)
+        return ""
+
+
 async def synthesize_node(state: ChatState) -> dict:
     """Prepare LLM prompt for stream_answer() to call streaming.
 
@@ -1378,6 +1435,19 @@ async def synthesize_node(state: ChatState) -> dict:
             "If the passages come from multiple documents, synthesise across them. "
             "Be explicit about which document each point comes from."
         )
+
+    # Inject SAME_CONCEPT contradiction context for scope=all (S141)
+    if scope == "all" and state.get("doc_ids"):
+        try:
+            contradiction_ctx = await _fetch_contradiction_context(state["doc_ids"])
+            if contradiction_ctx:
+                context = contradiction_ctx + "\n\n---\n\n" + context
+                logger.info(
+                    "synthesize_node: injected contradiction context (%d chars)",
+                    len(contradiction_ctx),
+                )
+        except Exception:
+            logger.debug("synthesize_node: contradiction context fetch failed", exc_info=True)
 
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent

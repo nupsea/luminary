@@ -103,6 +103,25 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("ffmpeg found at startup", extra={"path": _ffmpeg_path})
 
+    # Register enrichment handlers and start the background worker (S141)
+    # Must be done before yielding so jobs enqueued during first request are dispatched.
+    from app.services.concept_linker import concept_link_handler  # noqa: PLC0415
+    from app.services.diagram_extractor import diagram_extract_handler  # noqa: PLC0415
+    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
+    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
+    from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
+    from app.services.prereq_extractor import prereq_extract_handler  # noqa: PLC0415
+    from app.services.reference_enricher import web_refs_handler  # noqa: PLC0415
+
+    _worker = get_enrichment_worker()
+    _worker.register("image_extract", image_extract_handler)
+    _worker.register("image_analyze", image_analyze_handler)
+    _worker.register("diagram_extract", diagram_extract_handler)
+    _worker.register("web_refs", web_refs_handler)
+    _worker.register("prerequisites", prereq_extract_handler)
+    _worker.register("concept_link", concept_link_handler)
+    await _worker.start()
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")

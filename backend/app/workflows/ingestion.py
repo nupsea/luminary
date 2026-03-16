@@ -1424,10 +1424,8 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
 
 
 async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
-    """Create an image_extract enrichment job and set stage='enriching'.
+    """Create enrichment jobs: image_extract (PDF/EPUB only) and concept_link (always).
 
-    Only runs for formats that may contain images (PDF, EPUB).
-    For all other formats, returns without changing state.
     Non-fatal: enrichment failure does not prevent document from being usable.
     """
     import uuid as _uuid  # noqa: PLC0415
@@ -1435,37 +1433,67 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     from sqlalchemy import update as _update  # noqa: PLC0415
 
     from app.models import DocumentModel, EnrichmentJobModel  # noqa: PLC0415
+    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
 
     doc_id = state["document_id"]
     fmt = state.get("format", "").lower()
     _IMAGE_FORMATS = {"pdf", "epub"}
 
-    if fmt not in _IMAGE_FORMATS:
+    # Image extraction: only for PDF/EPUB
+    if fmt in _IMAGE_FORMATS:
+        try:
+            job_id = str(_uuid.uuid4())
+            async with get_session_factory()() as session:
+                session.add(
+                    EnrichmentJobModel(
+                        id=job_id,
+                        document_id=doc_id,
+                        job_type="image_extract",
+                        status="pending",
+                    )
+                )
+                await session.execute(
+                    _update(DocumentModel)
+                    .where(DocumentModel.id == doc_id)
+                    .values(stage="enriching")
+                )
+                await session.commit()
+
+            worker = get_enrichment_worker()
+            task = asyncio.create_task(worker._dispatch_pending())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+            logger.info(
+                "enrichment_enqueue_node: enqueued image_extract job=%s doc=%s",
+                job_id,
+                doc_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "enrichment_enqueue_node: image_extract enqueue failed (non-fatal): %s",
+                exc,
+                extra={"doc_id": doc_id},
+            )
+    else:
         logger.info(
-            "enrichment_enqueue_node: skipping (format=%s has no images)", fmt,
+            "enrichment_enqueue_node: skipping image_extract (format=%s has no images)", fmt,
             extra={"doc_id": doc_id},
         )
-        return state
 
+    # Concept linking: always enqueue for cross-document concept comparison (S141)
     try:
-        job_id = str(_uuid.uuid4())
+        cl_job_id = str(_uuid.uuid4())
         async with get_session_factory()() as session:
             session.add(
                 EnrichmentJobModel(
-                    id=job_id,
+                    id=cl_job_id,
                     document_id=doc_id,
-                    job_type="image_extract",
+                    job_type="concept_link",
                     status="pending",
                 )
             )
-            await session.execute(
-                _update(DocumentModel)
-                .where(DocumentModel.id == doc_id)
-                .values(stage="enriching")
-            )
             await session.commit()
-
-        from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
 
         worker = get_enrichment_worker()
         task = asyncio.create_task(worker._dispatch_pending())
@@ -1473,16 +1501,17 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
         task.add_done_callback(_background_tasks.discard)
 
         logger.info(
-            "enrichment_enqueue_node: enqueued image_extract job=%s doc=%s",
-            job_id,
+            "enrichment_enqueue_node: enqueued concept_link job=%s doc=%s",
+            cl_job_id,
             doc_id,
         )
     except Exception as exc:
         logger.warning(
-            "enrichment_enqueue_node failed (non-fatal): %s",
+            "enrichment_enqueue_node: concept_link enqueue failed (non-fatal): %s",
             exc,
             extra={"doc_id": doc_id},
         )
+
     return state
 
 

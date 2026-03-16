@@ -147,7 +147,8 @@ interface GraphEdge {
   source: string
   target: string
   weight: number
-  relation?: string  // e.g. "PREREQUISITE_OF", "CO_OCCURS", "IMPLEMENTS"
+  relation?: string  // e.g. "PREREQUISITE_OF", "CO_OCCURS", "IMPLEMENTS", "SAME_CONCEPT"
+  contradiction?: boolean  // true when SAME_CONCEPT edge has detected contradiction (S141)
 }
 
 interface GraphData {
@@ -178,11 +179,12 @@ async function fetchGraphData(
   documentId: string | null,
   scope: "document" | "all",
   viewMode: "knowledge_graph" | "call_graph",
+  showCrossBook: boolean = false,
 ): Promise<GraphData> {
   const url =
     scope === "document" && documentId
       ? `${API_BASE}/graph/${documentId}?type=${viewMode}`
-      : `${API_BASE}/graph?doc_ids=`
+      : `${API_BASE}/graph?doc_ids=&include_same_concept=${showCrossBook}`
   const res = await fetch(url)
   if (!res.ok) throw new Error("Failed to fetch graph data")
   return res.json() as Promise<GraphData>
@@ -211,6 +213,12 @@ async function fetchDocList(): Promise<DocListItem[]> {
 
 // Purple color for PREREQUISITE_OF edges (S139)
 const PREREQ_EDGE_COLOR = "#a855f7"  // purple-500
+
+// SAME_CONCEPT edge colors (S141)
+// Sigma.js does not natively support dashed/dotted edges without a custom edge program.
+// We differentiate SAME_CONCEPT edges by color and low weight (0.5 vs 1.0 default).
+const SAME_CONCEPT_COLOR = "#94a3b8"         // slate-400 -- no contradiction
+const SAME_CONCEPT_CONTRADICTION_COLOR = "#ef4444"  // red-500 -- contradiction detected
 
 function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   // Use mixed graph to support both undirected (CO_OCCURS) and directed (PREREQUISITE_OF) edges
@@ -243,6 +251,24 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
     if (g.hasNode(edge.source) && g.hasNode(edge.target) && edge.source !== edge.target) {
       if (!g.hasEdge(edge.source, edge.target)) {
         const isPrereq = edge.relation === "PREREQUISITE_OF"
+        const isSameConcept = edge.relation === "SAME_CONCEPT"
+
+        if (isSameConcept) {
+          // SAME_CONCEPT: undirected, low weight, gray or red based on contradiction (S141)
+          // Sigma does not natively support dashed edges; use low weight + distinct color.
+          const edgeColor = edge.contradiction
+            ? SAME_CONCEPT_CONTRADICTION_COLOR
+            : SAME_CONCEPT_COLOR
+          g.addUndirectedEdge(edge.source, edge.target, {
+            key: `e-${idx}`,
+            weight: edge.weight ?? 0.5,
+            color: edgeColor,
+            relation: "SAME_CONCEPT",
+            size: 0.5,
+          })
+          return
+        }
+
         const edgeAttrs: Record<string, unknown> = {
           key: `e-${idx}`,
           weight: edge.weight ?? 1,
@@ -358,6 +384,8 @@ export default function Viz() {
   const [showDiagramNodes, setShowDiagramNodes] = useState(true)
   // Prerequisites layer toggle: show/hide PREREQUISITE_OF edges (S139)
   const [showPrerequisites, setShowPrerequisites] = useState(true)
+  // Cross-book layer toggle: show/hide SAME_CONCEPT edges (S141) -- default off (noisy)
+  const [showCrossBook, setShowCrossBook] = useState(false)
   // Learning path state (S117)
   const [learningPathStart, setLearningPathStart] = useState("")
   const [lpInputDraft, setLpInputDraft] = useState("")
@@ -371,10 +399,10 @@ export default function Viz() {
 
   const noDocSelected = scope === "document" && !activeDocumentId
 
-  const queryKey = ["graph", scope, activeDocumentId, viewMode]
+  const queryKey = ["graph", scope, activeDocumentId, viewMode, showCrossBook]
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey,
-    queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode as "knowledge_graph" | "call_graph"),
+    queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode as "knowledge_graph" | "call_graph", showCrossBook),
     staleTime: 30_000,
     enabled: !noDocSelected && viewMode !== "learning_path",
   })
@@ -420,10 +448,11 @@ export default function Viz() {
       (e) =>
         visibleIds.has(e.source) &&
         visibleIds.has(e.target) &&
-        (showPrerequisites || e.relation !== "PREREQUISITE_OF"),
+        (showPrerequisites || e.relation !== "PREREQUISITE_OF") &&
+        (showCrossBook || e.relation !== "SAME_CONCEPT"),
     )
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites])
+  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook])
 
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
@@ -747,6 +776,19 @@ export default function Viz() {
                   style={{ backgroundColor: PREREQ_EDGE_COLOR }}
                 />
                 <span className="text-xs text-foreground">Prerequisites</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showCrossBook}
+                  onChange={() => setShowCrossBook((v) => !v)}
+                  className="accent-primary"
+                />
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: SAME_CONCEPT_COLOR }}
+                />
+                <span className="text-xs text-foreground">Cross-book</span>
               </label>
             </div>
           </div>

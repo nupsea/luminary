@@ -42,6 +42,36 @@ class EntityListResponse(BaseModel):
     entities: list[EntityItem]
 
 
+class ConceptClusterItem(BaseModel):
+    concept_name: str
+    entity_ids: list[str]
+    document_ids: list[str]
+    has_contradiction: bool
+    contradiction_note: str
+
+
+class ConceptLinkedResponse(BaseModel):
+    clusters: list[ConceptClusterItem]
+
+
+@router.get("/concepts/linked")
+async def get_concept_clusters() -> ConceptLinkedResponse:
+    """Return concept clusters: groups of Entity nodes linked by SAME_CONCEPT edges.
+
+    Returns all cross-document concept clusters. Each cluster represents one concept
+    that appears in multiple documents, with contradiction status if detected.
+    Empty clusters list when no SAME_CONCEPT edges exist.
+
+    IMPORTANT: This route must be declared before GET /{document_id} to prevent
+    FastAPI from matching 'concepts' as a document_id path parameter.
+    """
+    svc = get_graph_service()
+    raw = svc.get_concept_clusters()
+    return ConceptLinkedResponse(
+        clusters=[ConceptClusterItem(**c) for c in raw]
+    )
+
+
 @router.get("/entities/{document_id}")
 async def get_entities_by_type(
     document_id: str,
@@ -74,15 +104,19 @@ async def get_graph_for_document(
 
 
 @router.get("")
-async def get_graph(doc_ids: str = Query(default="")) -> dict:
+async def get_graph(
+    doc_ids: str = Query(default=""),
+    include_same_concept: bool = Query(default=False),
+) -> dict:
     """Return merged nodes and edges for multiple documents.
 
     Pass ?doc_ids=id1,id2,id3 to filter by specific documents.
     Returns all graph data if doc_ids is empty.
+    Pass ?include_same_concept=true to include SAME_CONCEPT cross-book edges (S141).
     """
     svc = get_graph_service()
     if doc_ids:
         ids = [d.strip() for d in doc_ids.split(",") if d.strip()]
     else:
         ids = []
-    return svc.get_graph_for_documents(ids)
+    return svc.get_graph_for_documents(ids, include_same_concept=include_same_concept)
