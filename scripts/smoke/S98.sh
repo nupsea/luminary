@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S98: POST /qa/stream with 'quiz me' question returns HTTP 200.
 # The response is an SSE stream; we just assert HTTP 200 and non-empty body.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

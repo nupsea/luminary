@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test for S135: GET /graph/entities/{doc_id}?type=LIBRARY returns HTTP 200 and JSON.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 #
 # Usage: ./scripts/smoke/S135.sh [document_id]
 # If document_id is omitted, the test verifies the endpoint exists and returns 200
@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 DOC_ID="${1:-smoke-test-nonexistent-doc}"
 
 # 1. Health check

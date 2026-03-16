@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for S140: Code Execution Sandbox with Predict-then-Run
-# Requires a running backend at localhost:8000
+# Requires a running backend at localhost:7820
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "--- S140 smoke tests ---"
 

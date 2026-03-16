@@ -22,7 +22,7 @@ import { useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000
 const PERM_REQUESTED_KEY = "luminary:notifPermRequested"
 const LAST_NOTIF_KEY = "luminary:lastReviewNotif"

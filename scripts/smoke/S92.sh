@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S92: Notes as chat context -- POST /chat/stream with notes intent.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 NOTE_ID=""
 
 cleanup() {

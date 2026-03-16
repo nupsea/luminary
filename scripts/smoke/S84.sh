@@ -9,7 +9,7 @@
 # 4. DELETE /notes/{id} — cleanup
 set -euo pipefail
 
-BASE="${BACKEND_URL:-http://localhost:8000}"
+BASE="${BACKEND_URL:-http://localhost:7820}"
 
 # ---- (1) GET /notes returns 200 ----
 STATUS=$(curl -so /dev/null -w "%{http_code}" "$BASE/notes")

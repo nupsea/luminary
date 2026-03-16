@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S61: document attribution — POST /qa returns 200 for both
 # scope=all and scope=single; citation structure is valid JSON.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # scope=all with no documents → no_context error event (not a 500)
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \

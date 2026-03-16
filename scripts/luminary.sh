@@ -15,7 +15,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-BACKEND_PORT=8000
+BACKEND_PORT=7820
 FRONTEND_PORT=5173
 
 # ---------------------------------------------------------------------------

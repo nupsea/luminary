@@ -40,7 +40,7 @@ import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types

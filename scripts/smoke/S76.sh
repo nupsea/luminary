@@ -5,11 +5,11 @@
 # (3) POST /summarize/{id} with mode=executive and force_refresh=true.
 #     Assert HTTP 200 and streaming response contains non-empty content.
 # (4) GET /summarize/{id}/cached, assert 'executive' key is present.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 FIXTURE="backend/tests/fixtures/art_of_unix_ch1.txt"
 
 if [ ! -f "$FIXTURE" ]; then

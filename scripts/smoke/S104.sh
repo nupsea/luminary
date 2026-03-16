@@ -2,7 +2,7 @@
 # S104 smoke test: GET /settings/llm returns 200 with has_*_key booleans (no raw key in body)
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8000}"
+BASE_URL="${BASE_URL:-http://localhost:7820}"
 
 echo "S104: GET /settings/llm returns 200..."
 BODY=$(curl -s -w "\n%{http_code}" "${BASE_URL}/settings/llm")

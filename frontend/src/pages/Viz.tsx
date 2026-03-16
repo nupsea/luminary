@@ -76,7 +76,7 @@ class VizErrorBoundary extends Component<{ children: ReactNode }, { error: strin
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 const SIDEBAR_W = 240
 
 const ALL_ENTITY_TYPES = [

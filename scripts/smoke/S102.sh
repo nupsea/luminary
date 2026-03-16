@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S102: tech debt - datetime.now(UTC), FK pragma, settings PATCH validation.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

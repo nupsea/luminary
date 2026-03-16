@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types

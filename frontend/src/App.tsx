@@ -25,7 +25,7 @@ const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
 const Monitoring = lazy(() => import("./pages/Monitoring"))
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Prefetch helpers

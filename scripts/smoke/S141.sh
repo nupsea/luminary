@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 RESP=$(curl -sf "$BASE/graph/concepts/linked")
 echo "$RESP" | python3 -c "

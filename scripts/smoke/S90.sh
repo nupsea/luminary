@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S90: Notes auto-tagging -- POST /notes/{id}/suggest-tags.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Create a note with sufficient content for tagging
 CREATE=$(curl -sf -X POST "${BASE}/notes" \

@@ -3,7 +3,7 @@
 # Tests PATCH /documents/{id}/tags and GET /documents?tag=X
 set -euo pipefail
 
-BASE="${BACKEND_URL:-http://localhost:8000}"
+BASE="${BACKEND_URL:-http://localhost:7820}"
 
 # Create a document via ingest (we need a real endpoint, use a tiny text file)
 INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S79: pure context packer integrated into synthesize_node.
 # POST /qa with a book-style question; assert HTTP 200, done event, response < 15s.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 TMP_FILE="/tmp/s79_qa.txt"
 
 echo "POSTing question to /qa ..."

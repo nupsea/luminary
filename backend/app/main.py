@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 
     # Telemetry setup
     if settings.PHOENIX_ENABLED:
-        setup_tracing()
+        setup_tracing(phoenix_enabled=True, data_dir=settings.DATA_DIR)
         FastAPIInstrumentor.instrument_app(app)
 
     data_dir = Path(settings.DATA_DIR).expanduser()

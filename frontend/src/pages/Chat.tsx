@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // ExploreConnectionsChips — graph-derived entity-pair suggestions (S109)
@@ -579,7 +579,7 @@ export default function Chat() {
       logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
       setQaError(
         errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")
-          ? "Cannot reach the server. Is the backend running on port 8000?"
+          ? "Cannot reach the server. Is the backend running on port 7820?"
           : `Could not get a response: ${errMsg}`
       )
       setMessages((m) => m.filter((msg) => msg.id !== assistantId))

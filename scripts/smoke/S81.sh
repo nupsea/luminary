@@ -3,11 +3,11 @@
 # Tests that POST /qa returns HTTP 200 for each intent type with retry mocked.
 #
 # Usage: ./scripts/smoke/S81.sh [BASE_URL]
-# Requires: backend running at BASE_URL (default http://localhost:8000)
+# Requires: backend running at BASE_URL (default http://localhost:7820)
 
 set -euo pipefail
 
-BASE="${1:-http://localhost:8000}"
+BASE="${1:-http://localhost:7820}"
 
 echo "S81 smoke: confidence-adaptive retry — $BASE"
 

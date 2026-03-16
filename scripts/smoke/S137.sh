@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S137: POST /flashcards/generate-technical returns HTTP 201
 # with a JSON array where at least one card has flashcard_type set.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

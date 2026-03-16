@@ -2,11 +2,11 @@
 # Smoke test for S58: query rewriting — POST /qa returns a non-500 streaming response.
 # The rewriting logic is exercised internally; we verify the endpoint is up and
 # does not crash when a vague-reference question is submitted with scope=all.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # POST /qa with a vague-reference question (scope=all skips rewriting per spec).
 # Must return HTTP 200 with Content-Type: text/event-stream.

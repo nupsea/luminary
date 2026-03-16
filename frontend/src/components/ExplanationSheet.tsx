@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react"
 import type { ExplainMode } from "./FloatingToolbar"
 import { MarkdownRenderer } from "./MarkdownRenderer"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 const MODE_LABELS: Record<ExplainMode | "formal", string> = {
   plain: "Explanation",

@@ -16,7 +16,7 @@ import {
   relativeDate,
 } from "./utils"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   const r = (size - 4) / 2

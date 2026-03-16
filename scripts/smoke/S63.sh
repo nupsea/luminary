@@ -2,7 +2,7 @@
 # Smoke test for S63 — Mandatory content type selection in upload
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "[S63] Test 1: POST /documents/ingest without content_type returns 422"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE}/documents/ingest" \

@@ -10,7 +10,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Start backend with DEBUG logging; prefix each line with cyan [BACKEND]
-(cd "$REPO_ROOT/backend" && LOG_LEVEL=DEBUG uv run uvicorn app.main:app --reload --port 8000 2>&1) \
+(cd "$REPO_ROOT/backend" && LOG_LEVEL=DEBUG uv run uvicorn app.main:app --reload --port 7820 2>&1) \
     | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m "}{print p $0; fflush()}' &
 BACKEND_PID=$!
 

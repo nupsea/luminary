@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S80: V2 integration tests gate.
 # Sends 4 POST /qa calls with different intent types; all must return HTTP 200.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 FAIL=0
 
 qa_check() {

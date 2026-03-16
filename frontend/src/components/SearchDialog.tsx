@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 interface SearchMatch {
   chunk_id: string

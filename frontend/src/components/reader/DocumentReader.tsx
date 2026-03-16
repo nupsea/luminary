@@ -17,7 +17,7 @@ import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // FSRS fragility heatmap (S116)

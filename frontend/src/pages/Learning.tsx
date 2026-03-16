@@ -43,7 +43,7 @@ import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 const PAGE_SIZE = 20
 
 interface SearchMatch {

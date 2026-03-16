@@ -3,7 +3,7 @@
 # Calls GET /study/sessions and asserts HTTP 200 with a non-empty body.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S115 smoke: GET /study/sessions"
 RESPONSE=$(curl -sf -w "\n%{http_code}" "${BASE}/study/sessions?page=1&page_size=5")

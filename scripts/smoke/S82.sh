@@ -3,7 +3,7 @@
 # Verifies that Gutenberg/distribution metadata does not appear in the output.
 set -euo pipefail
 
-BASE="${BACKEND_URL:-http://localhost:8000}"
+BASE="${BACKEND_URL:-http://localhost:7820}"
 
 # Ingest a minimal document that contains Gutenberg boilerplate mixed with content
 INGEST_RESP=$(curl -sf -X POST "$BASE/documents/ingest" \

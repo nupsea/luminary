@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S101: GET /study/session-plan returns HTTP 200 with 'items' key.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

@@ -2,7 +2,7 @@
 # S117 smoke test: verify GET /graph/learning-path responds 200 with expected shape.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S117 smoke: GET /graph/learning-path with unknown entity returns 200 and empty nodes"
 resp=$(curl -sf "${BASE}/graph/learning-path?start_entity=test_concept&document_id=nonexistent_doc")

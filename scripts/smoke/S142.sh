@@ -3,7 +3,7 @@
 # Verifies GET /settings/web-search and POST /qa with web_enabled=false both work.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

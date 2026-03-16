@@ -3,7 +3,7 @@
 # Uses a nonexistent doc_id -- graceful empty response is the expected result.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S109 [1/2]: GET /chat/explorations with unknown doc returns 200 empty list..."
 RESP=$(curl -sf "${BASE}/chat/explorations?document_id=smoke-nonexistent-doc-s109")

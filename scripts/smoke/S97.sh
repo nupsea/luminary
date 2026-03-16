@@ -2,11 +2,11 @@
 # Smoke test for S97: POST /flashcards/from-gaps endpoint.
 # Tests validation (422 on empty gaps) and that a non-empty request is accepted
 # (200 if Ollama is running, 503 if not -- both are valid for this smoke test).
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

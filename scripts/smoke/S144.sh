@@ -4,7 +4,7 @@
 # Both are valid since Ollama may not be running during smoke test execution.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # Get first document id from library
 DOC_ID=$(curl -sf "$BASE/documents" | python3 -c "

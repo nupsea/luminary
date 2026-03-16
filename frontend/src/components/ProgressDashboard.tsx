@@ -25,7 +25,7 @@ import {
 } from "recharts"
 import { Loader2 } from "lucide-react"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types

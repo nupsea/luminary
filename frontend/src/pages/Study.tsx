@@ -55,7 +55,7 @@ async function fetchDocList(): Promise<DocListItem[]> {
   return data.items ?? []
 }
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types

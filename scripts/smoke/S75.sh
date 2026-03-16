@@ -2,11 +2,11 @@
 # Smoke test for S75: SectionSummaryModel + section summarization node.
 # (1) POST /ingest with a small TXT fixture, poll for stage=complete.
 # (2) GET /summarize/{id}/sections returns HTTP 200 and a JSON array.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 FIXTURE="backend/tests/fixtures/art_of_unix_ch1.txt"
 
 if [ ! -f "$FIXTURE" ]; then

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S134 — Vision LLM image analysis
 # Usage: ./scripts/smoke/S134.sh <document_id>
-# Requires: backend running at localhost:8000
+# Requires: backend running at localhost:7820
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ fi
 echo "S134 smoke test — document_id=$DOC_ID"
 
 # Check images endpoint responds 200
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/documents/${DOC_ID}/images")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/images")
 if [ "$STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/images returned HTTP $STATUS (expected 200)"
   exit 1
@@ -23,7 +23,7 @@ fi
 echo "PASS: images endpoint returned HTTP 200"
 
 # Check enrichment jobs endpoint includes image_analyze job type
-JOBS=$(curl -s "http://localhost:8000/documents/${DOC_ID}/enrichment")
+JOBS=$(curl -s "http://localhost:7820/documents/${DOC_ID}/enrichment")
 python3 -c "
 import sys, json
 try:

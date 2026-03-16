@@ -4,7 +4,7 @@
 # 2. POST /qa with scope='all' summary query — asserts HTTP 200, non-empty answer
 set -euo pipefail
 
-BASE="${BACKEND_URL:-http://localhost:8000}"
+BASE="${BACKEND_URL:-http://localhost:7820}"
 
 # ---- Ingest two small documents so scope='all' retrieval has content ----
 DOC1=$(curl -sf -X POST "$BASE/documents/ingest" \

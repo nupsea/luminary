@@ -2,7 +2,7 @@
 # Smoke test for S91: Notes search -- GET /notes/search.
 
 set -euo pipefail
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Create a note with searchable content
 CREATE=$(curl -sf -X POST "${BASE}/notes" \

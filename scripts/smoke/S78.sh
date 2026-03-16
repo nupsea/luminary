@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S78: strategy nodes — summary_lookup, graph_traversal, comparative, search.
 # POST /qa twice with different question types; both must return HTTP 200 within 30 seconds.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # ---------------------------------------------------------------------------
 # Helper: POST /qa and check response

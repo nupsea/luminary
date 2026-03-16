@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for S123: EPUB and Kindle ingestion
-# Calls localhost:8000 over real HTTP. No mocking.
+# Calls localhost:7820 over real HTTP. No mocking.
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8000}"
+BASE_URL="${BASE_URL:-http://localhost:7820}"
 
 echo "S123 smoke: Kindle My Clippings.txt ingest"
 

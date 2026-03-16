@@ -4,7 +4,7 @@
 # Endpoint must return HTTP 200 with {"heatmap": {}}.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 DOC_ID="smoke-test-nonexistent"
 
 echo "S116 smoke: GET /study/section-heatmap?document_id=${DOC_ID}"

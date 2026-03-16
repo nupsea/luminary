@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { logger } from "@/lib/logger"
 import { Progress } from "@/components/ui/progress"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4", ".epub"]
 

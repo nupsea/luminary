@@ -9,7 +9,7 @@ import { useState } from "react"
 import type { HighlightInfo } from "@/components/FloatingToolbar"
 import type { AnnotationItem } from "./types"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 const COLORS: { id: "yellow" | "green" | "blue" | "pink"; bg: string; label: string }[] = [
   { id: "yellow", bg: "bg-yellow-300", label: "Yellow" },

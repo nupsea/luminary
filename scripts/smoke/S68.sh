@@ -2,7 +2,7 @@
 # Smoke test for S68: App startup readiness — backend responds to GET /documents
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S68 smoke: waiting 2s then GET /documents"
 sleep 2

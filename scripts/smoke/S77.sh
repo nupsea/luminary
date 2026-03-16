@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S77: ChatState + LangGraph chat router skeleton with intent classifier.
 # POST /qa with a summary-intent question, assert HTTP 200 and non-empty answer field.
-# Requires the backend to be running on localhost:8000 with at least one ingested document.
+# Requires the backend to be running on localhost:7820 with at least one ingested document.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # POST /qa
 echo "POSTing question to /qa ..."

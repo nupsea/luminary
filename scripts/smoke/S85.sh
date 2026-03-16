@@ -4,7 +4,7 @@
 # Verifies POST /evals/run with dataset=book returns HTTP 202.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S85 smoke: GET /evals/results"
 BODY=$(curl -sf "$BASE/evals/results")

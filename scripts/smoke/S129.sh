@@ -3,7 +3,7 @@
 # Verifies GET /evals/results returns HTTP 200 with a JSON array body.
 set -euo pipefail
 
-BASE="${BACKEND_URL:-http://localhost:8000}"
+BASE="${BACKEND_URL:-http://localhost:7820}"
 
 echo "=== S129 smoke test: GET /evals/results ==="
 

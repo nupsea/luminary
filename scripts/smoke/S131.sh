@@ -3,11 +3,11 @@
 # Calls GET /documents/nonexistent-id/code_snippets and asserts HTTP 404.
 #
 # Usage: bash scripts/smoke/S131.sh
-# Prerequisites: backend running on localhost:8000
+# Prerequisites: backend running on localhost:7820
 
 set -euo pipefail
 
-BASE_URL="${LUMINARY_BACKEND_URL:-http://localhost:8000}"
+BASE_URL="${LUMINARY_BACKEND_URL:-http://localhost:7820}"
 
 echo "S131 smoke: GET /documents/nonexistent-id/code_snippets expects 404"
 

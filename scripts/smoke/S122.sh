@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API="http://localhost:8000"
+API="http://localhost:7820"
 
 echo "S122: checking /documents/ingest-url endpoint exists..."
 resp=$(curl -s -o /dev/null -w "%{http_code}" \

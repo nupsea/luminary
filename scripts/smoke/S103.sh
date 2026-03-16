@@ -2,7 +2,7 @@
 # S103 smoke test: POST /qa returns HTTP 200 SSE response (Ollama online path)
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8000}"
+BASE_URL="${BASE_URL:-http://localhost:7820}"
 
 echo "S103: POST /qa returns HTTP 200..."
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \

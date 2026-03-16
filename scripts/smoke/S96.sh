@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S96: Inline Gap Analysis Card in Chat.
 # Tests that the chat stream endpoint routes notes_gap intent to a __card__ SSE event.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 NOTE_ID=""
 
 cleanup() {

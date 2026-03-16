@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-BASE=http://localhost:8000
+BASE=http://localhost:7820
 
 # Verify the library endpoint returns expected shape
 RESP=$(curl -sf "${BASE}/documents")

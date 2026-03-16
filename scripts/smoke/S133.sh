@@ -6,13 +6,13 @@ if [ -z "$DOC_ID" ]; then
   exit 1
 fi
 
-IMAGES_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/documents/${DOC_ID}/images")
+IMAGES_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/images")
 if [ "$IMAGES_STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/images returned $IMAGES_STATUS"
   exit 1
 fi
 
-ENRICHMENT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/documents/${DOC_ID}/enrichment")
+ENRICHMENT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/enrichment")
 if [ "$ENRICHMENT_STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/enrichment returned $ENRICHMENT_STATUS"
   exit 1

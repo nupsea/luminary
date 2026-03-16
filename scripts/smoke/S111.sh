@@ -2,7 +2,7 @@
 # S111 smoke: annotation create, list, delete
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S111 [1/5]: Find a document..."
 DOC_ID=$(curl -sf "${BASE}/documents?page_size=1" | python3 -c "

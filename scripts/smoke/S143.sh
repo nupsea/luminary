@@ -3,7 +3,7 @@
 # Verifies GET /documents/{id}/progress returns 200 with expected schema.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

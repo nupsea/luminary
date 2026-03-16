@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S94: Notes vs Book gap detection.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 NOTE_ID=""
 
 cleanup() {

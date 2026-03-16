@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # S145 smoke test: concept mastery endpoints return 200 with empty data for nonexistent IDs
 set -e
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "S145 smoke: GET /mastery/concepts"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \

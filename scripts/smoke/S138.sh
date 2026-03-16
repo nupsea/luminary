@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for S138: GET /references/documents/{id} returns HTTP 200 with references key.
-# Requires a running backend at http://localhost:8000.
+# Requires a running backend at http://localhost:7820.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # Health check
 HTTP_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health")

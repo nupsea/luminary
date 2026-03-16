@@ -8,7 +8,7 @@ if [ -z "$DOC_ID" ]; then
   exit 1
 fi
 
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/documents/${DOC_ID}/objectives")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:7820/documents/${DOC_ID}/objectives")
 if [ "$STATUS" -ne 200 ]; then
   echo "FAIL: GET /documents/${DOC_ID}/objectives returned $STATUS"
   exit 1

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S95: Smart Start suggestion pills.
 # Verifies GET /study/due with a nonexistent document_id returns HTTP 200 and a JSON array.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # GET /study/due with a nonexistent document_id -- must return 200 and an array (empty is fine)
 HTTP_CODE=$(curl -s -o /tmp/s95_due_resp.json -w "%{http_code}" \

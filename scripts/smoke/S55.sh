@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S55: cross-document holistic summary — POST /summarize/all
 # returns 200 with text/event-stream; error event when < 2 docs ingested.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # POST /summarize/all should return 200 regardless of library state
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \

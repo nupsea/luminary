@@ -3,11 +3,11 @@
 # Calls GET /evals/results and asserts HTTP 200 with a non-empty JSON array.
 #
 # Usage: bash scripts/smoke/S130.sh
-# Prerequisites: backend running on localhost:8000
+# Prerequisites: backend running on localhost:7820
 
 set -euo pipefail
 
-BASE_URL="${LUMINARY_BACKEND_URL:-http://localhost:8000}"
+BASE_URL="${LUMINARY_BACKEND_URL:-http://localhost:7820}"
 
 echo "S130 smoke: GET /evals/results"
 

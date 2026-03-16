@@ -4,7 +4,7 @@
 # then asserts GET /graph/{doc_id} returns at least 1 entity node.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 FIXTURE="/tmp/s86_smoke_fixture.txt"
 
 # Create a minimal fixture with known entity variants

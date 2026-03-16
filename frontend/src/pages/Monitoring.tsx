@@ -35,7 +35,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types

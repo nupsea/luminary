@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for S114 - Struggling Cards endpoint
-# Requires: live backend at http://localhost:8000
+# Requires: live backend at http://localhost:7820
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "=== S114 smoke: Struggling Cards ==="
 

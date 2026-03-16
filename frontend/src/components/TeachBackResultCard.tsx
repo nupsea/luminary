@@ -2,7 +2,7 @@ import { CheckCircle2, Loader2, XCircle, AlertTriangle } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router-dom"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 export interface TeachBackCardData {
   type: "teach_back_result"

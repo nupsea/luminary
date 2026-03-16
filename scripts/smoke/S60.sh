@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S60: GET /sections/{id} and GET /documents/{id}/conversation return 200.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. GET /sections/<nonexistent-id> — must return 200 with empty array (no 404/500)
 BODY=$(curl -sf "${BASE}/sections/nonexistent-id-smoke-s60")

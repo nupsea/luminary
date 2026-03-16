@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for S113 - Learning Goals endpoints
-# Requires: live backend at http://localhost:8000 and at least one ingested document.
+# Requires: live backend at http://localhost:7820 and at least one ingested document.
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 echo "=== S113 smoke: Learning Goals ==="
 
