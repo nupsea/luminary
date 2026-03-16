@@ -111,6 +111,8 @@ class DocumentListItem(BaseModel):
     source_url: str | None = None
     video_title: str | None = None
     enrichment_status: str | None = None  # None if no enrichment job; else latest job status
+    # S143: None = no objectives extracted; 0.0 = objectives exist but none covered
+    objective_progress_pct: float | None = None
 
 
 class DocumentListResponse(BaseModel):
@@ -307,6 +309,21 @@ async def list_documents(
             .correlate(DocumentModel)
             .scalar_subquery()
         )
+        objectives_total_sq = (
+            select(func.count())
+            .where(LearningObjectiveModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
+        objectives_covered_sq = (
+            select(func.count())
+            .where(
+                LearningObjectiveModel.document_id == DocumentModel.id,
+                LearningObjectiveModel.covered.is_(True),
+            )
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
 
         stmt = select(
             DocumentModel,
@@ -318,6 +335,8 @@ async def list_documents(
             section_count_sq.label("section_count"),
             read_section_count_sq.label("read_section_count"),
             enrichment_status_sq.label("enrichment_status"),
+            objectives_total_sq.label("objectives_total"),
+            objectives_covered_sq.label("objectives_covered"),
         )
 
         result = await session.execute(stmt)
@@ -335,7 +354,12 @@ async def list_documents(
         section_count = row[6] or 0
         read_section_count = row[7] or 0
         enrichment_status = row[8]
+        objectives_total = row[9] or 0
+        objectives_covered = row[10] or 0
         reading_progress_pct = (read_section_count / section_count) if section_count > 0 else 0.0
+        objective_progress_pct: float | None = None
+        if objectives_total > 0:
+            objective_progress_pct = round(objectives_covered / objectives_total * 100.0, 1)
         all_items.append(
             DocumentListItem(
                 id=doc.id,
@@ -360,6 +384,7 @@ async def list_documents(
                 source_url=doc.source_url,
                 video_title=doc.video_title,
                 enrichment_status=enrichment_status,
+                objective_progress_pct=objective_progress_pct,
             )
         )
 
@@ -1156,4 +1181,79 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
             )
             for obj in objectives
         ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# S143: Document learning progress endpoints
+# ---------------------------------------------------------------------------
+
+
+class ChapterProgressItem(BaseModel):
+    section_id: str
+    heading: str
+    total_objectives: int
+    covered_objectives: int
+    progress_pct: float  # 0.0-100.0
+
+
+class DocumentProgressResponse(BaseModel):
+    document_id: str
+    total_objectives: int
+    covered_objectives: int
+    progress_pct: float  # 0.0-100.0
+    by_chapter: list[ChapterProgressItem]
+
+
+@router.get("/{document_id}/progress", response_model=DocumentProgressResponse)
+async def get_document_progress(document_id: str) -> DocumentProgressResponse:
+    """Return learning objective coverage progress for a document.
+
+    Returns zeros (not 404) when the document has no objectives.
+    Returns 404 when the document does not exist.
+    """
+    from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        doc_check = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+    tracker = get_objective_tracker_service()
+    data = await tracker.get_progress(document_id)
+    return DocumentProgressResponse(
+        document_id=data["document_id"],
+        total_objectives=data["total_objectives"],
+        covered_objectives=data["covered_objectives"],
+        progress_pct=data["progress_pct"],
+        by_chapter=[ChapterProgressItem(**ch) for ch in data["by_chapter"]],
+    )
+
+
+@router.post("/{document_id}/refresh_progress", response_model=DocumentProgressResponse)
+async def refresh_document_progress(document_id: str) -> DocumentProgressResponse:
+    """Synchronously recalculate objective coverage and return updated progress.
+
+    Returns 404 when the document does not exist.
+    """
+    from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        doc_check = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+    tracker = get_objective_tracker_service()
+    await tracker.update_coverage(document_id)
+    data = await tracker.get_progress(document_id)
+    return DocumentProgressResponse(
+        document_id=data["document_id"],
+        total_objectives=data["total_objectives"],
+        covered_objectives=data["covered_objectives"],
+        progress_pct=data["progress_pct"],
+        by_chapter=[ChapterProgressItem(**ch) for ch in data["by_chapter"]],
     )

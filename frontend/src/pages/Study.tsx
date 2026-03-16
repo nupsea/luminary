@@ -169,8 +169,16 @@ interface SessionCardDetail {
 // API
 // ---------------------------------------------------------------------------
 
-async function fetchFlashcards(documentId: string): Promise<Flashcard[]> {
-  const res = await fetch(`${API_BASE}/flashcards/${documentId}`)
+async function fetchFlashcards(
+  documentId: string,
+  sectionId?: string | null,
+  bloomLevelMin?: number | null,
+): Promise<Flashcard[]> {
+  const params = new URLSearchParams()
+  if (sectionId) params.set("section_id", sectionId)
+  if (bloomLevelMin != null) params.set("bloom_level_min", String(bloomLevelMin))
+  const query = params.toString()
+  const res = await fetch(`${API_BASE}/flashcards/${documentId}${query ? `?${query}` : ""}`)
   if (!res.ok) return []
   return res.json() as Promise<Flashcard[]>
 }
@@ -1384,6 +1392,8 @@ type GenerateErrorKind = "ollama_offline" | "server_error" | null
 export default function Study() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const studySectionFilter = useAppStore((s) => s.studySectionFilter)
+  const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const queryClient = useQueryClient()
   const [studying, setStudying] = useState(false)
   // Track section pre-selected by clicking a gap item
@@ -1393,6 +1403,12 @@ export default function Study() {
   const [filterType, setFilterType] = useState<string | null>(null)
   const [filterBloomMin, setFilterBloomMin] = useState(1)
   const [filterBloomMax, setFilterBloomMax] = useState(6)
+  // S143: active section filter consumed from store
+  const [activeSectionFilter, setActiveSectionFilter] = useState<{
+    sectionId: string
+    bloomLevelMin: number
+    sectionHeading?: string
+  } | null>(null)
   const mountTime = useRef(Date.now())
 
   // Document list for the in-tab picker
@@ -1406,10 +1422,25 @@ export default function Study() {
     logger.info("[Study] mounted")
   }, [])
 
-  // Flashcard list
+  // S143: consume studySectionFilter from store when it changes
+  useEffect(() => {
+    if (!studySectionFilter) return
+    setActiveSectionFilter({
+      sectionId: studySectionFilter.sectionId,
+      bloomLevelMin: studySectionFilter.bloomLevelMin,
+    })
+    // Clear the store filter immediately after consuming
+    setStudySectionFilter(null)
+  }, [studySectionFilter, setStudySectionFilter])
+
+  // Flashcard list — include section/bloom filters when set (S143)
   const { data: cards = [], isLoading: cardsLoading, isError: cardsError } = useQuery<Flashcard[]>({
-    queryKey: ["flashcards", activeDocumentId],
-    queryFn: () => fetchFlashcards(activeDocumentId!),
+    queryKey: ["flashcards", activeDocumentId, activeSectionFilter?.sectionId, activeSectionFilter?.bloomLevelMin],
+    queryFn: () => fetchFlashcards(
+      activeDocumentId!,
+      activeSectionFilter?.sectionId,
+      activeSectionFilter?.bloomLevelMin,
+    ),
     enabled: !!activeDocumentId,
   })
 
@@ -1603,6 +1634,21 @@ export default function Study() {
         </section>
       ) : (
       <>
+      {/* S143: Section filter banner */}
+      {activeSectionFilter && (
+        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="text-foreground">
+            Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
+          </span>
+          <button
+            onClick={() => setActiveSectionFilter(null)}
+            className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            title="Clear section filter"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {/* Flashcards section */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>

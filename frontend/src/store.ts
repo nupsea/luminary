@@ -1,5 +1,10 @@
 import { create } from "zustand"
 
+interface StudySectionFilter {
+  sectionId: string
+  bloomLevelMin: number
+}
+
 interface AppState {
   activeDocumentId: string | null
   llmMode: "private" | "cloud"
@@ -10,11 +15,14 @@ interface AppState {
   // Note: direct localStorage read at module load is safe because Luminary is a client-only
   // SPA (Vite + Tauri) with no server-side rendering.
   reviewRemindersEnabled: boolean
+  // S143: Navigate to Study tab filtered to a specific section + bloom level.
+  studySectionFilter: StudySectionFilter | null
   setActiveDocument: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
   setNotesView: (view: "grid" | "list") => void
   setReviewRemindersEnabled: (enabled: boolean) => void
+  setStudySectionFilter: (filter: StudySectionFilter | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -25,6 +33,7 @@ export const useAppStore = create<AppState>((set) => ({
   notesView: "grid",
   // Only "false" disables; absent key (first run) defaults to enabled.
   reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
+  studySectionFilter: null,
   setActiveDocument: (id) => set({ activeDocumentId: id }),
   setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
   setLibraryView: (view) => set({ libraryView: view }),
@@ -33,4 +42,5 @@ export const useAppStore = create<AppState>((set) => ({
     localStorage.setItem("luminary:reviewReminders", String(enabled))
     set({ reviewRemindersEnabled: enabled })
   },
+  setStudySectionFilter: (filter) => set({ studySectionFilter: filter }),
 }))

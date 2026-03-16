@@ -14,6 +14,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { AnnotationPopover } from "./AnnotationPopover"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useAppStore } from "@/store"
 
 const API_BASE = "http://localhost:8000"
 
@@ -297,11 +298,37 @@ interface LearningObjective {
   covered: boolean
 }
 
-interface ChapterGoalsPanelProps {
-  documentId: string
+interface ChapterProgressRingProps {
+  pct: number
+  size?: number
 }
 
-function ChapterGoalsPanel({ documentId }: ChapterGoalsPanelProps) {
+function ChapterProgressRing({ pct, size = 12 }: ChapterProgressRingProps) {
+  const r = (size - 2) / 2
+  const circ = 2 * Math.PI * r
+  const dashOffset = circ - (pct / 100) * circ
+  return (
+    <svg width={size} height={size} className="shrink-0" aria-label={`${Math.round(pct)}% covered`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted/30" />
+      <circle
+        cx={size / 2} cy={size / 2} r={r}
+        fill="none" stroke="currentColor" strokeWidth={1.5}
+        strokeDasharray={circ} strokeDashoffset={dashOffset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        className="text-primary"
+      />
+    </svg>
+  )
+}
+
+interface ChapterGoalsPanelProps {
+  documentId: string
+  sectionId?: string | null
+  onStudyClick: (sectionId: string) => void
+}
+
+function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: ChapterGoalsPanelProps) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["objectives", documentId],
     queryFn: async () => {
@@ -328,14 +355,40 @@ function ChapterGoalsPanel({ documentId }: ChapterGoalsPanelProps) {
     return null
   }
 
+  const visibleObjectives = sectionId
+    ? data.objectives.filter((o) => o.section_id === sectionId)
+    : data.objectives
+
+  if (visibleObjectives.length === 0) {
+    return (
+      <div className="mb-4 rounded-lg border border-border bg-card p-4">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">Chapter Goals</h3>
+        <p className="text-xs text-muted-foreground">No learning objectives for this section.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="mb-4 rounded-lg border border-border bg-card p-4">
       <h3 className="mb-2 text-sm font-semibold text-foreground">Chapter Goals</h3>
       <ul className="space-y-1.5">
-        {data.objectives.map((obj) => (
+        {visibleObjectives.map((obj) => (
           <li key={obj.id} className="flex items-start gap-2 text-xs text-foreground/80">
-            <span className="mt-0.5 shrink-0 text-muted-foreground">-</span>
-            {obj.text}
+            <input
+              type="checkbox"
+              checked={obj.covered}
+              readOnly
+              className="mt-0.5 shrink-0 accent-primary"
+            />
+            <span className="flex-1">{obj.text}</span>
+            {!obj.covered && (
+              <button
+                onClick={() => onStudyClick(obj.section_id)}
+                className="ml-auto shrink-0 rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground hover:bg-primary/90"
+              >
+                Study
+              </button>
+            )}
           </li>
         ))}
       </ul>
@@ -1199,6 +1252,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
   const [leftTab, setLeftTab] = useState<"sections" | "highlights">("sections")
   const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
+  // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
+  const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
 
   // Audio mini-player state (S120) — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -1283,6 +1340,29 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
     },
     staleTime: 30_000,
   })
+
+  // Fetch objective progress for mini rings on section headers (S143)
+  const { data: progressData } = useQuery<{
+    by_chapter: { section_id: string; progress_pct: number }[]
+  }>({
+    queryKey: ["doc-progress", documentId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/documents/${documentId}/progress`)
+      if (!res.ok) return { by_chapter: [] }
+      return res.json() as Promise<{ by_chapter: { section_id: string; progress_pct: number }[] }>
+    },
+    staleTime: 60_000,
+  })
+
+  const progressBySectionId = useMemo(
+    () => new Map((progressData?.by_chapter ?? []).map((c) => [c.section_id, c.progress_pct])),
+    [progressData],
+  )
+
+  function handleStudyClick(sid: string) {
+    setActiveDocument(documentId)
+    setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
+  }
 
   // Fetch FSRS fragility heatmap for section coloring (S116)
   const { data: heatmapData } = useQuery<Record<string, SectionHeatmapItem>>({
@@ -1496,6 +1576,18 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                                   </button>
                                 )
                               )}
+                              {/* Mini progress ring (S143) — only when objectives exist for this section */}
+                              {progressBySectionId.has(section.id) && (
+                                <button
+                                  onClick={() => setActiveSectionGoals(
+                                    activeSectionGoals === section.id ? null : section.id
+                                  )}
+                                  title={`${Math.round(progressBySectionId.get(section.id) ?? 0)}% objectives covered`}
+                                  className="mt-0.5 shrink-0"
+                                >
+                                  <ChapterProgressRing pct={progressBySectionId.get(section.id) ?? 0} size={12} />
+                                </button>
+                              )}
                               {hasNote && (
                                 <span title="Has note" className="mt-0.5 shrink-0 text-primary">
                                   <StickyNote size={12} />
@@ -1555,7 +1647,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
           )}
           {/* Chapter Goals panel — only visible for tech_book/tech_article with extracted objectives */}
-          <ChapterGoalsPanel documentId={documentId} />
+          <ChapterGoalsPanel
+            documentId={documentId}
+            sectionId={activeSectionGoals}
+            onStudyClick={handleStudyClick}
+          />
           <SummaryPanel documentId={documentId} contentType={doc.content_type} />
         </div>
       </div>

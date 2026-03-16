@@ -10,6 +10,7 @@ Routes:
   POST /flashcards/{card_id}/review    — FSRS review with rating
 """
 
+import asyncio
 import csv
 import io
 import logging
@@ -18,20 +19,23 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import litellm
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DocumentModel, FlashcardModel, ReviewEventModel
+from app.models import ChunkModel, DocumentModel, FlashcardModel, ReviewEventModel
 from app.services.flashcard import FlashcardService, get_flashcard_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+
+# Strong references to fire-and-forget coverage update tasks (asyncio holds only weak refs).
+_background_tasks: set[asyncio.Task] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -397,14 +401,47 @@ async def export_flashcards_csv(
 @router.get("/{document_id}", response_model=list[FlashcardResponse])
 async def list_flashcards(
     document_id: str,
+    section_id: str | None = Query(default=None),
+    bloom_level_min: int | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
 ) -> list[FlashcardResponse]:
-    """List all flashcards for a document ordered by created_at desc."""
-    result = await session.execute(
+    """List flashcards for a document ordered by created_at desc.
+
+    Optional filters:
+      section_id      -- only cards whose chunk belongs to this section
+      bloom_level_min -- only cards with bloom_level >= this value (null bloom cards excluded)
+    """
+    if section_id is not None:
+        # Join through ChunkModel to filter by section
+        stmt = (
+            select(FlashcardModel, ChunkModel.section_id)
+            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
+            .where(
+                FlashcardModel.document_id == document_id,
+                ChunkModel.section_id == section_id,
+            )
+        )
+        if bloom_level_min is not None:
+            stmt = stmt.where(
+                FlashcardModel.bloom_level.is_not(None),
+                FlashcardModel.bloom_level >= bloom_level_min,
+            )
+        stmt = stmt.order_by(FlashcardModel.created_at.desc())
+        result = await session.execute(stmt)
+        return [_to_response(row[0], section_id=row[1]) for row in result.all()]
+
+    # No section filter — preserve existing no-join path
+    stmt = (
         select(FlashcardModel)
         .where(FlashcardModel.document_id == document_id)
-        .order_by(FlashcardModel.created_at.desc())
     )
+    if bloom_level_min is not None:
+        stmt = stmt.where(
+            FlashcardModel.bloom_level.is_not(None),
+            FlashcardModel.bloom_level >= bloom_level_min,
+        )
+    stmt = stmt.order_by(FlashcardModel.created_at.desc())
+    result = await session.execute(stmt)
     cards = result.scalars().all()
     return [_to_response(c) for c in cards]
 
@@ -491,6 +528,15 @@ async def review_flashcard(
         )
         session.add(event)
         await session.commit()
+
+    # Fire-and-forget coverage update -- does not block the review response.
+    if card.document_id:
+        from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
+
+        _tracker = get_objective_tracker_service()
+        _task = asyncio.create_task(_tracker.update_coverage(card.document_id))
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
 
     logger.info("Reviewed flashcard", extra={"card_id": card_id, "rating": req.rating})
     return _to_response(card)

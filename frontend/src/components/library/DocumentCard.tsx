@@ -18,6 +18,29 @@ import {
 
 const API_BASE = "http://localhost:8000"
 
+function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
+  const r = (size - 4) / 2
+  const circ = 2 * Math.PI * r
+  const dashOffset = circ - (pct / 100) * circ
+  return (
+    <svg width={size} height={size} className="shrink-0" aria-hidden="true">
+      <circle
+        cx={size / 2} cy={size / 2} r={r}
+        fill="none" stroke="currentColor" strokeWidth={2}
+        className="text-muted/30"
+      />
+      <circle
+        cx={size / 2} cy={size / 2} r={r}
+        fill="none" stroke="currentColor" strokeWidth={2}
+        strokeDasharray={circ} strokeDashoffset={dashOffset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        className="text-primary"
+      />
+    </svg>
+  )
+}
+
 const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string }> = {
   book: { label: "Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
   conversation: { label: "Conversation", className: "bg-green-100 text-green-700 hover:bg-green-200" },
@@ -314,6 +337,14 @@ export function DocumentCard({
       {doc.reading_progress_pct > 0 && (
         <div className="mt-2">
           <Progress value={doc.reading_progress_pct * 100} className="h-1" />
+        </div>
+      )}
+
+      {/* Objective progress ring (S143) — shown only when objectives have been extracted */}
+      {doc.objective_progress_pct !== null && (
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <ProgressRing pct={doc.objective_progress_pct} size={24} />
+          <span>{Math.round(doc.objective_progress_pct)}% objectives covered</span>
         </div>
       )}
 
