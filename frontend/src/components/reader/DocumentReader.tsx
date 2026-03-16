@@ -1,17 +1,20 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
-import { FloatingToolbar } from "@/components/FloatingToolbar"
-import type { ExplainMode, HighlightInfo } from "@/components/FloatingToolbar"
+import type { ExplainMode } from "@/components/FloatingToolbar"
 import type { AnnotationItem, DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { AnnotationPopover } from "./AnnotationPopover"
+import { SelectionActionBar } from "./SelectionActionBar"
+import type { SourceRef } from "./SelectionActionBar"
+import { NoteCreationDialog } from "./NoteCreationDialog"
+import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer } from "./PDFViewer"
 import { ReferencesPanel } from "./ReferencesPanel"
@@ -1243,11 +1246,13 @@ interface DocumentReaderProps {
 
 export function DocumentReader({ documentId, onBack, initialSectionId }: DocumentReaderProps) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { data: doc, isLoading } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
   })
   const sectionListRef = useRef<HTMLDivElement>(null)
+  const readerContainerRef = useRef<HTMLDivElement>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
@@ -1255,13 +1260,22 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview">("sections")
   // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
   const [pdfViewVisited, setPdfViewVisited] = useState(false)
-  const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
   // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
+  // S147: SelectionActionBar dialog state
+  const [selectionNoteOpen, setSelectionNoteOpen] = useState(false)
+  const [selectionNoteText, setSelectionNoteText] = useState("")
+  const [selectionNoteSourceRef, setSelectionNoteSourceRef] = useState<SourceRef | null>(null)
+  const [selectionNoteHeading, setSelectionNoteHeading] = useState<string | undefined>(undefined)
+  const [selectionFlashcardOpen, setSelectionFlashcardOpen] = useState(false)
+  const [selectionFlashcardText, setSelectionFlashcardText] = useState("")
+  const [selectionFlashcardSourceRef, setSelectionFlashcardSourceRef] = useState<SourceRef | null>(null)
+  const [selectionFlashcardHeading, setSelectionFlashcardHeading] = useState<string | undefined>(undefined)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
+  const setChatPreload = useAppStore((s) => s.setChatPreload)
 
   // Audio mini-player state (S120) — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -1410,8 +1424,68 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
     setSheetOpen(true)
   }
 
-  function handleHighlight(info: HighlightInfo) {
-    setPendingHighlight(info)
+  // S147: walk up DOM from startContainer looking for [data-section-id] attribute
+  function resolveSourceRef(startContainer: Node): SourceRef {
+    let node: Node | null = startContainer
+    while (node) {
+      if (node instanceof HTMLElement && node.dataset.sectionId) {
+        return {
+          sectionId: node.dataset.sectionId,
+          documentId,
+          documentTitle: doc?.title ?? "",
+        }
+      }
+      node = node.parentNode
+    }
+    return { sectionId: undefined, documentId, documentTitle: doc?.title ?? "" }
+  }
+
+  function handleSelectionAddToNote(text: string, sourceRef: SourceRef) {
+    const heading = sourceRef.sectionId
+      ? doc?.sections.find((s) => s.id === sourceRef.sectionId)?.heading
+      : undefined
+    setSelectionNoteText(text)
+    setSelectionNoteSourceRef(sourceRef)
+    setSelectionNoteHeading(heading)
+    setSelectionNoteOpen(true)
+  }
+
+  function handleSelectionCreateFlashcard(text: string, sourceRef: SourceRef) {
+    const heading = sourceRef.sectionId
+      ? doc?.sections.find((s) => s.id === sourceRef.sectionId)?.heading
+      : undefined
+    setSelectionFlashcardText(text)
+    setSelectionFlashcardSourceRef(sourceRef)
+    setSelectionFlashcardHeading(heading)
+    setSelectionFlashcardOpen(true)
+  }
+
+  function handleSelectionAskInChat(text: string, sourceRef: SourceRef) {
+    setChatPreload({ text: `> "${text}"\n\n`, documentId: sourceRef.documentId })
+    navigate("/chat")
+  }
+
+  async function handleSelectionHighlight(text: string, sourceRef: SourceRef) {
+    if (!sourceRef.sectionId) return
+    try {
+      await fetch(`${API_BASE}/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_id: documentId,
+          section_id: sourceRef.sectionId,
+          chunk_id: null,
+          selected_text: text,
+          start_offset: 0,
+          end_offset: text.length,
+          color: "yellow", // "yellow" maps to the same visual as hex #fef08a
+          note_text: null,
+        }),
+      })
+      void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
+    } catch {
+      // best-effort highlight; user can retry via Highlights tab
+    }
   }
 
   if (isLoading) {
@@ -1458,8 +1532,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
 
       {/* Two-panel layout */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left panel — 60% */}
-        <div className="flex w-3/5 flex-col overflow-hidden border-r border-border">
+        {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
+        <div ref={readerContainerRef} className="relative flex w-3/5 flex-col overflow-hidden border-r border-border">
           {/* Document header */}
           <div className="px-6 py-4">
             <h1 className="text-lg font-bold text-foreground">{doc.title}</h1>
@@ -1508,7 +1582,18 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
             </div>
           )}
 
-          {/* Section list / Highlights — relative for FloatingToolbar + AnnotationPopover positioning */}
+          {/* S147: SelectionActionBar — fires on selections in both section list and PDF viewer */}
+          <SelectionActionBar
+            containerRef={readerContainerRef}
+            resolveSourceRef={resolveSourceRef}
+            onExplain={handleExplain}
+            onAddToNote={handleSelectionAddToNote}
+            onCreateFlashcard={handleSelectionCreateFlashcard}
+            onAskInChat={handleSelectionAskInChat}
+            onHighlight={(text, sourceRef) => void handleSelectionHighlight(text, sourceRef)}
+          />
+
+          {/* Section list / Highlights */}
           <div
             ref={sectionListRef}
             className={cn(
@@ -1529,23 +1614,6 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                   <p className="mb-2 px-6 pt-3 text-xs text-muted-foreground">
                     Note indicators unavailable — could not load notes.
                   </p>
-                )}
-                <FloatingToolbar
-                  containerRef={sectionListRef}
-                  onExplain={handleExplain}
-                  onHighlight={handleHighlight}
-                />
-                {pendingHighlight && (
-                  <AnnotationPopover
-                    info={pendingHighlight}
-                    documentId={documentId}
-                    position={{ top: pendingHighlight.y + 50, left: pendingHighlight.x }}
-                    onSaved={() => {
-                      setPendingHighlight(null)
-                      void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
-                    }}
-                    onCancel={() => setPendingHighlight(null)}
-                  />
                 )}
                 <div className="px-6 pt-3">
                   {doc.sections.length === 0 ? (
@@ -1730,6 +1798,26 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
           onClose={() => setFeynmanSection(null)}
         />
       )}
+
+      {/* S147: Note creation dialog — pre-filled with selected text blockquote */}
+      <NoteCreationDialog
+        open={selectionNoteOpen}
+        selectedText={selectionNoteText}
+        sourceRef={selectionNoteSourceRef}
+        sectionHeading={selectionNoteHeading}
+        onClose={() => setSelectionNoteOpen(false)}
+        onSaved={() => void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })}
+      />
+
+      {/* S147: Flashcard generation dialog — scoped to selected text context */}
+      <DocumentFlashcardDialog
+        open={selectionFlashcardOpen}
+        documentId={documentId}
+        sectionId={selectionFlashcardSourceRef?.sectionId}
+        sectionHeading={selectionFlashcardHeading}
+        context={selectionFlashcardText}
+        onClose={() => setSelectionFlashcardOpen(false)}
+      />
 
       {/* Explanation sheet */}
       <ExplanationSheet

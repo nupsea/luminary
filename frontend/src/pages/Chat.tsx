@@ -326,6 +326,8 @@ function buildModelOptions(settings: LLMSettings | undefined): string[] {
 
 export default function Chat() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
+  const chatPreload = useAppStore((s) => s.chatPreload)
+  const clearChatPreload = useAppStore((s) => s.clearChatPreload)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
@@ -358,6 +360,19 @@ export default function Chat() {
       setSelectedDocId((prev) => prev ?? activeDocumentId)
     }
   }, [activeDocumentId])
+
+  // S147: Pre-fill input from chatPreload set by SelectionActionBar "Ask in Chat" action
+  useEffect(() => {
+    if (chatPreload) {
+      setInput(chatPreload.text)
+      if (chatPreload.documentId) {
+        setSelectedDocId(chatPreload.documentId)
+        setScope("single")
+      }
+      clearChatPreload()
+      setTimeout(() => textareaRef.current?.focus(), 50)
+    }
+  }, [chatPreload, clearChatPreload])
 
   // Pre-fill input from ?q= query param (e.g. from Notes "Compare with Book" button)
   useEffect(() => {
