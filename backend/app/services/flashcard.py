@@ -629,6 +629,76 @@ class FlashcardService:
         return len(cards), ids
 
 
+    async def generate_from_feynman_gaps(
+        self,
+        gaps: list[str],
+        document_id: str,
+        session: AsyncSession,
+    ) -> tuple[int, list[str]]:
+        """Generate concept_explanation flashcards from Feynman session gaps.
+
+        Identical to generate_from_gaps but sets source='feynman',
+        deck='feynman', flashcard_type='concept_explanation'.
+        Raises litellm.ServiceUnavailableError if Ollama is unreachable.
+        Returns (created_count, card_ids).
+        """
+        llm = get_llm_service()
+        semaphore = asyncio.Semaphore(5)
+
+        async def _generate_one(gap: str) -> FlashcardModel | None:
+            async with semaphore:
+                prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
+                raw = await llm.generate(prompt, system=GAP_FLASHCARD_SYSTEM, stream=False)
+                item = _parse_gap_flashcard(raw, gap)
+                if item is None:
+                    return None
+                now = datetime.now(UTC)
+                return FlashcardModel(
+                    id=str(uuid.uuid4()),
+                    document_id=document_id if document_id else None,
+                    chunk_id=None,
+                    source="feynman",
+                    deck="feynman",
+                    flashcard_type="concept_explanation",
+                    question=item["front"].strip(),
+                    answer=item["back"].strip(),
+                    source_excerpt=gap,
+                    fsrs_state="new",
+                    fsrs_stability=0.0,
+                    fsrs_difficulty=0.0,
+                    due_date=now,
+                    reps=0,
+                    lapses=0,
+                    created_at=now,
+                )
+
+        raw_results = await asyncio.gather(
+            *[_generate_one(g) for g in gaps], return_exceptions=True
+        )
+        for exc in raw_results:
+            if isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+                raise exc
+            if isinstance(exc, BaseException):
+                logger.warning(
+                    "generate_from_feynman_gaps: unexpected error for a gap, skipping: %s", exc
+                )
+        results: list[FlashcardModel | None] = [
+            r for r in raw_results if not isinstance(r, BaseException)
+        ]
+        cards = [r for r in results if r is not None]
+        ids: list[str] = []
+        for card in cards:
+            session.add(card)
+            ids.append(card.id)
+        if cards:
+            await session.commit()
+            logger.info(
+                "generate_from_feynman_gaps: created %d flashcards from %d gaps",
+                len(cards),
+                len(gaps),
+            )
+        return len(cards), ids
+
     async def generate_from_graph(
         self,
         document_id: str,

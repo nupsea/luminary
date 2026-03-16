@@ -329,6 +329,45 @@ class LearningObjectiveModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class FeynmanSessionModel(Base):
+    """A guided Feynman technique session for a document section concept.
+
+    status values: active | complete
+    Note: any new delete path in documents.py must also delete these rows.
+    """
+
+    __tablename__ = "feynman_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    concept: Mapped[str] = mapped_column(String(300), nullable=False)
+    # active|complete
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class FeynmanTurnModel(Base):
+    """One turn in a Feynman session (tutor or learner message).
+
+    role values: tutor | learner
+    gaps_identified: JSON list of gap strings; null for learner turns and opening.
+    Note: any new delete path in documents.py must also delete these rows.
+    """
+
+    __tablename__ = "feynman_turns"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    turn_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    # tutor|learner
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # JSON list of identified gap strings; null for learner turns
+    gaps_identified: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class AnnotationModel(Base):
     """Persistent text highlights anchored to a document section.
 

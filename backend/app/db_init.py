@@ -11,6 +11,8 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     DocumentModel,
     EnrichmentJobModel,
     EvalRunModel,
+    FeynmanSessionModel,
+    FeynmanTurnModel,
     FlashcardModel,
     ImageModel,
     LearningGoalModel,

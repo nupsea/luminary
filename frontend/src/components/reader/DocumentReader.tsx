@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
@@ -12,6 +12,7 @@ import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { AnnotationPopover } from "./AnnotationPopover"
+import { FeynmanDialog } from "./FeynmanDialog"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -1254,6 +1255,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
   const [pendingHighlight, setPendingHighlight] = useState<HighlightInfo | null>(null)
   // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
+  // S144: Feynman mode — section id to open dialog for; null = closed
+  const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
 
@@ -1602,6 +1605,16 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
                               >
                                 <StickyNote size={12} />
                               </button>
+                              {/* Feynman button -- only for tech books (S144) */}
+                              {(doc.content_type === "tech_book" || doc.content_type === "tech_article") && (
+                                <button
+                                  onClick={() => setFeynmanSection(section.id)}
+                                  title="Practice Feynman technique for this section"
+                                  className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+                                >
+                                  <Brain size={12} />
+                                </button>
+                              )}
                             </div>
                             {section.preview && (
                               <SectionPreviewWithHighlights
@@ -1673,6 +1686,16 @@ export function DocumentReader({ documentId, onBack, initialSectionId }: Documen
             if (audioRef.current) setAudioDuration(audioRef.current.duration)
           }}
           onEnded={() => setAudioPlaying(false)}
+        />
+      )}
+
+      {/* Feynman dialog (S144) */}
+      {feynmanSection && (
+        <FeynmanDialog
+          documentId={documentId}
+          sectionId={feynmanSection}
+          concept={doc.sections.find((s) => s.id === feynmanSection)?.heading ?? ""}
+          onClose={() => setFeynmanSection(null)}
         />
       )}
 

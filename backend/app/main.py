@@ -24,6 +24,7 @@ from app.routers.code_executor import router as code_executor_router
 from app.routers.documents import router as documents_router
 from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
+from app.routers.feynman import router as feynman_router
 from app.routers.flashcards import router as flashcards_router
 from app.routers.goals import router as goals_router
 from app.routers.graph import router as graph_router
@@ -147,6 +148,7 @@ app.include_router(documents_router)
 app.include_router(evals_router)
 app.include_router(explain_router)
 app.include_router(goals_router)
+app.include_router(feynman_router)
 app.include_router(flashcards_router)
 app.include_router(graph_router)
 app.include_router(images_router)
