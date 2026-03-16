@@ -29,6 +29,7 @@ from app.routers.flashcards import router as flashcards_router
 from app.routers.goals import router as goals_router
 from app.routers.graph import router as graph_router
 from app.routers.images import router as images_router
+from app.routers.mastery import router as mastery_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
@@ -160,6 +161,7 @@ app.include_router(references_router)
 app.include_router(search_router)
 app.include_router(sections_router)
 app.include_router(settings_router)
+app.include_router(mastery_router)
 app.include_router(study_router)
 app.include_router(code_executor_router)
 app.include_router(summarize_router)

@@ -125,6 +125,7 @@ class GapReport(TypedDict):
     gaps: list[str]
     covered: list[str]
     query_used: str
+    weak: list[str]   # S145: concepts in notes with mastery < 0.3
 
 
 # ---------------------------------------------------------------------------
@@ -193,3 +194,38 @@ class StartConceptItem:
 class StartConceptsResponse(TypedDict):
     document_id: str
     concepts: list[StartConceptItem]  # up to 3, sorted by shortest chain then fewest cards
+
+
+# ---------------------------------------------------------------------------
+# Concept mastery (S145)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ConceptMastery:
+    concept: str
+    mastery: float           # 0.0 to 1.0; 0.0 + no_flashcards=True means no cards
+    card_count: int
+    due_soon: int            # cards due within the next 3 days
+    no_flashcards: bool
+    document_ids: list[str]
+
+
+@dataclass
+class HeatmapCell:
+    chapter: str             # section heading
+    concept: str
+    mastery: float | None    # None = no flashcards for this (chapter, concept) cell
+    card_count: int
+
+
+class MasteryConceptsResponse(TypedDict):
+    document_ids: list[str]
+    concepts: list[ConceptMastery]
+
+
+class MasteryHeatmapResponse(TypedDict):
+    document_id: str
+    chapters: list[str]
+    concepts: list[str]
+    cells: list[HeatmapCell]

@@ -119,6 +119,7 @@ class GapDetectorService:
                 gaps=["Gap analysis unavailable -- could not parse LLM response"],
                 covered=[],
                 query_used=query_used,
+                weak=[],
             )
 
         gaps = parsed.get("gaps", [])
@@ -130,16 +131,33 @@ class GapDetectorService:
                 gaps=["Gap analysis unavailable -- could not parse LLM response"],
                 covered=[],
                 query_used=query_used,
+                weak=[],
+            )
+
+        # S145: identify weak concepts (in notes but mastery < 0.3)
+        weak: list[str] = []
+        try:
+            from app.services.mastery_service import get_mastery_service  # noqa: PLC0415
+
+            mastery_svc = get_mastery_service()
+            for concept in covered:
+                cm = await mastery_svc.compute_mastery(concept, [document_id], session)
+                if not cm.no_flashcards and cm.mastery < 0.3:
+                    weak.append(concept)
+        except Exception:
+            logger.debug(
+                "detect_gaps: mastery weak-spot check failed, skipping", exc_info=True
             )
 
         logger.info(
-            "detect_gaps: doc=%s notes=%d gaps=%d covered=%d",
+            "detect_gaps: doc=%s notes=%d gaps=%d covered=%d weak=%d",
             document_id,
             len(notes),
             len(gaps),
             len(covered),
+            len(weak),
         )
-        return GapReport(gaps=gaps, covered=covered, query_used=query_used)
+        return GapReport(gaps=gaps, covered=covered, query_used=query_used, weak=weak)
 
 
 @lru_cache
