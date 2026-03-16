@@ -20,6 +20,7 @@ from app.db_init import create_all_tables
 from app.models import SettingsModel
 from app.routers.annotations import router as annotations_router
 from app.routers.chat_meta import router as chat_meta_router
+from app.routers.code_executor import router as code_executor_router
 from app.routers.documents import router as documents_router
 from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
@@ -152,6 +153,7 @@ app.include_router(search_router)
 app.include_router(sections_router)
 app.include_router(settings_router)
 app.include_router(study_router)
+app.include_router(code_executor_router)
 app.include_router(summarize_router)
 
 

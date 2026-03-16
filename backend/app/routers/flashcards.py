@@ -14,7 +14,7 @@ import csv
 import io
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 import litellm
@@ -318,6 +318,54 @@ async def generate_technical_flashcards(
         extra={"document_id": req.document_id, "count": len(cards)},
     )
     return [_to_response(c) for c in cards]
+
+
+class TraceFlashcardRequest(BaseModel):
+    question: str  # typically the code block (front of card)
+    answer: str    # correct output + diff explanation (back of card)
+    source_excerpt: str
+    document_id: str | None = None
+    chunk_id: str | None = None
+
+
+@router.post("/create-trace", response_model=FlashcardResponse, status_code=201)
+async def create_trace_flashcard(
+    req: TraceFlashcardRequest,
+    session: AsyncSession = Depends(get_db),
+) -> FlashcardResponse:
+    """Create a 'trace' flashcard from a prediction error. No LLM required.
+
+    Called when the user clicks 'Create flashcard from this mistake?' after a wrong
+    prediction in the Predict-then-Run panel. Stores with source='prediction_error',
+    flashcard_type='trace'.
+    """
+    now = datetime.now(UTC)
+    card = FlashcardModel(
+        id=str(uuid.uuid4()),
+        document_id=req.document_id,
+        chunk_id=req.chunk_id,
+        source="prediction_error",
+        deck="default",
+        question=req.question,
+        answer=req.answer,
+        source_excerpt=req.source_excerpt[:500],
+        difficulty="medium",
+        is_user_edited=False,
+        fsrs_state="new",
+        fsrs_stability=0.0,
+        fsrs_difficulty=0.0,
+        due_date=now,
+        reps=0,
+        lapses=0,
+        created_at=now,
+        flashcard_type="trace",
+        bloom_level=None,
+    )
+    session.add(card)
+    await session.commit()
+    await session.refresh(card)
+    logger.info("Created trace flashcard", extra={"card_id": card.id})
+    return _to_response(card)
 
 
 @router.get("/{document_id}/export/csv")

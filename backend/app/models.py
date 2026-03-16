@@ -452,3 +452,30 @@ class WebReferenceModel(Base):
             name="uq_web_ref_doc_section_term_url",
         ),
     )
+
+
+class PredictionEventModel(Base):
+    """Records each Predict-then-Run attempt by the user.
+
+    strip() comparison is used for prediction_correct:
+      expected='hello' vs actual='hello\\n' yields correct=True
+      (trailing newlines are normalized).
+
+    chunk_id is nullable because the PredictPanel is section-scoped.
+    code_content is truncated to 2000 chars at write time.
+    document_id has no FK constraint (same pattern as review_events).
+    """
+
+    __tablename__ = "prediction_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    code_content: Mapped[str] = mapped_column(Text, nullable=False)
+    expected: Mapped[str] = mapped_column(Text, nullable=False)
+    actual: Mapped[str] = mapped_column(Text, nullable=False)
+    correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    language: Mapped[str] = mapped_column(String(50), nullable=False, default="python")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )

@@ -18,6 +18,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
+    PredictionEventModel,
     QAHistoryModel,
     ReadingProgressModel,
     SectionModel,
