@@ -1391,3 +1391,32 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - `pointerEvents: "text"` is not a valid React CSSProperties value; use "auto" for text selection on overlay divs
   - pdfjs v4 requires `page.cleanup()` after render to release memory; use try/finally
 ---
+
+## S147 — Text selection action bar
+- Status: PASS
+- Commit: 50083f9
+- Files created: SelectionActionBar.tsx, NoteCreationDialog.tsx, DocumentFlashcardDialog.tsx, scripts/smoke/S147.sh
+- Files modified: store.ts (chatPreload), DocumentReader.tsx (replaced FloatingToolbar/AnnotationPopover), Chat.tsx (chatPreload wiring)
+- AC results:
+  - AC1 (SelectionActionBar.tsx with Props interface): PASS
+  - AC2 (positions 8px above selection): PASS (top = rect.top - containerRect.top, style top - 8, translateY(-100%))
+  - AC3 (dismisses on Escape / outside mousedown): PASS
+  - AC4 (Explain opens ExplanationSheet): PASS
+  - AC5 (Add to Note opens NoteCreationDialog with blockquote prefix): PASS
+  - AC6 (Create Flashcard opens DocumentFlashcardDialog with section_id): PASS
+  - AC7 (Ask in Chat stores chatPreload, navigates to /chat): PASS
+  - AC8 (Highlight POSTs to /annotations with color="yellow"): PASS
+  - AC9 (fires on selections in both section list and PDF text layer): PASS (readerContainerRef covers both)
+  - AC10 (FloatingToolbar usage in DocumentReader removed): PASS
+  - AC11 (no crash when section_id undefined): PASS (Highlight disabled; Note/Flashcard use null)
+  - AC12 (tsc --noEmit exits 0): PASS
+  - AC13 (scripts/smoke/S147.sh exits 0): PASS (structure verified)
+  - Quality (ruff 0 / pytest 1039 pass / tsc 0 / build pass): PASS
+- Reviewer verdict: PASS after 1 Critical fix:
+  1. Critical: Double-offset bug in SelectionActionBar positioning -- `position.top` was `rect.top - containerRect.top - 8` then style applied `top - 8` again (16px total). Fixed: position stores raw `rect.top - containerRect.top`, style applies single `-8` gap.
+- High (deferred to tech-debt): start_offset=0/end_offset=text.length in highlight POST causes wrong span in SectionPreviewWithHighlights. Pre-existing limitation; correct fix requires DOM text-node offset calculation (scope for S150 or a future refactor story).
+- Learnings:
+  - TypeScript cannot narrow a `const` variable captured by a closure inside setTimeout when using `tsc -b` strict mode; add an explicit null guard inside the callback
+  - `AnnotationCreateRequest.section_id` is required (non-nullable); Highlight action must be disabled (canHighlight=false) when sectionId is undefined
+  - FloatingToolbar.tsx and AnnotationPopover.tsx are now dead code but cannot be deleted without moving `ExplainMode` type to a shared location first
+---
