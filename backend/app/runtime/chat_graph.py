@@ -1449,6 +1449,21 @@ async def synthesize_node(state: ChatState) -> dict:
         except Exception:
             logger.debug("synthesize_node: contradiction context fetch failed", exc_info=True)
 
+    # Inject version-mismatch detection instruction when web snippets are present (S142)
+    web_snippets = state.get("web_snippets") or []
+    if web_snippets:
+        web_versions = [s.get("version_info", "") for s in web_snippets if s.get("version_info")]
+        if web_versions:
+            system_prompt = (
+                system_prompt
+                + "\n\nSome context comes from web sources labeled [Web: ...]. "
+                "If the web source mentions a newer version than the local content "
+                "(e.g. 'Python 3.12' vs 'Python 3.9'), explicitly note the discrepancy: "
+                "'Your book covers X [Local]. The current recommendation is Y [Web: domain].' "
+                "In the citations JSON, add version_mismatch=true to any citation where "
+                "a version discrepancy is detected between local and web content."
+            )
+
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent
     # as the LLM generates it, not after all tokens are buffered.
@@ -1475,14 +1490,22 @@ def _route_after_confidence_gate(state: ChatState) -> str:
     """Conditional edge after confidence_gate_node.
 
     Routes to END unless confidence is 'low' AND this is the first attempt.
-    Guarantees at most 1 retry loop.
+    When web_enabled=True and within rate limit, routes to web_augment_node first.
+    Guarantees at most 1 retry loop (retry_attempted guards both web and local augment).
     """
     confidence = state.get("confidence", "low")
     retry_attempted = state.get("retry_attempted", False)
     if confidence == "low" and not retry_attempted:
+        web_enabled = state.get("web_enabled", False)
+        web_calls_used = state.get("web_calls_used", 0)
+        if web_enabled and web_calls_used < 3:
+            logger.info(
+                "confidence_gate_node: low confidence + web_enabled -- routing to web_augment_node"
+            )
+            return "web_augment_node"
         logger.info("confidence_gate_node: low confidence, triggering augment retry")
         return "augment_node"
-    logger.info("confidence_gate_node: confidence=%s — routing to END", confidence)
+    logger.info("confidence_gate_node: confidence=%s -- routing to END", confidence)
     return END
 
 
@@ -1581,6 +1604,86 @@ async def augment_node(state: ChatState) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# web_augment_node — fetch web snippets for low-confidence answers (S142)
+# ---------------------------------------------------------------------------
+
+
+async def web_augment_node(state: ChatState) -> dict:
+    """Fetch web snippets to supplement low-confidence local answers.
+
+    Fires only when:
+      - state['web_enabled'] is True
+      - state['confidence'] is 'low' (string value, not float)
+      - state['web_calls_used'] < 3 (per-conversation rate limit)
+
+    Returns {} (no-op) when any condition is False.
+    Appends snippets to state['web_snippets'], increments web_calls_used.
+    Sets retry_attempted=True so confidence_gate_node routes to END on next pass.
+    Web snippets are NOT written to DB (privacy invariant).
+    """
+    web_enabled = state.get("web_enabled", False)
+    confidence = state.get("confidence", "high")
+    web_calls_used = state.get("web_calls_used", 0)
+
+    if not web_enabled:
+        logger.info("web_augment_node: web_enabled=False -- skipping")
+        return {}
+
+    if confidence != "low":
+        logger.info("web_augment_node: confidence=%s -- skipping (only fires on low)", confidence)
+        return {}
+
+    if web_calls_used >= 3:
+        logger.info(
+            "web_augment_node: rate limit reached (%d/3) -- local-only fallback", web_calls_used
+        )
+        return {}
+
+    question = state.get("rewritten_question") or state["question"]
+    logger.info("web_augment_node: fetching web snippets for query=%r", question[:60])
+
+    from app.services.web_searcher import get_web_searcher  # noqa: PLC0415
+
+    snippets: list[dict] = []
+    try:
+        results = await get_web_searcher().search(question, k=3)
+        snippets = [dict(s) for s in results]
+    except Exception:
+        logger.warning("web_augment_node: web search failed", exc_info=True)
+        snippets = []
+
+    if not snippets:
+        logger.info("web_augment_node: no web results returned")
+        # Still set retry_attempted=True to prevent a second augment loop
+        return {"web_calls_used": web_calls_used + 1, "retry_attempted": True}
+
+    # Format snippets as labeled section_context entries
+    existing_section_context = state.get("section_context") or ""
+    web_lines = [
+        f"[Web: {s['domain']}]\nTitle: {s['title']}\n{s['content']}"
+        for s in snippets
+    ]
+    web_context = "\n\n".join(web_lines)
+
+    if existing_section_context:
+        combined = existing_section_context + "\n\n---\n\n" + web_context
+    else:
+        combined = web_context
+
+    existing_snippets = list(state.get("web_snippets") or [])
+    logger.info(
+        "web_augment_node: added %d web snippets (total web_calls_used=%d)",
+        len(snippets), web_calls_used + 1,
+    )
+    return {
+        "section_context": combined,
+        "web_snippets": existing_snippets + snippets,
+        "web_calls_used": web_calls_used + 1,
+        "retry_attempted": True,  # prevents a second confidence-gate retry loop
+    }
+
+
+# ---------------------------------------------------------------------------
 # Graph construction + singleton
 # ---------------------------------------------------------------------------
 
@@ -1604,6 +1707,7 @@ def build_chat_graph() -> StateGraph:
     g.add_node("synthesize_node", synthesize_node)
     g.add_node("confidence_gate_node", confidence_gate_node)
     g.add_node("augment_node", augment_node)
+    g.add_node("web_augment_node", web_augment_node)
 
     g.set_entry_point("classify_node")
 
@@ -1648,11 +1752,15 @@ def build_chat_graph() -> StateGraph:
         _route_after_confidence_gate,
         {
             "augment_node": "augment_node",
+            "web_augment_node": "web_augment_node",
             END: END,
         },
     )
-    # Retry path: augment_node → synthesize_node → confidence_gate_node → END
+    # Retry paths:
+    #   augment_node → synthesize_node → confidence_gate_node → END
+    #   web_augment_node → synthesize_node → confidence_gate_node → END
     g.add_edge("augment_node", "synthesize_node")
+    g.add_edge("web_augment_node", "synthesize_node")
 
     return g
 

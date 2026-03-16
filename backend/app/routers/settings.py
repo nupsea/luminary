@@ -141,3 +141,24 @@ async def patch_llm_settings(
     data = await get_llm_settings(db)
     cfg = get_settings()
     return await _build_response(data, cfg.OLLAMA_URL)
+
+
+# ---------------------------------------------------------------------------
+# Web search settings (S142)
+# ---------------------------------------------------------------------------
+
+
+class WebSearchSettingsResponse(BaseModel):
+    provider: str   # "none" | "brave" | "tavily" | "duckduckgo"
+    enabled: bool   # True when provider != "none"
+
+
+@router.get("/web-search", response_model=WebSearchSettingsResponse)
+async def get_web_search_settings() -> WebSearchSettingsResponse:
+    """Return current web search provider status for the Chat UI toggle."""
+    cfg = get_settings()
+    provider = cfg.WEB_SEARCH_PROVIDER
+    return WebSearchSettingsResponse(
+        provider=provider,
+        enabled=(provider != "none"),
+    )

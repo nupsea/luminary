@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     WHISPER_MODEL_SIZE: str = "base"
     VISION_MODEL: str = "ollama/llava:13b"
     WEB_SEARCH_PROVIDER: str = "none"  # "none" | "brave" | "tavily" | "duckduckgo"
+    BRAVE_API_KEY: str = ""
+    TAVILY_API_KEY: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

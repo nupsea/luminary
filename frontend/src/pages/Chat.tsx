@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, Loader2, Send, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, Globe, Loader2, Send, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -85,6 +85,20 @@ interface Citation {
   section_heading: string
   page: number
   excerpt: string
+  version_mismatch?: boolean  // S142: local vs web version discrepancy
+}
+
+interface WebSource {
+  url: string
+  title: string
+  content: string
+  domain: string
+  version_info: string
+}
+
+interface WebSearchSettings {
+  provider: string
+  enabled: boolean
 }
 
 type Confidence = "high" | "medium" | "low"
@@ -110,6 +124,7 @@ interface ChatMessage {
   not_found?: boolean
   isStreaming?: boolean
   image_ids?: string[]
+  web_sources?: WebSource[]  // S142: web augmentation sources
 }
 
 interface ConfusionSignal {
@@ -323,6 +338,8 @@ export default function Chat() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [qaError, setQaError] = useState<string | null>(null)
   const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
+  const [webEnabled, setWebEnabled] = useState(false)
+  const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -365,6 +382,17 @@ export default function Chat() {
       return res.json() as Promise<ConfusionSignal[]>
     },
     staleTime: 300_000,
+  })
+
+  const { data: webSearchSettings } = useQuery<WebSearchSettings>({
+    queryKey: ["web-search-settings"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/settings/web-search`)
+      if (!res.ok) throw new Error("Failed to fetch web search settings")
+      return res.json() as Promise<WebSearchSettings>
+    },
+    staleTime: 300_000,
+    refetchOnWindowFocus: false,
   })
 
   const {
@@ -412,6 +440,7 @@ export default function Chat() {
   function clearConversation() {
     setMessages([])
     setQaError(null)
+    setWebCallsUsed(0)
   }
 
   function autoResize() {
@@ -452,6 +481,7 @@ export default function Chat() {
           scope,
           model: model || null,
           messages: historySlice.length > 0 ? historySlice : undefined,
+          web_enabled: webEnabled,
         }),
       })
       if (!res.ok || !res.body) throw new Error("QA request failed")
@@ -516,6 +546,9 @@ export default function Chat() {
               const citations = (payload["citations"] as Citation[] | undefined) ?? []
               const confidence = (payload["confidence"] as Confidence | undefined) ?? "low"
               const image_ids = (payload["image_ids"] as string[] | undefined) ?? []
+              const web_sources = (payload["web_sources"] as WebSource[] | undefined) ?? []
+              const newWebCallsUsed = (payload["web_calls_used"] as number | undefined) ?? webCallsUsed
+              setWebCallsUsed(newWebCallsUsed)
               setMessages((m) =>
                 m.map((msg) =>
                   msg.id === assistantId
@@ -529,6 +562,7 @@ export default function Chat() {
                         confidence,
                         not_found,
                         image_ids,
+                        web_sources,
                       }
                     : msg,
                 ),
@@ -625,6 +659,33 @@ export default function Chat() {
             ))}
           </select>
         ) : null}
+
+        {/* Web search toggle (S142) */}
+        <div
+          title={
+            webSearchSettings?.enabled
+              ? "Toggle web augmentation (adds current web results to low-confidence answers)"
+              : "Configure a web search provider in Settings to enable web search"
+          }
+        >
+          <button
+            disabled={!webSearchSettings?.enabled}
+            onClick={() => setWebEnabled((prev) => !prev)}
+            className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors ${
+              webEnabled
+                ? "border-blue-300 bg-blue-50 text-blue-700"
+                : "border-border text-muted-foreground hover:bg-accent"
+            } disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <Globe size={12} />
+            Web
+          </button>
+        </div>
+
+        {/* Web call counter -- shown when web is enabled and conversation is active */}
+        {webEnabled && messages.length > 0 && (
+          <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
+        )}
       </div>
 
       {/* LLM settings unavailable warning */}
@@ -760,12 +821,17 @@ export default function Chat() {
                         {msg.citations.map((c, i) => (
                           <span
                             key={i}
-                            className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                             title={c.excerpt}
                           >
                             {c.document_title
                               ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
                               : `p.${c.page}`}
+                            {c.version_mismatch && (
+                              <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
+                                Version mismatch
+                              </span>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -774,6 +840,25 @@ export default function Chat() {
                           {msg.confidence} confidence
                         </Badge>
                       )}
+                    </div>
+                  )}
+
+                  {/* Web sources — shown after streaming completes (S142) */}
+                  {!msg.isStreaming && msg.web_sources && msg.web_sources.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">Web sources:</span>
+                      {msg.web_sources.map((s, i) => (
+                        <a
+                          key={i}
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block truncate text-xs text-blue-600 hover:underline"
+                          title={s.title}
+                        >
+                          [Web: {s.domain}] {s.title}
+                        </a>
+                      ))}
                     </div>
                   )}
 

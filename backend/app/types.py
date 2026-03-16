@@ -93,6 +93,12 @@ class ChatState(TypedDict):
     # Set by search_node; included in the SSE done event so Chat.tsx can render thumbnails.
     image_ids: list[str]
 
+    # Web augmentation (S142): optional per-conversation web search.
+    # web_snippets is transient per graph invocation -- never written to DB (privacy invariant).
+    web_enabled: bool
+    web_calls_used: int
+    web_snippets: list[dict]
+
 
 # ---------------------------------------------------------------------------
 # Notes search (S91)
@@ -119,6 +125,20 @@ class GapReport(TypedDict):
     gaps: list[str]
     covered: list[str]
     query_used: str
+
+
+# ---------------------------------------------------------------------------
+# Web search (S142)
+# ---------------------------------------------------------------------------
+
+
+class WebSnippet(TypedDict):
+    url: str
+    title: str
+    content: str        # first 500 chars of fetched content
+    source_quality: str  # "official_docs" | "spec" | "wiki" | "blog" | "unknown"
+    version_info: str   # e.g. "Python 3.12" or "" if not detected
+    domain: str         # extracted domain for [Web: domain.com] label
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,7 @@ class QARequest(BaseModel):
     scope: Literal["single", "all"] = "all"
     model: str | None = None
     messages: list[ConversationMessage] | None = None  # sliding-window history
+    web_enabled: bool = False  # optional web augmentation (S142)
 
 
 @router.post("")
@@ -32,6 +33,9 @@ async def ask_question(req: QARequest) -> StreamingResponse:
     svc = get_qa_service()
     history = [m.model_dump() for m in req.messages] if req.messages else []
     return StreamingResponse(
-        svc.stream_answer(req.question, req.document_ids, req.scope, req.model, history),
+        svc.stream_answer(
+            req.question, req.document_ids, req.scope, req.model, history,
+            web_enabled=req.web_enabled,
+        ),
         media_type="text/event-stream",
     )

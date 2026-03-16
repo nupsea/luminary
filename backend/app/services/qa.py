@@ -283,6 +283,7 @@ class QAService:
         scope: str,
         model: str | None,
         conversation_history: list[dict] | None = None,
+        web_enabled: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -328,6 +329,10 @@ class QAService:
                     "primary_strategy": None,
                     "conversation_history": conversation_history or [],
                     "image_ids": [],
+                    # Web augmentation fields (S142)
+                    "web_enabled": web_enabled,
+                    "web_calls_used": 0,
+                    "web_snippets": [],
                 }
 
                 try:
@@ -520,6 +525,9 @@ class QAService:
                 "confidence": confidence,
                 "qa_id": qa_id,
                 "image_ids": result.get("image_ids") or [],
+                # Web augmentation fields (S142) -- web_snippets not stored in DB
+                "web_sources": result.get("web_snippets") or [],
+                "web_calls_used": result.get("web_calls_used") or 0,
             }
             yield f"data: {json.dumps(final)}\n\n"
 
