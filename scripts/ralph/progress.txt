@@ -1313,3 +1313,26 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Mini SVG rings need strokeDashoffset + rotate(-90) for correct clockwise fill from top
   - studySectionFilter store pattern: write in DocumentReader handleStudyClick, read+clear in Study useEffect on mount
 ---
+
+## 2026-03-16T12:00:00Z - S144 - Feynman technique mode: guided explanation sessions, gap identification, and auto-generated remediation flashcards
+- Implemented: FeynmanService (create_session, stream_turn, complete_session, list_sessions), FeynmanSessionModel + FeynmanTurnModel DB tables, POST /feynman/sessions, POST /feynman/sessions/{id}/message, POST /feynman/sessions/{id}/complete, GET /feynman/sessions, FlashcardService.generate_technical(), FeynmanDialog split-pane React component, Feynman button on section outline (tech books only)
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/main.py, backend/app/services/feynman_service.py (NEW), backend/app/routers/feynman.py (NEW), backend/app/services/flashcard.py, backend/tests/test_feynman_service.py (NEW), backend/tests/test_feynman_router.py (NEW), frontend/src/components/reader/DocumentReader.tsx, frontend/src/components/reader/FeynmanDialog.tsx (NEW), scripts/smoke/S144.sh (NEW)
+- AC verified:
+  - AC1 (feynman_sessions/feynman_turns tables in db_init): PASS
+  - AC2 (POST /feynman/sessions returns opening tutor message): PASS
+  - AC3 (unit test: complete_session generates >=2 feynman flashcards): PASS
+  - AC4 (unit test: tutor prompt includes section summary): PASS
+  - AC5 (integration test: 3-turn session stored, gap flashcards generated): PASS
+  - AC6 (objective tracker called on session completion): PASS
+  - AC7 (Feynman button visible for tech books only): PASS
+  - AC8 (split-pane dialog: summary left, SSE chat right): PASS
+  - AC9 (GET /feynman/sessions returns gap_count and status): PASS
+  - AC10 (offline 503 with 'ollama serve' message): PASS
+  - AC11 (ruff 0 / pytest 1020 pass / tsc 0 / build pass): PASS
+- Reviewer verdict: PASS after 2 Critical fixes:
+  1. get_settings() moved from fragile inline try/except to module-level import in feynman_service.py
+  2. Added explicit db_session.rollback() in stream_turn before yielding SSE error event on Ollama failure
+- Learnings:
+  - Import module-level settings at top of service file; never suppress get_settings() exceptions with bare except
+  - When persisting rows before an LLM call in an SSE generator, always add explicit rollback in the error branch -- SQLAlchemy's implicit rollback on session close is insufficient for generators that close after the exception handler runs
+---

@@ -1477,7 +1477,7 @@
         "Offline test: POST /feynman/sessions with Ollama unreachable returns 503 with message containing 'ollama serve'",
         "uv run ruff check . exits 0; uv run pytest passes; npx tsc --noEmit exits 0; scripts/smoke/S144.sh passes"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "S145",
