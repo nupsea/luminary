@@ -1248,3 +1248,33 @@ Status: PASS
   - Truncate subprocess output before returning in HTTP response to prevent large memory allocations
   - RLIMIT_AS memory enforcement is Linux-only; macOS virtual memory allocator bypasses it for anonymous maps; test must accept both exit_code!=0 and MemoryError in stderr
 ---
+
+S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
+- Status: PASS
+- Implementation:
+  - ConceptLinkerService: _compute_match_confidence (3 rules: exact, substring, token-overlap>=2)
+    and _parse_year (4 patterns + fallback) as testable pure functions
+  - SAME_CONCEPT Kuzu rel table with confidence FLOAT, contradiction INT64, contradiction_note, prefer_source
+  - get_concept_clusters() using union-find algorithm for clustering linked entities
+  - GET /graph/concepts/linked endpoint with ConceptLinkedResponse Pydantic model
+  - DocumentModel.publication_year column + db_init additive migration
+  - synthesize_node injects contradiction context block (capped at 3) for scope=all queries
+  - Viz.tsx Cross-book toggle (default off); SAME_CONCEPT edges in gray/red by contradiction status
+  - Fixed pre-existing bug: ALL enrichment handlers now registered in main.py lifespan
+  - ingestion always enqueues concept_link job for every document
+- AC verified:
+  - AC1 (SAME_CONCEPT edge created): PASS -- 'dependency injection' vs 'dependency injection framework' (Rule B, confidence=0.8)
+  - AC2 (contradiction detection): PASS -- mock LiteLLM returns has_contradiction=True; edge gains contradiction=True and note
+  - AC3 (real Kuzu integration test): PASS -- @pytest.mark.slow with real KuzuService in tmp_path; confidence==pytest.approx(0.8)
+  - AC4 (GET /graph/concepts/linked): PASS -- endpoint test returns empty clusters
+  - AC5 (smoke script): PASS -- S141.sh
+- Reviewer verdict: PASS after 2 fixes:
+  1. Removed unused `import types` (ruff F401)
+  2. Changed "(older source preferred)" to "(first source preferred)" -- neutral label
+- Learnings:
+  - Kuzu FLOAT storage has ~1e-7 imprecision; use pytest.approx(x, abs=1e-5) for float assertions
+  - Kuzu does not support BOOLEAN rel fields; use INT64 (0/1) instead
+  - FastAPI route ordering: GET /concepts/linked must precede GET /{document_id} or "concepts" matches as path param
+  - 'DI' vs 'dependency injection' does not match via the three heuristic rules (no substring, no 2-token overlap); abbreviation detection requires a separate lookup step
+  - Pre-existing bug: enrichment worker was started but no handlers were registered, so all jobs silently dropped
+---
