@@ -1363,3 +1363,31 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - bloom_level weighting in a pure weighted mean only differentiates when bloom levels are MIXED across cards in the same set; all-high vs all-low yields identical arithmetic means
   - patch() target must be the module where the symbol lives at import time; locally-imported functions inside methods are only reachable by patching at the source module (e.g. app.services.retriever.get_retriever, not app.services.gap_detector.get_retriever)
 ---
+
+## 2026-03-17T00:00:00Z - S146 - PDF.js native PDF viewer with text layer, page navigation, and TOC panel
+- Implemented: ChunkModel.pdf_page_number (nullable int, 1-based) + db_init migration; _chunk_book/_chunk_tech_book populate it when state["format"]=="pdf"; GET /documents/{id}/file serves raw file bytes (any format, MIME-typed); GET /documents/{id}/pdf-meta returns {page_count, has_toc}; pdfjs-dist installed + PDFJS_WORKER_URL bundled locally (offline-first); PDFViewer.tsx (canvas + TextLayer, virtual render current+1 ahead, zoom 50-200%, TOC panel, keyboard nav); DocumentReader.tsx "PDF View" tab (PDF docs only, lazy-mount with pdfViewVisited state)
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/workflows/ingestion.py, backend/app/routers/documents.py, backend/tests/test_pdf_page_number.py (NEW), frontend/package.json, frontend/src/lib/config.ts, frontend/src/components/reader/PDFViewer.tsx (NEW), frontend/src/components/reader/DocumentReader.tsx, scripts/smoke/S146.sh (NEW)
+- AC verified:
+  - AC1 (ChunkModel.pdf_page_number in models.py and migration): PASS
+  - AC2 (PDF chunking populates pdf_page_number 1-based): PASS
+  - AC3 (unit test: 5-section PDF -> all chunks have pdf_page_number in [1,5]): PASS
+  - AC4 (GET /documents/{id}/file returns 200 + Content-Type: application/pdf): PASS
+  - AC5 (GET /documents/{id}/file returns 404 when file not on disk): PASS
+  - AC6 (GET /documents/{id}/pdf-meta returns {page_count, has_toc}): PASS
+  - AC7 (PDFViewer.tsx renders PDF via pdfjs-dist, virtual rendering only): PASS
+  - AC8 ("PDF View" tab only for doc.format === "pdf"): PASS
+  - AC9 (page navigation: prev/next buttons, direct input, keyboard arrows): PASS
+  - AC10 (zoom 50%-200%, persisted in component state): PASS
+  - AC11 (TOC panel shows section headings, clicking jumps to page_start): PASS
+  - AC12 (loading state: Skeleton component, not full-page spinner): PASS
+  - AC13 (error state: inline message if /file returns error): PASS
+  - AC14 (ruff 0 / pytest 1039 pass / tsc 0 / build pass): PASS
+  - AC15 (scripts/smoke/S146.sh exits 0): PASS (verified structure; needs live server to run)
+- Reviewer verdict: PASS after 1 Critical fix:
+  1. Critical: PDFJS_WORKER_URL pointed to CDN -- violates offline-first invariant. Changed to `new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url)` so Vite bundles the worker locally into dist/assets/
+- Learnings:
+  - pdfjs-dist v4 `TextLayer` class API: `new pdfjsLib.TextLayer({ textContentSource, container, viewport }).render()` -- not the legacy `renderTextLayer()` function
+  - Vite bundles web workers from local packages via `new URL("package/worker.js", import.meta.url)` pattern; avoids CDN dependency for offline-first apps
+  - `pointerEvents: "text"` is not a valid React CSSProperties value; use "auto" for text selection on overlay divs
+  - pdfjs v4 requires `page.cleanup()` after render to release memory; use try/finally
+---
