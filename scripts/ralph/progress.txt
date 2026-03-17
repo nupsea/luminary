@@ -1624,3 +1624,32 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - "Open in reader" from within a session should use <a target="_blank"> not navigate() to avoid interrupting the session without calling endSession
   - For "hard" rating: when source context is available, pause and show panel; when 404, advance immediately (different from "again" which shows S138 SourcePanel as fallback)
 ---
+
+## 2026-03-17T00:00:00 - S156 - Structured rubric scoring for Feynman and Teach-back
+
+- Implemented: TeachBackRubric TypedDict (3 dimensions: accuracy, completeness, clarity), rubric_json columns on TeachbackResultModel and FeynmanSessionModel, db_init.py migrations, _parse_rubric() helper (with markdown fence stripping, key validation, graceful None fallback), POST /study/teachback now makes 2 LLM calls (legacy eval + rubric, rubric wrapped in bare except), FeynmanService.complete_session() adds rubric evaluation using full learner transcript, FeynmanCompleteResponse extended with TeachbackRubricResponse type, RubricCard.tsx shared frontend component with score badge color coding and per-missed-point inline flashcard creation, TeachBackResultCard.tsx rubric rendering with legacy fallback, FeynmanDialog.tsx completion screen shows RubricCard when rubric present
+- Files changed: backend/app/types.py, backend/app/models.py, backend/app/db_init.py, backend/app/routers/study.py, backend/app/routers/feynman.py, backend/app/services/feynman_service.py, backend/tests/test_teachback_rubric.py (new, 7 tests), backend/tests/test_learning.py (updated 2 tests to add rubric response to mock side_effect), frontend/src/components/RubricCard.tsx (new), frontend/src/components/TeachBackResultCard.tsx, frontend/src/components/reader/FeynmanDialog.tsx, scripts/smoke/S156.sh (new)
+- AC verified:
+  - TeachBackRubric TypedDict defined in app/types/: PASS
+  - TeachBackResultModel.rubric_json column added; db_init.py migration: PASS
+  - FeynmanSessionModel.rubric_json column added; db_init.py migration: PASS
+  - POST /study/teachback LLM prompt updated with source section text in context: PASS
+  - Unit test: valid rubric JSON stored correctly: PASS
+  - Unit test: malformed LLM JSON causes graceful fallback to null (no 500): PASS
+  - Unit test: 2 missed_points in rubric -> completeness.missed_points has 2 entries: PASS
+  - FeynmanSession completion triggers rubric evaluation; rubric_json stored: PASS
+  - TeachBackResultCard renders 3-dimension rubric when present; fallback to legacy: PASS
+  - Score badge color: green >=80, yellow >=50, red <50: PASS
+  - Completeness missed_points list with Create flashcard button per item: PASS
+  - Create flashcard calls POST /flashcards/create-trace with pre-filled question: PASS
+  - FeynmanDialog completion screen shows RubricCard (shared component): PASS
+  - ruff check . exits 0: PASS
+  - uv run pytest exits 0 (excluding pre-existing chat_graph failure): PASS
+  - npx tsc --noEmit exits 0: PASS
+  - scripts/smoke/S156.sh: written correctly (not verified without live server)
+- Reviewer verdict: PASS (no Critical issues; fixed High issue: FeynmanCompleteResponse.rubric now uses TeachbackRubricResponse instead of dict | None)
+- Learnings:
+  - When adding a new LLM call to an existing endpoint, update all existing tests that mock that endpoint's LLM with side_effect lists -- the new call adds to the sequence
+  - Importing Pydantic response models between same-layer router files (feynman.py importing from study.py) is valid since both are API layer; no circular dependency risk
+  - _parse_rubric() pure function pattern: strip markdown fences, json.loads, key subset check, return None on any failure -- duplicated across layers is acceptable for small utility functions
+---
