@@ -1575,3 +1575,28 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Tooltip formatter value type is `number | undefined` in strict TS -- guard with `?? 0`
   - JSON keys are always strings: dict[int, int] Python TypedDict becomes Record<string, number> on wire; use String(level) to build chartData
 ---
+
+## 2026-03-17T08:00:00Z - S154 - Cloze deletion flashcard type with progressive blank reveal in study session
+- Implemented: cloze_text column on FlashcardModel (models.py + db_init.py migration), CLOZE_SYSTEM/CLOZE_USER_TMPL prompts + _parse_cloze_text/_build_cloze_question/_parse_cloze_llm_response helpers + FlashcardService.generate_cloze() with one-retry logic (flashcard.py), cloze_text in FlashcardResponse + POST /flashcards/cloze/{section_id} endpoint (routers/flashcards.py), ClozeCard.tsx with parseClozeSegments() + progressive blank reveal + FSRS rating buttons (frontend), StudySession.tsx cloze dispatch, Study.tsx Cloze tab in GeneratePanel with section selector, Vitest setup + ClozeCard.test.ts (5 tests), smoke test S154.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/flashcard.py, backend/app/routers/flashcards.py, backend/tests/test_flashcard_cloze.py, frontend/src/components/ClozeCard.tsx, frontend/src/components/ClozeCard.test.ts, frontend/src/components/StudySession.tsx, frontend/src/pages/Study.tsx, frontend/vitest.config.ts, frontend/package.json, scripts/smoke/S154.sh
+- AC verified:
+  1. FlashcardModel.cloze_text column added: PASS
+  2. generate_cloze parses {{term}} syntax, validates >= 1 blank: PASS
+  3. Malformed output triggers one retry; still malformed => card skipped: PASS
+  4. Unit test: mocked LLM, card created with correct cloze_text and question: PASS
+  5. POST /flashcards/cloze/{section_id} returns list of cloze-type flashcards: PASS
+  6. GeneratePanel has 'Cloze' tab; submitting calls POST /flashcards/cloze/{section_id}: PASS
+  7. ClozeCard.tsx renders blank boxes for {{}} markers; each shows '?': PASS
+  8. 'Reveal next blank' uncovers blanks left-to-right: PASS
+  9. After all blanks revealed, FSRS rating buttons appear: PASS
+  10. ClozeCard uses progressive reveal (CSS transition-all duration-300, no flip): PASS
+  11. StudySession renders ClozeCard for flashcard_type === 'cloze': PASS
+  12. Fallback to Q&A rendering if cloze_text null or no valid blanks: PASS
+  13. ruff check 0; pytest 1073 pass (8 new); tsc + build pass; vitest 5 pass: PASS
+  14. scripts/smoke/S154.sh created: PASS
+- Reviewer verdict: PASS (no Critical items)
+- Learnings:
+  - Three-way ternary in JSX: original binary `mode === "text" ? (...) : (...)` must be expanded to `mode === "text" ? (...) : mode === "entities" ? (...) : mode === "cloze" ? (...) : null` -- inserting the third branch at the tail without converting the second branch guard causes a TS parse error
+  - Vitest can be used for pure function tests from a TSX component: set environment:"node" and export the pure function; no DOM environment required for pure logic tests
+  - FastAPI route ordering: /cloze/{section_id} and /audit/{document_id} both require explicit registration BEFORE /{document_id} wildcard; no conflict between POST and GET HTTP methods but ordering comment is essential for future maintainers
+---
