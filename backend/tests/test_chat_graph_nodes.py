@@ -37,6 +37,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionModel, SectionSummaryModel, SummaryModel
 from app.runtime.chat_graph import (
+    augment_node,
     comparative_node,
     graph_node,
     search_node,
@@ -109,6 +110,9 @@ def _make_state(**overrides) -> dict:
         "_llm_prompt": None,
         "_system_prompt": None,
         "source_citations": [],
+        # S158: transparency fields
+        "transparency": None,
+        "transparency_augmented": False,
     }
     base.update(overrides)
     return base
@@ -517,3 +521,131 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
     # The first citation (chunk c1, text='text1') has snippet 'text1'
     first_cit = next(c for c in source_citations if c["section_id"] == section_id_1)
     assert first_cit["section_preview_snippet"] == "text1"
+
+
+# ---------------------------------------------------------------------------
+# S158 AC: synthesize_node emits transparency event; augment_node sets augmented
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_emits_transparency_hybrid_retrieval(test_db):
+    """synthesize_node returns transparency with strategy_used='hybrid_retrieval'
+    when chunks are present and primary_strategy is 'search_node'.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    section_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(SectionModel(
+            id=section_id, document_id=doc_id, heading="Chapter One",
+            level=1, section_order=0,
+        ))
+        session.add(ChunkModel(
+            id=chunk_id, document_id=doc_id, section_id=section_id,
+            text="Some relevant text about the topic.", chunk_index=0, pdf_page_number=3,
+        ))
+        await session.commit()
+
+    state = _make_state(
+        question="What is this about?",
+        chunks=[{
+            "chunk_id": chunk_id,
+            "document_id": doc_id,
+            "text": "Some relevant text about the topic.",
+            "section_heading": "Chapter One",
+            "page": 3,
+            "score": 0.9,
+            "source": "vector",
+        }],
+        doc_ids=[doc_id],
+        intent="factual",
+        primary_strategy="search_node",
+        transparency_augmented=False,
+    )
+
+    result = await synthesize_node(state)
+
+    transparency = result.get("transparency")
+    assert transparency is not None, "Expected transparency in synthesize_node result"
+    assert transparency["strategy_used"] == "hybrid_retrieval", (
+        f"Expected strategy_used='hybrid_retrieval', got: {transparency['strategy_used']}"
+    )
+    assert transparency["chunk_count"] == 1
+    assert not transparency["augmented"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_transparency_augmented_hybrid(test_db):
+    """synthesize_node sets strategy_used='augmented_hybrid' and augmented=True
+    when transparency_augmented=True in state (set by augment_node).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    chunk_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(ChunkModel(
+            id=chunk_id, document_id=doc_id, section_id=None,
+            text="Extra context from augmentation.", chunk_index=0, pdf_page_number=None,
+        ))
+        await session.commit()
+
+    state = _make_state(
+        question="What is this about?",
+        chunks=[{
+            "chunk_id": chunk_id,
+            "document_id": doc_id,
+            "text": "Extra context from augmentation.",
+            "section_heading": "",
+            "page": 0,
+            "score": 0.7,
+            "source": "vector",
+        }],
+        doc_ids=[doc_id],
+        intent="factual",
+        primary_strategy="search_node",
+        transparency_augmented=True,
+    )
+
+    result = await synthesize_node(state)
+
+    transparency = result.get("transparency")
+    assert transparency is not None
+    assert transparency["strategy_used"] == "augmented_hybrid"
+    assert transparency["augmented"] is True
+
+
+@pytest.mark.asyncio
+async def test_augment_node_sets_transparency_augmented(test_db):
+    """augment_node returns transparency_augmented=True in its result dict.
+
+    Verifies S158 AC: 'augment_node sets transparency.augmented=True;
+    verified by inspecting ChatState after node execution.'
+    The augmented flag propagates via state so synthesize_node can read it
+    on the second pass.
+    """
+    _engine, factory, _tmp = test_db
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[])
+
+    state = _make_state(
+        question="What is this about?",
+        chunks=[],
+        intent="factual",
+        primary_strategy="summary_node",
+        retry_attempted=False,
+    )
+
+    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+        result = await augment_node(state)
+
+    assert result.get("transparency_augmented") is True, (
+        f"Expected transparency_augmented=True in augment_node result, got: {result}"
+    )
+    assert result.get("retry_attempted") is True

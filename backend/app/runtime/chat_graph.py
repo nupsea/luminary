@@ -49,7 +49,7 @@ from app.services.qa import (
     _should_use_summary,
 )
 from app.services.retriever import get_retriever
-from app.types import ChatState, ScoredChunk
+from app.types import ChatState, ScoredChunk, TransparencyInfo
 
 logger = logging.getLogger(__name__)
 
@@ -1495,6 +1495,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # S148: collect SourceCitations from context chunks for post-stream emission.
     # Deduplicate by section_id (first occurrence wins); when section_id is None,
     # fall back to chunk_id so each unlinked chunk gets its own citation entry.
+    chunk_meta: dict = {}  # chunk_id -> (section_id, pdf_page); populated below if chunks present
     source_citations_out: list[dict] = []
     if chunks_dicts:
         chunk_ids = [c["chunk_id"] for c in chunks_dicts if c.get("chunk_id")]
@@ -1527,6 +1528,35 @@ async def synthesize_node(state: ChatState) -> dict:
                 "section_preview_snippet": chunk_text[:150],  # S157: hover tooltip preview
             })
 
+    # S158: build TransparencyInfo for the retrieval transparency panel.
+    # strategy_used is inferred from primary_strategy and retry state.
+    # confidence_level is not known here (determined by _split_response after streaming);
+    # stream_answer() fills it in before emitting the 'transparency' SSE event.
+    primary_strategy = state.get("primary_strategy") or ""
+    transparency_augmented = state.get("transparency_augmented", False)
+    if transparency_augmented:
+        strategy_used = "augmented_hybrid"
+    elif primary_strategy == "graph_node":
+        strategy_used = "graph_traversal"
+    elif primary_strategy == "comparative_node":
+        strategy_used = "comparative"
+    else:
+        strategy_used = "hybrid_retrieval"
+
+    # Count unique sections across context chunks (using already-fetched chunk_meta).
+    section_count = 0
+    if chunks_dicts:
+        section_count = len({
+            meta[0] for meta in chunk_meta.values() if meta[0] is not None
+        })
+
+    transparency_info: TransparencyInfo = {
+        "strategy_used": strategy_used,
+        "chunk_count": len(chunks_dicts),
+        "section_count": section_count,
+        "augmented": transparency_augmented,
+    }
+
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent
     # as the LLM generates it, not after all tokens are buffered.
@@ -1534,6 +1564,7 @@ async def synthesize_node(state: ChatState) -> dict:
         "_llm_prompt": prompt,
         "_system_prompt": system_prompt,
         "source_citations": source_citations_out,
+        "transparency": transparency_info,
     }
 
 
@@ -1646,7 +1677,7 @@ async def augment_node(state: ChatState) -> dict:
 
     except Exception:
         logger.warning("augment_node: augmentation failed", exc_info=True)
-        return {"retry_attempted": True}
+        return {"retry_attempted": True, "transparency_augmented": True}
 
     # Append new context; pack_context() handles deduplication
     combined_chunks = existing_chunks + new_chunks
@@ -1667,6 +1698,7 @@ async def augment_node(state: ChatState) -> dict:
         "chunks": combined_chunks,
         "section_context": combined_section_context,
         "retry_attempted": True,
+        "transparency_augmented": True,  # S158: signals synthesize_node to set augmented=True
     }
 
 

@@ -104,6 +104,15 @@ interface WebSearchSettings {
   enabled: boolean
 }
 
+// S158: retrieval transparency metadata emitted by backend as 'transparency' SSE event
+interface TransparencyInfo {
+  confidence_level: string  // 'high' | 'medium' | 'low'
+  strategy_used: string     // 'executive_summary' | 'hybrid_retrieval' | 'graph_traversal' | 'comparative' | 'augmented_hybrid'
+  chunk_count: number
+  section_count: number
+  augmented: boolean
+}
+
 type Confidence = "high" | "medium" | "low"
 
 interface QuizCardData {
@@ -129,6 +138,7 @@ interface ChatMessage {
   image_ids?: string[]
   web_sources?: WebSource[]  // S142: web augmentation sources
   source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
+  transparency?: TransparencyInfo       // S158: retrieval transparency panel
 }
 
 interface ConfusionSignal {
@@ -172,6 +182,69 @@ const CONFIDENCE_BADGE: Record<Confidence, "green" | "blue" | "gray"> = {
   high: "green",
   medium: "blue",
   low: "gray",
+}
+
+// S158: transparency badge uses green/yellow/red per AC (not the shadcn Badge variant system)
+const TRANSPARENCY_BADGE_CLASS: Record<string, string> = {
+  high: "bg-green-100 text-green-800 border border-green-200",
+  medium: "bg-yellow-100 text-yellow-800 border border-yellow-200",
+  low: "bg-red-100 text-red-800 border border-red-200",
+}
+
+const STRATEGY_LABEL: Record<string, string> = {
+  executive_summary: "Executive summary",
+  hybrid_retrieval: "Hybrid retrieval (vector + keyword)",
+  graph_traversal: "Graph traversal",
+  comparative: "Comparative search",
+  augmented_hybrid: "Augmented hybrid retrieval",
+}
+
+// S158: per-message transparency panel with collapsible "How I Answered" section
+function TransparencyPanel({ transparency }: { transparency: TransparencyInfo }) {
+  const [open, setOpen] = useState(false)
+  const badgeClass =
+    TRANSPARENCY_BADGE_CLASS[transparency.confidence_level] ??
+    TRANSPARENCY_BADGE_CLASS["low"]
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${badgeClass}`}
+        >
+          {transparency.confidence_level} confidence
+        </span>
+        {transparency.confidence_level === "low" && (
+          <span className="text-xs italic text-muted-foreground">
+            This answer has low confidence -- verify in the source document
+          </span>
+        )}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          aria-expanded={open}
+        >
+          {open ? "Hide" : "How I answered"}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground space-y-1">
+          <div>
+            <span className="font-medium text-foreground">Strategy:</span>{" "}
+            {STRATEGY_LABEL[transparency.strategy_used] ?? transparency.strategy_used}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Sources:</span>{" "}
+            {transparency.chunk_count} chunk{transparency.chunk_count !== 1 ? "s" : ""} from{" "}
+            {transparency.section_count} section{transparency.section_count !== 1 ? "s" : ""}
+          </div>
+          {transparency.augmented && (
+            <div className="italic">Context was extended after initial low confidence</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const EXAMPLE_QUESTIONS = [
@@ -544,6 +617,27 @@ export default function Chat() {
               )
             }
 
+            // S158: transparency event arrives before 'done' — silently omit if malformed
+            if (payload["type"] === "transparency") {
+              try {
+                const raw = payload as Record<string, unknown>
+                const transparency: TransparencyInfo = {
+                  confidence_level: raw["confidence_level"] as string,
+                  strategy_used: raw["strategy_used"] as string,
+                  chunk_count: raw["chunk_count"] as number,
+                  section_count: raw["section_count"] as number,
+                  augmented: raw["augmented"] as boolean,
+                }
+                setMessages((m) =>
+                  m.map((msg) =>
+                    msg.id === assistantId ? { ...msg, transparency } : msg,
+                  ),
+                )
+              } catch {
+                // malformed transparency event — silent omission per AC
+              }
+            }
+
             // SSE error event — end streaming, remove placeholder, show banner
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
@@ -892,6 +986,11 @@ export default function Chat() {
                         </a>
                       ))}
                     </div>
+                  )}
+
+                  {/* Retrieval transparency panel: confidence badge + How I Answered (S158) */}
+                  {!msg.isStreaming && msg.transparency && (
+                    <TransparencyPanel transparency={msg.transparency} />
                   )}
 
                   {/* Source citation chips — deep-links to exact section/page (S157) */}

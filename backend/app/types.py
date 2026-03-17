@@ -104,6 +104,31 @@ class ChatState(TypedDict):
     # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
     source_citations: list[dict]
 
+    # S158: retrieval transparency metadata set by synthesize_node.
+    # Emitted as a 'transparency' SSE event by stream_answer() after token streaming.
+    transparency: "TransparencyInfo | None"
+
+    # S158: flag set by augment_node to indicate context was augmented after low confidence.
+    # Checked by synthesize_node to set transparency.augmented = True.
+    transparency_augmented: bool
+
+
+# ---------------------------------------------------------------------------
+# Retrieval transparency (S158)
+# ---------------------------------------------------------------------------
+
+
+class TransparencyInfo(TypedDict):
+    """Retrieval transparency metadata emitted as SSE event after answer streaming.
+
+    strategy_used values: 'executive_summary' | 'hybrid_retrieval' |
+        'graph_traversal' | 'comparative' | 'augmented_hybrid'
+    """
+    strategy_used: str   # how context was retrieved
+    chunk_count: int     # number of unique chunks used as context
+    section_count: int   # number of unique sections those chunks span
+    augmented: bool      # True if augment_node ran (context extended after low confidence)
+
 
 # ---------------------------------------------------------------------------
 # Notes search (S91)

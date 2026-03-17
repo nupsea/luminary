@@ -335,6 +335,9 @@ class QAService:
                     "web_snippets": [],
                     # S148: chunk-derived source citations (populated by synthesize_node)
                     "source_citations": [],
+                    # S158: retrieval transparency (populated by synthesize_node)
+                    "transparency": None,
+                    "transparency_augmented": False,
                 }
 
                 try:
@@ -515,6 +518,20 @@ class QAService:
                     yield f'data: {json.dumps({"token": word + " "})}\n\n'
                 citations = result.get("citations") or []
                 confidence = result.get("confidence") or "low"
+
+            # S158: emit 'transparency' SSE event before 'done' if TransparencyInfo available.
+            # confidence_level is filled in here after _split_response() determines it.
+            transparency = result.get("transparency")
+            if transparency:
+                transparency_event = {
+                    "type": "transparency",
+                    "confidence_level": confidence,
+                    "strategy_used": transparency.get("strategy_used", "hybrid_retrieval"),
+                    "chunk_count": transparency.get("chunk_count", 0),
+                    "section_count": transparency.get("section_count", 0),
+                    "augmented": transparency.get("augmented", False),
+                }
+                yield f"data: {json.dumps(transparency_event)}\n\n"
 
             # Persist Q&A history and yield final SSE event
             qa_id = await self._store_qa(
