@@ -1469,3 +1469,30 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - @tailwindcss/typography is installed but scroll-area shadcn component is not — use plain overflow-auto divs
   - bleach.clean() requires _ALLOWED_ATTRIBUTES as dict[str, list[str]], not callable, for simple per-tag attribute lists
 ---
+
+## 2026-03-17T00:00:00Z - S150 - Passage clips and reading journal with source attribution and convert actions
+- Implemented: ClipModel in models.py; clips table in db_init.py; full CRUD router /clips (POST, GET w/ doc filter, PATCH user_note, DELETE); cascade delete in both delete_document and bulk_delete_documents; SelectionActionBar 'Clip' button + onClip prop; DocumentReader handleSelectionClip + toast 'Passage clipped'; Notes.tsx ReadingJournalTab with ClipCard (blockquote, attribution, auto-save user_note, Navigate to source, Convert to Note, Create Flashcard); group-by-document toggle using native <details>/<summary>; Loading/Error/Empty states; smoke test S150.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/clips.py (new), backend/app/main.py, backend/app/routers/documents.py, backend/tests/test_clips_api.py (new), frontend/src/components/reader/SelectionActionBar.tsx, frontend/src/components/reader/DocumentReader.tsx, frontend/src/pages/Notes.tsx, scripts/smoke/S150.sh (new)
+- AC verified:
+  - ClipModel added to models.py; clips table in db_init.py: PASS
+  - POST /clips, GET /clips, GET /clips?document_id, DELETE /clips/{id}, PATCH /clips/{id} all implemented: PASS
+  - Unit test: POST creates row; GET returns it; PATCH updates user_note; DELETE removes; second DELETE returns 404: PASS
+  - SelectionActionBar gains 'clip' action; clicking posts to POST /clips: PASS
+  - Toast 'Passage clipped' on successful POST: PASS
+  - Notes page has 'Reading Journal' sub-tab: PASS
+  - Each clip card shows blockquote, document name, section heading, editable user_note: PASS
+  - User note auto-saves on blur with inline save indicator: PASS
+  - 'Navigate to source' link opens DocumentReader at section/page: PASS
+  - 'Convert to Note' creates NoteModel with clip text as body and attribution tag: PASS
+  - 'Create Flashcard' opens GenerateFlashcardsDialog with toast guiding user: PASS
+  - Group-by-document toggle works (native <details>/<summary>): PASS
+  - Loading state Skeleton cards; Error inline with retry; Empty explicit message: PASS
+  - ruff check 0; pytest 1056 passed; tsc --noEmit 0; build 0: PASS
+  - scripts/smoke/S150.sh written (not server-verified): PASS
+- Reviewer verdict: PASS (Critical ruff import ordering auto-fixed; High UX issue fixed inline: added toast 'Note created from clip -- select it in the dialog' to handleCreateFlashcardFromClip)
+- Learnings:
+  - No shadcn Accordion component installed -- group-by-document views must use native <details>/<summary>
+  - GenerateFlashcardsDialog does not accept pre-selected note IDs -- 'Create Flashcard from clip' flow: auto-create note first, then open dialog with toast explaining to select it
+  - ClipCard user_note auto-save pattern: useRef<AbortController> to cancel in-flight PATCH on rapid blur/focus; setSaveStatus idle/saving/saved/error
+  - FeynmanSessionModel, FeynmanTurnModel, PredictionEventModel absent from cascade delete loops in documents.py (pre-existing orphan leak) -- noted in tech-debt-tracker
+---
