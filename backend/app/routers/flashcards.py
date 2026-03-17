@@ -1,13 +1,18 @@
 """Flashcard CRUD and generation endpoints.
 
 Routes:
-  POST /flashcards/generate            — LLM-generate cards for a document
-  POST /flashcards/from-gaps           — one LLM flashcard per gap string (S97)
-  GET  /flashcards/{document_id}/export/csv — CSV download
-  GET  /flashcards/{document_id}       — list cards ordered by created_at desc
-  PUT  /flashcards/{card_id}           — update question/answer, sets is_user_edited
-  DELETE /flashcards/{card_id}         — delete a card (204)
-  POST /flashcards/{card_id}/review    — FSRS review with rating
+  POST /flashcards/generate                      — LLM-generate cards for a document
+  POST /flashcards/from-gaps                     — one LLM flashcard per gap string (S97)
+  GET  /flashcards/audit/{document_id}           — Bloom's coverage report (S153)
+  POST /flashcards/audit/{document_id}/fill      — fill Bloom's gaps (S153)
+  GET  /flashcards/{document_id}/export/csv      — CSV download
+  GET  /flashcards/{document_id}                 — list cards ordered by created_at desc
+  PUT  /flashcards/{card_id}                     — update question/answer, sets is_user_edited
+  DELETE /flashcards/{card_id}                   — delete a card (204)
+  POST /flashcards/{card_id}/review              — FSRS review with rating
+
+NOTE: The /audit/{document_id} routes must be registered BEFORE /{document_id}
+to prevent FastAPI from matching the literal string "audit" as a document_id.
 """
 
 import asyncio
@@ -28,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import ChunkModel, DocumentModel, FlashcardModel, ReviewEventModel
 from app.services.flashcard import FlashcardService, get_flashcard_service
+from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 
 logger = logging.getLogger(__name__)
@@ -117,6 +123,22 @@ class FlashcardResponse(BaseModel):
     section_id: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CoverageReportResponse(BaseModel):
+    """Response schema for GET /flashcards/audit/{document_id} (S153)."""
+
+    total_cards: int
+    by_bloom_level: dict[str, int]  # JSON keys are always strings
+    by_section: dict[str, dict]  # BloomSectionStat as plain dict
+    coverage_score: float
+    gaps: list[dict]  # BloomGap as plain dict
+
+
+class FillGapsResponse(BaseModel):
+    """Response schema for POST /flashcards/audit/{document_id}/fill (S153)."""
+
+    created: int
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +392,62 @@ async def create_trace_flashcard(
     await session.refresh(card)
     logger.info("Created trace flashcard", extra={"card_id": card.id})
     return _to_response(card)
+
+
+# ---------------------------------------------------------------------------
+# Bloom's taxonomy coverage audit (S153)
+# NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
+# from matching the literal segment "audit" as a document_id wildcard.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/audit/{document_id}", response_model=CoverageReportResponse)
+async def get_audit(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+    audit_service: FlashcardAuditService = Depends(get_flashcard_audit_service),
+) -> CoverageReportResponse:
+    """Return a Bloom's taxonomy coverage report for a document's flashcard deck."""
+    report = await audit_service.analyze_coverage(document_id, session)
+    # Convert int keys to str for JSON serialisation (JSON object keys must be strings)
+    by_bloom_level_str = {str(k): v for k, v in report["by_bloom_level"].items()}
+    by_section_serialisable = {
+        sid: {
+            "section_heading": stat["section_heading"],
+            "by_bloom_level": {str(k): v for k, v in stat["by_bloom_level"].items()},
+            "has_level_3_plus": stat["has_level_3_plus"],
+        }
+        for sid, stat in report["by_section"].items()
+    }
+    return CoverageReportResponse(
+        total_cards=report["total_cards"],
+        by_bloom_level=by_bloom_level_str,
+        by_section=by_section_serialisable,
+        coverage_score=report["coverage_score"],
+        gaps=list(report["gaps"]),
+    )
+
+
+@router.post("/audit/{document_id}/fill", response_model=FillGapsResponse)
+async def fill_audit_gaps(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+    audit_service: FlashcardAuditService = Depends(get_flashcard_audit_service),
+) -> FillGapsResponse:
+    """Generate missing Bloom's level cards for all gap sections of a document."""
+    try:
+        report = await audit_service.analyze_coverage(document_id, session)
+        created = await audit_service.fill_gaps(document_id, report["gaps"], session)
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unreachable. Start it with: ollama serve",
+        ) from exc
+    return FillGapsResponse(created=created)
 
 
 @router.get("/{document_id}/export/csv")

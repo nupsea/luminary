@@ -249,3 +249,28 @@ class MasteryHeatmapResponse(TypedDict):
     chapters: list[str]
     concepts: list[str]
     cells: list[HeatmapCell]
+
+
+# ---------------------------------------------------------------------------
+# Flashcard coverage audit (S153)
+# ---------------------------------------------------------------------------
+
+
+class BloomGap(TypedDict):
+    section_id: str
+    section_heading: str
+    missing_bloom_levels: list[int]  # levels 1-6 absent from section's cards
+
+
+class BloomSectionStat(TypedDict):
+    section_heading: str
+    by_bloom_level: dict[int, int]  # level -> count (only levels present)
+    has_level_3_plus: bool
+
+
+class CoverageReport(TypedDict):
+    total_cards: int
+    by_bloom_level: dict[int, int]  # global level -> count across levels 1-6
+    by_section: dict[str, BloomSectionStat]  # keyed by section_id
+    coverage_score: float  # fraction of sections with >= 1 card at bloom_level >= 3
+    gaps: list[BloomGap]
