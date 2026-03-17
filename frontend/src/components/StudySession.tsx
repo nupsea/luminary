@@ -76,6 +76,98 @@ interface Flashcard {
 }
 
 // ---------------------------------------------------------------------------
+// S155: SourceContextPanel types
+// ---------------------------------------------------------------------------
+
+interface SourceContext {
+  section_heading: string
+  section_preview: string
+  document_title: string
+  pdf_page_number: number | null
+  section_id: string
+  document_id: string
+}
+
+async function fetchSourceContext(cardId: string): Promise<SourceContext | null> {
+  try {
+    const res = await fetch(`${API_BASE}/flashcards/${encodeURIComponent(cardId)}/source-context`)
+    if (!res.ok) return null
+    return res.json() as Promise<SourceContext>
+  } catch {
+    return null
+  }
+}
+
+interface SourceContextPanelProps {
+  context: SourceContext
+  onDismiss: () => void
+}
+
+function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
+  const [expanded, setExpanded] = useState(true)
+
+  function buildReaderUrl(): string {
+    const params = new URLSearchParams()
+    params.set("doc", context.document_id)
+    params.set("section_id", context.section_id)
+    if (context.pdf_page_number != null) {
+      params.set("page", String(context.pdf_page_number))
+    }
+    return `/learning?${params.toString()}`
+  }
+
+  return (
+    <div className="w-full max-w-2xl rounded-lg border border-border bg-muted/30">
+      <div className="flex items-center justify-between px-4 py-2">
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="flex flex-1 items-center gap-2 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"
+        >
+          Source passage
+          {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </button>
+        <button
+          onClick={onDismiss}
+          className="ml-2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          aria-label="Dismiss source panel"
+        >
+          <XIcon size={13} />
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="flex flex-col gap-3 px-4 pb-4">
+          {context.section_preview ? (
+            <blockquote className="border-l-2 border-border pl-3 text-xs text-muted-foreground italic">
+              {context.section_preview.length >= 400
+                ? `${context.section_preview}...`
+                : context.section_preview}
+            </blockquote>
+          ) : (
+            <p className="text-xs text-muted-foreground">No preview available for this section.</p>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              {context.section_heading} -- {context.document_title}
+            </span>
+            {/* Opens in new tab so the study session is not interrupted */}
+            <a
+              href={buildReaderUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+            >
+              <ExternalLink size={10} />
+              Open in reader
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // S138: SourcePanel types
 // ---------------------------------------------------------------------------
 
@@ -620,6 +712,10 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
   const [lastRating, setLastRating] = useState<Rating | null>(null)
   // Track next review date as minimum due_date across remaining cards
   const [nextReviewDate, setNextReviewDate] = useState<string | null>(null)
+  // S155: source context panel state
+  const [sourceContext, setSourceContext] = useState<SourceContext | null>(null)
+  const [sourceContextLoading, setSourceContextLoading] = useState(false)
+  const dismissedSourceContextIds = useRef(new Set<string>())
 
   const total = queue.length
 
@@ -655,6 +751,7 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
     setIsRating(true)
 
     try {
+      // AC6: submit rating immediately -- do not wait for source context fetch
       await submitReview(card.id, rating, sessionId)
       const isCorrect = rating !== "again"
       const newReviewed = reviewed + 1
@@ -667,31 +764,56 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
         setNextReviewDate(card.due_date)
       }
 
-      // S138: show SourcePanel when "again" was rated.
-      // Do NOT advance the card yet -- the user reads the SourcePanel first and
-      // clicks "Continue" which calls advanceCard().
       setLastRating(rating)
 
-      const nextIndex = currentIndex + 1
-      if (rating !== "again") {
-        // Non-"again" ratings advance immediately
-        if (nextIndex >= queue.length) {
-          await endSession(sessionId)
-          setSessionState("complete")
-        } else {
-          setCurrentIndex(nextIndex)
-          setShowAnswer(false)
-          setLastRating(null)
+      // S155: lazy-fetch source context after "again" or "hard" (AC7)
+      if (rating === "again" || rating === "hard") {
+        if (!dismissedSourceContextIds.current.has(card.id)) {
+          setSourceContextLoading(true)
+          const ctx = await fetchSourceContext(card.id)
+          setSourceContextLoading(false)
+          if (ctx !== null) {
+            setSourceContext(ctx)
+            // Panel shown -- do not advance; user clicks Continue (which calls advanceCard)
+            return
+          }
         }
+        // 404, error, or dismissed: fall through to advance for "hard";
+        // for "again" stay and show S138 SourcePanel (advanceCard driven by Continue)
+        if (rating === "hard") {
+          const nextIndex = currentIndex + 1
+          if (nextIndex >= queue.length) {
+            await endSession(sessionId)
+            setSessionState("complete")
+          } else {
+            setCurrentIndex(nextIndex)
+            setShowAnswer(false)
+            setLastRating(null)
+          }
+        }
+        // "again" with no source context: stays on card showing S138 SourcePanel
+        return
       }
-      // "again" stays on current card with SourcePanel visible; advanceCard() drives next step
+
+      // "good" / "easy": advance immediately
+      const nextIndex = currentIndex + 1
+      if (nextIndex >= queue.length) {
+        await endSession(sessionId)
+        setSessionState("complete")
+      } else {
+        setCurrentIndex(nextIndex)
+        setShowAnswer(false)
+        setLastRating(null)
+      }
     } finally {
       setIsRating(false)
     }
   }
 
   async function advanceCard() {
-    // Called by the "Continue" button after viewing the SourcePanel on an "again" rating.
+    // Called by the "Continue" button after viewing SourceContextPanel (S155) or SourcePanel (S138).
+    setSourceContext(null)
+    setSourceContextLoading(false)
     const nextIndex = currentIndex + 1
     if (nextIndex >= queue.length) {
       if (sessionId) await endSession(sessionId)
@@ -701,6 +823,13 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
       setShowAnswer(false)
       setLastRating(null)
     }
+  }
+
+  function handleDismissSourceContext() {
+    const card = queue[currentIndex]
+    if (card) dismissedSourceContextIds.current.add(card.id)
+    // advanceCard() clears sourceContext; no need to call setSourceContext(null) here
+    void advanceCard()
   }
 
   function handleTeachbackNext() {
@@ -850,8 +979,33 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
                 </div>
               ) : null}
 
-              {/* S138: Source panel -- shown after "again" rating; user clicks Continue to advance */}
-              {lastRating === "again" && (
+              {/* S155: Source context panel -- shown after "again" or "hard" when source context fetched */}
+              {(lastRating === "again" || lastRating === "hard") && sourceContextLoading && (
+                <div className="w-full max-w-2xl rounded-lg border border-border bg-muted/30 p-4">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 size={12} className="animate-spin" />
+                    Loading source passage...
+                  </div>
+                </div>
+              )}
+
+              {sourceContext !== null && (
+                <>
+                  <SourceContextPanel
+                    context={sourceContext}
+                    onDismiss={handleDismissSourceContext}
+                  />
+                  <button
+                    onClick={() => void advanceCard()}
+                    className="rounded bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    Continue
+                  </button>
+                </>
+              )}
+
+              {/* S138: Source panel -- shown after "again" only when no S155 context available */}
+              {lastRating === "again" && sourceContext === null && !sourceContextLoading && (
                 <>
                   <SourcePanel card={currentCard} />
                   <button

@@ -139,7 +139,9 @@ async def test_source_context_returns_correct_fields(test_db):
 
     async with factory() as session:
         session.add(_make_doc(doc_id, title="Domain-Driven Design"))
-        session.add(_make_section(sec_id, doc_id, heading="Aggregates", preview="An aggregate is a cluster"))
+        session.add(
+            _make_section(sec_id, doc_id, heading="Aggregates", preview="An aggregate is a cluster")
+        )
         session.add(_make_chunk(chunk_id, doc_id, section_id=sec_id, pdf_page_number=42))
         session.add(_make_flashcard(card_id, doc_id, chunk_id=chunk_id))
         await session.commit()
