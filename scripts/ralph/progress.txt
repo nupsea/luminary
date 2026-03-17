@@ -1710,3 +1710,31 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - LCS backtrack must decrement i when dp[i-1][j] >= dp[i][j-1] (not >) to avoid preferring j-path incorrectly
   - key_points: block suppression reuses same sliding-window pattern as gaps: block in stream_turn
   - AC says button hidden when concept or sectionId missing -- prop is always present via FeynmanDialogProps, so guard on truthy value of the prop
+
+## 2026-03-17T00:00:00Z - S160 - Deck health report: orphaned/mastered/stale/uncovered sections + one-click remediation
+- Implemented: DeckHealthService (analyze, archive_mastered, generate_for_uncovered) in backend/app/services/deck_health.py; DeckHealthReport + HealthSection TypedDicts in types.py; 3 new API endpoints (GET /health/{doc_id}, POST /health/{doc_id}/archive-mastered, POST /health/{doc_id}/fill-uncovered fire-and-forget); HealthReportPanel in Study.tsx (5 metric pills, archive + fill buttons, loading/error/empty states); 6 unit tests; smoke test S160.sh
+- Files changed: backend/app/types.py, backend/app/services/deck_health.py, backend/app/routers/flashcards.py, backend/tests/test_deck_health.py, frontend/src/pages/Study.tsx, scripts/smoke/S160.sh
+- AC verified:
+  - DeckHealthService with analyze/archive_mastered/generate_for_uncovered: PASS
+  - DeckHealthReport TypedDict fields: PASS
+  - Unit test orphaned: PASS
+  - Unit test mastered > 180: PASS
+  - Unit test stale > 90 days + stability < 7: PASS
+  - Unit test uncovered sections: PASS
+  - Unit test archive_mastered sets status='archived': PASS
+  - GET /flashcards/health/{document_id}: PASS
+  - POST /health/{document_id}/archive-mastered: PASS
+  - POST /health/{document_id}/fill-uncovered (fire-and-forget, 202): PASS
+  - Study tab shows DeckHealthPanel + HealthReportPanel as siblings: PASS
+  - 5 metric pills rendered: PASS
+  - Loading/Error/Empty states: PASS
+  - useQuery staleTime=300_000: PASS
+  - ruff/pytest/tsc all pass: PASS
+  - scripts/smoke/S160.sh: PASS (written; not live-verified without running server)
+- Reviewer verdict: PASS (1 Critical fixed by reviewer: smoke test coverage added for POST endpoints)
+- Learnings:
+  - SQLite returns naive datetimes; always use .replace(tzinfo=UTC) when comparing against timezone-aware thresholds
+  - Local imports inside methods (noqa: PLC0415) must be patched at source module (app.services.flashcard.get_flashcard_service), not at the deck_health module level since the name doesn't exist there at import time
+  - HealthSection and DeckHealthReport TypedDicts belong in app/types.py, not inline in the service
+  - fire-and-forget background tasks must open a fresh AsyncSession inside the task (async for db in _get_db(): ... break) to avoid sharing the request-scope session that FastAPI closes after the response
+---
