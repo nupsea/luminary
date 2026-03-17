@@ -321,3 +321,26 @@ class TeachBackRubric(TypedDict):
     accuracy: TeachBackRubricDimension
     completeness: TeachBackCompletenessDimension
     clarity: TeachBackRubricDimension
+
+
+# ---------------------------------------------------------------------------
+# Deck Health Report (S160)
+# ---------------------------------------------------------------------------
+
+
+class HealthSection(TypedDict):
+    section_id: str
+    section_heading: str
+    card_count: int
+
+
+class DeckHealthReport(TypedDict):
+    orphaned: int
+    orphaned_ids: list[str]
+    mastered: int
+    mastered_ids: list[str]
+    stale: int
+    stale_ids: list[str]
+    uncovered_sections: int
+    uncovered_section_ids: list[str]
+    hotspot_sections: list[HealthSection]

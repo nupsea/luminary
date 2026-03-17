@@ -1,20 +1,23 @@
 """Flashcard CRUD and generation endpoints.
 
 Routes:
-  POST /flashcards/generate                      — LLM-generate cards for a document
-  POST /flashcards/from-gaps                     — one LLM flashcard per gap string (S97)
-  POST /flashcards/cloze/{section_id}            — generate cloze deletion cards (S154)
-  GET  /flashcards/audit/{document_id}           — Bloom's coverage report (S153)
-  POST /flashcards/audit/{document_id}/fill      — fill Bloom's gaps (S153)
-  GET  /flashcards/{document_id}/export/csv      — CSV download
-  GET  /flashcards/{document_id}                 — list cards ordered by created_at desc
-  PUT  /flashcards/{card_id}                     — update question/answer, sets is_user_edited
-  DELETE /flashcards/{card_id}                   — delete a card (204)
-  POST /flashcards/{card_id}/review              — FSRS review with rating
-  GET  /flashcards/{card_id}/source-context      — source passage for SourceContextPanel (S155)
+  POST /flashcards/generate                              — LLM-generate cards for a document
+  POST /flashcards/from-gaps                             — one LLM flashcard per gap string (S97)
+  POST /flashcards/cloze/{section_id}                   — generate cloze deletion cards (S154)
+  GET  /flashcards/audit/{document_id}                  — Bloom's coverage report (S153)
+  POST /flashcards/audit/{document_id}/fill             — fill Bloom's gaps (S153)
+  GET  /flashcards/health/{document_id}                 — deck health report (S160)
+  POST /flashcards/health/{document_id}/archive-mastered — archive mastered cards (S160)
+  POST /flashcards/health/{document_id}/fill-uncovered  — generate for uncovered sections (S160)
+  GET  /flashcards/{document_id}/export/csv             — CSV download
+  GET  /flashcards/{document_id}                        — list cards ordered by created_at desc
+  PUT  /flashcards/{card_id}                — update question/answer, sets is_user_edited
+  DELETE /flashcards/{card_id}              — delete a card (204)
+  POST /flashcards/{card_id}/review         — FSRS review with rating
+  GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel (S155)
 
-NOTE: The /audit/{document_id} and /cloze/{section_id} routes must be registered
-BEFORE /{document_id} to prevent FastAPI from matching literal segments as document_id.
+NOTE: The /audit/{document_id}, /cloze/{section_id}, and /health/{document_id} routes must be
+registered BEFORE /{document_id} to prevent FastAPI from matching literal segments as document_id.
 """
 
 import asyncio
@@ -34,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import ChunkModel, DocumentModel, FlashcardModel, ReviewEventModel, SectionModel
+from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.flashcard import FlashcardService, get_flashcard_service
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
@@ -143,6 +147,38 @@ class FillGapsResponse(BaseModel):
     """Response schema for POST /flashcards/audit/{document_id}/fill (S153)."""
 
     created: int
+
+
+class DeckHealthReportResponse(BaseModel):
+    """Response schema for GET /flashcards/health/{document_id} (S160)."""
+
+    orphaned: int
+    orphaned_ids: list[str]
+    mastered: int
+    mastered_ids: list[str]
+    stale: int
+    stale_ids: list[str]
+    uncovered_sections: int
+    uncovered_section_ids: list[str]
+    hotspot_sections: list[dict]
+
+
+class ArchiveMasteredResponse(BaseModel):
+    """Response schema for POST /flashcards/health/{document_id}/archive-mastered (S160)."""
+
+    archived: int
+
+
+class FillUncoveredRequest(BaseModel):
+    """Request body for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
+
+    section_ids: list[str] = Field(min_length=1)
+
+
+class FillUncoveredResponse(BaseModel):
+    """Response schema for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
+
+    queued: int
 
 
 class SourceContextResponse(BaseModel):
@@ -501,6 +537,65 @@ async def fill_audit_gaps(
             detail="Ollama is unreachable. Start it with: ollama serve",
         ) from exc
     return FillGapsResponse(created=created)
+
+
+# ---------------------------------------------------------------------------
+# Deck health report (S160)
+# NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
+# from matching the literal segment "health" as a document_id wildcard.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/health/{document_id}", response_model=DeckHealthReportResponse)
+async def get_deck_health(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+    health_service: DeckHealthService = Depends(get_deck_health_service),
+) -> DeckHealthReportResponse:
+    """Return a deck health report for a document's flashcard deck (S160)."""
+    report = await health_service.analyze(document_id, session)
+    return DeckHealthReportResponse(**report)
+
+
+@router.post("/health/{document_id}/archive-mastered", response_model=ArchiveMasteredResponse)
+async def archive_mastered_cards(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+    health_service: DeckHealthService = Depends(get_deck_health_service),
+) -> ArchiveMasteredResponse:
+    """Archive all mastered cards (stability > 180) for a document (S160)."""
+    archived = await health_service.archive_mastered(document_id, session)
+    return ArchiveMasteredResponse(archived=archived)
+
+
+@router.post(
+    "/health/{document_id}/fill-uncovered",
+    response_model=FillUncoveredResponse,
+    status_code=202,
+)
+async def fill_uncovered_sections(
+    document_id: str,
+    req: FillUncoveredRequest,
+    health_service: DeckHealthService = Depends(get_deck_health_service),
+) -> FillUncoveredResponse:
+    """Queue fire-and-forget card generation for uncovered sections (S160).
+
+    Returns HTTP 202 immediately. Cards are generated in the background using
+    a fresh DB session to avoid sharing the request-scope session with a
+    background task (which FastAPI may close when the response is sent).
+    """
+
+    async def _run() -> None:
+        from app.database import get_db as _get_db  # noqa: PLC0415
+
+        async for db in _get_db():
+            await health_service.generate_for_uncovered(document_id, req.section_ids, db)
+            break
+
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return FillUncoveredResponse(queued=len(req.section_ids))
 
 
 @router.get("/{document_id}/export/csv")
