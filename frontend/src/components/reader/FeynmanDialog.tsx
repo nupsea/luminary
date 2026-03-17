@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { RubricCard, type Rubric } from "@/components/RubricCard"
 
 import { API_BASE } from "@/lib/config"
 
@@ -75,7 +76,7 @@ export function FeynmanDialog({
 
   // Complete session state
   const [completing, setCompleting] = useState(false)
-  const [completeResult, setCompleteResult] = useState<{ gap_count: number; flashcard_ids: string[] } | null>(null)
+  const [completeResult, setCompleteResult] = useState<{ gap_count: number; flashcard_ids: string[]; rubric: Rubric | null } | null>(null)
 
   // Session history
   const [history, setHistory] = useState<SessionHistoryItem[]>([])
@@ -331,8 +332,8 @@ export function FeynmanDialog({
         method: "POST",
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { gap_count: number; flashcard_ids: string[] }
-      setCompleteResult(data)
+      const data = (await res.json()) as { gap_count: number; flashcard_ids: string[]; rubric: Rubric | null }
+      setCompleteResult({ gap_count: data.gap_count, flashcard_ids: data.flashcard_ids, rubric: data.rubric ?? null })
     } catch {
       setSessionError("Could not complete session. Please try again.")
     } finally {
@@ -448,16 +449,20 @@ export function FeynmanDialog({
 
               {/* Complete session banner */}
               {completeResult !== null ? (
-                <div className="border-t border-border px-4 py-3 text-center">
-                  <p className="text-sm font-medium text-foreground">
-                    Session complete!{" "}
-                    {completeResult.gap_count > 0
-                      ? `${completeResult.flashcard_ids.length} flashcard${completeResult.flashcard_ids.length !== 1 ? "s" : ""} created from ${completeResult.gap_count} gap${completeResult.gap_count !== 1 ? "s" : ""}.`
-                      : "No gaps identified -- great job!"}
-                  </p>
+                <div className="border-t border-border px-4 py-3">
+                  <p className="mb-2 text-sm font-medium text-foreground">Session complete!</p>
+                  {completeResult.rubric ? (
+                    <RubricCard rubric={completeResult.rubric} documentId={documentId} />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {completeResult.gap_count > 0
+                        ? `${completeResult.flashcard_ids.length} flashcard${completeResult.flashcard_ids.length !== 1 ? "s" : ""} created from ${completeResult.gap_count} gap${completeResult.gap_count !== 1 ? "s" : ""}.`
+                        : "No gaps identified -- great job!"}
+                    </p>
+                  )}
                   <button
                     onClick={onClose}
-                    className="mt-2 rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                    className="mt-3 rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                   >
                     Done
                   </button>

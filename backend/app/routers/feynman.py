@@ -16,6 +16,11 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.routers.study import (
+    RubricCompletenessResponse,
+    RubricDimensionResponse,
+    TeachbackRubricResponse,
+)
 from app.services.feynman_service import get_feynman_service
 
 logger = logging.getLogger(__name__)
@@ -49,6 +54,7 @@ class FeynmanMessageRequest(BaseModel):
 class FeynmanCompleteResponse(BaseModel):
     gap_count: int
     flashcard_ids: list[str]
+    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric evaluation failed
 
 
 class FeynmanSessionListItem(BaseModel):
@@ -137,9 +143,22 @@ async def complete_feynman_session(
         result["gap_count"],
         len(result["flashcard_ids"]),
     )
+    rubric_response: TeachbackRubricResponse | None = None
+    rubric_dict = result.get("rubric")
+    if rubric_dict is not None:
+        try:
+            rubric_response = TeachbackRubricResponse(
+                accuracy=RubricDimensionResponse(**rubric_dict["accuracy"]),
+                completeness=RubricCompletenessResponse(**rubric_dict["completeness"]),
+                clarity=RubricDimensionResponse(**rubric_dict["clarity"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            rubric_response = None
+
     return FeynmanCompleteResponse(
         gap_count=result["gap_count"],
         flashcard_ids=result["flashcard_ids"],
+        rubric=rubric_response,
     )
 
 

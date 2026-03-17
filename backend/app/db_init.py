@@ -103,6 +103,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN pdf_page_number INTEGER",
             # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
+            # S156: structured rubric JSON for teachback results and feynman sessions
+            "ALTER TABLE teachback_results ADD COLUMN rubric_json JSON",
+            "ALTER TABLE feynman_sessions ADD COLUMN rubric_json JSON",
         ]:
             try:
                 await conn.execute(text(ddl))

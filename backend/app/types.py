@@ -274,3 +274,24 @@ class CoverageReport(TypedDict):
     by_section: dict[str, BloomSectionStat]  # keyed by section_id
     coverage_score: float  # fraction of sections with >= 1 card at bloom_level >= 3
     gaps: list[BloomGap]
+
+
+# ---------------------------------------------------------------------------
+# Teach-back rubric (S156)
+# ---------------------------------------------------------------------------
+
+
+class TeachBackRubricDimension(TypedDict):
+    score: int          # 0-100
+    evidence: str       # quoted evidence from source or one-sentence comment
+
+
+class TeachBackCompletenessDimension(TypedDict):
+    score: int          # 0-100
+    missed_points: list[str]  # concise concept phrases the student omitted
+
+
+class TeachBackRubric(TypedDict):
+    accuracy: TeachBackRubricDimension
+    completeness: TeachBackCompletenessDimension
+    clarity: TeachBackRubricDimension

@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Link } from "react-router-dom"
 
 import { API_BASE } from "@/lib/config"
+import { RubricCard, type Rubric } from "@/components/RubricCard"
 
 export interface TeachBackCardData {
   type: "teach_back_result"
@@ -13,6 +14,7 @@ export interface TeachBackCardData {
   document_id: string
   error?: string
   error_detail?: string
+  rubric?: Rubric | null  // S156: structured rubric; null for legacy rows
 }
 
 interface TeachBackResultCardProps {
@@ -68,6 +70,19 @@ export function TeachBackResultCard({ data }: TeachBackResultCardProps) {
     }
   }
 
+  // S156: if rubric is present, render RubricCard (primary path)
+  if (data.rubric) {
+    return (
+      <div className="flex flex-col gap-3">
+        {data.encouragement && (
+          <p className="text-sm italic text-muted-foreground">{data.encouragement}</p>
+        )}
+        <RubricCard rubric={data.rubric} documentId={data.document_id} />
+      </div>
+    )
+  }
+
+  // Legacy rendering path (rubric is null/undefined)
   return (
     <div className="flex flex-col gap-3">
       {data.encouragement && (

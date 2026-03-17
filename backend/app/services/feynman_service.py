@@ -61,6 +61,24 @@ _FEYNMAN_OPENING_TMPL = (
     "Be encouraging and specific about what you want them to explain."
 )
 
+# S156: rubric evaluation prompts (duplicated in study.py -- same layer)
+_RUBRIC_SYSTEM = (
+    "You are an expert tutor evaluating a student explanation. "
+    "Output a JSON object only -- no preamble, no markdown fences."
+)
+
+_RUBRIC_USER_TMPL = (
+    "Source material:\n{source_context}\n\n"
+    "Student explanation:\n{explanation}\n\n"
+    "Evaluate on three dimensions. "
+    "For accuracy: score 0-100 and quote specific evidence from the source. "
+    "For completeness: score 0-100 and list missed_points as short concept phrases. "
+    "For clarity: score 0-100 and give a one-sentence comment. "
+    'Output JSON: {{"accuracy": {{"score": int, "evidence": str}}, '
+    '"completeness": {{"score": int, "missed_points": [str]}}, '
+    '"clarity": {{"score": int, "evidence": str}}}}'
+)
+
 # Max chars for section context included in the system prompt
 _SECTION_CONTEXT_CHAR_LIMIT = 3000
 
@@ -96,6 +114,25 @@ def _parse_gaps(raw: str) -> list[str]:
     except (json.JSONDecodeError, ValueError):
         pass
     return []
+
+
+def _parse_rubric(raw: str) -> dict | None:
+    """Strip markdown fences and parse rubric JSON from LLM response. Returns None on failure."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
+    try:
+        parsed = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Failed to parse rubric JSON: %r", raw[:200])
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    if not {"accuracy", "completeness", "clarity"}.issubset(parsed.keys()):
+        logger.warning("Rubric JSON missing required keys: %s", set(parsed.keys()))
+        return None
+    return parsed
 
 
 def _strip_gaps_block(raw: str) -> str:
@@ -360,19 +397,19 @@ class FeynmanService:
         # Mark session complete
         feynman_session.status = "complete"
 
-        # Collect all gaps from tutor turns
+        # Collect all turns (tutor for gaps, learner for rubric transcript)
         turns_result = await db_session.execute(
-            select(FeynmanTurnModel)
-            .where(
+            select(FeynmanTurnModel).where(
                 FeynmanTurnModel.session_id == session_id,
-                FeynmanTurnModel.role == "tutor",
             )
         )
-        turns = list(turns_result.scalars().all())
+        all_turns = list(turns_result.scalars().all())
+        tutor_turns = [t for t in all_turns if t.role == "tutor"]
+        learner_turns = [t for t in all_turns if t.role == "learner"]
 
         all_gaps: list[str] = []
         seen: set[str] = set()
-        for turn in turns:
+        for turn in tutor_turns:
             for gap in (turn.gaps_identified or []):
                 if gap and gap not in seen:
                     seen.add(gap)
@@ -401,13 +438,37 @@ class FeynmanService:
         tracker = get_objective_tracker_service()
         _fire_and_forget(tracker.update_coverage(feynman_session.document_id))
 
+        # S156: rubric evaluation using full learner transcript as explanation
+        rubric_dict: dict | None = None
+        try:
+            learner_texts = [t.content for t in learner_turns if t.content]
+            explanation = "\n\n".join(learner_texts) if learner_texts else ""
+            if explanation:
+                section_context = await self._get_section_context(
+                    feynman_session.document_id,
+                    feynman_session.section_id,
+                    db_session,
+                )
+                rubric_prompt = _RUBRIC_USER_TMPL.format(
+                    source_context=section_context,
+                    explanation=explanation,
+                )
+                llm = get_llm_service()
+                raw_rubric = await llm.generate(prompt=rubric_prompt, system=_RUBRIC_SYSTEM)
+                rubric_dict = _parse_rubric(raw_rubric)
+                feynman_session.rubric_json = rubric_dict
+                await db_session.commit()
+        except Exception:  # noqa: BLE001 -- never raise 500 from rubric evaluation
+            logger.warning("Feynman rubric evaluation failed for session=%s", session_id)
+            rubric_dict = None
+
         logger.info(
             "Feynman session completed: session_id=%s gaps=%d flashcards=%d",
             session_id,
             len(all_gaps),
             len(flashcard_ids),
         )
-        return {"gap_count": len(all_gaps), "flashcard_ids": flashcard_ids}
+        return {"gap_count": len(all_gaps), "flashcard_ids": flashcard_ids, "rubric": rubric_dict}
 
     async def list_sessions(
         self,

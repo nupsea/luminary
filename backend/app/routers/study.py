@@ -77,6 +77,24 @@ _CORRECTION_USER_TMPL = (
     'Output JSON: {{"question": str, "answer": str, "source_excerpt": str}}'
 )
 
+# S156: rubric evaluation prompts (duplicated in feynman_service.py -- same layer)
+_RUBRIC_SYSTEM = (
+    "You are an expert tutor evaluating a student explanation. "
+    "Output a JSON object only -- no preamble, no markdown fences."
+)
+
+_RUBRIC_USER_TMPL = (
+    "Source material:\n{source_context}\n\n"
+    "Student explanation:\n{explanation}\n\n"
+    "Evaluate on three dimensions. "
+    "For accuracy: score 0-100 and quote specific evidence from the source. "
+    "For completeness: score 0-100 and list missed_points as short concept phrases. "
+    "For clarity: score 0-100 and give a one-sentence comment. "
+    'Output JSON: {{"accuracy": {{"score": int, "evidence": str}}, '
+    '"completeness": {{"score": int, "missed_points": [str]}}, '
+    '"clarity": {{"score": int, "evidence": str}}}}'
+)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -180,12 +198,29 @@ class TeachbackRequest(BaseModel):
     user_explanation: str
 
 
+class RubricDimensionResponse(BaseModel):
+    score: int
+    evidence: str
+
+
+class RubricCompletenessResponse(BaseModel):
+    score: int
+    missed_points: list[str]
+
+
+class TeachbackRubricResponse(BaseModel):
+    accuracy: RubricDimensionResponse
+    completeness: RubricCompletenessResponse
+    clarity: RubricDimensionResponse
+
+
 class TeachbackResponse(BaseModel):
     score: int
     correct_points: list[str]
     missing_points: list[str]
     misconceptions: list[str]
     correction_flashcard_id: str | None = None
+    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric LLM call fails
 
 
 class SectionStabilityItem(BaseModel):
@@ -722,6 +757,19 @@ async def teachback(
     missing_points: list[str] = parsed.get("missing_points", [])
     misconceptions: list[str] = parsed.get("misconceptions", [])
 
+    # S156: rubric evaluation (second LLM call; graceful fallback on failure)
+    rubric_dict: dict | None = None
+    try:
+        rubric_prompt = _RUBRIC_USER_TMPL.format(
+            source_context=card.answer,
+            explanation=req.user_explanation,
+        )
+        raw_rubric = await llm.generate(prompt=rubric_prompt, system=_RUBRIC_SYSTEM)
+        rubric_dict = _parse_rubric(raw_rubric)
+    except Exception:  # noqa: BLE001 -- never raise 500 from rubric call
+        logger.warning("Rubric LLM call failed for flashcard=%s; null rubric", card.id)
+        rubric_dict = None
+
     # Persist teachback result
     tb_result = TeachbackResultModel(
         id=str(uuid.uuid4()),
@@ -731,6 +779,7 @@ async def teachback(
         correct_points=correct_points,
         missing_points=missing_points,
         misconceptions=misconceptions,
+        rubric_json=rubric_dict,
     )
     session.add(tb_result)
 
@@ -763,12 +812,25 @@ async def teachback(
         extra={"flashcard_id": card.id, "score": score, "misconceptions": len(misconceptions)},
     )
 
+    # Build rubric response
+    rubric_response: TeachbackRubricResponse | None = None
+    if rubric_dict is not None:
+        try:
+            rubric_response = TeachbackRubricResponse(
+                accuracy=RubricDimensionResponse(**rubric_dict["accuracy"]),
+                completeness=RubricCompletenessResponse(**rubric_dict["completeness"]),
+                clarity=RubricDimensionResponse(**rubric_dict["clarity"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            rubric_response = None
+
     return TeachbackResponse(
         score=score,
         correct_points=correct_points,
         missing_points=missing_points,
         misconceptions=misconceptions,
         correction_flashcard_id=correction_card_id,
+        rubric=rubric_response,
     )
 
 
@@ -1057,6 +1119,25 @@ async def get_start_concepts(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_rubric(raw: str) -> dict | None:
+    """Strip markdown fences and parse rubric JSON from LLM response. Returns None on failure."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
+    try:
+        parsed = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Failed to parse rubric JSON: %r", raw[:200])
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    if not {"accuracy", "completeness", "clarity"}.issubset(parsed.keys()):
+        logger.warning("Rubric JSON missing required keys: %s", set(parsed.keys()))
+        return None
+    return parsed
 
 
 def _parse_teachback_response(raw: str) -> dict:

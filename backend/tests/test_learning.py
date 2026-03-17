@@ -243,10 +243,13 @@ async def test_teachback_score_below_60_creates_misconception_rows(test_db):
         "source_excerpt": "Spaced repetition...",
     })
 
+    # S156: rubric call is now the 2nd LLM call; correction flashcard is the 3rd
+    rubric_response = "{}"  # invalid rubric JSON -> graceful fallback to null rubric
+
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.generate = AsyncMock(
-            side_effect=[llm_eval_response, correction_response]
+            side_effect=[llm_eval_response, rubric_response, correction_response]
         )
         mock_get_llm.return_value = mock_llm
 
@@ -299,10 +302,13 @@ async def test_teachback_score_below_60_creates_correction_flashcard(test_db):
         "source_excerpt": "...",
     })
 
+    # S156: rubric call is now the 2nd LLM call; correction flashcard is the 3rd
+    rubric_response = "{}"  # invalid rubric JSON -> graceful fallback to null rubric
+
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.generate = AsyncMock(
-            side_effect=[llm_eval_response, correction_response]
+            side_effect=[llm_eval_response, rubric_response, correction_response]
         )
         mock_get_llm.return_value = mock_llm
 

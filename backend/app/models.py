@@ -163,6 +163,8 @@ class TeachbackResultModel(Base):
     correct_points: Mapped[list] = mapped_column(JSON, default=list)
     missing_points: Mapped[list] = mapped_column(JSON, default=list)
     misconceptions: Mapped[list] = mapped_column(JSON, default=list)
+    # S156: structured rubric JSON; null when rubric LLM call fails or for legacy rows
+    rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -349,6 +351,8 @@ class FeynmanSessionModel(Base):
     concept: Mapped[str] = mapped_column(String(300), nullable=False)
     # active|complete
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # S156: structured rubric JSON written at complete_session(); null until completion
+    rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
