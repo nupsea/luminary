@@ -370,8 +370,12 @@ async def test_synthesize_node_prepares_llm_prompt(test_db):
 @pytest.mark.asyncio
 async def test_summary_intent_end_to_end(test_db):
     """POST /qa with summary question + cached exec summary returns HTTP 200
-    with non-empty answer and confidence='high'.  No LLM call needed because
-    summary_node returns the executive summary text directly as the answer.
+    with non-empty answer and confidence='medium'.
+
+    summary_node (scope=single) now passes the cached summary as section_context
+    so synthesize_node can tailor the answer to the specific question — this
+    requires a mocked LLM call.  The mock returns a substantive answer so
+    _split_response() derives confidence='medium' (>80 chars, no JSON block).
     """
     _engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
@@ -389,15 +393,31 @@ async def test_summary_intent_end_to_end(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post(
-            "/qa",
-            json={
-                "question": "summarize this document",
-                "document_ids": [doc_id],
-                "scope": "single",
-            },
-        )
+    mock_answer = (
+        "The Iliad is an ancient Greek epic poem attributed to Homer, "
+        "centering on events during the Trojan War, particularly the wrath of Achilles."
+    )
+
+    async def _mock_stream(*args, **kwargs):
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = mock_answer
+
+        async def _gen():
+            yield chunk
+
+        return _gen()
+
+    with patch("litellm.acompletion", new=AsyncMock(side_effect=_mock_stream)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/qa",
+                json={
+                    "question": "summarize this document",
+                    "document_ids": [doc_id],
+                    "scope": "single",
+                },
+            )
 
     assert resp.status_code == 200
 
@@ -483,3 +503,17 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
     section_ids_in_citations = {c["section_id"] for c in source_citations}
     assert section_id_1 in section_ids_in_citations
     assert section_id_2 in section_ids_in_citations
+
+    # S157: section_preview_snippet must be populated from chunk text (first 150 chars)
+    for c in source_citations:
+        assert "section_preview_snippet" in c, (
+            f"Missing section_preview_snippet in citation: {c}"
+        )
+        snippet = c["section_preview_snippet"]
+        assert isinstance(snippet, str), "section_preview_snippet must be a string"
+        assert len(snippet) <= 150, (
+            f"section_preview_snippet exceeds 150 chars: {len(snippet)}"
+        )
+    # The first citation (chunk c1, text='text1') has snippet 'text1'
+    first_cit = next(c for c in source_citations if c["section_id"] == section_id_1)
+    assert first_cit["section_preview_snippet"] == "text1"

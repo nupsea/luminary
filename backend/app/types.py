@@ -160,6 +160,7 @@ class SourceCitation(TypedDict):
     section_id: str | None
     section_heading: str
     pdf_page_number: int | None
+    section_preview_snippet: str  # S157: first 150 chars of chunk text for hover tooltip
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,8 @@ import { AlertTriangle, BookMarked, BookOpen, Globe, Loader2, Send, Trash2, X } 
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
+import { SourceCitationChips } from "@/components/SourceCitationChips"
+import type { SourceCitation } from "@/components/SourceCitationChips"
 import { GapResultCard } from "@/components/GapResultCard"
 import type { GapCardData } from "@/components/GapResultCard"
 import { QuizQuestionCard } from "@/components/QuizQuestionCard"
@@ -96,15 +98,6 @@ interface WebSource {
   version_info: string
 }
 
-// S148: chunk-derived source citations for deep-link navigation
-interface SourceCitation {
-  chunk_id: string
-  document_id: string
-  document_title: string
-  section_id: string | null
-  section_heading: string
-  pdf_page_number: number | null
-}
 
 interface WebSearchSettings {
   provider: string
@@ -901,32 +894,12 @@ export default function Chat() {
                     </div>
                   )}
 
-                  {/* Source citations — deep-links to exact section/page (S148) */}
-                  {!msg.isStreaming && msg.source_citations && msg.source_citations.length > 0 && (
-                    <div className="mt-3 space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">Sources:</span>
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {msg.source_citations.map((c, i) => {
-                          const titleAbbrev = c.document_title
-                            ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "..." : ""}`
-                            : "Doc"
-                          const headingAbbrev = c.section_heading
-                            ? ` / ${c.section_heading.slice(0, 30)}${c.section_heading.length > 30 ? "..." : ""}`
-                            : ""
-                          const pageLabel = c.pdf_page_number ? ` (p.${c.pdf_page_number})` : ""
-                          return (
-                            <button
-                              key={i}
-                              onClick={() => navigateToCitation(c)}
-                              className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-0.5 text-xs text-primary hover:bg-primary/10 transition-colors animate-in fade-in duration-300"
-                              title={`${c.document_title} — ${c.section_heading}`}
-                            >
-                              {titleAbbrev}{headingAbbrev}{pageLabel}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
+                  {/* Source citation chips — deep-links to exact section/page (S157) */}
+                  {!msg.isStreaming && (
+                    <SourceCitationChips
+                      citations={msg.source_citations ?? []}
+                      navigateToCitation={navigateToCitation}
+                    />
                   )}
 
                   {/* Image thumbnails — shown when retrieval matched image descriptions (S134) */}

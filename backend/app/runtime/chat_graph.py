@@ -1516,6 +1516,7 @@ async def synthesize_node(state: ChatState) -> dict:
                 continue
             seen_dedup_keys.add(dedup_key)
 
+            chunk_text = c.get("text", "") or ""
             source_citations_out.append({
                 "chunk_id": cid,
                 "document_id": doc_id,
@@ -1523,6 +1524,7 @@ async def synthesize_node(state: ChatState) -> dict:
                 "section_id": section_id,
                 "section_heading": section_heading,
                 "pdf_page_number": pdf_page,
+                "section_preview_snippet": chunk_text[:150],  # S157: hover tooltip preview
             })
 
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
