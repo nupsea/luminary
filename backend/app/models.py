@@ -123,6 +123,8 @@ class FlashcardModel(Base):
     # S137: Bloom's Taxonomy fields — set by generate_technical(); null for non-tech cards
     flashcard_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     bloom_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+    cloze_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

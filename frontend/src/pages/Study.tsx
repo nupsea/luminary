@@ -86,6 +86,8 @@ interface Flashcard {
   // S137: Bloom's Taxonomy fields
   flashcard_type: string | null
   bloom_level: number | null
+  // S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+  cloze_text: string | null
 }
 
 interface SectionItem {
@@ -348,6 +350,19 @@ async function deleteAllFlashcards(documentId: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete all flashcards")
 }
 
+// S154: Cloze generation API helper
+async function generateClozeFlashcards(
+  sectionId: string,
+  count: number,
+): Promise<Flashcard[]> {
+  const res = await fetch(
+    `${API_BASE}/flashcards/cloze/${encodeURIComponent(sectionId)}?count=${count}`,
+    { method: "POST" },
+  )
+  if (!res.ok) throw new GenerateError(res.status, "Failed to generate cloze flashcards")
+  return res.json() as Promise<Flashcard[]>
+}
+
 // S153: Bloom's coverage audit API helpers
 async function fetchAudit(documentId: string): Promise<CoverageReport> {
   const res = await fetch(`${API_BASE}/flashcards/audit/${documentId}`)
@@ -535,6 +550,7 @@ function FlashcardCard({
 
 const FLASHCARD_TYPE_OPTIONS = [
   "(All)",
+  "cloze",  // S154: fill-in-the-blank
   "definition",
   "syntax_recall",
   "concept_explanation",
@@ -870,7 +886,10 @@ interface GeneratePanelProps {
     difficulty: "easy" | "medium" | "hard"
   }) => void
   onGenerateFromGraph: (k: number) => void
+  // S154: cloze generation (section-scoped)
+  onGenerateCloze: (sectionId: string, count: number) => void
   isGenerating: boolean
+  isClozeGenerating: boolean
   preselectedSection?: string | null
 }
 
@@ -889,15 +908,20 @@ function GeneratePanel({
   onGenerate,
   onRegenerate,
   onGenerateFromGraph,
+  onGenerateCloze,
   isGenerating,
+  isClozeGenerating,
   preselectedSection,
 }: GeneratePanelProps) {
-  const [mode, setMode] = useState<"text" | "entities">("text")
+  const [mode, setMode] = useState<"text" | "entities" | "cloze">("text")
   const [count, setCount] = useState(10)
   const [scope, setScope] = useState<"full" | "section">("full")
   const [sectionHeading, setSectionHeading] = useState<string | null>(null)
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
   const [pairsK, setPairsK] = useState(5)
+  // S154: cloze tab state
+  const [clozeSectionId, setClozeSectionId] = useState<string | null>(null)
+  const [clozeCount, setClozeCount] = useState(5)
 
   // Sync scope/heading when a gap section is clicked from outside
   useEffect(() => {
@@ -935,13 +959,23 @@ function GeneratePanel({
         </button>
         <button
           onClick={() => setMode("entities")}
-          className={`px-3 py-1.5 text-sm font-medium rounded-r-md transition-colors ${
+          className={`px-3 py-1.5 text-sm font-medium transition-colors ${
             mode === "entities"
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
           From Entities
+        </button>
+        <button
+          onClick={() => setMode("cloze")}
+          className={`px-3 py-1.5 text-sm font-medium rounded-r-md transition-colors ${
+            mode === "cloze"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Cloze
         </button>
       </div>
 
@@ -1034,7 +1068,7 @@ function GeneratePanel({
             </button>
           </div>
         </div>
-      ) : (
+      ) : mode === "entities" ? (
         <div className="flex flex-col gap-4">
           {/* Top pairs count */}
           <div className="flex flex-wrap items-end gap-3">
@@ -1099,7 +1133,57 @@ function GeneratePanel({
             )}
           </div>
         </div>
-      )}
+      ) : mode === "cloze" ? (
+        /* S154: Cloze (fill-in-the-blank) generation tab */
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Section picker — required for cloze (endpoint is section-scoped) */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              Section <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={clozeSectionId ?? ""}
+              onChange={(e) => setClozeSectionId(e.target.value || null)}
+              className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Select a section...</option>
+              {sections.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.heading}
+                </option>
+              ))}
+            </select>
+            {!clozeSectionId && (
+              <span className="text-xs text-muted-foreground">Select a section to generate cloze cards.</span>
+            )}
+          </div>
+
+          {/* Count */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Count</label>
+            <select
+              value={clozeCount}
+              onChange={(e) => setClozeCount(Number(e.target.value))}
+              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n} cards
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => clozeSectionId && onGenerateCloze(clozeSectionId, clozeCount)}
+            disabled={isClozeGenerating || !clozeSectionId}
+            className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isClozeGenerating && <Loader2 size={14} className="animate-spin" />}
+            Generate Cloze Cards
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1723,6 +1807,25 @@ export default function Study() {
     },
   })
 
+  // S154: Cloze generation mutation
+  const generateClozeMutation = useMutation({
+    mutationFn: ({ sectionId, count }: { sectionId: string; count: number }) =>
+      generateClozeFlashcards(sectionId, count),
+    onSuccess: (newCards) => {
+      setGenerateErrorKind(null)
+      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      toast.success(`Generated ${newCards.length} cloze card${newCards.length !== 1 ? "s" : ""}`)
+    },
+    onError: (err: unknown) => {
+      const status = err instanceof GenerateError ? err.status : 0
+      if (status === 503) {
+        setGenerateErrorKind("ollama_offline")
+      } else {
+        setGenerateErrorKind("server_error")
+      }
+    },
+  })
+
   // Update mutation
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: { question?: string; answer?: string } }) =>
@@ -1877,11 +1980,16 @@ export default function Study() {
             setGenerateErrorKind(null)
             generateFromGraphMutation.mutate(k)
           }}
+          onGenerateCloze={(sectionId, count) => {
+            setGenerateErrorKind(null)
+            generateClozeMutation.mutate({ sectionId, count })
+          }}
           isGenerating={
             generateMutation.isPending ||
             deleteAllMutation.isPending ||
             generateFromGraphMutation.isPending
           }
+          isClozeGenerating={generateClozeMutation.isPending}
           preselectedSection={selectedGapSection}
         />
 

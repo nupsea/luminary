@@ -3,6 +3,7 @@
 Routes:
   POST /flashcards/generate                      — LLM-generate cards for a document
   POST /flashcards/from-gaps                     — one LLM flashcard per gap string (S97)
+  POST /flashcards/cloze/{section_id}            — generate cloze deletion cards (S154)
   GET  /flashcards/audit/{document_id}           — Bloom's coverage report (S153)
   POST /flashcards/audit/{document_id}/fill      — fill Bloom's gaps (S153)
   GET  /flashcards/{document_id}/export/csv      — CSV download
@@ -11,8 +12,8 @@ Routes:
   DELETE /flashcards/{card_id}                   — delete a card (204)
   POST /flashcards/{card_id}/review              — FSRS review with rating
 
-NOTE: The /audit/{document_id} routes must be registered BEFORE /{document_id}
-to prevent FastAPI from matching the literal string "audit" as a document_id.
+NOTE: The /audit/{document_id} and /cloze/{section_id} routes must be registered
+BEFORE /{document_id} to prevent FastAPI from matching literal segments as document_id.
 """
 
 import asyncio
@@ -121,6 +122,8 @@ class FlashcardResponse(BaseModel):
     bloom_level: int | None = None
     # S138: section_id derived from chunk -- populated by endpoints that do the join
     section_id: str | None = None
+    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+    cloze_text: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -169,6 +172,7 @@ def _to_response(
         flashcard_type=getattr(card, "flashcard_type", None),
         bloom_level=getattr(card, "bloom_level", None),
         section_id=section_id,
+        cloze_text=getattr(card, "cloze_text", None),
     )
 
 
@@ -392,6 +396,43 @@ async def create_trace_flashcard(
     await session.refresh(card)
     logger.info("Created trace flashcard", extra={"card_id": card.id})
     return _to_response(card)
+
+
+# ---------------------------------------------------------------------------
+# S154: Cloze deletion flashcard generation
+# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
+# from matching the literal segment "cloze" as a document_id wildcard.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/cloze/{section_id}", response_model=list[FlashcardResponse], status_code=201)
+async def generate_cloze_flashcards(
+    section_id: str,
+    count: int = Query(default=5, ge=1, le=20),
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> list[FlashcardResponse]:
+    """Generate cloze deletion (fill-in-the-blank) flashcards for a section."""
+    try:
+        cards = await service.generate_cloze(
+            section_id=section_id,
+            count=count,
+            session=session,
+        )
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is not running. Start it with: ollama serve",
+        ) from exc
+    logger.info(
+        "Generated cloze flashcards",
+        extra={"section_id": section_id, "count": len(cards)},
+    )
+    return [_to_response(c) for c in cards]
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronUp, ExternalLink, Loader2, Check, AlertTriangle, X as XIcon, Mic, MicOff } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { ClozeCard } from "@/components/ClozeCard"
 
 // ---------------------------------------------------------------------------
 // Web Speech API types (not included in all TS lib targets)
@@ -69,6 +70,9 @@ interface Flashcard {
   due_date: string | null
   // S138: section_id populated by /study/due join with ChunkModel
   section_id: string | null
+  // S154: cloze deletion fields
+  flashcard_type: string | null
+  cloze_text: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -783,57 +787,81 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
         <TeachbackPanel card={currentCard} onNext={handleTeachbackNext} />
       ) : (
         <>
-          {/* Card with AnimatePresence for slide-out between cards */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentCard.id}
-              initial={{ x: 300, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: -300, opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-              className="w-full max-w-2xl"
-            >
-              <FlashCard
-                card={currentCard}
-                showAnswer={showAnswer}
-                onFlip={() => setShowAnswer((prev) => !prev)}
-              />
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Show Answer / Rating buttons -- hidden once a rating is recorded (lastRating set) */}
-          {!showAnswer ? (
-            <button
-              onClick={() => setShowAnswer(true)}
-              className="rounded bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              Show Answer
-            </button>
-          ) : lastRating === null ? (
-            <div className="flex gap-3">
-              {RATINGS.map(({ label, value, className }) => (
-                <button
-                  key={value}
-                  onClick={() => void handleRate(value)}
-                  disabled={isRating}
-                  className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {/* S138: Source panel -- shown after "again" rating; user clicks Continue to advance */}
-          {lastRating === "again" && (
-            <>
-              <SourcePanel card={currentCard} />
-              <button
-                onClick={() => void advanceCard()}
-                className="rounded bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          {/* S154: dispatch to ClozeCard for cloze flashcard_type with valid blanks */}
+          {currentCard.flashcard_type === "cloze" &&
+          currentCard.cloze_text !== null &&
+          /\{\{.+?\}\}/.test(currentCard.cloze_text) ? (
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentCard.id}
+                initial={{ x: 300, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -300, opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeInOut" }}
+                className="w-full max-w-2xl"
               >
-                Continue
-              </button>
+                <ClozeCard
+                  card={currentCard}
+                  onRate={handleRate}
+                  isRating={isRating}
+                />
+              </motion.div>
+            </AnimatePresence>
+          ) : (
+            <>
+              {/* Card with AnimatePresence for slide-out between cards */}
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={currentCard.id}
+                  initial={{ x: 300, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: -300, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: "easeInOut" }}
+                  className="w-full max-w-2xl"
+                >
+                  <FlashCard
+                    card={currentCard}
+                    showAnswer={showAnswer}
+                    onFlip={() => setShowAnswer((prev) => !prev)}
+                  />
+                </motion.div>
+              </AnimatePresence>
+
+              {/* Show Answer / Rating buttons -- hidden once a rating is recorded (lastRating set) */}
+              {!showAnswer ? (
+                <button
+                  onClick={() => setShowAnswer(true)}
+                  className="rounded bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Show Answer
+                </button>
+              ) : lastRating === null ? (
+                <div className="flex gap-3">
+                  {RATINGS.map(({ label, value, className }) => (
+                    <button
+                      key={value}
+                      onClick={() => void handleRate(value)}
+                      disabled={isRating}
+                      className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* S138: Source panel -- shown after "again" rating; user clicks Continue to advance */}
+              {lastRating === "again" && (
+                <>
+                  <SourcePanel card={currentCard} />
+                  <button
+                    onClick={() => void advanceCard()}
+                    className="rounded bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    Continue
+                  </button>
+                </>
+              )}
             </>
           )}
         </>

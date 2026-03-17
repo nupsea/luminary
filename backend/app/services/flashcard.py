@@ -365,6 +365,64 @@ def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# S154: Cloze deletion helpers and prompts
+# ---------------------------------------------------------------------------
+
+CLOZE_SYSTEM = (
+    "You are a learning assistant creating cloze deletion (fill-in-the-blank) flashcards. "
+    "Extract 3-5 key technical terms or concepts from the section text. "
+    "For each term, produce a sentence that embeds the term using {{term}} syntax. "
+    "Each sentence must make sense without the blank and use one or two blanks only. "
+    "Output a JSON array starting with [ and ending with ]. "
+    'Each element: {"cloze_text": "...", "source_excerpt": "..."}. '
+    "cloze_text uses {{term}} markers. source_excerpt is a verbatim passage from the text. "
+    "Write no explanation, preamble, or markdown fences."
+)
+
+CLOZE_USER_TMPL = (
+    "Generate {count} cloze deletion cards from the text below.\n"
+    "Each card must contain at least one {{{{term}}}} blank. "
+    "Use exactly one or two blanks per sentence.\n"
+    "Text:\n{text}\n\n"
+    "JSON array:"
+)
+
+_CLOZE_BLANK_RE = re.compile(r"\{\{(.+?)\}\}")
+
+
+def _parse_cloze_text(cloze_text: str) -> list[str]:
+    """Return list of blank terms extracted from {{term}} markers in order."""
+    return _CLOZE_BLANK_RE.findall(cloze_text)
+
+
+def _build_cloze_question(cloze_text: str) -> str:
+    """Replace {{term}} markers with [____] for list-view display."""
+    return _CLOZE_BLANK_RE.sub("[____]", cloze_text)
+
+
+def _parse_cloze_llm_response(raw: str) -> list[dict]:
+    """Parse the LLM JSON array response for cloze cards.
+
+    Filters out any element whose cloze_text has no {{}} markers (malformed).
+    Returns only valid elements.
+    """
+    items = _parse_llm_response(raw, "cloze")
+    valid = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cloze_text = str(item.get("cloze_text", "")).strip()
+        if not cloze_text:
+            continue
+        blanks = _parse_cloze_text(cloze_text)
+        if not blanks:
+            logger.warning("Cloze item has no {{}} markers, skipping: %r", cloze_text[:100])
+            continue
+        valid.append(item)
+    return valid
+
+
 class FlashcardService:
     async def generate(
         self,
@@ -917,6 +975,107 @@ class FlashcardService:
                 created_at=now,
                 flashcard_type=flashcard_type,
                 bloom_level=bloom_level,
+            )
+            session.add(card)
+            flashcards.append(card)
+
+        if flashcards:
+            await session.commit()
+            for card in flashcards:
+                await session.refresh(card)
+
+        return flashcards
+
+
+    async def generate_cloze(
+        self,
+        section_id: str,
+        count: int,
+        session: AsyncSession,
+    ) -> list[FlashcardModel]:
+        """Generate cloze deletion flashcards for a section.
+
+        Prompts the LLM to produce {{term}} fill-in-the-blank sentences.
+        Validates that each card has at least one blank. Retries once if the
+        first response contains zero valid cards. Cards whose cloze_text has
+        no {{}} markers are skipped.
+
+        question = cloze_text with {{term}} replaced by [____] (for list views)
+        answer = comma-separated terms from the blanks
+        cloze_text = raw {{term}} text for frontend rendering
+        """
+        llm = get_llm_service()
+
+        chunk_result = await session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.section_id == section_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        chunks = list(chunk_result.scalars().all())
+        if not chunks:
+            return []
+
+        document_id = chunks[0].document_id
+        first_chunk_id = chunks[0].id
+
+        combined_text, _ = _build_text(chunks)
+        if not combined_text:
+            return []
+
+        prompt = CLOZE_USER_TMPL.format(count=count, text=combined_text)
+
+        with trace_chain(
+            "flashcard.generate_cloze",
+            input_value=f"section={section_id} count={count}",
+        ) as span:
+            span.set_attribute("flashcard.section_id", section_id)
+            span.set_attribute("flashcard.requested_count", count)
+            span.set_attribute("flashcard.mode", "cloze")
+
+            raw = await llm.generate(prompt, system=CLOZE_SYSTEM, stream=False)
+            items = _parse_cloze_llm_response(raw)
+
+            if not items:
+                logger.warning(
+                    "generate_cloze: no valid cards on first attempt for section=%s, retrying",
+                    section_id,
+                )
+                raw2 = await llm.generate(prompt, system=CLOZE_SYSTEM, stream=False)
+                items = _parse_cloze_llm_response(raw2)
+
+            span.set_attribute("flashcard.generated_count", len(items))
+
+        now = datetime.now(UTC)
+        flashcards: list[FlashcardModel] = []
+        for item in items:
+            cloze_text = str(item.get("cloze_text", "")).strip()
+            source_excerpt = str(item.get("source_excerpt", "")).strip()
+            blanks = _parse_cloze_text(cloze_text)
+            if not blanks:
+                continue
+            question = _build_cloze_question(cloze_text)
+            answer = ", ".join(blanks)
+            card = FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=document_id,
+                chunk_id=first_chunk_id,
+                source="document",
+                deck="default",
+                question=question,
+                answer=answer,
+                source_excerpt=source_excerpt,
+                difficulty="medium",
+                is_user_edited=False,
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=now,
+                reps=0,
+                lapses=0,
+                created_at=now,
+                flashcard_type="cloze",
+                bloom_level=None,
+                cloze_text=cloze_text,
             )
             session.add(card)
             flashcards.append(card)
