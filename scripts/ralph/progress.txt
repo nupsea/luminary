@@ -1678,3 +1678,26 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - summary_node (scope=single) was changed in S148 to set section_context not answer -- any test going through the HTTP layer needs litellm mocked
   - Exporting pure helper functions from components enables pure-logic Vitest tests without jsdom; follow ClozeCard.test.ts pattern
 ---
+
+## 2026-03-17T11:30:00Z - S158 - Chat retrieval transparency panel: confidence badge + How I Answered
+- Implemented: TransparencyInfo TypedDict (strategy_used, chunk_count, section_count, augmented); ChatState.transparency + transparency_augmented fields; synthesize_node builds TransparencyInfo from primary_strategy/transparency_augmented/chunk_meta; augment_node returns transparency_augmented=True in both paths; qa.py stream_answer emits 'transparency' SSE event before 'done'; Chat.tsx TransparencyPanel component with green/yellow/red badge, low confidence warning, How I Answered collapsible; 3 new backend unit tests
+- Files changed: backend/app/types.py, backend/app/runtime/chat_graph.py, backend/app/services/qa.py, backend/tests/test_chat_graph_nodes.py, frontend/src/pages/Chat.tsx, scripts/smoke/S158.sh
+- AC verified:
+  - TransparencyInfo TypedDict with all 4 fields: PASS
+  - ChatState.transparency and transparency_augmented: PASS
+  - synthesize_node returns transparency in state: PASS
+  - augment_node sets transparency_augmented=True: PASS
+  - Unit test synthesize_node strategy_used: PASS
+  - Unit test augment_node augmented flag: PASS
+  - Confidence badge green/yellow/red: PASS
+  - Low confidence warning text: PASS
+  - How I answered collapsible with all fields: PASS
+  - Absent for user messages: PASS (user messages never have transparency)
+  - Malformed event silent omission: PASS
+  - tsc/ruff/pytest (1090) all pass: PASS
+  - smoke S158.sh created: PASS
+- Reviewer verdict: PASS; fixed High items (missing initial_state and _make_state transparency fields)
+- Learnings:
+  - confidence_level can only be filled after _split_response() -- synthesize_node builds partial TransparencyInfo (without confidence_level); stream_answer fills it at SSE emission time
+  - TypedDict fields not in initial_state can cause KeyError on future subscript access; always initialize all ChatState fields in qa.py initial_state dict
+---
