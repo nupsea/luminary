@@ -19,6 +19,7 @@ from app.database import get_session_factory
 from app.models import (
     AnnotationModel,
     ChunkModel,
+    ClipModel,
     CodeSnippetModel,
     DocumentModel,
     EnrichmentJobModel,
@@ -1059,6 +1060,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 ReadingProgressModel,
                 AnnotationModel,
                 LearningGoalModel,
+                ClipModel,
             ):
                 await session.execute(
                     delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
@@ -1162,6 +1164,7 @@ async def delete_document(document_id: str):
             ReadingProgressModel,
             AnnotationModel,
             LearningGoalModel,
+            ClipModel,
         ):
             await session.execute(
                 delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]

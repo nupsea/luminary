@@ -2,8 +2,8 @@
  * SelectionActionBar — unified text-selection popup for DocumentReader (S147).
  *
  * Fires on mouseup/touchend within containerRef, positions 8px above the
- * selection using getBoundingClientRect, and offers 5 actions:
- *   Explain | Add to Note | Flashcard | Ask in Chat | Highlight
+ * selection using getBoundingClientRect, and offers 6 actions:
+ *   Explain | Add to Note | Flashcard | Ask in Chat | Highlight | Clip
  *
  * Dismisses on Escape keydown or mousedown outside the bar.
  */
@@ -25,6 +25,7 @@ export interface SelectionActionBarProps {
   onCreateFlashcard: (text: string, sourceRef: SourceRef) => void
   onAskInChat: (text: string, sourceRef: SourceRef) => void
   onHighlight: (text: string, sourceRef: SourceRef) => void
+  onClip: (text: string, sourceRef: SourceRef) => void
 }
 
 interface Position {
@@ -40,6 +41,7 @@ export function SelectionActionBar({
   onCreateFlashcard,
   onAskInChat,
   onHighlight,
+  onClip,
 }: SelectionActionBarProps) {
   const [position, setPosition] = useState<Position | null>(null)
   const [selectedText, setSelectedText] = useState("")
@@ -168,6 +170,19 @@ export function SelectionActionBar({
         className="rounded px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
       >
         Ask
+      </button>
+
+      {/* Clip — always enabled; saves to Reading Journal */}
+      <button
+        onMouseDown={(e) => {
+          e.preventDefault()
+          onClip(selectedText, pendingSourceRef)
+          reset()
+        }}
+        title="Save to Reading Journal"
+        className="rounded px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
+      >
+        Clip
       </button>
 
       {/* Highlight — disabled when sectionId is undefined (PDF without section mapping) */}

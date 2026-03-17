@@ -18,8 +18,10 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
+import { BookOpen, Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -64,6 +66,18 @@ interface GroupsData { groups: GroupInfo[]; tags: TagInfo[] }
 interface DocumentItem {
   id: string
   title: string
+}
+
+interface Clip {
+  id: string
+  document_id: string
+  section_id: string | null
+  section_heading: string | null
+  pdf_page_number: number | null
+  selected_text: string
+  user_note: string
+  created_at: string
+  updated_at: string
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +139,45 @@ async function patchNote(
   return res.json() as Promise<Note>
 }
 
+async function fetchClips(documentId?: string): Promise<Clip[]> {
+  const params = new URLSearchParams()
+  if (documentId) params.set("document_id", documentId)
+  const res = await fetch(`${API_BASE}/clips?${params.toString()}`)
+  if (!res.ok) throw new Error(`GET /clips failed: ${res.status}`)
+  return res.json() as Promise<Clip[]>
+}
+
+async function patchClipNote(id: string, userNote: string): Promise<Clip> {
+  const res = await fetch(`${API_BASE}/clips/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_note: userNote }),
+  })
+  if (!res.ok) throw new Error(`PATCH /clips/${id} failed: ${res.status}`)
+  return res.json() as Promise<Clip>
+}
+
+async function deleteClip(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/clips/${id}`, { method: "DELETE" })
+  if (!res.ok && res.status !== 204) throw new Error(`DELETE /clips/${id} failed: ${res.status}`)
+}
+
+async function createNoteFromClip(clip: Clip, docTitle: string): Promise<{ id: string }> {
+  const body = `> ${clip.selected_text}\n\n*Source: ${docTitle}${clip.section_heading ? ` — ${clip.section_heading}` : ""}*`
+  const res = await fetch(`${API_BASE}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: body,
+      tags: ["clip"],
+      document_id: clip.document_id,
+      section_id: clip.section_id ?? null,
+    }),
+  })
+  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
+  return res.json() as Promise<{ id: string }>
+}
+
 async function fetchSuggestedTags(id: string): Promise<string[]> {
   try {
     const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
@@ -157,6 +210,274 @@ async function fetchNoteSearch(q: string, k = 10): Promise<NoteSearchResponse> {
   const res = await fetch(`${API_BASE}/notes/search?${params.toString()}`)
   if (!res.ok) throw new Error(`GET /notes/search failed: ${res.status}`)
   return res.json() as Promise<NoteSearchResponse>
+}
+
+// ---------------------------------------------------------------------------
+// ClipCard — single clip entry in Reading Journal
+// ---------------------------------------------------------------------------
+
+interface ClipCardProps {
+  clip: Clip
+  docTitle: string
+  onDeleted: () => void
+  onConvertToNote: (clip: Clip) => void
+  onCreateFlashcard: (clip: Clip) => void
+  navigate: (url: string) => void
+}
+
+function ClipCard({ clip, docTitle, onDeleted, onConvertToNote, onCreateFlashcard, navigate }: ClipCardProps) {
+  const [confirming, setConfirming] = useState(false)
+  const [noteText, setNoteText] = useState(clip.user_note)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const abortRef = useRef<AbortController | null>(null)
+  const qc = useQueryClient()
+
+  const deleteMut = useMutation({
+    mutationFn: () => deleteClip(clip.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clips"] })
+      onDeleted()
+    },
+  })
+
+  async function handleNoteBlur() {
+    if (noteText === clip.user_note) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setSaveStatus("saving")
+    try {
+      await patchClipNote(clip.id, noteText)
+      setSaveStatus("saved")
+      void qc.invalidateQueries({ queryKey: ["clips"] })
+      setTimeout(() => setSaveStatus("idle"), 2000)
+    } catch {
+      if (!controller.signal.aborted) setSaveStatus("error")
+    }
+  }
+
+  const attribution = [
+    docTitle,
+    clip.section_heading,
+  ]
+    .filter(Boolean)
+    .join(" — ")
+
+  const sourceUrl = clip.section_id
+    ? `/learning?doc=${clip.document_id}&section_id=${clip.section_id}`
+    : clip.pdf_page_number
+      ? `/learning?doc=${clip.document_id}&page=${clip.pdf_page_number}`
+      : `/learning?doc=${clip.document_id}`
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+      {/* Blockquote */}
+      <blockquote className="border-l-4 border-l-blue-400 pl-3 text-sm italic text-foreground">
+        {clip.selected_text}
+      </blockquote>
+
+      {/* Attribution */}
+      <p className="text-xs text-muted-foreground">{attribution}</p>
+
+      {/* User note */}
+      <div className="relative">
+        <textarea
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          onBlur={() => void handleNoteBlur()}
+          placeholder="Add your note..."
+          className="w-full resize-none rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          rows={2}
+        />
+        {saveStatus === "saving" && (
+          <span className="absolute bottom-1 right-2 text-xs text-muted-foreground">Saving...</span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="absolute bottom-1 right-2 text-xs text-green-600">Saved</span>
+        )}
+        {saveStatus === "error" && (
+          <span className="absolute bottom-1 right-2 text-xs text-red-600">Save failed</span>
+        )}
+      </div>
+
+      {/* Actions row */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <button
+          onClick={() => navigate(sourceUrl)}
+          className="rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          Navigate to source
+        </button>
+        <button
+          onClick={() => onConvertToNote(clip)}
+          className="rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          Convert to Note
+        </button>
+        <button
+          onClick={() => onCreateFlashcard(clip)}
+          className="rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          Create Flashcard
+        </button>
+        <div className="flex-1" />
+        <span className="text-muted-foreground">{relativeDate(clip.created_at)}</span>
+        {confirming ? (
+          <>
+            <button
+              onClick={() => deleteMut.mutate()}
+              disabled={deleteMut.isPending}
+              className="rounded bg-destructive px-2 py-0.5 text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded border border-border px-2 py-0.5 hover:bg-accent"
+            >
+              No
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            className="rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-accent"
+            title="Delete clip"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ReadingJournalTab
+// ---------------------------------------------------------------------------
+
+interface ReadingJournalTabProps {
+  documents: DocumentItem[]
+  onConvertToNote: (clip: Clip) => void
+  onCreateFlashcard: (clip: Clip) => void
+  navigate: (url: string) => void
+}
+
+function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navigate }: ReadingJournalTabProps) {
+  const [groupByDoc, setGroupByDoc] = useState(false)
+  const qc = useQueryClient()
+
+  const { data: clips, isLoading, isError, refetch } = useQuery({
+    queryKey: ["clips"],
+    queryFn: () => fetchClips(),
+  })
+
+  const docTitleMap = Object.fromEntries(documents.map((d) => [d.id, d.title]))
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 w-full rounded-lg" />
+        ))}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <span className="flex-1">Could not load clips</span>
+        <button
+          onClick={() => void refetch()}
+          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (!clips || clips.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <BookOpen size={32} className="text-muted-foreground/50" />
+        <p className="text-base font-medium text-foreground">No clips yet</p>
+        <p className="text-sm text-muted-foreground">
+          Select text in the Document Reader and click &ldquo;Clip&rdquo; to save a passage.
+        </p>
+      </div>
+    )
+  }
+
+  function handleDeleted() {
+    void qc.invalidateQueries({ queryKey: ["clips"] })
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={groupByDoc}
+            onChange={(e) => setGroupByDoc(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-border"
+          />
+          Group by document
+        </label>
+        <span className="ml-auto text-xs text-muted-foreground">{clips.length} clip{clips.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {groupByDoc ? (
+        // Grouped view — native <details>/<summary> (no shadcn Accordion)
+        (() => {
+          const grouped = clips.reduce<Record<string, Clip[]>>((acc, c) => {
+            const key = c.document_id
+            ;(acc[key] ??= []).push(c)
+            return acc
+          }, {})
+          return Object.entries(grouped).map(([docId, docClips]) => (
+            <details key={docId} open className="rounded-lg border border-border">
+              <summary className="cursor-pointer rounded-t-lg bg-muted px-3 py-2 text-sm font-medium text-foreground select-none">
+                {docTitleMap[docId] ?? docId}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {docClips.length} clip{docClips.length !== 1 ? "s" : ""}
+                </span>
+              </summary>
+              <div className="flex flex-col gap-2 p-2">
+                {docClips.map((clip) => (
+                  <ClipCard
+                    key={clip.id}
+                    clip={clip}
+                    docTitle={docTitleMap[clip.document_id] ?? clip.document_id}
+                    onDeleted={handleDeleted}
+                    onConvertToNote={onConvertToNote}
+                    onCreateFlashcard={onCreateFlashcard}
+                    navigate={navigate}
+                  />
+                ))}
+              </div>
+            </details>
+          ))
+        })()
+      ) : (
+        // Flat list — newest first
+        clips.map((clip) => (
+          <ClipCard
+            key={clip.id}
+            clip={clip}
+            docTitle={docTitleMap[clip.document_id] ?? clip.document_id}
+            onDeleted={handleDeleted}
+            onConvertToNote={onConvertToNote}
+            onCreateFlashcard={onCreateFlashcard}
+            navigate={navigate}
+          />
+        ))
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +712,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
 
 type FilterState =
   | { type: "all" }
+  | { type: "journal" }
   | { type: "group"; name: string }
   | { type: "tag"; name: string }
 
@@ -406,6 +728,7 @@ export default function NotesPage() {
   const mountTime = useRef(Date.now())
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
+  const navigate = useNavigate()
 
   useEffect(() => {
     logger.info("[Notes] mounted")
@@ -462,12 +785,46 @@ export default function NotesPage() {
     void qc.invalidateQueries({ queryKey: ["notes-groups"] })
   }
 
+  async function handleConvertClipToNote(clip: Clip) {
+    const docTitle = documents.find((d) => d.id === clip.document_id)?.title ?? clip.document_id
+    try {
+      await createNoteFromClip(clip, docTitle)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+      toast.success("Note created from clip")
+    } catch {
+      toast.error("Failed to create note")
+    }
+  }
+
+  async function handleCreateFlashcardFromClip(clip: Clip) {
+    const docTitle = documents.find((d) => d.id === clip.document_id)?.title ?? clip.document_id
+    try {
+      await createNoteFromClip(clip, docTitle)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      toast.success("Note created from clip — select it in the dialog to generate flashcards")
+      setShowGenerateFlashcards(true)
+    } catch {
+      // still open the dialog even if note creation fails
+      setShowGenerateFlashcards(true)
+    }
+  }
+
   const noteList = notes ?? []
 
   // Determine right panel content
   let panelContent: React.ReactNode
 
-  if (isSearchMode) {
+  if (filter.type === "journal") {
+    panelContent = (
+      <ReadingJournalTab
+        documents={documents}
+        onConvertToNote={(clip) => void handleConvertClipToNote(clip)}
+        onCreateFlashcard={(clip) => void handleCreateFlashcardFromClip(clip)}
+        navigate={navigate}
+      />
+    )
+  } else if (isSearchMode) {
     if (searchLoading) {
       panelContent = (
         <div className="flex flex-col gap-3">
@@ -675,6 +1032,18 @@ export default function NotesPage() {
           <span className="ml-auto text-xs">{noteList.length}</span>
         </button>
 
+        <button
+          onClick={() => setFilter({ type: "journal" })}
+          className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
+            filter.type === "journal"
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:bg-accent/60"
+          }`}
+        >
+          <BookOpen size={13} />
+          Reading Journal
+        </button>
+
         {(groups?.groups ?? []).map((g) => (
           <div key={g.name}>
             <button
@@ -723,57 +1092,61 @@ export default function NotesPage() {
           <h2 className="text-sm font-semibold text-foreground">
             {filter.type === "all"
               ? "All Notes"
-              : filter.type === "group"
-                ? filter.name
-                : `#${filter.name}`}
+              : filter.type === "journal"
+                ? "Reading Journal"
+                : filter.type === "group"
+                  ? filter.name
+                  : `#${filter.name}`}
           </h2>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search notes..."
-                className="rounded border border-border bg-background px-3 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-48 pr-7"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  title="Clear search"
-                >
-                  <X size={12} />
-                </button>
-              )}
+          {filter.type !== "journal" && (
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search notes..."
+                  className="rounded border border-border bg-background px-3 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-48 pr-7"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    title="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <ViewToggle value={notesView} onChange={setNotesView} />
+              <button
+                onClick={() => setShowGapDetect(true)}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                title="Compare notes with a book to find gaps"
+              >
+                Compare with Book
+              </button>
+              <button
+                onClick={() => setShowGenerateFlashcards(true)}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                title="Generate flashcards from notes"
+              >
+                Generate Flashcards
+              </button>
+              <button
+                onClick={() => setShowCreate((v) => !v)}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                title="New note"
+              >
+                <Plus size={13} />
+                New
+              </button>
             </div>
-            <ViewToggle value={notesView} onChange={setNotesView} />
-            <button
-              onClick={() => setShowGapDetect(true)}
-              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-              title="Compare notes with a book to find gaps"
-            >
-              Compare with Book
-            </button>
-            <button
-              onClick={() => setShowGenerateFlashcards(true)}
-              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-              title="Generate flashcards from notes"
-            >
-              Generate Flashcards
-            </button>
-            <button
-              onClick={() => setShowCreate((v) => !v)}
-              className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-              title="New note"
-            >
-              <Plus size={13} />
-              New
-            </button>
-          </div>
+          )}
         </div>
 
-        {/* Create form */}
-        {showCreate && (
+        {/* Create form — hidden in Reading Journal view */}
+        {showCreate && filter.type !== "journal" && (
           <CreateNoteForm
             documents={documents}
             onClose={() => setShowCreate(false)}

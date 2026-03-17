@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
@@ -1507,6 +1508,29 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     }
   }
 
+  async function handleSelectionClip(text: string, sourceRef: SourceRef) {
+    const heading = sourceRef.sectionId
+      ? doc?.sections.find((s) => s.id === sourceRef.sectionId)?.heading
+      : undefined
+    try {
+      await fetch(`${API_BASE}/clips`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_id: sourceRef.documentId,
+          section_id: sourceRef.sectionId ?? null,
+          section_heading: heading ?? null,
+          pdf_page_number: null,
+          selected_text: text,
+          user_note: "",
+        }),
+      })
+      toast.success("Passage clipped")
+    } catch {
+      toast.error("Failed to save clip. Please try again.")
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-full gap-6 p-6">
@@ -1621,6 +1645,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             onCreateFlashcard={handleSelectionCreateFlashcard}
             onAskInChat={handleSelectionAskInChat}
             onHighlight={(text, sourceRef) => void handleSelectionHighlight(text, sourceRef)}
+            onClip={(text, sourceRef) => void handleSelectionClip(text, sourceRef)}
           />
 
           {/* Section list / Highlights */}

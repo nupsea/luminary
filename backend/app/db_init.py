@@ -7,6 +7,7 @@ from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
     ChunkModel,
+    ClipModel,
     CodeSnippetModel,
     DocumentModel,
     EnrichmentJobModel,

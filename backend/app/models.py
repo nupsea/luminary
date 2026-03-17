@@ -499,6 +499,35 @@ class WebReferenceModel(Base):
     )
 
 
+class ClipModel(Base):
+    """Persistent passage clip from any document reader view.
+
+    selected_text is the raw clipped text.
+    section_heading is denormalized at clip time to avoid JOIN in Reading Journal.
+    pdf_page_number is null for non-PDF documents.
+    user_note is editable and auto-saved by the Reading Journal card.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "clips"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    pdf_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    selected_text: Mapped[str] = mapped_column(Text, nullable=False)
+    user_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 
