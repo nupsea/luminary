@@ -1548,3 +1548,30 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - IntersectionObserver for position tracking fires on all [data-section-id] elements; PDF/EPUB viewer pages require separate POST calls with page/chapter data (follow-up story)
   - SessionStorage key pattern: `resume-dismissed-{documentId}` -- per-document, cleared on tab close, no cross-session bleed
 ---
+
+## 2026-03-17T05:36:45Z - S153 - Flashcard Bloom's taxonomy coverage audit, distribution chart, and gap fill
+- Implemented: FlashcardAuditService with analyze_coverage (JOIN query: flashcard->chunk->section, computes per-section bloom stats and coverage_score) and fill_gaps (concurrent LLM calls bounded by Semaphore(3), sequential DB writes). GET /flashcards/audit/{doc_id} and POST /flashcards/audit/{doc_id}/fill endpoints. DeckHealthPanel component in Study.tsx with Recharts BarChart (6 bars L1-L6), coverage badge (red/yellow/green), Fill Gaps button with inline spinner, per-section gap list, loading/error/empty states.
+- Files changed: backend/app/types.py, backend/app/services/flashcard_audit.py (new), backend/app/routers/flashcards.py, backend/tests/test_flashcard_audit.py (new), frontend/src/pages/Study.tsx, scripts/smoke/S153.sh (new)
+- AC verified:
+  - FlashcardAuditService in app/services/flashcard_audit.py with analyze_coverage and fill_gaps: PASS
+  - CoverageReport TypedDict and BloomGap TypedDict in app/types/: PASS
+  - Unit test: deck with only bloom_level=1 cards produces BloomGap entries with missing_bloom_levels=[2,3,4,5,6]: PASS
+  - Unit test: fill_gaps with 2 gap entries calls LLM with level-specific prompts and creates >= 2 cards with bloom_level >= 3: PASS
+  - Unit test: coverage_score = 0.0 when zero sections have a card at bloom_level >= 3: PASS
+  - GET /flashcards/audit/{document_id} returns CoverageReport with all fields: PASS
+  - POST /flashcards/audit/{document_id}/fill returns {created: int} and creates gap cards: PASS
+  - Study tab Deck Health section shows Bloom's bar chart with 6 bars labeled L1-L6: PASS
+  - Coverage score badge uses correct color: red <40%, yellow <70%, green >=70%: PASS
+  - Fill Gaps button shows inline spinner during POST; updates chart after completion: PASS
+  - Per-section gap list shows sections with no L3+ cards: PASS
+  - Loading state: Skeleton bars; Error state: inline message with retry; Empty state: explicit message when no cards: PASS
+  - uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0; npm run build passes: PASS
+  - scripts/smoke/S153.sh created (not verified against live server): written correctly
+- Reviewer verdict: PASS (critical concurrency bug fixed: LLM calls concurrent via gather, DB writes sequential; high issue fixed: broader exception types for 503 offline degradation)
+- Learnings:
+  - AsyncSession concurrent-access violation: always separate asyncio.gather (LLM calls only) from sequential DB writes when fill_gaps-style patterns need concurrency
+  - Route ordering invariant: /audit/{document_id} routes MUST be registered before /{document_id} wildcard to prevent FastAPI matching "audit" as document_id
+  - Recharts BarChart with per-bar custom fill requires Cell component, not rect elements
+  - Tooltip formatter value type is `number | undefined` in strict TS -- guard with `?? 0`
+  - JSON keys are always strings: dict[int, int] Python TypedDict becomes Record<string, number> on wire; use String(level) to build chartData
+---
