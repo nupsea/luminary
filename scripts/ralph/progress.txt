@@ -1653,3 +1653,28 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Importing Pydantic response models between same-layer router files (feynman.py importing from study.py) is valid since both are API layer; no circular dependency risk
   - _parse_rubric() pure function pattern: strip markdown fences, json.loads, key subset check, return None on any failure -- duplicated across layers is acceptable for small utility functions
 ---
+
+## 2026-03-17T10:00:00Z - S157 - Chat source citation chips with click-to-navigate full UI
+- Implemented: SourceCitation TypedDict gains section_preview_snippet field; synthesize_node populates it from chunk text[:150]; SourceCitationChips.tsx component with Badge chips, hover tooltip (full title/heading/snippet via title attr), deduplicateCitations pure function, fade-in animation, "From N sources" label; Chat.tsx refactored to use new component; 5 Vitest tests; fixed pre-existing test_summary_intent_end_to_end (needed litellm mock after S148 changed summary_node to use section_context); added section_preview_snippet assertion to citation dedup test
+- Files changed: backend/app/types.py, backend/app/runtime/chat_graph.py, backend/tests/test_chat_graph_nodes.py, frontend/src/components/SourceCitationChips.tsx, frontend/src/components/SourceCitationChips.test.ts, frontend/src/pages/Chat.tsx, scripts/smoke/S157.sh
+- AC verified:
+  - SourceCitation gains section_preview_snippet: PASS
+  - synthesize_node populates section_preview_snippet: PASS
+  - SourceCitationChips.tsx created: PASS
+  - Chips show abbreviated title/heading/page: PASS
+  - Hover tooltip shows full title, heading, snippet: PASS (via HTML title attr)
+  - Chip click calls navigateToCitation: PASS
+  - Chips fade in after sources event (not during streaming): PASS (animate-in + !isStreaming)
+  - Client-side dedup by section_id: PASS
+  - "From N sources" label: PASS
+  - No Sources section when empty: PASS (returns null)
+  - No error UI if sources event malformed: PASS (silent omission via ?? [])
+  - Vitest: 2 citations -> 2 Badge elements: PASS
+  - Vitest: empty array -> null: PASS
+  - tsc/ruff/pytest all pass (1088 tests): PASS
+  - scripts/smoke/S157.sh created: PASS
+- Reviewer verdict: No Critical items; fixed pre-existing High item (test_summary_intent_end_to_end + section_preview_snippet backend test)
+- Learnings:
+  - summary_node (scope=single) was changed in S148 to set section_context not answer -- any test going through the HTTP layer needs litellm mocked
+  - Exporting pure helper functions from components enables pure-logic Vitest tests without jsdom; follow ClozeCard.test.ts pattern
+---
