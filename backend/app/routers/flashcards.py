@@ -11,6 +11,7 @@ Routes:
   PUT  /flashcards/{card_id}                     — update question/answer, sets is_user_edited
   DELETE /flashcards/{card_id}                   — delete a card (204)
   POST /flashcards/{card_id}/review              — FSRS review with rating
+  GET  /flashcards/{card_id}/source-context      — source passage for SourceContextPanel (S155)
 
 NOTE: The /audit/{document_id} and /cloze/{section_id} routes must be registered
 BEFORE /{document_id} to prevent FastAPI from matching literal segments as document_id.
@@ -32,7 +33,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ChunkModel, DocumentModel, FlashcardModel, ReviewEventModel
+from app.models import ChunkModel, DocumentModel, FlashcardModel, ReviewEventModel, SectionModel
 from app.services.flashcard import FlashcardService, get_flashcard_service
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
@@ -142,6 +143,17 @@ class FillGapsResponse(BaseModel):
     """Response schema for POST /flashcards/audit/{document_id}/fill (S153)."""
 
     created: int
+
+
+class SourceContextResponse(BaseModel):
+    """Response schema for GET /flashcards/{card_id}/source-context (S155)."""
+
+    section_heading: str
+    section_preview: str
+    document_title: str
+    pdf_page_number: int | None
+    section_id: str
+    document_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -659,3 +671,59 @@ async def review_flashcard(
 
     logger.info("Reviewed flashcard", extra={"card_id": card_id, "rating": req.rating})
     return _to_response(card)
+
+
+@router.get("/{card_id}/source-context", response_model=SourceContextResponse)
+async def get_source_context(
+    card_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> SourceContextResponse:
+    """Return source passage for a flashcard (for SourceContextPanel on Again/Hard).
+
+    Join chain: FlashcardModel.chunk_id -> ChunkModel.section_id -> SectionModel -> DocumentModel.
+    Returns 404 when:
+      - flashcard not found
+      - flashcard.chunk_id is null
+      - ChunkModel.section_id is null (chunk not section-assigned)
+      - SectionModel row not found for that section_id
+    """
+    fc_result = await session.execute(
+        select(FlashcardModel).where(FlashcardModel.id == card_id)
+    )
+    card = fc_result.scalar_one_or_none()
+    if card is None:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+    if card.chunk_id is None:
+        raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
+
+    chunk_result = await session.execute(
+        select(ChunkModel).where(ChunkModel.id == card.chunk_id)
+    )
+    chunk = chunk_result.scalar_one_or_none()
+    if chunk is None or chunk.section_id is None:
+        raise HTTPException(status_code=404, detail="No section found for this flashcard")
+
+    sec_result = await session.execute(
+        select(SectionModel).where(SectionModel.id == chunk.section_id)
+    )
+    section = sec_result.scalar_one_or_none()
+    if section is None:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    doc_result = await session.execute(
+        select(DocumentModel).where(DocumentModel.id == section.document_id)
+    )
+    doc = doc_result.scalar_one_or_none()
+    document_title = doc.title if doc else ""
+
+    preview = (section.preview or "")[:400]
+
+    logger.info("source-context: card=%s section=%s", card_id, chunk.section_id)
+    return SourceContextResponse(
+        section_heading=section.heading,
+        section_preview=preview,
+        document_title=document_title,
+        pdf_page_number=chunk.pdf_page_number,
+        section_id=chunk.section_id,
+        document_id=section.document_id,
+    )
