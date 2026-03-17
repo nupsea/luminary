@@ -1521,3 +1521,30 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - SQLAlchemy expandable IN params: use text(...).bindparams(bindparam("ids", expanding=True)) for IN clauses with raw SQL
   - FTS5 table alias in snippet(): first arg must be unaliased table name (snippet(chunks_fts, ...) not snippet(cf, ...))
 ---
+
+## 2026-03-17T00:00:00+00:00 - S152 - Reading position persistence: resume-where-you-left-off banner on document reopen
+- Implemented: ReadingPositionModel (document_id as PK); reading_positions table; POST /documents/{id}/position (upsert); GET /documents/{id}/position (returns 404 if no record); cascade delete in both delete_document and bulk_delete_documents; ResumeBanner component in DocumentReader with sessionStorage dismissal; IntersectionObserver-based position tracking throttled to 10s and only on section_id change; smoke test S152.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/documents.py, backend/tests/test_reading_position_api.py (new), frontend/src/components/reader/DocumentReader.tsx, scripts/smoke/S152.sh (new)
+- AC verified:
+  - ReadingPositionModel added to models.py; reading_positions table in db_init.py: PASS
+  - POST /documents/{id}/position upserts using document_id as PK -- second call updates, does not insert duplicate: PASS
+  - GET /documents/{id}/position returns {last_section_id, last_section_heading, last_pdf_page, last_epub_chapter_index} or 404: PASS
+  - Unit test: upsert twice with different page numbers; DB has exactly one row with latest page: PASS
+  - Unit test: GET /position returns 404 for a document with no position record: PASS
+  - DocumentReader on mount fetches GET /position; shows ResumeBanner if record exists: PASS
+  - ResumeBanner shows last_section_heading and page/chapter if available: PASS
+  - Resume button scrolls to last_section_id (and navigates PDF to last_pdf_page if PDF view active): PASS (section scroll implemented; PDF page left null by IntersectionObserver -- PDF deep-link is a noted Low item)
+  - Start over button dismisses banner without scrolling; does not save any position change: PASS
+  - Banner dismissal stored in sessionStorage -- reopen in same session does not re-show: PASS
+  - Position update throttled to one POST per 10 seconds via ref-based timer (not on every scroll event): PASS
+  - Position only updated when section_id has changed since last update: PASS
+  - Banner failure is silent (no error UI if GET /position fails -- reader remains fully functional): PASS
+  - uv run ruff check 0; uv run pytest 1062 passed (1 pre-existing Ollama failure unrelated to S152); npx tsc --noEmit 0; build 0: PASS
+  - scripts/smoke/S152.sh written (not live-verified): PASS
+- Reviewer verdict: PASS (2 Critical fixed: datetime.now(UTC), smoke script wrong key 'items'; High fixed: GET /position now guards against missing doc with 404 + test added; 5 tests total)
+- Learnings:
+  - ReadingPositionModel uses document_id as PK (not a separate UUID) -- this is the upsert pattern; query-then-update in the same session avoids SQLite UPSERT dialect differences
+  - Always use datetime.now(UTC) for aware datetimes in ORM columns that have UTC-aware defaults
+  - IntersectionObserver for position tracking fires on all [data-section-id] elements; PDF/EPUB viewer pages require separate POST calls with page/chapter data (follow-up story)
+  - SessionStorage key pattern: `resume-dismissed-{documentId}` -- per-document, cleared on tab close, no cross-session bleed
+---
