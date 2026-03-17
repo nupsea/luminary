@@ -353,6 +353,9 @@ class FeynmanSessionModel(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     # S156: structured rubric JSON written at complete_session(); null until completion
     rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # S159: model-generated explanation and key points (null until POST /model-explanation)
+    model_explanation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_points_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

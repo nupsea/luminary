@@ -1701,3 +1701,12 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - confidence_level can only be filled after _split_response() -- synthesize_node builds partial TransparencyInfo (without confidence_level); stream_answer fills it at SSE emission time
   - TypedDict fields not in initial_state can cause KeyError on future subscript access; always initialize all ChatState fields in qa.py initial_state dict
 ---
+
+## 2026-03-17 - S159 - Comparative self-assessment: model explanation diff view for Feynman sessions
+- Implemented: FeynmanSessionModel.model_explanation_text + key_points_json columns (models.py + db_init.py), generate_model_explanation() service method (SSE streaming, persists text+key_points), POST /feynman/sessions/{id}/model-explanation endpoint (feynman.py), computeExplanationDiff() LCS diff (lib/explanationDiff.ts), FeynmanDialog updated (See model explanation button, streaming panel, diff view with green/red/blue highlights, Save as note)
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/feynman_service.py, backend/app/routers/feynman.py, frontend/src/lib/explanationDiff.ts, frontend/src/lib/explanationDiff.test.ts, frontend/src/components/reader/FeynmanDialog.tsx, backend/tests/test_feynman_service.py, scripts/smoke/S159.sh
+- Tests: 11 backend tests pass (7 existing + 4 new S159); 19 frontend Vitest pass (13 existing + 6 new); ruff clean; tsc clean
+- Learnings:
+  - LCS backtrack must decrement i when dp[i-1][j] >= dp[i][j-1] (not >) to avoid preferring j-path incorrectly
+  - key_points: block suppression reuses same sliding-window pattern as gaps: block in stream_turn
+  - AC says button hidden when concept or sectionId missing -- prop is always present via FeynmanDialogProps, so guard on truthy value of the prop

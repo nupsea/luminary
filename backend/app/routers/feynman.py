@@ -162,6 +162,28 @@ async def complete_feynman_session(
     )
 
 
+@router.post("/sessions/{session_id}/model-explanation")
+async def generate_model_explanation(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Stream a model-generated explanation for the Feynman session concept via SSE.
+
+    SSE events:
+      data: {"token": "..."}                                       -- streaming token
+      data: {"done": true, "explanation": "...", "key_points": [...]}  -- completion
+      data: {"error": "not_found", "message": "..."}              -- if session missing
+      data: {"error": "llm_unavailable", "message": "..."}        -- if Ollama is down
+    """
+    svc = get_feynman_service()
+
+    async def event_stream():
+        async for event in svc.generate_model_explanation(session_id, db):
+            yield event
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.get("/sessions", response_model=list[FeynmanSessionListItem])
 async def list_feynman_sessions(
     document_id: str = Query(...),

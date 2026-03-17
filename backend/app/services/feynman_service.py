@@ -79,6 +79,21 @@ _RUBRIC_USER_TMPL = (
     '"clarity": {{"score": int, "evidence": str}}}}'
 )
 
+# S159: model explanation prompt templates
+_MODEL_EXPLANATION_SYSTEM = (
+    "You are an expert educator. Your task is to generate a clear, accurate explanation "
+    "of a concept based on the provided source material."
+)
+
+_MODEL_EXPLANATION_USER_TMPL = (
+    "Concept: {concept}\n\n"
+    "Source material:\n{section_context}\n\n"
+    "Write a complete, self-contained explanation of this concept in 3-5 clear sentences. "
+    "After the explanation, output a line: "
+    'key_points: ["point1", "point2", ...] '
+    "listing the 3-5 key points as short phrases."
+)
+
 # Max chars for section context included in the system prompt
 _SECTION_CONTEXT_CHAR_LIMIT = 3000
 
@@ -133,6 +148,35 @@ def _parse_rubric(raw: str) -> dict | None:
         logger.warning("Rubric JSON missing required keys: %s", set(parsed.keys()))
         return None
     return parsed
+
+
+def _parse_key_points(raw: str) -> list[str]:
+    """Extract key_points JSON list from the end of a model explanation response.
+
+    Looks for a line starting with 'key_points:' and parses the JSON array.
+    Returns [] if no key_points block is found or parsing fails.
+    """
+    m = re.search(r"key_points:\s*(\[.*?\])", raw, re.DOTALL)
+    if not m:
+        return []
+    try:
+        result = json.loads(m.group(1))
+        if isinstance(result, list):
+            return [str(p) for p in result if p]
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return []
+
+
+def _strip_key_points_block(raw: str) -> str:
+    """Remove the trailing 'key_points: [...]' line from a model explanation for display."""
+    idx = raw.rfind("\nkey_points:")
+    if idx == -1:
+        idx = raw.rfind("key_points:")
+        if idx == 0 or (idx > 0 and raw[idx - 1] == "\n"):
+            return raw[:idx].rstrip()
+        return raw
+    return raw[:idx].rstrip()
 
 
 def _strip_gaps_block(raw: str) -> str:
@@ -469,6 +513,95 @@ class FeynmanService:
             len(flashcard_ids),
         )
         return {"gap_count": len(all_gaps), "flashcard_ids": flashcard_ids, "rubric": rubric_dict}
+
+    async def generate_model_explanation(
+        self,
+        session_id: str,
+        db_session: AsyncSession,
+    ) -> AsyncGenerator[str]:
+        """Generate and stream a model explanation for the Feynman session concept.
+
+        Yields SSE data strings:
+          data: {"token": "..."}\n\n        -- streaming tokens
+          data: {"done": true, "explanation": "...", "key_points": [...]}\n\n
+          data: {"error": "llm_unavailable", "message": "..."}\n\n
+
+        Persists model_explanation_text and key_points_json on the session row.
+        """
+        result = await db_session.execute(
+            select(FeynmanSessionModel).where(FeynmanSessionModel.id == session_id)
+        )
+        feynman_session = result.scalar_one_or_none()
+        if feynman_session is None:
+            not_found = {"error": "not_found", "message": "Feynman session not found"}
+            yield f"data: {json.dumps(not_found)}\n\n"
+            return
+
+        section_context = await self._get_section_context(
+            feynman_session.document_id,
+            feynman_session.section_id,
+            db_session,
+        )
+
+        prompt = _MODEL_EXPLANATION_USER_TMPL.format(
+            concept=feynman_session.concept,
+            section_context=section_context,
+        )
+
+        model = get_settings().LITELLM_DEFAULT_MODEL
+        accumulated = ""
+
+        try:
+            stream_resp = await litellm.acompletion(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _MODEL_EXPLANATION_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+            )
+            async for chunk in stream_resp:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    accumulated += delta
+                    # Suppress key_points: block once it starts
+                    tail = accumulated[-20:]
+                    kp_started = "\nkey_points:" in accumulated or "key_points:" in tail
+                    if not kp_started:
+                        yield f"data: {json.dumps({'token': delta})}\n\n"
+
+        except (litellm.ServiceUnavailableError, litellm.APIConnectionError) as exc:
+            logger.warning("generate_model_explanation: Ollama unavailable: %s", exc)
+            await db_session.rollback()
+            error_msg = (
+                "Ollama is not running. "
+                "Start Ollama to use this feature: ollama serve"
+            )
+            yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
+            return
+
+        key_points = _parse_key_points(accumulated)
+        explanation_text = _strip_key_points_block(accumulated)
+
+        # Persist on session row
+        feynman_session.model_explanation_text = explanation_text
+        feynman_session.key_points_json = key_points
+        try:
+            await db_session.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "generate_model_explanation: commit failed for session=%s", session_id
+            )
+            await db_session.rollback()
+
+        logger.info(
+            "Model explanation generated: session_id=%s key_points=%d",
+            session_id,
+            len(key_points),
+        )
+
+        done_event = {"done": True, "explanation": explanation_text, "key_points": key_points}
+        yield f"data: {json.dumps(done_event)}\n\n"
 
     async def list_sessions(
         self,

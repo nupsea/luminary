@@ -1,12 +1,14 @@
-"""Unit tests for FeynmanService (S144).
+"""Unit tests for FeynmanService (S144, S159).
 
 AC3: complete_session() with 2 identified gaps generates >= 2 flashcards
      with source='feynman' and flashcard_type='concept_explanation'.
 AC4: tutor prompt includes section summary content in system context.
+S159-AC3: generate_model_explanation stores non-null model_explanation_text.
+S159-AC3b: existing sessions with null model_explanation_text are tolerated.
 """
 
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -24,7 +26,9 @@ from app.models import (
 from app.services.feynman_service import (
     FeynmanService,
     _parse_gaps,
+    _parse_key_points,
     _strip_gaps_block,
+    _strip_key_points_block,
 )
 
 # ---------------------------------------------------------------------------
@@ -222,3 +226,112 @@ async def test_create_session_system_prompt_includes_section_summary(test_db):
         f"Expected section summary content in system prompt. "
         f"Got: {captured_systems[0][:200]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S159: _parse_key_points and _strip_key_points_block helpers
+# ---------------------------------------------------------------------------
+
+
+def test_parse_key_points_extracts_list():
+    raw = (
+        "The concept involves two ideas.\n"
+        'key_points: ["idea one", "idea two"]'
+    )
+    result = _parse_key_points(raw)
+    assert result == ["idea one", "idea two"]
+
+
+def test_parse_key_points_missing_block():
+    raw = "Just an explanation with no key_points block."
+    assert _parse_key_points(raw) == []
+
+
+def test_strip_key_points_block():
+    raw = 'Good explanation.\nkey_points: ["scope", "closure"]'
+    stripped = _strip_key_points_block(raw)
+    assert "key_points:" not in stripped
+    assert "Good explanation." in stripped
+
+
+# ---------------------------------------------------------------------------
+# S159-AC3: generate_model_explanation stores non-null model_explanation_text
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_model_explanation_stores_text(test_db):
+    """S159-AC3: stored model_explanation_text is non-null after POST."""
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+    model_answer = (
+        'Closures capture variables from their enclosing scope.'
+        '\nkey_points: ["scope", "capture"]'
+    )
+
+    async with factory() as session:
+        feynman_session = FeynmanSessionModel(
+            id=session_id,
+            document_id=doc_id,
+            section_id=None,
+            concept="closures",
+            status="complete",
+        )
+        session.add(feynman_session)
+        await session.commit()
+
+    async def _mock_stream(*args, **kwargs):
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = model_answer
+
+        async def _gen():
+            yield chunk
+
+        return _gen()
+
+    svc = FeynmanService()
+    patch_target = "app.services.feynman_service.litellm.acompletion"
+    with patch(patch_target, new=AsyncMock(side_effect=_mock_stream)):
+        async with factory() as session:
+            events = [e async for e in svc.generate_model_explanation(session_id, session)]
+
+    # Last event should be done with explanation
+    import json
+
+    done_events = [e for e in events if '"done": true' in e or '"done":true' in e]
+    assert len(done_events) >= 1
+    payload = json.loads(done_events[-1].replace("data: ", "").strip())
+    assert payload["done"] is True
+    assert isinstance(payload["explanation"], str)
+    assert len(payload["explanation"]) > 0
+    assert payload["key_points"] == ["scope", "capture"]
+
+    # Verify persisted on session row
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(FeynmanSessionModel).where(FeynmanSessionModel.id == session_id)
+            )
+        ).scalar_one_or_none()
+
+    assert row is not None
+    assert row.model_explanation_text is not None
+    assert len(row.model_explanation_text) > 0
+    assert row.key_points_json == ["scope", "capture"]
+
+
+@pytest.mark.asyncio
+async def test_generate_model_explanation_null_session_returns_error(test_db):
+    """S159-AC3b: generate_model_explanation with non-existent session yields error event."""
+    _engine, factory, _tmp = test_db
+    svc = FeynmanService()
+    async with factory() as session:
+        events = [e async for e in svc.generate_model_explanation("nonexistent-id", session)]
+
+    import json
+
+    assert len(events) >= 1
+    payload = json.loads(events[0].replace("data: ", "").strip())
+    assert payload.get("error") == "not_found"

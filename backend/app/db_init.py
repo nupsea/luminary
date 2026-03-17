@@ -106,6 +106,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S156: structured rubric JSON for teachback results and feynman sessions
             "ALTER TABLE teachback_results ADD COLUMN rubric_json JSON",
             "ALTER TABLE feynman_sessions ADD COLUMN rubric_json JSON",
+            # S159: model-generated explanation and key points for diff view
+            "ALTER TABLE feynman_sessions ADD COLUMN model_explanation_text TEXT",
+            "ALTER TABLE feynman_sessions ADD COLUMN key_points_json JSON",
         ]:
             try:
                 await conn.execute(text(ddl))
