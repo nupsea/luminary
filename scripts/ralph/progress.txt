@@ -1600,3 +1600,27 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Vitest can be used for pure function tests from a TSX component: set environment:"node" and export the pure function; no DOM environment required for pure logic tests
   - FastAPI route ordering: /cloze/{section_id} and /audit/{document_id} both require explicit registration BEFORE /{document_id} wildcard; no conflict between POST and GET HTTP methods but ordering comment is essential for future maintainers
 ---
+
+## 2026-03-17T00:00:00Z - S155 - Source-grounded answer panel on flashcard review errors
+- Implemented: GET /flashcards/{card_id}/source-context endpoint (join: chunk_id -> section_id -> SectionModel -> DocumentModel); SourceContextPanel component in StudySession.tsx (collapsible, blockquote, attribution, "Open in reader" anchor); lazy fetch after again/hard ratings; dismissed-set (useRef) to prevent re-appearance; loading skeleton; S138 SourcePanel preserved as fallback for "again" with 404
+- Files changed: backend/app/routers/flashcards.py, backend/tests/test_flashcard_source_context.py, frontend/src/components/StudySession.tsx, scripts/smoke/S155.sh
+- AC verified:
+  - AC1: GET /flashcards/{id}/source-context returns {section_heading, section_preview, document_title, pdf_page_number, section_id} -- PASS
+  - AC2: 404 when flashcard.chunk_id is null -- PASS
+  - AC3: 404 when section_id not found in SectionModel -- PASS
+  - AC4: Unit test correct section_heading and document_title -- PASS
+  - AC5: Unit tests 404 null chunk_id and non-existent section_id -- PASS
+  - AC6: submitReview called before source context fetch -- PASS
+  - AC7: Fetch triggered only after rating=1 or rating=2 -- PASS
+  - AC8: SourceContextPanel renders blockquote, attribution, "Open in reader" -- PASS
+  - AC9: "Open in reader" uses /learning?doc=...&section_id=...&page=... -- PASS
+  - AC10: Panel collapsible, default expanded -- PASS
+  - AC11: 404 = silently not shown -- PASS
+  - AC12: Dismissed panel not re-shown (dismissedSourceContextIds ref) -- PASS
+  - AC13: ruff clean, pytest 6/6 pass, tsc clean -- PASS
+  - AC14: scripts/smoke/S155.sh created -- PASS (not live-server verified)
+- Reviewer verdict: PASS -- no Critical issues; fixed duplicate setState and navigate-without-endSession (changed to anchor tag opening new tab)
+- Learnings:
+  - "Open in reader" from within a session should use <a target="_blank"> not navigate() to avoid interrupting the session without calling endSession
+  - For "hard" rating: when source context is available, pause and show panel; when 404, advance immediately (different from "again" which shows S138 SourcePanel as fallback)
+---
