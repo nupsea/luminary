@@ -1444,3 +1444,28 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - `page` is already a useState variable in Learning.tsx for pagination; named the URL param reader `initialPageParam` to avoid shadowing
   - When clearing citation deep-link URL params after use (doc, section_id, page), clear ALL related params in a single setSearchParams call to prevent stale state when user opens a different document
 ---
+
+## 2026-03-17T00:00:00Z - S149 - EPUB chapter rendering viewer with styled HTML, spine navigation, and SelectionActionBar
+- Implemented: EpubService (sanitize_html, get_toc, get_chapter, compute_chapter_section_ids) with bleach+BeautifulSoup sanitization; GET /documents/{id}/epub/toc and GET /documents/{id}/epub/chapter/{n} endpoints; EPUBViewer.tsx two-column component with TOC panel + prose-styled chapter HTML; Book View tab in DocumentReader (format='epub' only, lazy-mounted)
+- Files changed: backend/app/services/epub_service.py (new), backend/app/routers/documents.py, frontend/src/components/reader/EPUBViewer.tsx (new), frontend/src/components/reader/DocumentReader.tsx, backend/tests/test_s149_epub_viewer.py (new), scripts/smoke/S149.sh (new), backend/pyproject.toml (bleach, beautifulsoup4)
+- AC verified:
+  - bleach added via uv add bleach; ruff clean: PASS
+  - GET /documents/{id}/epub/toc returns [{chapter_index, title, word_count}]: PASS
+  - GET /documents/{id}/epub/chapter/{n} returns {html, chapter_title, word_count, section_ids}: PASS
+  - Unit test: sanitizer strips <script> and on* attrs; keeps <table>, <code>, <em>, <pre>: PASS
+  - Unit test: GET toc for 3-chapter EPUB fixture returns 3 entries: PASS
+  - EPUBViewer.tsx created with dangerouslySetInnerHTML + prose classes: PASS
+  - Book View tab only for format='epub': PASS
+  - TOC panel with active chapter highlighted; click navigates: PASS
+  - Prev/next buttons with boundary guards: PASS
+  - SelectionActionBar fires via readerContainerRef bubbling: PASS
+  - Loading state: Skeleton lines in right panel: PASS
+  - Error state: inline message with retry button: PASS
+  - tsc --noEmit, ruff check, pytest all pass: PASS
+  - scripts/smoke/S149.sh written (not server-verified): PASS
+- Reviewer verdict: PASS (no Critical items; High item fixed inline: asyncio.get_event_loop() -> get_running_loop())
+- Learnings:
+  - ebooklib EpubNav items appear in get_items_of_type(ITEM_DOCUMENT) — must isinstance-check to skip them, otherwise the nav HTML appears as an extra chapter
+  - @tailwindcss/typography is installed but scroll-area shadcn component is not — use plain overflow-auto divs
+  - bleach.clean() requires _ALLOWED_ATTRIBUTES as dict[str, list[str]], not callable, for simple per-tag attribute lists
+---
