@@ -5,7 +5,7 @@ import logging
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -30,6 +30,7 @@ from app.models import (
     MisconceptionModel,
     NoteModel,
     QAHistoryModel,
+    ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
     StudySessionModel,
@@ -1074,6 +1075,9 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                     delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
                 )
             await session.execute(
+                delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
+            )
+            await session.execute(
                 delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
             )
             await session.delete(doc)
@@ -1177,6 +1181,9 @@ async def delete_document(document_id: str):
             await session.execute(
                 delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
             )
+        await session.execute(
+            delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
+        )
         await session.execute(
             delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
         )
@@ -1505,4 +1512,104 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
         covered_objectives=data["covered_objectives"],
         progress_pct=data["progress_pct"],
         by_chapter=[ChapterProgressItem(**ch) for ch in data["by_chapter"]],
+    )
+
+
+# ---------------------------------------------------------------------------
+# S152: Reading position persistence -- resume-where-you-left-off
+# ---------------------------------------------------------------------------
+
+
+class SavePositionRequest(BaseModel):
+    last_section_id: str | None = None
+    last_section_heading: str | None = None
+    last_pdf_page: int | None = None
+    last_epub_chapter_index: int | None = None
+
+
+class ReadingPositionResponse(BaseModel):
+    document_id: str
+    last_section_id: str | None
+    last_section_heading: str | None
+    last_pdf_page: int | None
+    last_epub_chapter_index: int | None
+
+
+@router.post("/{document_id}/position", response_model=ReadingPositionResponse, status_code=200)
+async def save_reading_position(
+    document_id: str, body: SavePositionRequest
+) -> ReadingPositionResponse:
+    """Upsert the last reading position for a document.
+
+    Uses document_id as the primary key -- a second call updates the existing row
+    rather than inserting a duplicate.
+    Returns 404 if the document does not exist.
+    """
+    async with get_session_factory()() as session:
+        doc_check = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        result = await session.execute(
+            select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
+        )
+        row = result.scalar_one_or_none()
+        now = datetime.now(UTC)
+        if row is None:
+            row = ReadingPositionModel(
+                document_id=document_id,
+                last_section_id=body.last_section_id,
+                last_section_heading=body.last_section_heading,
+                last_pdf_page=body.last_pdf_page,
+                last_epub_chapter_index=body.last_epub_chapter_index,
+                updated_at=now,
+            )
+            session.add(row)
+        else:
+            row.last_section_id = body.last_section_id
+            row.last_section_heading = body.last_section_heading
+            row.last_pdf_page = body.last_pdf_page
+            row.last_epub_chapter_index = body.last_epub_chapter_index
+            row.updated_at = now
+        await session.commit()
+        await session.refresh(row)
+
+    return ReadingPositionResponse(
+        document_id=row.document_id,
+        last_section_id=row.last_section_id,
+        last_section_heading=row.last_section_heading,
+        last_pdf_page=row.last_pdf_page,
+        last_epub_chapter_index=row.last_epub_chapter_index,
+    )
+
+
+@router.get("/{document_id}/position", response_model=ReadingPositionResponse)
+async def get_reading_position(document_id: str) -> ReadingPositionResponse:
+    """Return the last saved reading position for a document.
+
+    Returns 404 if the document does not exist or has no saved position yet.
+    """
+    async with get_session_factory()() as session:
+        doc_check = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        result = await session.execute(
+            select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
+        )
+        row = result.scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="No reading position saved for this document")
+
+    return ReadingPositionResponse(
+        document_id=row.document_id,
+        last_section_id=row.last_section_id,
+        last_section_heading=row.last_section_heading,
+        last_pdf_page=row.last_pdf_page,
+        last_epub_chapter_index=row.last_epub_chapter_index,
     )

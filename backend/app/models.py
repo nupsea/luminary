@@ -528,6 +528,29 @@ class ClipModel(Base):
     )
 
 
+class ReadingPositionModel(Base):
+    """Stores the last reading position per document — one row per document (PK = document_id).
+
+    last_section_id and last_section_heading record the section visible when the user last read.
+    last_pdf_page is set only for PDF documents; last_epub_chapter_index only for EPUB.
+    updated_at is refreshed on every upsert so the banner can show a relative timestamp.
+
+    Note: any new delete path in documents.py must also delete these rows
+    (no FK CASCADE in SQLite without pragma enforcement).
+    """
+
+    __tablename__ = "reading_positions"
+
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    last_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    last_pdf_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_epub_chapter_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 

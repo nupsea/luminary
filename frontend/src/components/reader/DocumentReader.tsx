@@ -1268,6 +1268,55 @@ function sanitizeSnippet(html: string): string {
   return html.replace(/<(?!\/?mark>)[^>]*>/gi, "")
 }
 
+// ---------------------------------------------------------------------------
+// S152: ResumeBanner
+// ---------------------------------------------------------------------------
+
+interface ReadingPosition {
+  document_id: string
+  last_section_id: string | null
+  last_section_heading: string | null
+  last_pdf_page: number | null
+  last_epub_chapter_index: number | null
+}
+
+interface ResumeBannerProps {
+  position: ReadingPosition
+  onResume: () => void
+  onDismiss: () => void
+}
+
+function ResumeBanner({ position, onResume, onDismiss }: ResumeBannerProps) {
+  const label = position.last_section_heading ?? "your last position"
+  const pageInfo =
+    position.last_pdf_page != null
+      ? ` (page ${position.last_pdf_page})`
+      : position.last_epub_chapter_index != null
+        ? ` (chapter ${position.last_epub_chapter_index + 1})`
+        : ""
+
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-4 py-2 text-xs">
+      <span className="flex-1 text-muted-foreground">
+        Resume at <span className="font-medium text-foreground">{label}</span>{pageInfo}?
+      </span>
+      <button
+        onClick={onResume}
+        className="rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+      >
+        Resume
+      </button>
+      <button
+        onClick={onDismiss}
+        className="text-muted-foreground hover:text-foreground"
+        aria-label="Dismiss"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  )
+}
+
 interface InDocSearchBarProps {
   documentId: string
   onResults: (results: DocumentSectionSearchResult[]) => void
@@ -1424,6 +1473,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
   const [searchHitIndex, setSearchHitIndex] = useState(0)
+
+  // S152: reading position — resume banner
+  const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
+  // ref tracking the last section_id we POSTed so we only POST when it changes
+  const lastPostedSectionRef = useRef<string | null>(null)
+  // throttle timer: one POST per 10 seconds max
+  const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // S147: SelectionActionBar dialog state
   const [selectionNoteOpen, setSelectionNoteOpen] = useState(false)
@@ -1626,6 +1682,99 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   // Track reading progress via IntersectionObserver (3-second dwell per section)
   useReadingProgress(documentId, doc?.sections.length ?? 0)
 
+  // S152: fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
+  useEffect(() => {
+    if (!doc) return
+    const dismissedKey = `resume-dismissed-${documentId}`
+    if (sessionStorage.getItem(dismissedKey)) return
+    void fetch(`${API_BASE}/documents/${documentId}/position`)
+      .then((r) => {
+        if (r.status === 404) return null
+        if (!r.ok) return null
+        return r.json() as Promise<ReadingPosition>
+      })
+      .then((pos) => {
+        if (pos?.last_section_id) setResumePosition(pos)
+      })
+      .catch(() => {
+        // banner failure is silent — reader remains fully functional
+      })
+  }, [documentId, doc])
+
+  // S152: IntersectionObserver — track the topmost visible section and throttle-POST position
+  useEffect(() => {
+    if (!doc || doc.sections.length === 0) return
+    const sectionElements = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-section-id]"),
+    )
+    if (sectionElements.length === 0) return
+
+    function postPosition(sectionId: string) {
+      if (sectionId === lastPostedSectionRef.current) return
+      // throttle: clear any pending timer and set a new one (fire after 10s of no-change)
+      if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
+      positionThrottleRef.current = setTimeout(() => {
+        const section = doc!.sections.find((s) => s.id === sectionId)
+        void fetch(`${API_BASE}/documents/${documentId}/position`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            last_section_id: sectionId,
+            last_section_heading: section?.heading ?? null,
+            last_pdf_page: null,
+            last_epub_chapter_index: null,
+          }),
+        }).catch(() => {
+          // best-effort; ignore network errors silently
+        })
+        lastPostedSectionRef.current = sectionId
+      }, 10_000)
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // find the topmost intersecting section
+        let topmost: HTMLElement | null = null
+        let topmostTop = Infinity
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const top = entry.boundingClientRect.top
+            if (top < topmostTop) {
+              topmostTop = top
+              topmost = entry.target as HTMLElement
+            }
+          }
+        }
+        if (topmost?.dataset.sectionId) {
+          postPosition(topmost.dataset.sectionId)
+        }
+      },
+      { threshold: 0.2 },
+    )
+
+    for (const el of sectionElements) observer.observe(el)
+    return () => {
+      observer.disconnect()
+      if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, doc?.sections.length])
+
+  // S152: resume — scroll to last_section_id and dismiss banner
+  function handleResume() {
+    if (!resumePosition?.last_section_id) return
+    const el = document.querySelector(`[data-section-id="${CSS.escape(resumePosition.last_section_id)}"]`)
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+    setResumePosition(null)
+    sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
+  }
+
+  // S152: start over — dismiss banner without scrolling, store in sessionStorage
+  function handleDismissResume() {
+    setResumePosition(null)
+    sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
+  }
+
   // S146: mark PDF view visited for lazy mounting; guard against pdfview on non-PDF docs
   // S149: mark Book View visited for lazy mounting; guard against bookview on non-EPUB docs
   useEffect(() => {
@@ -1798,6 +1947,15 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
               <IngestionHealthPanel documentId={documentId} stage={doc.stage} />
             </div>
           </div>
+
+          {/* S152: Resume banner — shown once per session when a saved position exists */}
+          {resumePosition && (
+            <ResumeBanner
+              position={resumePosition}
+              onResume={handleResume}
+              onDismiss={handleDismissResume}
+            />
+          )}
 
           {/* Left panel tab bar — Sections / Highlights / PDF View (PDF only) / Book View (EPUB only) */}
           <div className="flex border-b border-border">
