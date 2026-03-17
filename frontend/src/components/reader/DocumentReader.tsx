@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
 
 import { API_BASE } from "@/lib/config"
+import { useDebounce } from "@/hooks/useDebounce"
 
 // ---------------------------------------------------------------------------
 // FSRS fragility heatmap (S116)
@@ -612,9 +613,20 @@ interface SectionPreviewProps {
   preview: string
   annotations: AnnotationItem[]
   sectionId: string
+  searchSnippet?: string
 }
 
-function SectionPreviewWithHighlights({ preview, annotations, sectionId }: SectionPreviewProps) {
+function SectionPreviewWithHighlights({ preview, annotations, sectionId, searchSnippet }: SectionPreviewProps) {
+  // S151: render FTS5 snippet with <mark> tags when a search hit exists for this section
+  if (searchSnippet) {
+    return (
+      <p
+        className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: sanitizeSnippet(searchSnippet) }}
+      />
+    )
+  }
   const sectionAnnotations = annotations
     .filter((a) => a.section_id === sectionId)
     .sort((a, b) => a.start_offset - b.start_offset)
@@ -1237,6 +1249,145 @@ function PredictPanel({ sectionId: _sectionId, documentId, preview }: PredictPan
 }
 
 // ---------------------------------------------------------------------------
+// S151: In-document Cmd+F search
+// ---------------------------------------------------------------------------
+
+interface DocumentSectionSearchResult {
+  section_id: string
+  section_heading: string
+  match_count: number
+  snippet: string
+}
+
+// Allow only bare <mark> and </mark> tags in snippet HTML to prevent XSS from
+// user-uploaded content. FTS5 snippet() always produces plain <mark>/<\/mark>
+// with no attributes, so the strict match is safe and closes the attribute-injection
+// bypass present in a lookahead-only approach (e.g. <mark onmouseover="...">) .
+function sanitizeSnippet(html: string): string {
+  // Strip every HTML tag that is not an exact bare <mark> or </mark>
+  return html.replace(/<(?!\/?mark>)[^>]*>/gi, "")
+}
+
+interface InDocSearchBarProps {
+  documentId: string
+  onResults: (results: DocumentSectionSearchResult[]) => void
+  onClose: () => void
+  hitIndex: number
+  totalHits: number
+  onPrev: () => void
+  onNext: () => void
+}
+
+function InDocSearchBar({
+  documentId,
+  onResults,
+  onClose,
+  hitIndex,
+  totalHits,
+  onPrev,
+  onNext,
+}: InDocSearchBarProps) {
+  const [inputValue, setInputValue] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const debouncedQuery = useDebounce(inputValue, 300)
+
+  // Autofocus on mount
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  // Fetch results when debounced query changes
+  useEffect(() => {
+    if (!debouncedQuery.trim()) {
+      onResults([])
+      setError(null)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/documents/${encodeURIComponent(documentId)}/search?q=${encodeURIComponent(debouncedQuery)}`,
+        )
+        if (!res.ok) {
+          setError("Search failed")
+          onResults([])
+        } else {
+          const data = (await res.json()) as DocumentSectionSearchResult[]
+          onResults(data)
+        }
+      } catch {
+        setError("Search failed")
+        onResults([])
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [debouncedQuery, documentId, onResults])
+
+  return (
+    <div className="mb-3 flex flex-col gap-1">
+      <div className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1">
+        {loading ? (
+          <Loader2 size={12} className="shrink-0 animate-spin text-muted-foreground" />
+        ) : (
+          <Search size={12} className="shrink-0 text-muted-foreground" />
+        )}
+        <input
+          ref={inputRef}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          placeholder="Search in document..."
+          className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+        {totalHits > 0 && (
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {hitIndex + 1} of {totalHits}
+          </span>
+        )}
+        {totalHits > 0 && (
+          <>
+            <button
+              onClick={onPrev}
+              title="Previous match"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label="Previous match"
+            >
+              <ChevronUp size={12} />
+            </button>
+            <button
+              onClick={onNext}
+              title="Next match"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label="Next match"
+            >
+              <ChevronDown size={12} />
+            </button>
+          </>
+        )}
+        <button
+          onClick={onClose}
+          title="Close search"
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          aria-label="Close search"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
+      {!loading && !error && debouncedQuery.trim() && totalHits === 0 && (
+        <p className="text-xs text-muted-foreground">No matches in this document</p>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // DocumentReader
 // ---------------------------------------------------------------------------
 
@@ -1269,6 +1420,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
+  // S151: in-document Cmd+F search state
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
+  const [searchHitIndex, setSearchHitIndex] = useState(0)
+
   // S147: SelectionActionBar dialog state
   const [selectionNoteOpen, setSelectionNoteOpen] = useState(false)
   const [selectionNoteText, setSelectionNoteText] = useState("")
@@ -1391,6 +1547,56 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     () => new Map((progressData?.by_chapter ?? []).map((c) => [c.section_id, c.progress_pct])),
     [progressData],
   )
+
+  // S151: derived set of section IDs that have a search hit (O(1) lookup)
+  const searchHitSectionIds = useMemo(
+    () => new Set(searchResults.map((r) => r.section_id)),
+    [searchResults],
+  )
+
+  // S151: Cmd+F / Ctrl+F keydown listener — opens inline search bar
+  useEffect(() => {
+    function handleCmdF(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener("keydown", handleCmdF)
+    return () => document.removeEventListener("keydown", handleCmdF)
+  }, [])
+
+  // S151: Escape closes the search bar when it is open
+  useEffect(() => {
+    if (!searchOpen) return
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setSearchOpen(false)
+        setSearchResults([])
+        setSearchHitIndex(0)
+      }
+    }
+    document.addEventListener("keydown", handleEsc)
+    return () => document.removeEventListener("keydown", handleEsc)
+  }, [searchOpen])
+
+  // S151: close search bar when switching away from the sections tab
+  useEffect(() => {
+    if (leftTab !== "sections" && searchOpen) {
+      setSearchOpen(false)
+      setSearchResults([])
+      setSearchHitIndex(0)
+    }
+  }, [leftTab, searchOpen])
+
+  // S151: scroll current hit into view when hitIndex or results change
+  useEffect(() => {
+    if (searchResults.length === 0) return
+    const targetId = searchResults[searchHitIndex]?.section_id
+    if (!targetId) return
+    const el = document.querySelector(`[data-section-id="${CSS.escape(targetId)}"]`)
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  }, [searchHitIndex, searchResults])
 
   function handleStudyClick(sid: string) {
     setActiveDocument(documentId)
@@ -1671,6 +1877,31 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                   </p>
                 )}
                 <div className="px-6 pt-3">
+                  {/* S151: Inline search bar — shown when Cmd+F is pressed */}
+                  {searchOpen && (
+                    <InDocSearchBar
+                      documentId={documentId}
+                      onResults={(results) => {
+                        setSearchResults(results)
+                        setSearchHitIndex(0)
+                      }}
+                      onClose={() => {
+                        setSearchOpen(false)
+                        setSearchResults([])
+                        setSearchHitIndex(0)
+                      }}
+                      hitIndex={searchHitIndex}
+                      totalHits={searchResults.length}
+                      onPrev={() =>
+                        setSearchHitIndex((i) =>
+                          (i - 1 + searchResults.length) % searchResults.length,
+                        )
+                      }
+                      onNext={() =>
+                        setSearchHitIndex((i) => (i + 1) % searchResults.length)
+                      }
+                    />
+                  )}
                   {doc.sections.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No sections detected.</p>
                   ) : (
@@ -1695,7 +1926,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                             key={section.id}
                             data-section-id={section.id}
                             title={tooltipText}
-                            className={cn("rounded-md border border-border p-3", sectionBorderClass)}
+                            className={cn(
+                              "rounded-md border border-border p-3",
+                              sectionBorderClass,
+                              searchHitSectionIds.has(section.id) && "ring-2 ring-primary",
+                            )}
                           >
                             <div className="flex items-start gap-1">
                               <p
@@ -1776,6 +2011,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                                 preview={section.preview}
                                 annotations={docAnnotations ?? []}
                                 sectionId={section.id}
+                                searchSnippet={
+                                  searchResults.find((r) => r.section_id === section.id)?.snippet
+                                }
                               />
                             )}
                             {/* Predict toggle — only for sections whose preview contains a code fence (S140) */}

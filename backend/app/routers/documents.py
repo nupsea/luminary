@@ -217,6 +217,14 @@ class EpubChapterResponse(BaseModel):
     section_ids: list[str]
 
 
+# S151: in-document FTS5 search response model
+class DocumentSectionSearchResult(BaseModel):
+    section_id: str
+    section_heading: str
+    match_count: int
+    snippet: str  # FTS5 snippet() output with <mark> tags wrapping matched terms
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -1273,6 +1281,45 @@ async def get_document_diagnostics(document_id: str):
         edge_count=edge_count,
         vector_count=vector_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# S151: In-document FTS5 search endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{document_id}/search", response_model=list[DocumentSectionSearchResult])
+async def search_document_sections(
+    document_id: str,
+    q: str = Query(default="", min_length=0),
+) -> list[DocumentSectionSearchResult]:
+    """FTS5 keyword search scoped to a single document.
+
+    Returns up to 50 section-level results ordered by match count desc.
+    Returns [] for empty/whitespace-only query (not an error).
+    Returns 404 if document does not exist.
+    """
+    from app.services.document_search import get_document_search_service  # noqa: PLC0415
+
+    if not q or not q.strip():
+        return []
+
+    async with get_session_factory()() as session:
+        doc_check = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.id == document_id)
+        )
+        if doc_check.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+    svc = get_document_search_service()
+    results = await svc.search(document_id, q, limit=50)
+    logger.info(
+        "Document search: doc=%s query=%r hits=%d",
+        document_id,
+        q[:50],
+        len(results),
+    )
+    return [DocumentSectionSearchResult(**r) for r in results]
 
 
 @router.get("/{document_id}/conversation")
