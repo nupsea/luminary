@@ -17,6 +17,7 @@ import { NoteCreationDialog } from "./NoteCreationDialog"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer } from "./PDFViewer"
+import { EPUBViewer } from "./EPUBViewer"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -1258,9 +1259,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview">("sections")
+  const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview" | "bookview">("sections")
   // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
   const [pdfViewVisited, setPdfViewVisited] = useState(false)
+  // S149: tracks whether the Book View tab has been visited at least once (lazy-mount)
+  const [bookViewVisited, setBookViewVisited] = useState(false)
   // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
@@ -1417,12 +1420,19 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   useReadingProgress(documentId, doc?.sections.length ?? 0)
 
   // S146: mark PDF view visited for lazy mounting; guard against pdfview on non-PDF docs
+  // S149: mark Book View visited for lazy mounting; guard against bookview on non-EPUB docs
   useEffect(() => {
     if (leftTab === "pdfview") {
       if (doc?.format !== "pdf") {
         setLeftTab("sections")
       } else {
         setPdfViewVisited(true)
+      }
+    } else if (leftTab === "bookview") {
+      if (doc?.format !== "epub") {
+        setLeftTab("sections")
+      } else {
+        setBookViewVisited(true)
       }
     }
   }, [leftTab, doc?.format])
@@ -1559,11 +1569,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             </div>
           </div>
 
-          {/* Left panel tab bar — Sections / Highlights / PDF View (PDF only) */}
+          {/* Left panel tab bar — Sections / Highlights / PDF View (PDF only) / Book View (EPUB only) */}
           <div className="flex border-b border-border">
             {(doc.format === "pdf"
               ? (["sections", "highlights", "pdfview"] as const)
-              : (["sections", "highlights"] as const)
+              : doc.format === "epub"
+                ? (["sections", "highlights", "bookview"] as const)
+                : (["sections", "highlights"] as const)
             ).map((tab) => (
               <button
                 key={tab}
@@ -1579,7 +1591,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                   ? `Highlights${(docAnnotations ?? []).length > 0 ? ` (${(docAnnotations ?? []).length})` : ""}`
                   : tab === "pdfview"
                     ? "PDF View"
-                    : "Sections"}
+                    : tab === "bookview"
+                      ? "Book View"
+                      : "Sections"}
               </button>
             ))}
           </div>
@@ -1588,6 +1602,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           {doc.format === "pdf" && pdfViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
               <PDFViewer documentId={documentId} sections={doc.sections} initialPage={initialPage} />
+            </div>
+          )}
+
+          {/* S149: Book View — lazy-mounted for EPUB documents */}
+          {doc.format === "epub" && bookViewVisited && (
+            <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
+              <EPUBViewer documentId={documentId} />
             </div>
           )}
 
@@ -1607,7 +1628,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             ref={sectionListRef}
             className={cn(
               "relative flex-1 overflow-auto pb-6",
-              leftTab === "pdfview" && "hidden",
+              (leftTab === "pdfview" || leftTab === "bookview") && "hidden",
             )}
           >
             {leftTab === "highlights" ? (

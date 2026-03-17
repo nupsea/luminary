@@ -6,6 +6,8 @@ requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "arize-phoenix>=13.3.0",
+    "beautifulsoup4>=4.14.3",
+    "bleach>=6.3.0",
     "chardet>=6.0.0.post1",
     "ebooklib>=0.20",
     "fastapi>=0.132.0",

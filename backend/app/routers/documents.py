@@ -197,6 +197,25 @@ class PDFMetaResponse(BaseModel):
     has_toc: bool
 
 
+class EpubChapterTocItem(BaseModel):
+    chapter_index: int
+    title: str
+    word_count: int
+
+
+class EpubTocResponse(BaseModel):
+    document_id: str
+    chapters: list[EpubChapterTocItem]
+
+
+class EpubChapterResponse(BaseModel):
+    chapter_index: int
+    chapter_title: str
+    html: str
+    word_count: int
+    section_ids: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -890,6 +909,121 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     return PDFMetaResponse(
         page_count=doc.page_count,
         has_toc=section_count > 0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# S149: EPUB chapter viewer endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{document_id}/epub/toc", response_model=EpubTocResponse)
+async def get_epub_toc(document_id: str) -> EpubTocResponse:
+    """Return the chapter table-of-contents for an EPUB document.
+
+    Returns 404 if the document does not exist.
+    Returns 400 if the document is not an EPUB (format != 'epub').
+    Returns 404 if the raw EPUB file is not found on disk.
+    """
+    from app.services.epub_service import get_toc_async  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.format.lower() != "epub":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document is not an EPUB (format={doc.format})",
+        )
+    fp = Path(doc.file_path)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="EPUB file not found on disk")
+
+    try:
+        chapters = await get_toc_async(str(fp))
+    except Exception as exc:
+        logger.error("EPUB TOC extraction failed for %s: %s", document_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read EPUB table of contents: {exc}",
+        ) from exc
+
+    return EpubTocResponse(
+        document_id=document_id,
+        chapters=[EpubChapterTocItem(**ch) for ch in chapters],
+    )
+
+
+@router.get("/{document_id}/epub/chapter/{chapter_index}", response_model=EpubChapterResponse)
+async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterResponse:
+    """Return sanitized HTML for a single EPUB chapter.
+
+    Returns 404 if the document does not exist or file is missing.
+    Returns 400 if the document is not an EPUB.
+    Returns 404 if chapter_index is out of range.
+    """
+    from app.services.epub_service import get_chapter_async, get_epub_service  # noqa: PLC0415
+
+    if chapter_index < 0:
+        raise HTTPException(status_code=400, detail="chapter_index must be >= 0")
+
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.format.lower() != "epub":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document is not an EPUB (format={doc.format})",
+            )
+        fp = Path(doc.file_path)
+        if not fp.exists():
+            raise HTTPException(status_code=404, detail="EPUB file not found on disk")
+
+        # Fetch all section IDs ordered by section_order for proportional assignment
+        sections_result = await session.execute(
+            select(SectionModel.id)
+            .where(SectionModel.document_id == document_id)
+            .order_by(SectionModel.section_order)
+        )
+        all_section_ids = [row[0] for row in sections_result.all()]
+
+    # Compute total chapters first (needed to slice sections)
+    try:
+        from app.services.epub_service import get_toc_async as _get_toc  # noqa: PLC0415
+        toc = await _get_toc(str(fp))
+        total_chapters = len(toc)
+    except Exception:
+        total_chapters = max(1, len(all_section_ids))
+
+    section_ids = get_epub_service().compute_chapter_section_ids(
+        all_section_ids, chapter_index, total_chapters
+    )
+
+    try:
+        chapter = await get_chapter_async(str(fp), chapter_index, section_ids)
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("EPUB chapter %d render failed for %s: %s", chapter_index, document_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to render chapter {chapter_index}: {exc}",
+        ) from exc
+
+    return EpubChapterResponse(
+        chapter_index=chapter_index,
+        chapter_title=chapter["chapter_title"],
+        html=chapter["html"],
+        word_count=chapter["word_count"],
+        section_ids=chapter["section_ids"],
     )
 
 
