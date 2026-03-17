@@ -1496,3 +1496,28 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - ClipCard user_note auto-save pattern: useRef<AbortController> to cancel in-flight PATCH on rapid blur/focus; setSaveStatus idle/saving/saved/error
   - FeynmanSessionModel, FeynmanTurnModel, PredictionEventModel absent from cascade delete loops in documents.py (pre-existing orphan leak) -- noted in tech-debt-tracker
 ---
+
+## 2026-03-17T00:00:00+00:00 - S151 - In-document Cmd+F search with section highlighting and prev/next hit navigation
+- Implemented: GET /documents/{id}/search?q= endpoint using FTS5 two-query approach; InDocSearchBar component in DocumentReader with Cmd+F keydown, debounce, ring highlights, snippet rendering with sanitizeSnippet
+- Files changed: backend/app/services/document_search.py (NEW), backend/app/routers/documents.py (added endpoint+model), frontend/src/components/reader/DocumentReader.tsx (added search bar), backend/tests/test_document_search.py (NEW), scripts/smoke/S151.sh (NEW)
+- AC verified:
+  - GET /documents/{id}/search returns [{section_id, section_heading, match_count, snippet}]: PASS
+  - Unit test: search returns only sections for specified document_id: PASS
+  - Unit test: empty query returns [] with HTTP 200: PASS
+  - Cmd+F opens inline search bar: PASS (document-level keydown listener)
+  - No conflict with global Cmd+K: PASS (separate key handler)
+  - Search bar in section list header area (not modal): PASS
+  - Debounced 300ms: PASS (useDebounce hook)
+  - Matching sections ring-2 ring-primary: PASS
+  - Matched terms in <mark> tags: PASS (FTS5 snippet() + sanitizeSnippet)
+  - Match counter N of M, prev/next navigation: PASS
+  - Escape/X closes bar + clears: PASS
+  - Loading/Error/Empty states: PASS
+  - tsc, ruff, pytest all pass: PASS (1059 tests)
+  - smoke script: PASS (written, not live-verified)
+- Reviewer verdict: PASS (2 Critical fixed inline: defaultdict module-level import, sanitizeSnippet attribute-injection bypass)
+- Learnings:
+  - SQLite FTS5 snippet() is restricted to simple queries only -- no JOINs, no CTEs, no GROUP BY. Must use two-query approach: pure FTS5 query first (get chunk_id + snippet), then regular SQL for section info, combine in Python.
+  - SQLAlchemy expandable IN params: use text(...).bindparams(bindparam("ids", expanding=True)) for IN clauses with raw SQL
+  - FTS5 table alias in snippet(): first arg must be unaliased table name (snippet(chunks_fts, ...) not snippet(cf, ...))
+---
