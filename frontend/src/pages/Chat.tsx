@@ -448,7 +448,10 @@ export default function Chat() {
         setScope("single")
       }
       clearChatPreload()
-      setTimeout(() => textareaRef.current?.focus(), 50)
+      setTimeout(() => {
+        textareaRef.current?.focus()
+        autoResize()
+      }, 50)
     }
   }, [chatPreload, clearChatPreload])
 

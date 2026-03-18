@@ -1,6 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
 import * as pdfjsLib from "pdfjs-dist"
+import { TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
+import "pdfjs-dist/web/pdf_viewer.css"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SectionItem } from "./types"
@@ -74,7 +76,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             const naturalVp = page.getViewport({ scale: 1.0 })
             page.cleanup()
             if (scrollAreaRef.current && naturalVp.width > 0) {
-              const available = scrollAreaRef.current.clientWidth - 32 // 2 × p-4
+              const available = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
               if (available > 0) setZoom(available / naturalVp.width)
             }
           } catch {
@@ -107,6 +109,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (!pdfDoc || loadStatus !== "ready") return
 
       let cancelled = false
+      let activeTextLayer: TextLayer | null = null
 
       async function renderPage(
         pageNum: number,
@@ -129,59 +132,34 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           await page.render({ canvasContext: ctx, viewport }).promise
           if (cancelled) return
 
-          // Text layer — manually positioned so spans overlay the canvas exactly.
-          //
-          // We intentionally do NOT use pdfjsLib.TextLayer here. That class calls
-          // setLayerDimensions() which sets width/height via
-          //   calc(var(--scale-factor) * pageWidth)
-          // where --scale-factor is only defined inside .pdfViewer from pdf_viewer.css.
-          // Without it the container collapses to zero width, and spans are positioned
-          // using #scale = viewport.scale * devicePixelRatio which places them outside
-          // the zero-size container on Retina displays. Nothing becomes selectable.
-          //
-          // Instead we use Util.transform(viewport.transform, item.transform) to map
-          // each text item directly into viewport CSS pixel coordinates — no CSS vars,
-          // no DPR confusion.
+          // Official pdfjs TextLayer -- supports proper drag-to-select across spans.
+          // We set --scale-factor CSS var on the container so TextLayer's
+          // setLayerDimensions() can compute width/height correctly.
           if (textLayerDiv) {
+            // Cancel any previous text layer
+            activeTextLayer?.cancel()
+
+            // Clear previous content
+            textLayerDiv.replaceChildren()
+
+            // Set the CSS variable that TextLayer needs for sizing
+            textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
+
+            // Set explicit dimensions as fallback
             textLayerDiv.style.width = `${viewport.width}px`
             textLayerDiv.style.height = `${viewport.height}px`
-            textLayerDiv.replaceChildren()
 
             const textContent = await page.getTextContent()
             if (cancelled) return
 
-            const fragment = document.createDocumentFragment()
-            for (const item of textContent.items) {
-              // TextMarkedContent items have no str/transform — skip them
-              if (!("str" in item) || !item.str) continue
+            const tl = new TextLayer({
+              textContentSource: textContent,
+              container: textLayerDiv,
+              viewport,
+            })
+            activeTextLayer = tl
 
-              // Map the item's PDF-coordinate transform into viewport CSS pixels
-              const [a, b, c, d, tx, ty] = pdfjsLib.Util.transform(
-                viewport.transform,
-                item.transform,
-              )
-              const fontHeight = Math.sqrt(c * c + d * d)
-              const fontWidth  = Math.sqrt(a * a + b * b)
-              if (fontHeight <= 0) continue
-
-              const span = document.createElement("span")
-              span.textContent = item.str
-
-              // Position baseline at (tx, ty); shift up by fontHeight for the top edge.
-              // scaleX stretches the span to match the rendered glyph width.
-              const scaleX = item.width > 0 ? (item.width * viewport.scale) / fontWidth : 1
-              span.style.cssText =
-                `position:absolute;` +
-                `left:${tx}px;` +
-                `top:${ty - fontHeight}px;` +
-                `font-size:${fontHeight}px;` +
-                `transform:scaleX(${scaleX});` +
-                `transform-origin:0 0;` +
-                `white-space:pre;`
-
-              fragment.appendChild(span)
-            }
-            textLayerDiv.appendChild(fragment)
+            await tl.render()
           }
         } finally {
           page?.cleanup()
@@ -193,7 +171,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         void renderPage(currentPage + 1, nextCanvasRef.current, null)
       }
 
-      return () => { cancelled = true }
+      return () => {
+        cancelled = true
+        activeTextLayer?.cancel()
+      }
     }, [pdfDoc, currentPage, zoom, totalPages, loadStatus])
 
     function goToPage(n: number) {
@@ -247,9 +228,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           {sections.length === 0 ? (
             <p className="text-xs text-muted-foreground px-1">No sections</p>
           ) : (() => {
-            // Sections have page numbers only when the PDF parser captured them.
-            // When all page_start values are 0 the backend didn't map section→page,
-            // so we render a non-interactive outline instead of broken navigation.
             const hasPageNums = sections.some((s) => s.page_start > 0)
             return (
               <ul className="space-y-0.5">
@@ -331,15 +309,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             </div>
           </div>
 
-          {/* Canvas scroll area — PDF centered, full available width */}
+          {/* Canvas scroll area */}
           <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4">
             <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
-              {/* Canvas is purely visual — pointer-events:none so the text layer above
-                  receives all mouse events (clicks, drag-to-select) unimpeded. */}
+              {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
               <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
-              {/* Text layer: transparent spans overlay the canvas; z-index ensures it's
-                  on top even if browser stacking order varies. user-select:text from CSS. */}
-              <div ref={textLayerRef} className="pdf-text-layer" style={{ zIndex: 2 }} />
+              {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
+                  and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
+              <div ref={textLayerRef} className="textLayer" />
             </div>
             <canvas ref={nextCanvasRef} className="hidden" />
           </div>

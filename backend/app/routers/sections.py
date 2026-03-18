@@ -91,17 +91,21 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
 
         chunks_result = await session.execute(
             select(ChunkModel)
-            .where(ChunkModel.document_id == document_id, ChunkModel.section_id.isnot(None))
+            .where(ChunkModel.document_id == document_id)
             .order_by(ChunkModel.section_id, ChunkModel.chunk_index)
         )
         chunks = chunks_result.scalars().all()
 
-    # Group chunks by section_id
+    # Group chunks by section_id; orphan chunks (section_id=None) go into a separate list
     chunks_by_section: dict[str, list[str]] = {}
+    orphan_chunks: list[str] = []
     for c in chunks:
-        chunks_by_section.setdefault(c.section_id, []).append(c.text)
+        if c.section_id:
+            chunks_by_section.setdefault(c.section_id, []).append(c.text)
+        else:
+            orphan_chunks.append(c.text)
 
-    return [
+    result = [
         SectionContentItem(
             section_id=s.id,
             heading=s.heading,
@@ -111,3 +115,14 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
         )
         for s in sections
     ]
+
+    # If all sections ended up empty (chunks lacked section_id mapping),
+    # distribute orphan chunks evenly across sections as a best-effort fallback.
+    if orphan_chunks and all(not r.content for r in result) and result:
+        per_section = max(1, len(orphan_chunks) // len(result))
+        for i, item in enumerate(result):
+            start = i * per_section
+            end = start + per_section if i < len(result) - 1 else len(orphan_chunks)
+            item.content = "\n\n".join(orphan_chunks[start:end])
+
+    return result

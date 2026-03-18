@@ -61,27 +61,11 @@
   }
 }
 
-/* PDF text layer — invisible but fully selectable, overlaid on the canvas.
-   Spans are positioned absolutely by pdfjs TextLayer; color:transparent keeps
-   the canvas render visible while the text layer captures selection events. */
-.pdf-text-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  overflow: hidden;
-  line-height: 1;
-  user-select: text;
+/* PDF text layer uses the official pdfjs .textLayer class from pdf_viewer.css.
+   We only need to ensure pointer-events so the layer captures selection. */
+.textLayer {
   pointer-events: auto;
-}
-.pdf-text-layer span,
-.pdf-text-layer br {
-  color: transparent;
-  position: absolute;
-  white-space: pre;
-  cursor: text;
-  transform-origin: 0% 0%;
   user-select: text;
-  pointer-events: auto;
 }
 
 @keyframes loading-bar {

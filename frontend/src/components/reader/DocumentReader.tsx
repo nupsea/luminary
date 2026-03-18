@@ -1861,8 +1861,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
         }),
       })
       void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
+      toast.success("Highlighted")
     } catch {
-      // best-effort highlight; user can retry via Highlights tab
+      toast.error("Failed to save highlight")
     }
   }
 
@@ -2012,7 +2013,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           {/* Read View — full document content as markdown */}
           {leftTab === "read" && (
             <div className="flex-1 overflow-hidden">
-              <ReadView documentId={documentId} initialSectionId={readSectionId} />
+              <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} />
             </div>
           )}
 

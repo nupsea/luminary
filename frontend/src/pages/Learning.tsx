@@ -634,15 +634,19 @@ export default function Learning() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const tagFilter = searchParams.get("tag")
-  const initialSectionId = searchParams.get("section_id") ?? undefined
   // S148: citation deep-link params — doc opens DocumentReader, page sets initial PDF page
+  // Capture into state so they survive URL param cleanup (params are cleared after first use
+  // but DocumentReader needs them after its async doc fetch completes).
   const docParam = searchParams.get("doc")
-  const initialPageParam = (() => {
+  const [savedSectionId, setSavedSectionId] = useState<string | undefined>(
+    searchParams.get("section_id") ?? undefined,
+  )
+  const [savedPage, setSavedPage] = useState<number | undefined>(() => {
     const raw = searchParams.get("page")
     if (!raw) return undefined
     const n = parseInt(raw, 10)
     return isNaN(n) ? undefined : n
-  })()
+  })
 
   const [search, setSearch] = useState("")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
@@ -768,12 +772,19 @@ export default function Learning() {
   // then clear doc/section_id/page params so the Back button and next doc-open work correctly
   useEffect(() => {
     if (docParam) {
+      // Snapshot deep-link params into state before clearing URL
+      const sectionId = searchParams.get("section_id") ?? undefined
+      const rawPage = searchParams.get("page")
+      const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
+      setSavedSectionId(sectionId)
+      setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
+
       setActiveDocument(docParam)
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
         next.delete("doc")
-        next.delete("section_id")  // prevent stale scroll when user opens a different doc
-        next.delete("page")        // prevent stale PDF page when user opens a different doc
+        next.delete("section_id")
+        next.delete("page")
         return next
       })
     }
@@ -798,9 +809,9 @@ export default function Learning() {
         <div className="flex-1 min-h-0">
           <DocumentReader
             documentId={activeDocumentId}
-            onBack={() => setActiveDocument(null)}
-            initialSectionId={initialSectionId}
-            initialPage={initialPageParam}
+            onBack={() => { setActiveDocument(null); setSavedSectionId(undefined); setSavedPage(undefined) }}
+            initialSectionId={savedSectionId}
+            initialPage={savedPage}
           />
         </div>
       </div>
