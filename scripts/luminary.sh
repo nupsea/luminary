@@ -16,7 +16,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 BACKEND_PORT=7820
-FRONTEND_PORT=5173
+FRONTEND_PORT=5173  # default; actual port detected from Vite output below
 
 # ---------------------------------------------------------------------------
 # Start processes — each piped through awk for prefixed, coloured output
@@ -25,7 +25,10 @@ FRONTEND_PORT=5173
     | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 BACKEND_PIPE_PID=$!
 
+# Tee Vite output so we can scrape the actual bound port
+VITE_LOG=$(mktemp)
 (cd "$REPO_ROOT/frontend" && npm run dev 2>&1) \
+    | tee "$VITE_LOG" \
     | awk 'BEGIN{p="\033[0;32m[FRONTEND]\033[0m "}{print p $0; fflush()}' &
 FRONTEND_PIPE_PID=$!
 
@@ -35,6 +38,7 @@ FRONTEND_PIPE_PID=$!
 _stop() {
     kill "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     wait "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
+    rm -f "$VITE_LOG"
     exit 0
 }
 trap _stop INT TERM
@@ -66,7 +70,25 @@ _doc_count() {
 # ---------------------------------------------------------------------------
 # Ready sequence
 # ---------------------------------------------------------------------------
-_info "Waiting for frontend on :${FRONTEND_PORT}..."
+
+# Detect actual Vite port from its output (handles port conflicts where Vite
+# increments to 5174, 5175, etc.)
+_detect_vite_port() {
+    local deadline=$((SECONDS + 30))
+    while [ $SECONDS -lt $deadline ]; do
+        local port
+        port=$(grep -oE 'localhost:[0-9]+' "$VITE_LOG" 2>/dev/null | head -1 | cut -d: -f2)
+        if [ -n "$port" ]; then
+            echo "$port"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "$FRONTEND_PORT"  # fallback to default
+}
+
+_info "Waiting for frontend..."
+FRONTEND_PORT=$(_detect_vite_port)
 _wait_http "http://localhost:${FRONTEND_PORT}" "frontend" 60
 
 # Wait for /documents to return HTTP 200 — this is the true readiness signal.

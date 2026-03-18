@@ -19,6 +19,10 @@
     --muted-foreground: 240 3.8% 46.1%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
     --sidebar: 240 4.8% 95.9%;
     --sidebar-foreground: 240 5.9% 10%;
   }
@@ -37,6 +41,10 @@
     --muted-foreground: 240 5% 64.9%;
     --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
     --sidebar: 240 3.7% 12%;
     --sidebar-foreground: 0 0% 98%;
   }
@@ -51,6 +59,29 @@
     margin: 0;
     font-family: system-ui, -apple-system, sans-serif;
   }
+}
+
+/* PDF text layer — invisible but fully selectable, overlaid on the canvas.
+   Spans are positioned absolutely by pdfjs TextLayer; color:transparent keeps
+   the canvas render visible while the text layer captures selection events. */
+.pdf-text-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  line-height: 1;
+  user-select: text;
+  pointer-events: auto;
+}
+.pdf-text-layer span,
+.pdf-text-layer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+  pointer-events: auto;
 }
 
 @keyframes loading-bar {

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown } from "lucide-react"
+import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -17,8 +17,9 @@ import type { SourceRef } from "./SelectionActionBar"
 import { NoteCreationDialog } from "./NoteCreationDialog"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
-import { PDFViewer } from "./PDFViewer"
+import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { EPUBViewer } from "./EPUBViewer"
+import { ReadView } from "./ReadView"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -1456,11 +1457,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   })
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
+  const pdfViewerRef = useRef<PDFViewerHandle>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview" | "bookview">("sections")
+  const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview" | "bookview" | "read">("sections")
+  const [readSectionId, setReadSectionId] = useState<string | null>(null)
   // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
   const [pdfViewVisited, setPdfViewVisited] = useState(false)
   // S149: tracks whether the Book View tab has been visited at least once (lazy-mount)
@@ -1836,7 +1839,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   }
 
   function handleSelectionAskInChat(text: string, sourceRef: SourceRef) {
-    setChatPreload({ text: `> "${text}"\n\n`, documentId: sourceRef.documentId })
+    setChatPreload({ text: `Regarding this passage:\n> "${text}"\n\nMy question: `, documentId: sourceRef.documentId })
     navigate("/chat")
   }
 
@@ -1932,38 +1935,42 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex w-3/5 flex-col overflow-hidden border-r border-border">
-          {/* Document header */}
-          <div className="px-6 py-4">
-            <h1 className="text-lg font-bold text-foreground">{doc.title}</h1>
-            <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-              <Icon size={14} />
-              <span className="capitalize">{doc.content_type}</span>
-              <span>·</span>
-              <span>{formatWordCount(doc.word_count)}</span>
-              <span>·</span>
-              <span>{relativeDate(doc.created_at)}</span>
-            </div>
-            <div className="mt-3">
-              <IngestionHealthPanel documentId={documentId} stage={doc.stage} />
-            </div>
-          </div>
+          {/* Document header — hidden in PDF/Book view to maximise canvas area */}
+          {leftTab !== "pdfview" && leftTab !== "bookview" && leftTab !== "read" && (
+            <>
+              <div className="px-6 py-4">
+                <h1 className="text-lg font-bold text-foreground">{doc.title}</h1>
+                <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Icon size={14} />
+                  <span className="capitalize">{doc.content_type}</span>
+                  <span>·</span>
+                  <span>{formatWordCount(doc.word_count)}</span>
+                  <span>·</span>
+                  <span>{relativeDate(doc.created_at)}</span>
+                </div>
+                <div className="mt-3">
+                  <IngestionHealthPanel documentId={documentId} stage={doc.stage} />
+                </div>
+              </div>
 
-          {/* S152: Resume banner — shown once per session when a saved position exists */}
-          {resumePosition && (
-            <ResumeBanner
-              position={resumePosition}
-              onResume={handleResume}
-              onDismiss={handleDismissResume}
-            />
+              {/* S152: Resume banner — shown once per session when a saved position exists */}
+              {resumePosition && (
+                <ResumeBanner
+                  position={resumePosition}
+                  onResume={handleResume}
+                  onDismiss={handleDismissResume}
+                />
+              )}
+            </>
           )}
 
           {/* Left panel tab bar — Sections / Highlights / PDF View (PDF only) / Book View (EPUB only) */}
           <div className="flex border-b border-border">
             {(doc.format === "pdf"
-              ? (["sections", "highlights", "pdfview"] as const)
+              ? (["sections", "highlights", "read", "pdfview"] as const)
               : doc.format === "epub"
-                ? (["sections", "highlights", "bookview"] as const)
-                : (["sections", "highlights"] as const)
+                ? (["sections", "highlights", "read", "bookview"] as const)
+                : (["sections", "highlights", "read"] as const)
             ).map((tab) => (
               <button
                 key={tab}
@@ -1981,7 +1988,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                     ? "PDF View"
                     : tab === "bookview"
                       ? "Book View"
-                      : "Sections"}
+                      : tab === "read"
+                        ? "Read"
+                        : "Sections"}
               </button>
             ))}
           </div>
@@ -1989,7 +1998,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-              <PDFViewer documentId={documentId} sections={doc.sections} initialPage={initialPage} />
+              <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={initialPage} />
             </div>
           )}
 
@@ -1997,6 +2006,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           {doc.format === "epub" && bookViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer documentId={documentId} />
+            </div>
+          )}
+
+          {/* Read View — full document content as markdown */}
+          {leftTab === "read" && (
+            <div className="flex-1 overflow-hidden">
+              <ReadView documentId={documentId} initialSectionId={readSectionId} />
             </div>
           )}
 
@@ -2017,7 +2033,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             ref={sectionListRef}
             className={cn(
               "relative flex-1 overflow-auto pb-6",
-              (leftTab === "pdfview" || leftTab === "bookview") && "hidden",
+              (leftTab === "pdfview" || leftTab === "bookview" || leftTab === "read") && "hidden",
             )}
           >
             {leftTab === "highlights" ? (
@@ -2105,6 +2121,31 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                                 )}
                                 {section.heading || "(Untitled section)"}
                               </p>
+                              {/* Read button — switches to Read tab and scrolls to this section */}
+                              <button
+                                onClick={() => {
+                                  setReadSectionId(section.id)
+                                  setLeftTab("read")
+                                }}
+                                title="Read from this section"
+                                className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+                              >
+                                <BookOpen size={12} />
+                              </button>
+                              {/* PDF page-jump badge — switches to PDF View and navigates to the section's page */}
+                              {doc.format === "pdf" && section.page_start > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setPdfViewVisited(true)
+                                    setLeftTab("pdfview")
+                                    pdfViewerRef.current?.goToPage(section.page_start)
+                                  }}
+                                  title={`Open PDF at page ${section.page_start}`}
+                                  className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  p.{section.page_start}
+                                </button>
+                              )}
                               {/* Timestamp badge — link out for YouTube, seek locally for audio/video */}
                               {mediaStartTime !== null && (
                                 isYouTube && doc?.source_url ? (

@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sections", tags=["sections"])
 
 
+class SectionContentItem(BaseModel):
+    section_id: str
+    heading: str
+    level: int
+    section_order: int
+    content: str
+
+
 class SectionResponse(BaseModel):
     id: str
     heading: str
@@ -62,6 +70,44 @@ async def get_sections(document_id: str) -> list[SectionResponse]:
             has_summary=False,
             admonition_type=s.admonition_type,
             parent_section_id=s.parent_section_id,
+        )
+        for s in sections
+    ]
+
+
+@router.get("/{document_id}/content", response_model=list[SectionContentItem])
+async def get_section_content(document_id: str) -> list[SectionContentItem]:
+    """Return all sections with full text assembled from their chunks."""
+    async with get_session_factory()() as session:
+        sections_result = await session.execute(
+            select(SectionModel)
+            .where(SectionModel.document_id == document_id)
+            .order_by(SectionModel.section_order)
+        )
+        sections = sections_result.scalars().all()
+
+        if not sections:
+            return []
+
+        chunks_result = await session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id, ChunkModel.section_id.isnot(None))
+            .order_by(ChunkModel.section_id, ChunkModel.chunk_index)
+        )
+        chunks = chunks_result.scalars().all()
+
+    # Group chunks by section_id
+    chunks_by_section: dict[str, list[str]] = {}
+    for c in chunks:
+        chunks_by_section.setdefault(c.section_id, []).append(c.text)
+
+    return [
+        SectionContentItem(
+            section_id=s.id,
+            heading=s.heading,
+            level=s.level,
+            section_order=s.section_order,
+            content="\n\n".join(chunks_by_section.get(s.id, [])) or s.preview or "",
         )
         for s in sections
     ]

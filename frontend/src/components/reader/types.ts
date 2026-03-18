@@ -41,6 +41,14 @@ export interface AnnotationItem {
   created_at: string
 }
 
+export interface SectionContentItem {
+  section_id: string
+  heading: string
+  level: number
+  section_order: number
+  content: string
+}
+
 export type SummaryMode = "one_sentence" | "executive" | "detailed" | "conversation"
 
 export interface SummaryTabDef {
