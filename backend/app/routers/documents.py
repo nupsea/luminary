@@ -1053,6 +1053,10 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
                 {"doc_id": document_id},
             )
+            await session.execute(
+                text("DELETE FROM images_fts WHERE document_id = :doc_id"),
+                {"doc_id": document_id},
+            )
             for model in (
                 EnrichmentJobModel,
                 ImageModel,
@@ -1158,6 +1162,10 @@ async def delete_document(document_id: str):
         # Delete child rows from all related tables (no FK CASCADE in SQLite without FK pragma)
         await session.execute(
             text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
+            {"doc_id": document_id},
+        )
+        await session.execute(
+            text("DELETE FROM images_fts WHERE document_id = :doc_id"),
             {"doc_id": document_id},
         )
         for model in (
