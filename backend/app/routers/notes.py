@@ -305,6 +305,11 @@ async def _apply_note_update(
     await _fts_update(note.id, note.content, note.document_id, session)
     await session.commit()
     await session.refresh(note)
+    # Delete stale vector synchronously so hybrid search doesn't return the
+    # old embedding while the background task re-embeds the new content.
+    from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+    get_lancedb_service().delete_note_vector(note.id)
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
