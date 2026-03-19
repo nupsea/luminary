@@ -129,21 +129,25 @@ def test_search_endpoint_422_empty_q(client):
 
 
 def test_fts_sync_on_update(client):
-    """Create note, update content, old term misses, new term hits."""
-    unique_old = "alpha beta gamma delta original"
-    unique_new = "epsilon zeta eta theta updated"
+    """Create note, update content, old term misses, new term hits.
+
+    Uses semantically dissimilar content so that the vector search arm
+    does not produce false-positive matches after the update.
+    """
+    unique_old = "photosynthesis chloroplast cellular respiration"
+    unique_new = "baroque fugue counterpoint harpsichord sonata"
     create = client.post("/notes", json={"content": unique_old, "tags": []})
     assert create.status_code == 201
     note_id = create.json()["id"]
 
     client.patch(f"/notes/{note_id}", json={"content": unique_new})
 
-    hit = client.get("/notes/search", params={"q": "epsilon zeta"})
+    hit = client.get("/notes/search", params={"q": "baroque fugue"})
     assert hit.status_code == 200
     hit_ids = [r["note_id"] for r in hit.json()["results"]]
     assert note_id in hit_ids
 
-    miss = client.get("/notes/search", params={"q": "alpha beta"})
+    miss = client.get("/notes/search", params={"q": "photosynthesis chloroplast"})
     assert miss.status_code == 200
     miss_ids = [r["note_id"] for r in miss.json()["results"]]
     assert note_id not in miss_ids

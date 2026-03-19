@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import NoteModel
 
 logger = logging.getLogger(__name__)
@@ -128,23 +128,16 @@ async def _fts_delete(note_id: str, session: AsyncSession) -> None:
     """Delete rows from the FTS5 virtual table for a given note_id.
 
     note_id is UNINDEXED so ``WHERE note_id = :nid`` directly on the FTS5
-    virtual table can be unreliable when many rows accumulate across sessions.
-
-    Use the shadow content table to look up the rowid, then delete by rowid.
-    Must use the same session (not a separate connection) to guarantee
-    visibility of rows inserted on this connection.
+    virtual table can be unreliable.  Use a single atomic DELETE via the
+    shadow content table (c1 = note_id column per DDL order).
     """
-    rows = (
-        await session.execute(
-            text("SELECT rowid FROM notes_fts_content WHERE c1 = :nid"),
-            {"nid": note_id},
-        )
-    ).fetchall()
-    for row in rows:
-        await session.execute(
-            text("DELETE FROM notes_fts WHERE rowid = :rid"),
-            {"rid": row[0]},
-        )
+    await session.execute(
+        text(
+            "DELETE FROM notes_fts WHERE rowid IN "
+            "(SELECT rowid FROM notes_fts_content WHERE c1 = :nid)"
+        ),
+        {"nid": note_id},
+    )
 
 
 async def _fts_update(
@@ -155,7 +148,11 @@ async def _fts_update(
 
 
 async def _embed_and_store_note(note_id: str, content: str, document_id: str | None) -> None:
-    """Embed note content and upsert vector. Non-fatal if embedding model unavailable."""
+    """Embed note content and upsert vector. Non-fatal if embedding model unavailable.
+
+    Checks the note's current content before upserting to avoid overwriting a
+    newer embedding with a stale one (race between create and rapid update).
+    """
     try:
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
         from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
@@ -163,6 +160,22 @@ async def _embed_and_store_note(note_id: str, content: str, document_id: str | N
         loop = asyncio.get_event_loop()
         embedder = get_embedding_service()
         vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])
+
+        # Guard: if the note was updated after this task was created, the
+        # content we embedded is stale -- skip the upsert.
+        async with get_session_factory()() as session:
+            row = (
+                await session.execute(
+                    select(NoteModel.content).where(NoteModel.id == note_id)
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            logger.debug("Note %s deleted before embedding completed, skipping", note_id)
+            return
+        if row != content:
+            logger.debug("Note %s content changed, skipping stale embedding", note_id)
+            return
+
         get_lancedb_service().upsert_note_vector(note_id, document_id, content, vector)
         logger.debug("Note vector stored note_id=%s", note_id)
     except Exception as exc:
