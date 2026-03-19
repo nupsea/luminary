@@ -125,11 +125,27 @@ async def _fts_insert(
 
 
 async def _fts_delete(note_id: str, session: AsyncSession) -> None:
-    """Delete rows from the FTS5 virtual table for a given note_id."""
-    await session.execute(
-        text("DELETE FROM notes_fts WHERE note_id = :nid"),
-        {"nid": note_id},
-    )
+    """Delete rows from the FTS5 virtual table for a given note_id.
+
+    note_id is UNINDEXED so ``WHERE note_id = :nid`` directly on the FTS5
+    virtual table can be unreliable when many rows accumulate across sessions.
+
+    Use the shadow content table to look up the rowid, then delete by rowid.
+    """
+    from app.database import get_engine  # noqa: PLC0415
+
+    async with get_engine().begin() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT rowid FROM notes_fts_content WHERE c1 = :nid"),
+                {"nid": note_id},
+            )
+        ).fetchall()
+        for row in rows:
+            await conn.execute(
+                text("DELETE FROM notes_fts WHERE rowid = :rid"),
+                {"rid": row[0]},
+            )
 
 
 async def _fts_update(

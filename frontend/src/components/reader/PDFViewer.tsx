@@ -5,15 +5,214 @@ import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { SectionItem } from "./types"
+import type { AnnotationItem, SectionItem } from "./types"
+
+/** A resolved PDF outline (bookmark) entry with a 1-based page number. */
+interface OutlineEntry {
+  title: string
+  page: number // 1-based
+  level: number
+  children: OutlineEntry[]
+}
+
+/** Recursively resolve a pdfjs outline tree into flat entries with page numbers. */
+async function resolveOutline(
+  doc: PDFDocumentProxy,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  items: Array<any>,
+  level: number,
+): Promise<OutlineEntry[]> {
+  const results: OutlineEntry[] = []
+  for (const item of items) {
+    let page = -1
+    try {
+      if (item.dest) {
+        // dest can be a string (named destination) or an array (explicit destination)
+        const dest = typeof item.dest === "string"
+          ? await doc.getDestination(item.dest)
+          : item.dest
+        if (dest && Array.isArray(dest) && dest.length > 0) {
+          // dest[0] is a page ref object; resolve to 0-based index
+          const pageIndex = await doc.getPageIndex(dest[0])
+          page = pageIndex + 1 // convert to 1-based
+        }
+      }
+    } catch {
+      // skip entries with unresolvable destinations
+    }
+    if (page >= 1) {
+      const children = item.items?.length
+        ? await resolveOutline(doc, item.items, level + 1)
+        : []
+      results.push({ title: item.title, page, level, children })
+    }
+  }
+  return results
+}
+
+/** Flatten a nested outline tree into a single array preserving level. */
+function flattenOutline(entries: OutlineEntry[]): OutlineEntry[] {
+  const flat: OutlineEntry[] = []
+  for (const e of entries) {
+    flat.push(e)
+    if (e.children.length) flat.push(...flattenOutline(e.children))
+  }
+  return flat
+}
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
+
+/** Apply highlight overlays to PDF text layer spans by matching annotation selected_text. */
+function applyPdfHighlights(
+  textLayerDiv: HTMLDivElement,
+  annotations: AnnotationItem[],
+  currentPage: number,
+  sections: SectionItem[],
+) {
+  // Clear any previous highlight marks
+  textLayerDiv.querySelectorAll("mark[data-pdf-highlight]").forEach((m) => {
+    const parent = m.parentNode
+    if (parent) {
+      parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
+      parent.normalize()
+    }
+  })
+  // Reset background on previously highlighted spans
+  textLayerDiv.querySelectorAll("span[data-hl-original]").forEach((span) => {
+    ;(span as HTMLElement).style.backgroundColor = ""
+    span.removeAttribute("data-hl-original")
+  })
+
+  if (annotations.length === 0) return
+
+  // Filter annotations relevant to current page:
+  // 1. By explicit page_number field
+  // 2. By section page range
+  // 3. Fallback: try matching any annotation's text against page content
+  const pageAnnotations = annotations.filter((ann) => {
+    if (ann.page_number != null) return ann.page_number === currentPage
+    const sec = sections.find((s) => s.id === ann.section_id)
+    if (sec) {
+      const start = sec.page_start || 1
+      const end = sec.page_end || start
+      return currentPage >= start && currentPage <= end
+    }
+    return true // fallback: try matching
+  })
+
+  if (pageAnnotations.length === 0) return
+
+  // Collect text spans
+  const spans = Array.from(textLayerDiv.querySelectorAll("span")) as HTMLSpanElement[]
+  if (spans.length === 0) return
+
+  // Build concatenated text with space separators between spans.
+  // Browser selection toString() inserts spaces between spans, so we must match
+  // with the same spacing.
+  const parts: { span: HTMLSpanElement; start: number; end: number }[] = []
+  let offset = 0
+  for (let i = 0; i < spans.length; i++) {
+    if (i > 0) offset += 1 // space separator
+    const text = spans[i].textContent ?? ""
+    parts.push({ span: spans[i], start: offset, end: offset + text.length })
+    offset += text.length
+  }
+  const fullText = spans.map((s) => s.textContent ?? "").join(" ")
+
+  for (const ann of pageAnnotations) {
+    // Try exact match first, then normalized whitespace match
+    let idx = fullText.indexOf(ann.selected_text)
+    let searchText = ann.selected_text
+    if (idx < 0) {
+      // Normalize both: collapse whitespace runs to single space
+      const normFull = fullText.replace(/\s+/g, " ")
+      const normSearch = ann.selected_text.replace(/\s+/g, " ")
+      const normIdx = normFull.indexOf(normSearch)
+      if (normIdx < 0) continue
+      // Map normalized index back to fullText offset
+      // Walk fullText counting chars while tracking normalized position
+      let fi = 0
+      let ni = 0
+      while (ni < normIdx && fi < fullText.length) {
+        if (/\s/.test(fullText[fi])) {
+          // Skip extra whitespace chars that got collapsed
+          fi++
+          if (ni < normFull.length && /\s/.test(normFull[ni])) ni++
+          while (fi < fullText.length && /\s/.test(fullText[fi])) fi++
+        } else {
+          fi++
+          ni++
+        }
+      }
+      idx = fi
+      // Use the length in fullText space
+      let endFi = fi
+      let endNi = ni
+      while (endNi < normIdx + normSearch.length && endFi < fullText.length) {
+        if (/\s/.test(fullText[endFi])) {
+          endFi++
+          if (endNi < normFull.length && /\s/.test(normFull[endNi])) endNi++
+          while (endFi < fullText.length && /\s/.test(fullText[endFi])) endFi++
+        } else {
+          endFi++
+          endNi++
+        }
+      }
+      searchText = fullText.slice(idx, endFi)
+    }
+
+    const matchEnd = idx + searchText.length
+    const bgColor = PDF_HIGHLIGHT_COLORS[ann.color] ?? PDF_HIGHLIGHT_COLORS.yellow
+
+    for (const part of parts) {
+      if (part.end <= idx || part.start >= matchEnd) continue
+
+      // Fully inside
+      if (part.start >= idx && part.end <= matchEnd) {
+        part.span.style.backgroundColor = bgColor
+        part.span.setAttribute("data-hl-original", "1")
+        continue
+      }
+
+      // Partially inside -- wrap matching portion in <mark>
+      const spanText = part.span.textContent ?? ""
+      const localStart = Math.max(0, idx - part.start)
+      const localEnd = Math.min(spanText.length, matchEnd - part.start)
+
+      const before = spanText.slice(0, localStart)
+      const matched = spanText.slice(localStart, localEnd)
+      const after = spanText.slice(localEnd)
+
+      const frag = document.createDocumentFragment()
+      if (before) frag.appendChild(document.createTextNode(before))
+      const mark = document.createElement("mark")
+      mark.setAttribute("data-pdf-highlight", "1")
+      mark.style.backgroundColor = bgColor
+      mark.style.borderRadius = "2px"
+      mark.textContent = matched
+      frag.appendChild(mark)
+      if (after) frag.appendChild(document.createTextNode(after))
+
+      part.span.replaceChildren(frag)
+    }
+  }
+}
+
+const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
+  yellow: "rgba(254, 240, 138, 0.5)",
+  green: "rgba(187, 247, 208, 0.5)",
+  blue: "rgba(191, 219, 254, 0.5)",
+  pink: "rgba(251, 207, 232, 0.5)",
+}
 
 interface PDFViewerProps {
   documentId: string
   sections: SectionItem[]
   initialPage?: number  // S148: navigate to this page after PDF loads (from citation deep-link)
+  annotations?: AnnotationItem[]
+  highlightsVisible?: boolean
+  onPageChange?: (page: number) => void
 }
 
 export interface PDFViewerHandle {
@@ -23,7 +222,7 @@ export interface PDFViewerHandle {
 type LoadStatus = "loading" | "error" | "ready"
 
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, initialPage }, ref) {
+  function PDFViewer({ documentId, sections, initialPage, annotations = [], highlightsVisible = true, onPageChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
     const [currentPage, setCurrentPage] = useState(1)
     const [totalPages, setTotalPages] = useState(0)
@@ -35,6 +234,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const textLayerRef = useRef<HTMLDivElement>(null)
     const nextCanvasRef = useRef<HTMLCanvasElement>(null)
     const scrollAreaRef = useRef<HTMLDivElement>(null)
+    // Bumped after each text layer render to trigger highlight application
+    const [textLayerVersion, setTextLayerVersion] = useState(0)
+    // PDF built-in outline (bookmarks) -- preferred over backend sections when available
+    const [pdfOutline, setPdfOutline] = useState<OutlineEntry[]>([])
+    // Refs for annotations/visibility so the render effect can apply highlights inline
+    const annotationsRef = useRef(annotations)
+    annotationsRef.current = annotations
+    const highlightsVisibleRef = useRef(highlightsVisible)
+    highlightsVisibleRef.current = highlightsVisible
 
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
@@ -81,6 +289,19 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             }
           } catch {
             // non-fatal; zoom stays at 1.0
+          }
+
+          // Extract PDF built-in outline (bookmarks) for accurate TOC navigation
+          try {
+            const rawOutline = await doc.getOutline()
+            if (rawOutline && rawOutline.length > 0 && !cancelled) {
+              const resolved = await resolveOutline(doc, rawOutline, 1)
+              if (!cancelled && resolved.length > 0) {
+                setPdfOutline(flattenOutline(resolved))
+              }
+            }
+          } catch {
+            // non-fatal; fall back to backend sections
           }
         })
         .catch(() => {
@@ -160,6 +381,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             activeTextLayer = tl
 
             await tl.render()
+            if (!cancelled) {
+              // Apply highlights immediately after text layer is ready
+              if (highlightsVisibleRef.current && annotationsRef.current.length > 0) {
+                applyPdfHighlights(textLayerDiv, annotationsRef.current, pageNum, sections)
+              }
+              setTextLayerVersion((v) => v + 1)
+            }
           }
         } finally {
           page?.cleanup()
@@ -176,6 +404,33 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         activeTextLayer?.cancel()
       }
     }, [pdfDoc, currentPage, zoom, totalPages, loadStatus])
+
+    // Notify parent of page changes
+    useEffect(() => {
+      onPageChange?.(currentPage)
+    }, [currentPage, onPageChange])
+
+    // Apply inline highlights on the text layer after it finishes rendering
+    useEffect(() => {
+      const textDiv = textLayerRef.current
+      if (!textDiv || textLayerVersion === 0) return
+      if (!highlightsVisible || annotations.length === 0) {
+        // Clear any existing highlights when toggled off
+        textDiv.querySelectorAll("mark[data-pdf-highlight]").forEach((m) => {
+          const parent = m.parentNode
+          if (parent) {
+            parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
+            parent.normalize()
+          }
+        })
+        textDiv.querySelectorAll("span[data-hl-original]").forEach((span) => {
+          ;(span as HTMLElement).style.backgroundColor = ""
+          span.removeAttribute("data-hl-original")
+        })
+        return
+      }
+      applyPdfHighlights(textDiv, annotations, currentPage, sections)
+    }, [textLayerVersion, annotations, highlightsVisible, currentPage, sections])
 
     function goToPage(n: number) {
       const clamped = Math.max(1, Math.min(n, totalPages))
@@ -220,12 +475,34 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
     return (
       <div className="flex h-full">
-        {/* TOC panel */}
-        <div className="w-40 flex-shrink-0 border-r overflow-y-auto p-2">
+        {/* TOC panel -- prefer PDF built-in outline for accurate page navigation */}
+        <div className="w-56 flex-shrink-0 border-r overflow-y-auto p-2">
           <p className="text-xs font-semibold uppercase text-muted-foreground mb-2 px-1">
             Contents
           </p>
-          {sections.length === 0 ? (
+          {pdfOutline.length > 0 ? (
+            <ul className="space-y-0.5">
+              {pdfOutline.map((entry, idx) => {
+                // Active if this entry's page <= currentPage and next entry's page > currentPage
+                const nextPage = idx < pdfOutline.length - 1 ? pdfOutline[idx + 1].page : totalPages + 1
+                const isActive = entry.page <= currentPage && currentPage < nextPage
+                return (
+                  <li key={`outline-${idx}`}>
+                    <button
+                      className={`w-full text-left text-xs px-2 py-1 rounded hover:bg-accent truncate ${
+                        isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground"
+                      }`}
+                      style={{ paddingLeft: `${(entry.level - 1) * 8 + 8}px` }}
+                      onClick={() => goToPage(entry.page)}
+                      title={`p.${entry.page} -- ${entry.title}`}
+                    >
+                      {entry.title}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : sections.length === 0 ? (
             <p className="text-xs text-muted-foreground px-1">No sections</p>
           ) : (() => {
             const hasPageNums = sections.some((s) => s.page_start > 0)

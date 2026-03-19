@@ -31,6 +31,7 @@ class AnnotationCreateRequest(BaseModel):
     end_offset: int
     color: Literal["yellow", "green", "blue", "pink"] = "yellow"
     note_text: str | None = None
+    page_number: int | None = None
 
 
 class AnnotationResponse(BaseModel):
@@ -43,6 +44,7 @@ class AnnotationResponse(BaseModel):
     end_offset: int
     color: str
     note_text: str | None
+    page_number: int | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -62,6 +64,7 @@ async def create_annotation(req: AnnotationCreateRequest) -> AnnotationResponse:
         end_offset=req.end_offset,
         color=req.color,
         note_text=req.note_text,
+        page_number=req.page_number,
         created_at=now,
     )
     async with get_session_factory()() as session:

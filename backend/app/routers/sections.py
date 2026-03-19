@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -105,24 +106,49 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
         else:
             orphan_chunks.append(c.text)
 
+    # Prefer the original section text (preview) over chunk-reassembled text.
+    # Chunks contain enrichment prefixes like "[Title > Section] ..." that are
+    # useful for retrieval but hurt the reading experience.  The preview field
+    # stores up to 10 000 chars of the original parsed section text -- if the
+    # section is longer, the preview is truncated mid-sentence and we must fall
+    # back to chunk-assembled text (with enrichment headers stripped).
+    PREVIEW_LIMIT = 10000
+
+    def _section_content(s: SectionModel) -> str:
+        chunk_texts = chunks_by_section.get(s.id, [])
+        # If preview exists and is NOT truncated (shorter than the storage cap),
+        # use it -- it preserves original formatting.
+        if s.preview and len(s.preview) < PREVIEW_LIMIT:
+            return s.preview
+        # Preview was truncated or empty -- reassemble from chunks, stripping
+        # the "[Title > Section] " enrichment prefix from each chunk.
+        if chunk_texts:
+            return "\n\n".join(
+                re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts
+            )
+        # Last resort: return whatever preview we have, even if truncated
+        return s.preview or ""
+
     result = [
         SectionContentItem(
             section_id=s.id,
             heading=s.heading,
             level=s.level,
             section_order=s.section_order,
-            content="\n\n".join(chunks_by_section.get(s.id, [])) or s.preview or "",
+            content=_section_content(s),
         )
         for s in sections
     ]
 
     # If all sections ended up empty (chunks lacked section_id mapping),
     # distribute orphan chunks evenly across sections as a best-effort fallback.
+    # Strip enrichment headers ([...] prefix) so the text reads naturally.
     if orphan_chunks and all(not r.content for r in result) and result:
-        per_section = max(1, len(orphan_chunks) // len(result))
+        cleaned = [re.sub(r"^\[.*?\]\s*", "", c) for c in orphan_chunks]
+        per_section = max(1, len(cleaned) // len(result))
         for i, item in enumerate(result):
             start = i * per_section
-            end = start + per_section if i < len(result) - 1 else len(orphan_chunks)
-            item.content = "\n\n".join(orphan_chunks[start:end])
+            end = start + per_section if i < len(result) - 1 else len(cleaned)
+            item.content = "\n\n".join(cleaned[start:end])
 
     return result

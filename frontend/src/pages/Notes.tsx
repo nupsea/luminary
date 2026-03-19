@@ -264,10 +264,10 @@ function ClipCard({ clip, docTitle, onDeleted, onConvertToNote, onCreateFlashcar
     .join(" — ")
 
   const sourceUrl = clip.section_id
-    ? `/learning?doc=${clip.document_id}&section_id=${clip.section_id}`
+    ? `/?doc=${clip.document_id}&section_id=${clip.section_id}`
     : clip.pdf_page_number
-      ? `/learning?doc=${clip.document_id}&page=${clip.pdf_page_number}`
-      : `/learning?doc=${clip.document_id}`
+      ? `/?doc=${clip.document_id}&page=${clip.pdf_page_number}`
+      : `/?doc=${clip.document_id}`
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">

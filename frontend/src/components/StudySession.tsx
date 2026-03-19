@@ -113,7 +113,7 @@ function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
     if (context.pdf_page_number != null) {
       params.set("page", String(context.pdf_page_number))
     }
-    return `/learning?${params.toString()}`
+    return `/?${params.toString()}`
   }
 
   return (

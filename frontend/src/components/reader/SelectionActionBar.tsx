@@ -10,6 +10,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ExplainMode } from "@/components/FloatingToolbar"
 
+export type HighlightColor = "yellow" | "green" | "blue" | "pink"
+
+const HIGHLIGHT_SWATCHES: { color: HighlightColor; bg: string }[] = [
+  { color: "yellow", bg: "bg-yellow-300" },
+  { color: "green", bg: "bg-green-300" },
+  { color: "blue", bg: "bg-blue-300" },
+  { color: "pink", bg: "bg-pink-300" },
+]
+
 export interface SourceRef {
   sectionId: string | undefined
   documentId: string
@@ -23,7 +32,7 @@ export interface SelectionActionBarProps {
   onAddToNote: (text: string, sourceRef: SourceRef) => void
   onCreateFlashcard: (text: string, sourceRef: SourceRef) => void
   onAskInChat: (text: string, sourceRef: SourceRef) => void
-  onHighlight: (text: string, sourceRef: SourceRef) => void
+  onHighlight: (text: string, sourceRef: SourceRef, color: HighlightColor) => void
   onClip: (text: string, sourceRef: SourceRef) => void
 }
 
@@ -166,18 +175,21 @@ export function SelectionActionBar({
       >
         Clip
       </button>
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault(); e.stopPropagation()
-          if (!canHighlight) return
-          onHighlight(selectedText, pendingSourceRef); reset()
-        }}
-        disabled={!canHighlight}
-        title={canHighlight ? "Highlight this text" : "Highlight not available without section mapping"}
-        className="rounded px-2.5 py-1 text-xs font-medium text-yellow-700 hover:bg-yellow-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-yellow-400 dark:hover:bg-yellow-900/30"
-      >
-        Highlight
-      </button>
+      <div className="flex items-center gap-0.5 border-l border-border pl-1.5 ml-0.5">
+        {HIGHLIGHT_SWATCHES.map((swatch) => (
+          <button
+            key={swatch.color}
+            onMouseDown={(e) => {
+              e.preventDefault(); e.stopPropagation()
+              if (!canHighlight) return
+              onHighlight(selectedText, pendingSourceRef, swatch.color); reset()
+            }}
+            disabled={!canHighlight}
+            title={canHighlight ? `Highlight ${swatch.color}` : "Highlight not available without section mapping"}
+            className={`h-5 w-5 rounded-full ${swatch.bg} border border-border/50 disabled:cursor-not-allowed disabled:opacity-40 hover:ring-2 hover:ring-primary/40`}
+          />
+        ))}
+      </div>
     </div>
   )
 }

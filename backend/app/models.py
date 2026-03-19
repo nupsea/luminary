@@ -400,6 +400,8 @@ class AnnotationModel(Base):
     # yellow|green|blue|pink
     color: Mapped[str] = mapped_column(String(20), nullable=False, default="yellow")
     note_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PDF page number (1-based); null for non-PDF documents
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )

@@ -109,6 +109,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S159: model-generated explanation and key points for diff view
             "ALTER TABLE feynman_sessions ADD COLUMN model_explanation_text TEXT",
             "ALTER TABLE feynman_sessions ADD COLUMN key_points_json JSON",
+            # Inline highlights: page_number for PDF annotations
+            "ALTER TABLE annotations ADD COLUMN page_number INTEGER",
         ]:
             try:
                 await conn.execute(text(ddl))

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown } from "lucide-react"
+import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -8,13 +8,15 @@ import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from 
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
-import type { AnnotationItem, DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
+import type { AnnotationItem, DocumentDetail, SectionItem, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { SelectionActionBar } from "./SelectionActionBar"
 import type { SourceRef } from "./SelectionActionBar"
 import { NoteCreationDialog } from "./NoteCreationDialog"
+import type { NoteCreationResult } from "./NoteCreationDialog"
+import { NoteEditorDialog } from "@/components/NoteEditorDialog"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
@@ -686,6 +688,7 @@ interface HighlightsPanelProps {
   onDelete: (id: string) => void
 }
 
+// @ts-expect-error -- HighlightsPanel is defined for upcoming highlights sidebar; not yet wired
 function HighlightsPanel({ annotations, loading, error, onDelete }: HighlightsPanelProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -1462,7 +1465,12 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [leftTab, setLeftTab] = useState<"sections" | "highlights" | "pdfview" | "bookview" | "read">("sections")
+  const [leftTab, setLeftTab] = useState<"sections" | "pdfview" | "bookview" | "read">("sections")
+  const [highlightsVisible, setHighlightsVisible] = useState(true)
+  const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
+  const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
+  const highlightsPanelRef = useRef<HTMLDivElement>(null)
+  const highlightsToggleRef = useRef<HTMLButtonElement>(null)
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
   // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
   const [pdfViewVisited, setPdfViewVisited] = useState(false)
@@ -1489,6 +1497,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [selectionNoteText, setSelectionNoteText] = useState("")
   const [selectionNoteSourceRef, setSelectionNoteSourceRef] = useState<SourceRef | null>(null)
   const [selectionNoteHeading, setSelectionNoteHeading] = useState<string | undefined>(undefined)
+  const [editingCreatedNote, setEditingCreatedNote] = useState<NoteCreationResult | null>(null)
   const [selectionFlashcardOpen, setSelectionFlashcardOpen] = useState(false)
   const [selectionFlashcardText, setSelectionFlashcardText] = useState("")
   const [selectionFlashcardSourceRef, setSelectionFlashcardSourceRef] = useState<SourceRef | null>(null)
@@ -1555,13 +1564,17 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     }
   }, [initialSectionId, doc])
 
-  // S148: auto-switch to PDF view when arriving via citation deep-link with a page number
+  // Auto-switch to PDF view for PDF documents; Book view for EPUB
   useEffect(() => {
-    if (initialPage && initialPage > 0 && doc?.format === "pdf") {
+    if (!doc) return
+    if (doc.format === "pdf") {
       setPdfViewVisited(true)
       setLeftTab("pdfview")
+    } else if (doc.format === "epub") {
+      setBookViewVisited(true)
+      setLeftTab("bookview")
     }
-  }, [initialPage, doc?.format])
+  }, [doc?.format]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
@@ -1577,8 +1590,6 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   // Fetch annotations for highlight reconstruction and panel (S111)
   const {
     data: docAnnotations,
-    isLoading: annotationsLoading,
-    isError: annotationsError,
   } = useQuery<AnnotationItem[]>({
     queryKey: ["annotations-for-doc", documentId],
     queryFn: async () => {
@@ -1796,6 +1807,63 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     }
   }, [leftTab, doc?.format])
 
+  // Close highlights panel on outside click
+  useEffect(() => {
+    if (!highlightsPanelOpen) return
+    function handleClick(e: MouseEvent) {
+      if (
+        highlightsPanelRef.current?.contains(e.target as Node) ||
+        highlightsToggleRef.current?.contains(e.target as Node)
+      ) return
+      setHighlightsPanelOpen(false)
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [highlightsPanelOpen])
+
+  // Navigate to a highlight: for PDF annotations go to PDF page, otherwise Read tab
+  function navigateToHighlight(ann: AnnotationItem) {
+    // PDF highlight with page number -- jump to that page in PDF view
+    if (ann.page_number != null && doc?.format === "pdf") {
+      setPdfViewVisited(true)
+      setLeftTab("pdfview")
+      // Small delay to ensure PDF viewer is mounted before calling goToPage
+      setTimeout(() => pdfViewerRef.current?.goToPage(ann.page_number!), 50)
+      setHighlightsPanelOpen(false)
+      return
+    }
+    // PDF highlight without page_number but with section -- use section page_start
+    if (doc?.format === "pdf") {
+      const sec = doc.sections.find((s) => s.id === ann.section_id)
+      if (sec && sec.page_start > 0) {
+        setPdfViewVisited(true)
+        setLeftTab("pdfview")
+        setTimeout(() => pdfViewerRef.current?.goToPage(sec.page_start), 50)
+        setHighlightsPanelOpen(false)
+        return
+      }
+    }
+    // Non-PDF: go to Read view and scroll to section
+    if (leftTab !== "read") {
+      setReadSectionId(ann.section_id)
+      setLeftTab("read")
+    } else {
+      const el = document.getElementById(`read-sec-${ann.section_id}`)
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+    setHighlightsPanelOpen(false)
+  }
+
+  async function handleDeleteHighlight(id: string) {
+    try {
+      await fetch(`${API_BASE}/annotations/${id}`, { method: "DELETE" })
+      void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
+      toast.success("Highlight removed")
+    } catch {
+      toast.error("Failed to delete highlight")
+    }
+  }
+
   function handleExplain(text: string, mode: ExplainMode) {
     setSheetText(text)
     setSheetMode(mode)
@@ -1814,6 +1882,31 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
         }
       }
       node = node.parentNode
+    }
+    // Fallback for PDF view: map currentPage to section by page range
+    if (leftTab === "pdfview" && doc?.sections && doc.sections.length > 0) {
+      const hasPageNums = doc.sections.some((s) => s.page_start > 0)
+      let sec: SectionItem | undefined
+      if (hasPageNums) {
+        // Find section whose page range contains the current page
+        sec = doc.sections.find((s) => {
+          const start = s.page_start
+          const end = s.page_end || start
+          return start > 0 && pdfCurrentPage >= start && pdfCurrentPage <= end
+        })
+        // If no exact match, find the last section that starts before current page
+        if (!sec) {
+          for (let i = doc.sections.length - 1; i >= 0; i--) {
+            if (doc.sections[i].page_start > 0 && doc.sections[i].page_start <= pdfCurrentPage) {
+              sec = doc.sections[i]
+              break
+            }
+          }
+        }
+      }
+      // Ultimate fallback: use first section
+      if (!sec) sec = doc.sections[0]
+      return { sectionId: sec.id, documentId, documentTitle: doc?.title ?? "" }
     }
     return { sectionId: undefined, documentId, documentTitle: doc?.title ?? "" }
   }
@@ -1843,8 +1936,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     navigate("/chat")
   }
 
-  async function handleSelectionHighlight(text: string, sourceRef: SourceRef) {
+  async function handleSelectionHighlight(text: string, sourceRef: SourceRef, color: string = "yellow") {
     if (!sourceRef.sectionId) return
+    const pageNumber = leftTab === "pdfview" ? pdfCurrentPage : null
     try {
       await fetch(`${API_BASE}/annotations`, {
         method: "POST",
@@ -1856,8 +1950,9 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           selected_text: text,
           start_offset: 0,
           end_offset: text.length,
-          color: "yellow", // "yellow" maps to the same visual as hex #fef08a
+          color,
           note_text: null,
+          page_number: pageNumber,
         }),
       })
       void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
@@ -1965,13 +2060,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             </>
           )}
 
-          {/* Left panel tab bar — Sections / Highlights / PDF View (PDF only) / Book View (EPUB only) */}
+          {/* Left panel tab bar — Sections / Read / PDF View (PDF only) / Book View (EPUB only) + highlight toggle */}
           <div className="flex border-b border-border">
             {(doc.format === "pdf"
-              ? (["sections", "highlights", "read", "pdfview"] as const)
+              ? (["sections", "read", "pdfview"] as const)
               : doc.format === "epub"
-                ? (["sections", "highlights", "read", "bookview"] as const)
-                : (["sections", "highlights", "read"] as const)
+                ? (["sections", "read", "bookview"] as const)
+                : (["sections", "read"] as const)
             ).map((tab) => (
               <button
                 key={tab}
@@ -1983,23 +2078,90 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {tab === "highlights"
-                  ? `Highlights${(docAnnotations ?? []).length > 0 ? ` (${(docAnnotations ?? []).length})` : ""}`
-                  : tab === "pdfview"
-                    ? "PDF View"
-                    : tab === "bookview"
-                      ? "Book View"
-                      : tab === "read"
-                        ? "Read"
-                        : "Sections"}
+                {tab === "pdfview"
+                  ? "PDF View"
+                  : tab === "bookview"
+                    ? "Book View"
+                    : tab === "read"
+                      ? "Read"
+                      : "Sections"}
               </button>
             ))}
+            {/* Highlight visibility toggle + dropdown */}
+            <div className="relative flex items-center">
+              <button
+                onClick={() => setHighlightsVisible((v) => !v)}
+                title={highlightsVisible ? "Hide highlights" : "Show highlights"}
+                className={cn(
+                  "relative flex items-center justify-center px-2 py-2 text-xs transition-colors",
+                  highlightsVisible
+                    ? "text-yellow-600 dark:text-yellow-400"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Highlighter size={14} />
+                {(docAnnotations ?? []).length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-bold text-primary-foreground">
+                    {(docAnnotations ?? []).length}
+                  </span>
+                )}
+              </button>
+              {(docAnnotations ?? []).length > 0 && (
+                <button
+                  ref={highlightsToggleRef}
+                  onClick={() => setHighlightsPanelOpen((v) => !v)}
+                  title="Manage highlights"
+                  className="flex items-center justify-center px-1 py-2 text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronRight size={10} className={cn("transition-transform", highlightsPanelOpen && "rotate-90")} />
+                </button>
+              )}
+              {/* Highlights dropdown panel */}
+              {highlightsPanelOpen && (docAnnotations ?? []).length > 0 && (
+                <div
+                  ref={highlightsPanelRef}
+                  className="absolute top-full right-0 z-50 mt-1 w-72 max-h-64 overflow-auto rounded-lg border border-border bg-background shadow-xl"
+                >
+                  <div className="px-3 py-2 border-b border-border">
+                    <p className="text-xs font-medium text-foreground">{(docAnnotations ?? []).length} highlight{(docAnnotations ?? []).length !== 1 ? "s" : ""}</p>
+                  </div>
+                  <ul className="divide-y divide-border">
+                    {(docAnnotations ?? []).map((ann) => {
+                      const sectionHeading = doc.sections.find((s) => s.id === ann.section_id)?.heading ?? ""
+                      return (
+                        <li key={ann.id} className="flex items-start gap-2 px-3 py-2 hover:bg-accent/50 group">
+                          <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", COLOR_CLASSES[ann.color] ?? COLOR_CLASSES.yellow)} />
+                          <button
+                            onClick={() => navigateToHighlight(ann)}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <p className="truncate text-xs text-foreground" title={ann.selected_text}>
+                              {ann.selected_text.length > 50 ? `${ann.selected_text.slice(0, 50)}...` : ann.selected_text}
+                            </p>
+                            {sectionHeading && (
+                              <p className="truncate text-[10px] text-muted-foreground">{sectionHeading}</p>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => void handleDeleteHighlight(ann.id)}
+                            title="Remove highlight"
+                            className="shrink-0 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-              <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={initialPage} />
+              <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={initialPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={setPdfCurrentPage} />
             </div>
           )}
 
@@ -2013,7 +2175,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           {/* Read View — full document content as markdown */}
           {leftTab === "read" && (
             <div className="flex-1 overflow-hidden">
-              <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} />
+              <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} />
             </div>
           )}
 
@@ -2025,11 +2187,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             onAddToNote={handleSelectionAddToNote}
             onCreateFlashcard={handleSelectionCreateFlashcard}
             onAskInChat={handleSelectionAskInChat}
-            onHighlight={(text, sourceRef) => void handleSelectionHighlight(text, sourceRef)}
+            onHighlight={(text, sourceRef, color) => void handleSelectionHighlight(text, sourceRef, color)}
             onClip={(text, sourceRef) => void handleSelectionClip(text, sourceRef)}
           />
 
-          {/* Section list / Highlights */}
+          {/* Section list */}
           <div
             ref={sectionListRef}
             className={cn(
@@ -2037,14 +2199,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
               (leftTab === "pdfview" || leftTab === "bookview" || leftTab === "read") && "hidden",
             )}
           >
-            {leftTab === "highlights" ? (
-              <HighlightsPanel
-                annotations={docAnnotations ?? []}
-                loading={annotationsLoading}
-                error={annotationsError}
-                onDelete={() => void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })}
-              />
-            ) : (
+            {leftTab === "sections" && (
               <>
                 {notesError && (
                   <p className="mb-2 px-6 pt-3 text-xs text-muted-foreground">
@@ -2299,7 +2454,20 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
         sourceRef={selectionNoteSourceRef}
         sectionHeading={selectionNoteHeading}
         onClose={() => setSelectionNoteOpen(false)}
-        onSaved={() => void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })}
+        onSaved={(note) => {
+          void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+          setEditingCreatedNote(note)
+        }}
+      />
+
+      {/* NoteEditorDialog -- opens after NoteCreationDialog saves for full editing */}
+      <NoteEditorDialog
+        note={editingCreatedNote}
+        onClose={() => setEditingCreatedNote(null)}
+        onSaved={(_updated) => {
+          void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+          setEditingCreatedNote(null)
+        }}
       />
 
       {/* S147: Flashcard generation dialog — scoped to selected text context */}

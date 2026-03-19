@@ -38,6 +38,7 @@ export interface AnnotationItem {
   end_offset: number
   color: "yellow" | "green" | "blue" | "pink"
   note_text: string | null
+  page_number: number | null
   created_at: string
 }
 

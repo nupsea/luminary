@@ -77,7 +77,7 @@ class DocumentParser:
         raw_parts: list[str] = []
         current_heading = "Introduction"
         current_level = 1
-        current_page_start = 0
+        current_page_start = 1  # 1-based to match pdfjs page numbering
         current_texts: list[str] = []
 
         all_font_sizes: list[float] = []
@@ -128,7 +128,7 @@ class DocumentParser:
                         current_texts.append(line_text)
                         raw_parts.append(line_text)
 
-        flush_section("_end", 0, len(doc))
+        flush_section("_end", 0, len(doc) + 1)  # +1 so last section page_end = len(doc) (1-based)
 
         raw_text = "\n".join(raw_parts)
         word_count = len(raw_text.split())

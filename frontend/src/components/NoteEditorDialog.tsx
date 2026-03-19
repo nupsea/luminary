@@ -145,7 +145,9 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
       void fetchSuggestedTags(updated.id, controller.signal).then((suggestions) => {
         if (controller.signal.aborted) return
         setIsFetchingTags(false)
-        const novel = suggestions.filter((t) => !updated.tags.includes(t))
+        const normalize = (s: string) => s.toLowerCase().replace(/[-_\s]+/g, "")
+        const existingNorm = updated.tags.map(normalize)
+        const novel = suggestions.filter((t) => !existingNorm.includes(normalize(t)))
         if (novel.length > 0) {
           setSuggestedTags(novel)
         } else {
