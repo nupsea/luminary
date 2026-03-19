@@ -432,10 +432,13 @@ class FlashcardService:
         count: int,
         session: AsyncSession,
         difficulty: Literal["easy", "medium", "hard"] = "medium",
+        context: str | None = None,
     ) -> list[FlashcardModel]:
         """Generate flashcards from document chunks using LLM.
 
-        Fetches chunks (all or filtered by section heading), calls LiteLLM,
+        When *context* (selected text) is provided, uses it directly instead of
+        fetching chunks -- this produces questions grounded in the exact selection.
+        Otherwise fetches chunks (all or filtered by section heading), calls LiteLLM,
         parses JSON output, and persists cards in SQLite with fsrs_state='new'.
         """
         llm = get_llm_service()
@@ -446,13 +449,25 @@ class FlashcardService:
         doc = doc_result.scalar_one_or_none()
         content_type = doc.content_type if doc else "unknown"
 
-        chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
-        if not chunks:
-            return []
+        # When the caller supplies selected text, use it directly.
+        if context and context.strip():
+            combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
+            # Still need a chunk_id (NOT NULL) — grab the first chunk for the document.
+            first_chunk_result = await session.execute(
+                select(ChunkModel.id)
+                .where(ChunkModel.document_id == document_id)
+                .order_by(ChunkModel.chunk_index)
+                .limit(1)
+            )
+            first_chunk_id = first_chunk_result.scalar_one_or_none() or document_id
+        else:
+            chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
+            if not chunks:
+                return []
 
-        combined_text, first_chunk_id = _build_text(chunks)
-        if not combined_text:
-            return []
+            combined_text, first_chunk_id = _build_text(chunks)
+            if not combined_text:
+                return []
 
         extra_instructions = ""
         if content_type == "book":

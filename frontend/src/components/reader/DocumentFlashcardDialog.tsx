@@ -38,7 +38,7 @@ export function DocumentFlashcardDialog({
   documentId,
   sectionId: _sectionId,
   sectionHeading,
-  context: _context,
+  context,
   onClose,
 }: DocumentFlashcardDialogProps) {
   const [count, setCount] = useState(3)
@@ -60,6 +60,7 @@ export function DocumentFlashcardDialog({
           section_heading: sectionHeading ?? null,
           count,
           difficulty: "medium",
+          context: context || null,
         }),
       })
       if (!res.ok) {
@@ -88,7 +89,11 @@ export function DocumentFlashcardDialog({
         <DialogHeader>
           <DialogTitle>Generate Flashcards</DialogTitle>
           <DialogDescription>
-            {sectionHeading ? `Section: ${sectionHeading}` : "Full document"}
+            {context
+              ? `Selected text (${context.length} chars)`
+              : sectionHeading
+                ? `Section: ${sectionHeading}`
+                : "Full document"}
           </DialogDescription>
         </DialogHeader>
 

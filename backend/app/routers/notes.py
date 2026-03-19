@@ -131,21 +131,20 @@ async def _fts_delete(note_id: str, session: AsyncSession) -> None:
     virtual table can be unreliable when many rows accumulate across sessions.
 
     Use the shadow content table to look up the rowid, then delete by rowid.
+    Must use the same session (not a separate connection) to guarantee
+    visibility of rows inserted on this connection.
     """
-    from app.database import get_engine  # noqa: PLC0415
-
-    async with get_engine().begin() as conn:
-        rows = (
-            await conn.execute(
-                text("SELECT rowid FROM notes_fts_content WHERE c1 = :nid"),
-                {"nid": note_id},
-            )
-        ).fetchall()
-        for row in rows:
-            await conn.execute(
-                text("DELETE FROM notes_fts WHERE rowid = :rid"),
-                {"rid": row[0]},
-            )
+    rows = (
+        await session.execute(
+            text("SELECT rowid FROM notes_fts_content WHERE c1 = :nid"),
+            {"nid": note_id},
+        )
+    ).fetchall()
+    for row in rows:
+        await session.execute(
+            text("DELETE FROM notes_fts WHERE rowid = :rid"),
+            {"rid": row[0]},
+        )
 
 
 async def _fts_update(

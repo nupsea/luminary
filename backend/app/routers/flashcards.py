@@ -61,6 +61,7 @@ class FlashcardGenerateRequest(BaseModel):
     section_heading: str | None = None
     count: int = 10
     difficulty: Literal["easy", "medium", "hard"] = "medium"
+    context: str | None = None  # selected text from reader; used directly when provided
 
 
 class FromGapsRequest(BaseModel):
@@ -244,6 +245,7 @@ async def generate_flashcards(
             count=req.count,
             difficulty=req.difficulty,
             session=session,
+            context=req.context,
         )
     except (
         litellm.exceptions.ServiceUnavailableError,
