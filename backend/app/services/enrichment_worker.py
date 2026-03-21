@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import select, update
 
 from app.database import get_session_factory
-from app.models import EnrichmentJobModel
+from app.models import DocumentModel, EnrichmentJobModel
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,26 @@ class EnrichmentQueueWorker:
         logger.info("EnrichmentQueueWorker: registered handler for job_type=%s", job_type)
 
     async def start(self) -> None:
-        """Start the background polling loop (called from lifespan)."""
+        """Start the background polling loop (called from lifespan).
+
+        On startup, reset any stale 'running' jobs back to 'pending' so they
+        get retried -- these were interrupted by a previous shutdown.
+        """
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                update(EnrichmentJobModel)
+                .where(EnrichmentJobModel.status == "running")
+                .values(status="pending", started_at=None)
+                .returning(EnrichmentJobModel.id)
+            )
+            reset_ids = [row[0] for row in result.all()]
+            if reset_ids:
+                await session.commit()
+                logger.info(
+                    "EnrichmentQueueWorker: reset %d stale running jobs to pending",
+                    len(reset_ids),
+                )
+
         self._running = True
         self._task = asyncio.create_task(self._poll_loop())
         logger.info("EnrichmentQueueWorker: started")
@@ -89,7 +108,10 @@ class EnrichmentQueueWorker:
             task.add_done_callback(lambda t, d=doc_id: self._active_doc_ids.discard(d))
 
     async def _run_for_document(self, document_id: str) -> None:
-        """Process all pending jobs for one document sequentially (FIFO)."""
+        """Process all pending jobs for one document sequentially (FIFO).
+
+        After all jobs finish, set the document stage to 'complete'.
+        """
         while True:
             async with get_session_factory()() as session:
                 result = await session.execute(
@@ -107,6 +129,22 @@ class EnrichmentQueueWorker:
                 break
 
             await self._run_job(job.id, job.document_id, job.job_type)
+
+        # All enrichment jobs for this document are done (or failed).
+        # Transition stage from 'enriching' to 'complete'.
+        async with get_session_factory()() as session:
+            await session.execute(
+                update(DocumentModel)
+                .where(
+                    DocumentModel.id == document_id,
+                    DocumentModel.stage == "enriching",
+                )
+                .values(stage="complete")
+            )
+            await session.commit()
+        logger.info(
+            "EnrichmentQueueWorker: document enrichment complete doc=%s", document_id
+        )
 
     async def _run_job(self, job_id: str, document_id: str, job_type: str) -> None:
         handler = self._handlers.get(job_type)

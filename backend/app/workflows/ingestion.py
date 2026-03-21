@@ -585,6 +585,8 @@ async def _chunk_conversation(
     Uses ConversationChunker.detect() to decide whether to use speaker-aware
     chunking or fall back to RecursiveCharacterTextSplitter.  After chunking,
     extracts roster + timeline and writes them to DocumentModel.conversation_metadata.
+
+    Creates SectionModel rows so the Read view can display conversation content.
     """
     from sqlalchemy import update as _update  # noqa: PLC0415
 
@@ -592,11 +594,46 @@ async def _chunk_conversation(
     from app.services.conversation_chunker import ConversationChunker  # noqa: PLC0415
 
     raw_text = (pd["raw_text"] if pd else "") or ""
+    raw_sections = pd["sections"] if pd else []
     chunker = ConversationChunker()
 
     chunks: list[dict] = []
     async with get_session_factory()() as session:
         chunk_models: list[ChunkModel] = []
+
+        # -- Create SectionModel rows from parsed sections so the Read view works --
+        section_models: list[SectionModel] = []
+        if raw_sections:
+            for s_idx, s in enumerate(raw_sections):
+                section_model = SectionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading=s.get("heading", "") or f"Part {s_idx + 1}",
+                    level=s.get("level", 1),
+                    page_start=s.get("page_start", 0),
+                    page_end=s.get("page_end", 0),
+                    section_order=s_idx,
+                    preview=s.get("text", "")[:10000],
+                )
+                session.add(section_model)
+                section_models.append(section_model)
+        else:
+            # No parsed sections -- create a single section from raw_text
+            section_model = SectionModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                heading="Conversation",
+                level=1,
+                page_start=0,
+                page_end=0,
+                section_order=0,
+                preview=raw_text[:10000],
+            )
+            session.add(section_model)
+            section_models.append(section_model)
+
+        await session.flush()
+
         if chunker.detect(raw_text):
             conv_chunks = chunker.chunk(raw_text)
             for idx, cc in enumerate(conv_chunks):
@@ -624,7 +661,7 @@ async def _chunk_conversation(
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
             )
-            all_texts = [s["text"] for s in (pd["sections"] if pd else []) if s["text"]]
+            all_texts = [s["text"] for s in raw_sections if s["text"]]
             raw_chunks_text = splitter.split_text("\n\n".join(all_texts) or raw_text)
             for idx, text in enumerate(raw_chunks_text):
                 chunk_id = str(uuid.uuid4())
@@ -662,6 +699,7 @@ async def _chunk_conversation(
         extra={
             "doc_id": doc_id,
             "num_chunks": len(chunks),
+            "num_sections": len(section_models),
             "speaker_count": len(conversation_metadata.get("speakers", [])),
         },
     )

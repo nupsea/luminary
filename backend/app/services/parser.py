@@ -66,12 +66,10 @@ class DocumentParser:
         if result is not None:
             return result
 
-        # Try UniversalParser next (signature discovery)
-        result = _universal_parser.parse(file_path, "pdf")
-        if result is not None:
-            return result
-
-        # Fallback: font-size heuristic
+        # Skip UniversalParser for PDFs -- the font-size heuristic below
+        # leverages actual font metrics from the PDF structure and produces
+        # better section boundaries than regex-based signature discovery.
+        # UniversalParser is designed for plain text where font info is absent.
         doc = fitz.open(str(file_path))
         sections: list[Section] = []
         raw_parts: list[str] = []

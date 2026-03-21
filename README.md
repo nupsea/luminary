@@ -5,7 +5,7 @@ Luminary is a local-first personal knowledge and learning assistant. It ingests 
 ## Features
 
 - **Document ingestion** -- Upload PDFs, plain text, and other formats. Luminary parses, chunks, embeds, and indexes them automatically.
-- **Hybrid Contextual search** -- Queries combine vector similarity (`bge-small-en-v1.5`), BM25 keyword search (SQLite FTS5), and graph traversal (Kuzu).
+- **Hybrid Contextual search** -- Queries combine vector similarity (`BAAI/bge-m3`, 1024-dim), BM25 keyword search (SQLite FTS5), and graph traversal (Kuzu).
 - **Smart Chunking** -- Uses structural splitting (paragraph/sentence boundaries) and **Context Injection** (prepending book/chapter titles to chunks) to improve retrieval accuracy.
 - **Parent-Child Retrieval** -- Automatically fetches neighboring chunks during search to provide coherent, high-quality context windows to the LLM.
 - **Knowledge graph** -- Entities and relationships are extracted with GLiNER and stored in an embedded graph DB. Explore visually in the Viz tab.
@@ -14,7 +14,7 @@ Luminary is a local-first personal knowledge and learning assistant. It ingests 
 - **Spaced repetition** -- Flashcards generated from document content, scheduled with FSRS (superior to SM-2 in retention accuracy).
 - **Notes** -- Markdown notes editor with side-by-side Write/Preview. Notes are searchable alongside your uploaded documents.
 - **Dynamic Evaluation** -- RAGAS-based retrieval quality metrics (HR@5, MRR, Faithfulness) with a golden dataset runner. The **Monitoring** tab allows selecting and running any golden dataset (`.jsonl`) found in the `evals/golden/` directory.
-- **Local by default** -- Runs entirely on your machine using Ollama. Optimized for performance with fast, 384-dimensional embeddings and batched vector storage.
+- **Local by default** -- Runs entirely on your machine using Ollama. Optimized for performance with 1024-dimensional bge-m3 embeddings via ONNX Runtime and batched vector storage.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ Navigation tabs: **Learning | Chat | Viz | Study | Notes | Monitoring**
 | Frontend | React 18, TypeScript 5, Vite 5, shadcn/ui, Tailwind CSS, Sigma.js v3            |
 | Storage  | SQLite (documents, flashcards, history), LanceDB (vectors), Kuzu (graph)         |
 | LLM      | Ollama (local, default), OpenAI / Anthropic / Gemini (optional via LiteLLM)      |
-| Embedder | `BAAI/bge-small-en-v1.5` (384-dim, highly optimized for local CPU/MPS)         |
+| Embedder | `BAAI/bge-m3` (1024-dim via ONNX Runtime, batched inference)                   |
 
 ## Prerequisites
 
@@ -110,7 +110,7 @@ Tests use a temporary `DATA_DIR` so they never touch `~/.luminary` and cannot co
 
 ### Integration Tests
 
-Integration tests run the full ingestion pipeline on real public-domain fixtures without downloading ML models. LiteLLM, embeddings, and GLiNER are mocked; real SQLite FTS5, LanceDB, and Kuzu run in a temp directory.
+Integration tests run the full ingestion pipeline on real public-domain fixtures. Core ML services (BAAI/bge-m3 embeddings, GLiNER NER) use real models; only LiteLLM is mocked. Real SQLite FTS5, LanceDB, and Kuzu run in a temp directory.
 
 ```bash
 cd backend && uv run pytest tests/test_integration.py -v
@@ -118,7 +118,7 @@ cd backend && uv run pytest tests/test_integration.py -v
 
 ### Full Integration Tests (slow)
 
-Full integration tests use the real `bge-small` and GLiNER models. First run downloads the models (~2-5 min); subsequent runs reuse the cache.
+Full corpus integration tests ingest all 3 canonical books (Time Machine, Alice in Wonderland, The Odyssey) with real ML models and verify retrieval quality. First run downloads models (~2-5 min); subsequent runs reuse the cache.
 
 ```bash
 make test-full

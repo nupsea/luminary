@@ -30,8 +30,17 @@ _RE_PG_END = re.compile(
 # Headers that often look like chat names but are just document metadata
 _METADATA_HEADERS = {
     "title", "author", "release date", "language", "credits", "produced by",
-    "updated", "character", "scene", "location", "time", "date", "table of contents"
+    "updated", "character", "scene", "location", "time", "date", "table of contents",
 }
+
+# Regex for chat_standard false positives: academic paper labels like
+# "Figure 1", "Table 2", "Encoder", "Decoder", "Algorithm 1", etc.
+_RE_NON_SPEAKER = re.compile(
+    r"^(?:figure|table|fig|tab|algorithm|equation|listing|"
+    r"encoder|decoder|appendix|lemma|theorem|corollary|proof|"
+    r"definition|proposition|example|remark|note|step)\b",
+    re.IGNORECASE,
+)
 
 @dataclass
 class Signature:
@@ -155,10 +164,21 @@ class UniversalParser:
             return None
 
     def _read_text(self, file_path: Path) -> str:
+        suffix = file_path.suffix.lower()
+        if suffix == ".pdf":
+            return self._read_pdf_text(file_path)
         raw_bytes = file_path.read_bytes()
         detected = chardet.detect(raw_bytes)
         encoding = detected.get("encoding") or "utf-8"
         return raw_bytes.decode(encoding, errors="replace").replace("\r\n", "\n")
+
+    @staticmethod
+    def _read_pdf_text(file_path: Path) -> str:
+        """Extract text from PDF using PyMuPDF instead of raw byte reading."""
+        import fitz  # noqa: PLC0415
+
+        doc = fitz.open(str(file_path))
+        return "\n".join(page.get_text() for page in doc)
 
     def _strip_boilerplate(self, text: str) -> tuple[str, int, int]:
         """Returns (clean_text, start_offset, end_offset)."""
@@ -208,9 +228,12 @@ class UniversalParser:
             valid_matches = []
             for m in matches:
                 # If it's a "Name: ..." pattern, check if "Name" is a metadata header
+                # or an academic paper label (Figure, Table, Encoder, etc.)
                 if sig.id == "chat_standard":
-                    name = m.group(1).lower().strip()
-                    if name in _METADATA_HEADERS:
+                    name = m.group(1).strip()
+                    if name.lower() in _METADATA_HEADERS:
+                        continue
+                    if _RE_NON_SPEAKER.match(name):
                         continue
                 valid_matches.append(m)
             
