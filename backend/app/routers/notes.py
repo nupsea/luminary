@@ -127,12 +127,14 @@ async def _fts_insert(
 async def _fts_delete(note_id: str, session: AsyncSession) -> None:
     """Delete rows from the FTS5 virtual table for a given note_id.
 
-    Note_id is UNINDEXED but can still be used in a WHERE clause for filtering
-    during DELETE.  Directly deleting by note_id is more reliable than manually
-    indexing into the shadow content table.
+    Note_id is UNINDEXED. We find the rowid(s) from the virtual table itself
+    and delete by rowid for maximum compatibility.
     """
     await session.execute(
-        text("DELETE FROM notes_fts WHERE note_id = :nid"),
+        text(
+            "DELETE FROM notes_fts WHERE rowid IN "
+            "(SELECT rowid FROM notes_fts WHERE note_id = :nid)"
+        ),
         {"nid": note_id},
     )
 
@@ -312,6 +314,7 @@ async def _apply_note_update(
         note.section_id = req.section_id
     note.updated_at = datetime.now(UTC)
 
+    await session.flush()  # Ensure content update is visible to other queries if needed
     await _fts_update(note.id, note.content, note.document_id, session)
     await session.commit()
     await session.refresh(note)

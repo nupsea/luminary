@@ -87,7 +87,23 @@ def test_rrf_merge_dedup_both_source():
 
 
 @pytest.fixture()
-def client():
+def client(tmp_path, monkeypatch):
+    """Isolated TestClient with a fresh DATA_DIR per test."""
+    data_dir = str(tmp_path)
+    monkeypatch.setenv("DATA_DIR", data_dir)
+
+    # Reset singletons to use the new data_dir
+    from app.config import get_settings
+    from app.database import get_engine, get_session_factory
+    import app.database as db_module
+    import app.services.vector_store as vs_module
+    from app.services.vector_store import get_lancedb_service
+
+    get_settings.cache_clear()
+    db_module._engine = None
+    db_module._session_factory = None
+    vs_module._lancedb_service = None
+
     with TestClient(app) as c:
         yield c
 
@@ -149,7 +165,8 @@ def test_fts_sync_on_update(client):
 
     miss = client.get("/notes/search", params={"q": "photosynthesis chloroplast"})
     assert miss.status_code == 200
-    miss_ids = [r["note_id"] for r in miss.json()["results"]]
+    results = miss.json()["results"]
+    miss_ids = [r["note_id"] for r in results]
     assert note_id not in miss_ids
 
 
