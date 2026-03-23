@@ -93,11 +93,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", data_dir)
 
     # Reset singletons to use the new data_dir
-    from app.config import get_settings
-    from app.database import get_engine, get_session_factory
     import app.database as db_module
     import app.services.vector_store as vs_module
-    from app.services.vector_store import get_lancedb_service
+    from app.config import get_settings
 
     get_settings.cache_clear()
     db_module._engine = None

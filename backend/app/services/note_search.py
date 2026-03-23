@@ -164,7 +164,11 @@ class NoteSearchService:
             if any(term in content_lower for term in query_terms):
                 final_results.append(r)
             else:
-                logger.debug("Dropping unrelated search result note_id=%s source=%s", r.note_id, r.source)
+                logger.debug(
+                    "Dropping unrelated search result note_id=%s source=%s",
+                    r.note_id,
+                    r.source,
+                )
 
         logger.debug(
             "note search q=%r fts=%d vector=%d merged=%d final=%d",
