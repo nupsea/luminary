@@ -4,6 +4,7 @@ from pathlib import Path
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import StaticPool
 
 from app.config import get_settings
 
@@ -31,7 +32,11 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
 
 def make_engine(db_url: str | None = None):
     url = db_url or _get_db_url()
-    engine = create_async_engine(url, echo=False)
+    kwargs = {}
+    if ":memory:" in url:
+        kwargs["poolclass"] = StaticPool
+
+    engine = create_async_engine(url, echo=False, **kwargs)
     event.listen(engine.sync_engine, "connect", _enable_sqlite_pragmas)
     return engine
 
