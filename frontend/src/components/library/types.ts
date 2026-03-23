@@ -1,4 +1,4 @@
-export type ContentType = "book" | "paper" | "conversation" | "notes" | "code"
+export type ContentType = "book" | "paper" | "conversation" | "notes" | "code" | "audio" | "epub" | "kindle_clippings"
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
 export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed"
 export type ViewMode = "grid" | "list"
@@ -17,6 +17,14 @@ export interface DocumentListItem {
   summary_one_sentence: string | null
   flashcard_count: number
   learning_status: LearningStatus
+  chunk_count: number
+  reading_progress_pct: number  // 0.0 to 1.0
+  audio_duration_seconds: number | null
+  source_url: string | null
+  video_title: string | null
+  enrichment_status: string | null
+  // S143: null = no objectives extracted; 0 = objectives exist but none covered
+  objective_progress_pct: number | null
 }
 
 export interface DocumentListResponse {

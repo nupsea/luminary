@@ -1,15 +1,61 @@
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { cn } from "@/lib/utils"
 import { Check, Pencil, Trash2, X } from "lucide-react"
-import { useState } from "react"
-import type { DocumentListItem } from "./types"
+import { useEffect, useRef, useState } from "react"
+import type { ContentType, DocumentListItem } from "./types"
 import {
   CONTENT_TYPE_ICONS,
+  Youtube,
   STATUS_LABELS,
   STATUS_VARIANTS,
+  formatDuration,
   formatWordCount,
+  isYouTubeDoc,
   relativeDate,
 } from "./utils"
+
+import { API_BASE } from "@/lib/config"
+
+function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
+  const r = (size - 4) / 2
+  const circ = 2 * Math.PI * r
+  const dashOffset = circ - (pct / 100) * circ
+  return (
+    <svg width={size} height={size} className="shrink-0" aria-hidden="true">
+      <circle
+        cx={size / 2} cy={size / 2} r={r}
+        fill="none" stroke="currentColor" strokeWidth={2}
+        className="text-muted/30"
+      />
+      <circle
+        cx={size / 2} cy={size / 2} r={r}
+        fill="none" stroke="currentColor" strokeWidth={2}
+        strokeDasharray={circ} strokeDashoffset={dashOffset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        className="text-primary"
+      />
+    </svg>
+  )
+}
+
+const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string }> = {
+  book: { label: "Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
+  conversation: { label: "Conversation", className: "bg-green-100 text-green-700 hover:bg-green-200" },
+  notes: { label: "Notes", className: "bg-gray-100 text-gray-600 hover:bg-gray-200" },
+  paper: { label: "Paper", className: "bg-purple-100 text-purple-700 hover:bg-purple-200" },
+  code: { label: "Code", className: "bg-orange-100 text-orange-700 hover:bg-orange-200" },
+  audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
+  epub: { label: "EPUB", className: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
+  kindle_clippings: { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
+}
+
+const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
+const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
+
+const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes"]
 
 interface DocumentCardProps {
   doc: DocumentListItem
@@ -17,6 +63,7 @@ interface DocumentCardProps {
   onTagClick?: (tag: string) => void
   onTagsChange?: (id: string, tags: string[]) => void
   onDelete?: (id: string) => void
+  onContentTypeChange?: (id: string, contentType: ContentType) => void
   selected?: boolean
   onSelect?: (id: string, selected: boolean) => void
   selectMode?: boolean
@@ -28,14 +75,32 @@ export function DocumentCard({
   onTagClick,
   onTagsChange,
   onDelete,
+  onContentTypeChange,
   selected = false,
   onSelect,
   selectMode = false,
 }: DocumentCardProps) {
-  const Icon = CONTENT_TYPE_ICONS[doc.content_type]
+  const isYouTube = isYouTubeDoc(doc)
+  const isKindleSource = doc.tags.includes("kindle")
+  const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
+  const badge = isYouTube ? YOUTUBE_BADGE : (isKindleSource ? KINDLE_SOURCE_BADGE : CONTENT_TYPE_BADGE[doc.content_type])
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [typePopoverOpen, setTypePopoverOpen] = useState(false)
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!typePopoverOpen) return
+    function handleClick(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setTypePopoverOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [typePopoverOpen])
 
   function handleCardClick(e: React.MouseEvent) {
     if (selectMode && onSelect) {
@@ -84,6 +149,21 @@ export function DocumentCard({
     setEditingTags(false)
   }
 
+  async function handleTypeChange(newType: ContentType) {
+    setTypePopoverOpen(false)
+    if (newType === doc.content_type) return
+    try {
+      await fetch(`${API_BASE}/documents/${doc.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content_type: newType }),
+      })
+      onContentTypeChange?.(doc.id, newType)
+    } catch {
+      // Non-fatal — UI will revert on next query invalidation
+    }
+  }
+
   return (
     <Card
       className={`group cursor-pointer select-none transition-colors ${selected ? "border-primary bg-primary/5" : ""}`}
@@ -122,13 +202,75 @@ export function DocumentCard({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="capitalize">{doc.content_type}</span>
-        <span>·</span>
+      {/* Content type badge */}
+      <div className="mt-1.5 relative inline-block" ref={popoverRef}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setTypePopoverOpen((v) => !v)
+          }}
+          title="Change document type (re-ingest to apply new chunking)"
+          className={cn(
+            "rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
+            badge.className,
+          )}
+        >
+          {badge.label}
+        </button>
+
+        {typePopoverOpen && (
+          <div
+            className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-border bg-background p-2 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1.5 px-1 text-xs text-muted-foreground">
+              Re-ingest document to apply new chunking strategy.
+            </p>
+            {CHANGEABLE_TYPES.map((t) => {
+              const opt = CONTENT_TYPE_BADGE[t]
+              return (
+                <button
+                  key={t}
+                  onClick={() => void handleTypeChange(t)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                    doc.content_type === t && "font-medium",
+                  )}
+                >
+                  {doc.content_type === t && <Check size={12} className="shrink-0 text-primary" />}
+                  {doc.content_type !== t && <span className="w-3" />}
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
         <span>{formatWordCount(doc.word_count)}</span>
         <span>·</span>
         <span>{relativeDate(doc.created_at)}</span>
+        {doc.audio_duration_seconds != null && (
+          <>
+            <span>·</span>
+            <span>{formatDuration(doc.audio_duration_seconds)}</span>
+          </>
+        )}
       </div>
+
+      {doc.enrichment_status && (
+        <span className={cn(
+          "mt-1.5 inline-block rounded-full px-2 py-0.5 text-xs",
+          (doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "animate-pulse bg-blue-100 text-blue-600",
+          doc.enrichment_status === "done" && "bg-green-100 text-green-700",
+          doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700",
+        )}>
+          {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching..."}
+          {doc.enrichment_status === "done" && "Images ready"}
+          {doc.enrichment_status === "failed" && "Enrichment failed"}
+        </span>
+      )}
 
       {doc.summary_one_sentence && (
         <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
@@ -190,6 +332,21 @@ export function DocumentCard({
           )
         )}
       </div>
+
+      {/* Reading progress bar — shown when at least one section has been read */}
+      {doc.reading_progress_pct > 0 && (
+        <div className="mt-2">
+          <Progress value={doc.reading_progress_pct * 100} className="h-1" />
+        </div>
+      )}
+
+      {/* Objective progress ring (S143) — shown only when objectives have been extracted */}
+      {doc.objective_progress_pct !== null && (
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <ProgressRing pct={doc.objective_progress_pct} size={24} />
+          <span>{Math.round(doc.objective_progress_pct)}% objectives covered</span>
+        </div>
+      )}
 
       {/* Inline delete confirmation */}
       {confirmDelete && (

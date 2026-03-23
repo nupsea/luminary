@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 interface DiagnosticsResponse {
   chunk_count: number

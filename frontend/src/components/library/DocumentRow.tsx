@@ -2,9 +2,11 @@ import { Badge } from "@/components/ui/badge"
 import type { DocumentListItem } from "./types"
 import {
   CONTENT_TYPE_ICONS,
+  Youtube,
   STATUS_LABELS,
   STATUS_VARIANTS,
   formatWordCount,
+  isYouTubeDoc,
   relativeDate,
 } from "./utils"
 
@@ -14,7 +16,7 @@ interface DocumentRowProps {
 }
 
 export function DocumentRow({ doc, onClick }: DocumentRowProps) {
-  const Icon = CONTENT_TYPE_ICONS[doc.content_type]
+  const Icon = isYouTubeDoc(doc) ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
 
   return (
     <div
@@ -26,6 +28,20 @@ export function DocumentRow({ doc, onClick }: DocumentRowProps) {
       <span className="hidden text-xs capitalize text-muted-foreground sm:block">{doc.content_type}</span>
       <span className="hidden text-xs text-muted-foreground md:block">{formatWordCount(doc.word_count)}</span>
       <span className="hidden text-xs text-muted-foreground lg:block">{relativeDate(doc.created_at)}</span>
+      {doc.reading_progress_pct > 0 && (
+        <span className="hidden text-xs text-muted-foreground xl:block">
+          {Math.round(doc.reading_progress_pct * 100)}% read
+        </span>
+      )}
+      {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && (
+        <span className="hidden text-xs text-blue-600 sm:block">Enriching...</span>
+      )}
+      {doc.enrichment_status === "done" && (
+        <span className="hidden text-xs text-green-700 sm:block">Images ready</span>
+      )}
+      {doc.enrichment_status === "failed" && (
+        <span className="hidden text-xs text-orange-600 sm:block">Enrichment failed</span>
+      )}
       <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
         {STATUS_LABELS[doc.learning_status]}
       </Badge>

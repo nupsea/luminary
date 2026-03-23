@@ -1,21 +1,26 @@
 """CRUD endpoints for notes.
 
-Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes/groups.
+Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes/groups,
+        GET /notes/search.
 """
 
+import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import NoteModel
 
 logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -28,6 +33,7 @@ router = APIRouter(prefix="/notes", tags=["notes"])
 class NoteCreateRequest(BaseModel):
     document_id: str | None = None
     chunk_id: str | None = None
+    section_id: str | None = None
     content: str
     tags: list[str] = []
     group_name: str | None = None
@@ -37,12 +43,15 @@ class NoteUpdateRequest(BaseModel):
     content: str | None = None
     tags: list[str] | None = None
     group_name: str | None = None
+    # section_id=None means "field not sent" (PATCH semantics — cannot clear via PATCH)
+    section_id: str | None = None
 
 
 class NoteResponse(BaseModel):
     id: str
     document_id: str | None
     chunk_id: str | None
+    section_id: str | None
     content: str
     tags: list[str]
     group_name: str | None
@@ -67,6 +76,26 @@ class GroupsResponse(BaseModel):
     tags: list[TagInfo]
 
 
+class SuggestedTagsResponse(BaseModel):
+    tags: list[str]
+
+
+class NoteSearchItem(BaseModel):
+    note_id: str
+    content: str
+    tags: list[str]
+    group_name: str | None
+    document_id: str | None
+    score: float
+    source: str  # "fts" | "vector" | "both"
+
+
+class NoteSearchResponse(BaseModel):
+    query: str
+    results: list[NoteSearchItem]
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -77,12 +106,79 @@ def _to_response(note: NoteModel) -> NoteResponse:
         id=note.id,
         document_id=note.document_id,
         chunk_id=note.chunk_id,
+        section_id=note.section_id,
         content=note.content,
         tags=note.tags or [],
         group_name=note.group_name,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
+
+
+async def _fts_insert(
+    note_id: str, content: str, document_id: str | None, session: AsyncSession
+) -> None:
+    await session.execute(
+        text("INSERT INTO notes_fts(note_id, content, document_id) VALUES (:nid, :content, :doc)"),
+        {"nid": note_id, "content": content, "doc": document_id or ""},
+    )
+
+
+async def _fts_delete(note_id: str, session: AsyncSession) -> None:
+    """Delete rows from the FTS5 virtual table for a given note_id.
+
+    Note_id is UNINDEXED. We find the rowid(s) from the virtual table itself
+    and delete by rowid for maximum compatibility.
+    """
+    await session.execute(
+        text(
+            "DELETE FROM notes_fts WHERE rowid IN "
+            "(SELECT rowid FROM notes_fts WHERE note_id = :nid)"
+        ),
+        {"nid": note_id},
+    )
+
+
+async def _fts_update(
+    note_id: str, content: str, document_id: str | None, session: AsyncSession
+) -> None:
+    await _fts_delete(note_id, session)
+    await _fts_insert(note_id, content, document_id, session)
+
+
+async def _embed_and_store_note(note_id: str, content: str, document_id: str | None) -> None:
+    """Embed note content and upsert vector. Non-fatal if embedding model unavailable.
+
+    Checks the note's current content before upserting to avoid overwriting a
+    newer embedding with a stale one (race between create and rapid update).
+    """
+    try:
+        from app.services.embedder import get_embedding_service  # noqa: PLC0415
+        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+        loop = asyncio.get_event_loop()
+        embedder = get_embedding_service()
+        vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])
+
+        # Guard: if the note was updated after this task was created, the
+        # content we embedded is stale -- skip the upsert.
+        async with get_session_factory()() as session:
+            row = (
+                await session.execute(
+                    select(NoteModel.content).where(NoteModel.id == note_id)
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            logger.debug("Note %s deleted before embedding completed, skipping", note_id)
+            return
+        if row != content:
+            logger.debug("Note %s content changed, skipping stale embedding", note_id)
+            return
+
+        get_lancedb_service().upsert_note_vector(note_id, document_id, content, vector)
+        logger.debug("Note vector stored note_id=%s", note_id)
+    except Exception as exc:
+        logger.warning("_embed_and_store_note failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -100,17 +196,49 @@ async def create_note(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
         chunk_id=req.chunk_id,
+        section_id=req.section_id,
         content=req.content,
         tags=req.tags,
         group_name=req.group_name,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(note)
+    await _fts_insert(note.id, note.content, note.document_id, session)
     await session.commit()
     await session.refresh(note)
+    task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note)
+
+
+@router.get("/search", response_model=NoteSearchResponse)
+async def search_notes(
+    q: str = Query(..., min_length=1),
+    k: int = Query(default=10, ge=1, le=50),
+) -> NoteSearchResponse:
+    """Hybrid FTS + semantic search over notes. Returns 422 if q is empty."""
+    from app.services.note_search import get_note_search_service  # noqa: PLC0415
+
+    results = await get_note_search_service().search(q, k=k)
+    return NoteSearchResponse(
+        query=q,
+        results=[
+            NoteSearchItem(
+                note_id=r.note_id,
+                content=r.content,
+                tags=r.tags,
+                group_name=r.group_name,
+                document_id=r.document_id,
+                score=round(r.score, 6),
+                source=r.source,
+            )
+            for r in results
+        ],
+        total=len(results),
+    )
 
 
 @router.get("/groups", response_model=GroupsResponse)
@@ -182,10 +310,22 @@ async def _apply_note_update(
         note.tags = req.tags
     if req.group_name is not None:
         note.group_name = req.group_name
-    note.updated_at = datetime.utcnow()
+    if req.section_id is not None:
+        note.section_id = req.section_id
+    note.updated_at = datetime.now(UTC)
 
+    await session.flush()  # Ensure content update is visible to other queries if needed
+    await _fts_update(note.id, note.content, note.document_id, session)
     await session.commit()
     await session.refresh(note)
+    # Delete stale vector synchronously so hybrid search doesn't return the
+    # old embedding while the background task re-embeds the new content.
+    from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+    get_lancedb_service().delete_note_vector(note.id)
+    task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(note)
 
@@ -221,6 +361,150 @@ async def delete_note(
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
 
+    await _fts_delete(note_id, session)
     await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
     await session.commit()
+    from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+
+    get_lancedb_service().delete_note_vector(note_id)
     logger.info("Deleted note", extra={"note_id": note_id})
+
+
+class NoteFlashcardGenerateRequest(BaseModel):
+    tag: str | None = None
+    note_ids: list[str] | None = None
+    count: int = 5
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+
+
+class NoteFlashcardItem(BaseModel):
+    id: str
+    question: str
+    answer: str
+    source_excerpt: str
+    source: str
+
+    model_config = {"from_attributes": True}
+
+
+@router.post("/flashcards/generate", response_model=list[NoteFlashcardItem], status_code=201)
+async def generate_note_flashcards(
+    req: NoteFlashcardGenerateRequest,
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteFlashcardItem]:
+    """Generate flashcards from user notes scoped by tag or explicit note IDs."""
+    import litellm  # noqa: PLC0415
+
+    from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
+
+    try:
+        cards = await get_flashcard_service().generate_from_notes(
+            tag=req.tag,
+            note_ids=req.note_ids,
+            count=req.count,
+            difficulty=req.difficulty,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Start it with: ollama serve",
+        ) from exc
+
+    logger.info("Generated %d note flashcards tag=%s", len(cards), req.tag)
+    return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
+@router.get("/flashcards", response_model=list[NoteFlashcardItem])
+async def list_note_flashcards(
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteFlashcardItem]:
+    """Return all flashcards generated from notes (source='note'), newest first."""
+    from app.models import FlashcardModel  # noqa: PLC0415
+
+    result = await session.execute(
+        select(FlashcardModel)
+        .where(FlashcardModel.source == "note")
+        .order_by(FlashcardModel.created_at.desc())
+    )
+    cards = list(result.scalars().all())
+    return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
+class GapDetectRequest(BaseModel):
+    note_ids: list[str] = []
+    document_id: str
+
+
+class GapDetectResponse(BaseModel):
+    gaps: list[str]
+    covered: list[str]
+    query_used: str
+
+
+@router.post("/gap-detect", response_model=GapDetectResponse)
+async def gap_detect(
+    req: GapDetectRequest,
+    session: AsyncSession = Depends(get_db),
+) -> GapDetectResponse:
+    """Identify book concepts absent from the user's notes."""
+    if not req.note_ids:
+        raise HTTPException(status_code=422, detail="note_ids must be non-empty")
+
+    import litellm  # noqa: PLC0415
+
+    from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
+
+    try:
+        report = await get_gap_detector().detect_gaps(
+            note_ids=req.note_ids,
+            document_id=req.document_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.APIConnectionError,
+        ConnectionRefusedError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Start it with: ollama serve",
+        ) from exc
+
+    logger.info(
+        "gap_detect: doc=%s gaps=%d covered=%d",
+        req.document_id,
+        len(report["gaps"]),
+        len(report["covered"]),
+    )
+    return GapDetectResponse(
+        gaps=report["gaps"],
+        covered=report["covered"],
+        query_used=report["query_used"],
+    )
+
+
+@router.post("/{note_id}/suggest-tags", response_model=SuggestedTagsResponse)
+async def suggest_tags(
+    note_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> SuggestedTagsResponse:
+    """Return LLM-suggested tags for an existing note. Always HTTP 200 when note exists."""
+    result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+    note = result.scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
+
+    tags = await get_note_tagger().suggest_tags(note.content)
+    logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
+    return SuggestedTagsResponse(tags=tags)

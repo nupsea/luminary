@@ -5,17 +5,32 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
+    AnnotationModel,
     ChunkModel,
+    ClipModel,
+    CodeSnippetModel,
     DocumentModel,
+    EnrichmentJobModel,
     EvalRunModel,
+    FeynmanSessionModel,
+    FeynmanTurnModel,
     FlashcardModel,
+    ImageModel,
+    LearningGoalModel,
+    LearningObjectiveModel,
+    LibrarySummaryModel,
     MisconceptionModel,
     NoteModel,
+    PredictionEventModel,
     QAHistoryModel,
+    ReadingPositionModel,
+    ReadingProgressModel,
     SectionModel,
+    SectionSummaryModel,
     SettingsModel,
     StudySessionModel,
     SummaryModel,
+    WebReferenceModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,17 +44,73 @@ USING fts5(
 )
 """
 
+NOTES_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts
+USING fts5(
+    content,
+    note_id UNINDEXED,
+    document_id UNINDEXED
+)
+"""
+
+IMAGES_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS images_fts
+USING fts5(
+    body,
+    image_id UNINDEXED,
+    document_id UNINDEXED
+)
+"""
+
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(FTS5_DDL))
+        await conn.execute(text(NOTES_FTS5_DDL))
+        await conn.execute(text(IMAGES_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
         # Additive migrations — safe to run on existing databases.
         # SQLite ignores "duplicate column" errors so we wrap each in its own try.
         for ddl in [
             "ALTER TABLE documents ADD COLUMN file_hash TEXT",
+            "ALTER TABLE documents ADD COLUMN chapter_count INTEGER",
+            "ALTER TABLE documents ADD COLUMN conversation_metadata JSON",
+            "ALTER TABLE flashcards ADD COLUMN source TEXT NOT NULL DEFAULT 'document'",
+            "ALTER TABLE flashcards ADD COLUMN deck TEXT NOT NULL DEFAULT 'default'",
+            "ALTER TABLE flashcards ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'medium'",
+            "ALTER TABLE notes ADD COLUMN section_id TEXT",
+            "ALTER TABLE annotations ADD COLUMN note_text TEXT",
+            "ALTER TABLE study_sessions ADD COLUMN accuracy_pct REAL",
+            "ALTER TABLE documents ADD COLUMN audio_duration_seconds REAL",
+            "ALTER TABLE documents ADD COLUMN error_message TEXT",
+            "ALTER TABLE documents ADD COLUMN source_url TEXT",
+            "ALTER TABLE documents ADD COLUMN video_title TEXT",
+            "ALTER TABLE chunks ADD COLUMN has_code INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE chunks ADD COLUMN code_language TEXT",
+            "ALTER TABLE chunks ADD COLUMN code_signature TEXT",
+            "ALTER TABLE sections ADD COLUMN admonition_type TEXT",
+            "ALTER TABLE sections ADD COLUMN parent_section_id TEXT",
+            # S137: Bloom's Taxonomy flashcard type/level — nullable; generate_technical() sets them
+            "ALTER TABLE flashcards ADD COLUMN flashcard_type TEXT",
+            "ALTER TABLE flashcards ADD COLUMN bloom_level INTEGER",
+            # S139: prerequisite chain depth per section (set by PrereqExtractorService)
+            "ALTER TABLE sections ADD COLUMN difficulty_estimate INTEGER",
+            # S141: publication year for contradiction prefer_source temporal ordering
+            "ALTER TABLE documents ADD COLUMN publication_year INTEGER",
+            # S146: PDF page number per chunk for PDF viewer deep-links
+            "ALTER TABLE chunks ADD COLUMN pdf_page_number INTEGER",
+            # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+            "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
+            # S156: structured rubric JSON for teachback results and feynman sessions
+            "ALTER TABLE teachback_results ADD COLUMN rubric_json JSON",
+            "ALTER TABLE feynman_sessions ADD COLUMN rubric_json JSON",
+            # S159: model-generated explanation and key points for diff view
+            "ALTER TABLE feynman_sessions ADD COLUMN model_explanation_text TEXT",
+            "ALTER TABLE feynman_sessions ADD COLUMN key_points_json JSON",
+            # Inline highlights: page_number for PDF annotations
+            "ALTER TABLE annotations ADD COLUMN page_number INTEGER",
         ]:
             try:
                 await conn.execute(text(ddl))

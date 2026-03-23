@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S50: Notes tab — POST /notes, GET /notes, PATCH /notes/{id}, DELETE /notes/{id}.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. Create a note
 CREATE=$(curl -sf -X POST "${BASE}/notes" \

@@ -2,18 +2,20 @@
 
 import json
 import uuid
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import CapturingLLMService as _CapturingLLMService
+from stubs import MockLLMService as _MockLLMService
 
 import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, DocumentModel, FlashcardModel
+from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.flashcard import FlashcardService
 
 # ---------------------------------------------------------------------------
@@ -75,7 +77,7 @@ def _make_chunk(chunk_id: str | None = None, doc_id: str = "doc-1", **kwargs) ->
 
 
 def _make_flashcard(card_id: str | None = None, doc_id: str = "doc-1", **kwargs) -> FlashcardModel:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     defaults = {
         "id": card_id or str(uuid.uuid4()),
         "document_id": doc_id,
@@ -119,8 +121,7 @@ async def test_service_parses_json_and_creates_cards(test_db):
             "source_excerpt": "Superposition...",
         },
     ])
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=llm_json)
+    mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -158,8 +159,7 @@ async def test_service_strips_markdown_fences(test_db):
         '[{"question": "Q1?", "answer": "A1.", "source_excerpt": "src."}]\n'
         "```"
     )
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=llm_json)
+    mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -185,7 +185,7 @@ async def test_service_returns_empty_when_no_chunks(test_db):
         session.add(_make_doc(doc_id))
         await session.commit()
 
-    mock_llm = MagicMock()
+    mock_llm = _MockLLMService()
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -199,7 +199,7 @@ async def test_service_returns_empty_when_no_chunks(test_db):
             )
 
     assert cards == []
-    mock_llm.generate.assert_not_called()
+    assert mock_llm.call_count == 0
 
 
 async def test_service_prompt_includes_count(test_db):
@@ -213,14 +213,7 @@ async def test_service_prompt_includes_count(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    captured_prompts: list[str] = []
-
-    async def fake_generate(prompt, system="", **kwargs):
-        captured_prompts.append(prompt)
-        return '[]'
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(side_effect=fake_generate)
+    mock_llm = _CapturingLLMService(response='[]')
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -233,8 +226,147 @@ async def test_service_prompt_includes_count(test_db):
                 session=session,
             )
 
-    assert captured_prompts, "LLM generate should have been called"
-    assert "7" in captured_prompts[0]
+    assert mock_llm.captured_prompts, "LLM generate should have been called"
+    assert "7" in mock_llm.captured_prompts[0]
+
+
+async def test_service_prompt_includes_difficulty(test_db):
+    """LLM prompt includes the requested difficulty and it's stored in the database."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_chunk(chunk_id, doc_id=doc_id))
+        await session.commit()
+
+    llm_json = json.dumps([
+        {"question": "Hard Q?", "answer": "Hard A.", "source_excerpt": "src."},
+    ])
+    mock_llm = _CapturingLLMService(response=llm_json)
+
+    with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
+        svc = FlashcardService()
+        async with factory() as session:
+            cards = await svc.generate(
+                document_id=doc_id,
+                scope="full",
+                section_heading=None,
+                count=1,
+                difficulty="hard",
+                session=session,
+            )
+
+    assert mock_llm.captured_prompts, "LLM generate should have been called"
+    assert "hard" in mock_llm.captured_prompts[0].lower()
+    assert "analysis" in mock_llm.captured_prompts[0].lower()  # from _DIFFICULTY_GUIDELINES["hard"]
+
+    assert len(cards) == 1
+    assert cards[0].difficulty == "hard"
+
+
+async def test_service_prompt_includes_book_guidelines(test_db):
+    """LLM prompt includes book-specific guidelines when content_type is 'book'."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="book"))
+        # Add 20 chunks so the 5% skip doesn't empty the list
+        for i in range(20):
+            session.add(_make_chunk(doc_id=doc_id, chunk_index=i))
+        await session.commit()
+
+    mock_llm = _CapturingLLMService(response='[]')
+
+    with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
+        svc = FlashcardService()
+        async with factory() as session:
+            await svc.generate(
+                document_id=doc_id,
+                scope="full",
+                section_heading=None,
+                count=1,
+                session=session,
+            )
+
+    assert mock_llm.captured_prompts, "LLM generate should have been called"
+    assert "story" in mock_llm.captured_prompts[0].lower()
+    # _BOOK_CONTENT_GUIDELINE names Project Gutenberg
+    assert "gutenberg" in mock_llm.captured_prompts[0].lower()
+    assert "avoid" in mock_llm.captured_prompts[0].lower()
+
+
+async def test_service_skips_preface(test_db):
+    """FlashcardService.generate() skips preface/intro sections for books."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="book"))
+        # Section 1: Preface
+        s1_id = str(uuid.uuid4())
+        session.add(SectionModel(
+            id=s1_id, document_id=doc_id, heading="Introduction by the Editor",
+            level=1, section_order=0
+        ))
+        session.add(_make_chunk(
+            doc_id=doc_id, section_id=s1_id, text="This edition was published in..."
+        ))
+
+        # Section 2: Chapter 1 (Actual content)
+        s2_id = str(uuid.uuid4())
+        session.add(SectionModel(
+            id=s2_id, document_id=doc_id, heading="Chapter 1. The Beginning",
+            level=1, section_order=1
+        ))
+        session.add(_make_chunk(
+            doc_id=doc_id, section_id=s2_id, text="The story begins in a far away land..."
+        ))
+        await session.commit()
+
+    mock_llm = _CapturingLLMService(response='[]')
+
+    with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
+        svc = FlashcardService()
+        async with factory() as session:
+            await svc.generate(
+                document_id=doc_id,
+                scope="full",
+                section_heading=None,
+                count=1,
+                session=session,
+            )
+
+    assert mock_llm.captured_prompts, "LLM generate should have been called"
+    prompt = mock_llm.captured_prompts[0]
+    assert "The story begins" in prompt
+    assert "This edition was published" not in prompt
+
+
+async def test_delete_all_document_flashcards(test_db):
+    """DELETE /flashcards/document/{id} removes all cards for that document."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_flashcard(doc_id=doc_id, question="Q1?"))
+        session.add(_make_flashcard(doc_id=doc_id, question="Q2?"))
+        session.add(_make_flashcard(doc_id="other-doc", question="Q3?"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.delete(f"/flashcards/document/{doc_id}")
+        assert resp.status_code == 204
+
+        # Check doc_id cards are gone
+        get_resp = await client.get(f"/flashcards/{doc_id}")
+        assert len(get_resp.json()) == 0
+
+        # Check other-doc card remains
+        other_resp = await client.get("/flashcards/other-doc")
+        assert len(other_resp.json()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +388,7 @@ async def test_generate_endpoint_returns_201(test_db):
     llm_json = json.dumps([
         {"question": "Q?", "answer": "A.", "source_excerpt": "src."},
     ])
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=llm_json)
+    mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -381,3 +512,45 @@ async def test_export_csv_returns_valid_csv(test_db):
     assert "question" in text
     assert "What is a qubit?" in text
     assert "My Study Guide" in text
+
+
+# ---------------------------------------------------------------------------
+# S73 — Smart question generation prompt tests
+# ---------------------------------------------------------------------------
+
+
+def test_flashcard_prompt_contains_taxonomy():
+    """FLASHCARD_SYSTEM must include comprehension and application quality guidance."""
+    from app.services.flashcard import FLASHCARD_SYSTEM
+
+    assert "comprehension" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'comprehension'"
+    assert "application" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'application'"
+
+
+def test_flashcard_prompt_forbids_hypothetical():
+    """FLASHCARD_SYSTEM must include AVOID block listing hypothetical questions."""
+    from app.services.flashcard import FLASHCARD_SYSTEM
+
+    assert "AVOID" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'AVOID'"
+    assert "hypothetical" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'hypothetical'"
+
+
+def test_build_text_samples_across_range():
+    """_build_text should sample from beginning, middle, and end when limit is exceeded."""
+    from app.services.flashcard import _CHUNK_CHAR_LIMIT, _build_text
+
+    # Create enough chunks to exceed limit
+    # Each chunk 1000 chars, limit is 10,000. 15 chunks = 15,000 chars.
+    chunks = [
+        _make_chunk(chunk_id=f"c{i}", text=f"Chunk{i} " + "x" * 990, chunk_index=i)
+        for i in range(20)
+    ]
+
+    combined, first_id = _build_text(chunks)
+
+    assert first_id == "c0"
+    assert "Chunk0" in combined  # Beginning
+    assert "Chunk10" in combined  # Middle
+    assert "Chunk19" in combined  # End
+    assert "[...]" in combined
+    assert len(combined) <= _CHUNK_CHAR_LIMIT + 500  # allowing some overhead for separators

@@ -15,15 +15,17 @@ import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { SearchDialog } from "./components/SearchDialog"
 import { Skeleton } from "./components/ui/skeleton"
-import Chat from "./pages/Chat"
-import Learning from "./pages/Learning"
-import Notes from "./pages/Notes"
-import Study from "./pages/Study"
-
+import { useReviewNotification } from "./hooks/useReviewNotification"
+// All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
+// performance. Viz and Monitoring were already lazy — Chat, Learning, Notes, Study added in S84.
+const Chat = lazy(() => import("./pages/Chat"))
+const Learning = lazy(() => import("./pages/Learning"))
+const Notes = lazy(() => import("./pages/Notes"))
+const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
 const Monitoring = lazy(() => import("./pages/Monitoring"))
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Prefetch helpers
@@ -66,8 +68,10 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60_000,
+      gcTime: 60_000,
       refetchOnWindowFocus: false,
-      retry: 1,
+      retry: 2,
+      retryDelay: 1000,
     },
   },
 })
@@ -224,6 +228,9 @@ function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const qc = useQueryClient()
 
+  // S118: review reminder notifications
+  useReviewNotification()
+
   // Startup prefetch: documents list + LLM settings
   useEffect(() => {
     const docsKey: QueryKey = ["documents", undefined, null, "newest", 1, 20]
@@ -273,11 +280,11 @@ function AppShell() {
       <Sidebar />
       <main className="flex-1 h-full overflow-auto">
         <Routes>
-          <Route path="/" element={<Learning />} />
-          <Route path="/chat" element={<Chat />} />
+          <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
+          <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
-          <Route path="/study" element={<Study />} />
-          <Route path="/notes" element={<Notes />} />
+          <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
+          <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
           <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Monitoring /></Suspense>} />
         </Routes>
       </main>

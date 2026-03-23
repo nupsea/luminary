@@ -1,4 +1,12 @@
-"""Tests for QAService and POST /qa endpoint."""
+"""Tests for QAService and POST /qa endpoint.
+
+V2: stream_answer() delegates to the LangGraph chat router.  Integration tests
+that exercise stream_answer() now mock app.runtime.chat_graph.get_chat_graph
+with a mock graph whose ainvoke() returns a pre-built result dict.
+
+Pure helper-function tests (_split_response, _build_context, etc.) are
+unchanged — they test stateless functions that are still in qa.py.
+"""
 
 import json
 import uuid
@@ -20,6 +28,8 @@ from app.services.qa import (
     QA_SYSTEM_PROMPT,
     QAService,
     _build_context,
+    _enrich_citation_titles,
+    _should_use_summary,
     _split_response,
 )
 from app.types import ScoredChunk
@@ -83,13 +93,46 @@ def _make_chunk(doc_id: str, text: str = "chunk text", section: str = "Intro") -
     )
 
 
+def _make_graph_result(
+    *,
+    answer: str = "The answer.",
+    citations: list | None = None,
+    confidence: str = "high",
+    not_found: bool = False,
+    chunks: list | None = None,
+    intent: str = "factual",
+) -> dict:
+    """Build a mock graph result that matches ChatState shape."""
+    return {
+        "question": "",
+        "doc_ids": [],
+        "scope": "single",
+        "model": None,
+        "intent": intent,
+        "rewritten_question": None,
+        "chunks": chunks or [],
+        "section_context": None,
+        "answer": answer,
+        "citations": citations or [],
+        "confidence": confidence,
+        "not_found": not_found,
+    }
+
+
+def _make_mock_graph(result: dict) -> MagicMock:
+    """Return a mock graph whose ainvoke returns `result`."""
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result)
+    return mock_graph
+
+
 async def _async_iter(items):
     for item in items:
         yield item
 
 
 # ---------------------------------------------------------------------------
-# _split_response — unit tests
+# _split_response — unit tests (unchanged)
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +155,7 @@ def test_split_response_no_json_returns_full_text():
 
 
 def test_split_response_medium_confidence():
-    citations: list[dict] = []
+    citations: list = []
     full_text = "Partial answer." + json.dumps({"citations": citations, "confidence": "medium"})
     _, _, confidence = _split_response(full_text)
     assert confidence == "medium"
@@ -126,7 +169,6 @@ def test_split_response_malformed_json_returns_empty_citations():
 
 
 def test_split_response_strips_json_label_line():
-    """LLM echoes 'JSON:' label before the JSON block — should be stripped."""
     citations = [{"document_title": "Bio", "section_heading": "Cells", "page": 1, "excerpt": "..."}]
     full_text = "The cell is the basic unit of life.\nJSON:\n" + json.dumps(
         {"citations": citations, "confidence": "high"}
@@ -136,9 +178,7 @@ def test_split_response_strips_json_label_line():
 
 
 def test_split_response_strips_instruction_echo():
-    """LLM echoes the system prompt fragment as a label — should be stripped."""
-    citations: list[dict] = []
-    # Simulate mistral echoing the old system prompt instruction text
+    citations: list = []
     full_text = (
         "ONLY JSON (no prose inside the JSON, do not repeat the answer):\n"
         + json.dumps({"citations": citations, "confidence": "medium"})
@@ -148,8 +188,7 @@ def test_split_response_strips_instruction_echo():
 
 
 def test_split_response_strips_here_is_json_label():
-    """'Here is a JSON response:' label is stripped."""
-    citations: list[dict] = []
+    citations: list = []
     full_text = "Alice explores Wonderland.\nHere is a JSON response:\n" + json.dumps(
         {"citations": citations, "confidence": "high"}
     )
@@ -158,7 +197,6 @@ def test_split_response_strips_here_is_json_label():
 
 
 def test_split_response_style_b_answer_in_json():
-    """Style B: LLM puts answer inside the JSON object."""
     citations = [{"document_title": "Gita", "section_heading": "Ch1", "page": 1, "excerpt": "..."}]
     full_text = json.dumps(
         {"answer": "Arjuna questions his duty.", "citations": citations, "confidence": "medium"}
@@ -170,9 +208,7 @@ def test_split_response_style_b_answer_in_json():
 
 
 def test_split_response_prose_with_colon_not_stripped():
-    """A prose line ending with a colon but no 'json' word is kept intact."""
-    citations: list[dict] = []
-    # "The main themes are:" is legitimate prose — it should NOT be stripped
+    citations: list = []
     full_text = "The main themes are:\n- Adventure\n- Mystery.\n" + json.dumps(
         {"citations": citations, "confidence": "medium"}
     )
@@ -181,7 +217,7 @@ def test_split_response_prose_with_colon_not_stripped():
 
 
 # ---------------------------------------------------------------------------
-# _build_context — unit tests
+# _build_context — unit tests (unchanged)
 # ---------------------------------------------------------------------------
 
 
@@ -209,6 +245,7 @@ def test_qa_system_prompt_mentions_citations():
 
 # ---------------------------------------------------------------------------
 # QAService.stream_answer — normal flow
+# V2: mock the chat graph (graph.ainvoke returns pre-built result)
 # ---------------------------------------------------------------------------
 
 
@@ -221,20 +258,10 @@ async def test_stream_yields_token_events_for_answer(test_db):
     citations = [
         {"document_title": "Biology Book", "section_heading": "Cells", "page": 1, "excerpt": "..."}
     ]
-    llm_response = "Mitochondria produces ATP." + json.dumps(
-        {"citations": citations, "confidence": "high"}
-    )
+    result = _make_graph_result(answer="Mitochondria produces ATP.", citations=citations)
+    mock_graph = _make_mock_graph(result)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
             e async for e in svc.stream_answer(
@@ -242,12 +269,9 @@ async def test_stream_yields_token_events_for_answer(test_db):
             )
         ]
 
-    # Token events + done event
     assert len(events) >= 2
     token_events = [e for e in events if '"token"' in e]
     assert len(token_events) > 0
-
-    # All token events have correct format
     for event in token_events:
         assert event.startswith("data: ")
         payload = json.loads(event[len("data: "):])
@@ -261,22 +285,16 @@ async def test_stream_final_event_contains_citations(test_db):
     await _insert_doc(factory, tmp_path, doc_id, "Physics")
 
     citations = [
-        {"document_title": "Physics", "section_heading": "Forces", "page": 5, "excerpt": "F=ma"}
+        {"document_title": None, "section_heading": "Forces", "page": 5, "excerpt": "F=ma"}
     ]
-    llm_response = "Force equals mass times acceleration." + json.dumps(
-        {"citations": citations, "confidence": "high"}
+    result = _make_graph_result(
+        answer="Force equals mass times acceleration.",
+        citations=citations,
+        confidence="high",
     )
+    mock_graph = _make_mock_graph(result)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
             e async for e in svc.stream_answer(
@@ -288,7 +306,6 @@ async def test_stream_final_event_contains_citations(test_db):
     assert done_payload["done"] is True
     assert done_payload["confidence"] == "high"
     assert len(done_payload["citations"]) == 1
-    assert done_payload["citations"][0]["document_title"] == "Physics"
     assert "qa_id" in done_payload
 
 
@@ -298,18 +315,10 @@ async def test_stream_stores_qa_in_database(test_db):
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, tmp_path, doc_id, "History")
 
-    llm_response = "Napoleon was French." + json.dumps({"citations": [], "confidence": "medium"})
+    result = _make_graph_result(answer="Napoleon was French.", confidence="medium")
+    mock_graph = _make_mock_graph(result)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [e async for e in svc.stream_answer("Who was Napoleon?", [doc_id], "single", None)]
 
@@ -317,8 +326,8 @@ async def test_stream_stores_qa_in_database(test_db):
     qa_id = done_payload["qa_id"]
 
     async with factory() as session:
-        result = await session.execute(select(QAHistoryModel).where(QAHistoryModel.id == qa_id))
-        stored = result.scalar_one_or_none()
+        result_row = await session.execute(select(QAHistoryModel).where(QAHistoryModel.id == qa_id))
+        stored = result_row.scalar_one_or_none()
 
     assert stored is not None
     assert stored.question == "Who was Napoleon?"
@@ -334,23 +343,20 @@ async def test_stream_stores_qa_in_database(test_db):
 @pytest.mark.asyncio
 async def test_not_found_yields_not_found_event(test_db):
     _engine, factory, tmp_path = test_db
-    doc_id = str(uuid.uuid4())
-    await _insert_doc(factory, tmp_path, doc_id)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
+    # Chunks present but LLM said NOT_FOUND → not_found event (not error event)
+    result = _make_graph_result(
+        answer="",
+        not_found=True,
+        chunks=[{"chunk_id": "c1", "document_id": "d1", "text": "x",
+                 "section_heading": "S", "page": 1, "score": 0.5, "source": "vector"}],
+    )
+    mock_graph = _make_mock_graph(result)
 
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([NOT_FOUND_SENTINEL]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [e async for e in svc.stream_answer("Unknown question?", None, "all", None)]
 
-    # Only one event — the not_found done event
     assert len(events) == 1
     payload = json.loads(events[0][len("data: "):])
     assert payload["done"] is True
@@ -360,19 +366,11 @@ async def test_not_found_yields_not_found_event(test_db):
 @pytest.mark.asyncio
 async def test_not_found_no_token_events(test_db):
     _engine, factory, tmp_path = test_db
-    doc_id = str(uuid.uuid4())
-    await _insert_doc(factory, tmp_path, doc_id)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[])
+    result = _make_graph_result(answer="", not_found=True, chunks=[])
+    mock_graph = _make_mock_graph(result)
 
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([NOT_FOUND_SENTINEL]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [e async for e in svc.stream_answer("Unknowable?", None, "all", None)]
 
@@ -391,18 +389,10 @@ async def test_endpoint_returns_sse_content_type(test_db):
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, tmp_path, doc_id)
 
-    llm_response = "The answer is 42." + json.dumps({"citations": [], "confidence": "high"})
+    result = _make_graph_result(answer="The answer is 42.")
+    mock_graph = _make_mock_graph(result)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/qa", json={"question": "What is the answer?"})
 
@@ -412,19 +402,13 @@ async def test_endpoint_returns_sse_content_type(test_db):
 
 @pytest.mark.asyncio
 async def test_endpoint_not_found_response(test_db):
-    """Retriever returns [] → no-context guard fires before LLM; endpoint returns error event."""
+    """No chunks → no_context error event."""
     _engine, factory, tmp_path = test_db
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[])
+    result = _make_graph_result(answer="", not_found=True, chunks=[])
+    mock_graph = _make_mock_graph(result)
 
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([NOT_FOUND_SENTINEL]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/qa", json={"question": "Impossible question?"})
 
@@ -432,60 +416,45 @@ async def test_endpoint_not_found_response(test_db):
     events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
     assert len(events) == 1
     payload = json.loads(events[0][len("data: "):])
-    # no-context guard fires before LLM is called when retriever returns []
     assert payload["error"] == "no_context"
     assert payload["done"] is True
 
 
 @pytest.mark.asyncio
-async def test_endpoint_all_scope_passes_none_doc_ids(test_db):
+async def test_endpoint_all_scope_produces_answer(test_db):
+    """scope='all' endpoint call produces a valid SSE response."""
     _engine, factory, tmp_path = test_db
 
-    captured_doc_ids: list = []
+    result = _make_graph_result(answer="An answer.", intent="factual")
+    mock_graph = _make_mock_graph(result)
 
-    async def fake_retrieve(query, document_ids, k):
-        captured_doc_ids.append(document_ids)
-        return []
-
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = fake_retrieve
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([NOT_FOUND_SENTINEL]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            await ac.post(
+            resp = await ac.post(
                 "/qa",
                 json={"question": "Any question?", "scope": "all", "document_ids": ["doc-1"]},
             )
 
-    # scope=all overrides document_ids → passes None to retriever
-    assert captured_doc_ids[0] is None
+    assert resp.status_code == 200
+    events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
+    done_events = [e for e in events if '"done"' in e]
+    assert len(done_events) >= 1
 
 
 # ---------------------------------------------------------------------------
-# QAService.stream_answer — error flows (S48)
+# QAService.stream_answer — error flows
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_qa_no_context(test_db):
-    """Retriever returns 0 chunks → exactly 1 SSE event with error='no_context'."""
+    """Graph returns not_found=True with no chunks → 1 SSE event with error='no_context'."""
     _engine, factory, tmp_path = test_db
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[])
+    result = _make_graph_result(answer="", not_found=True, chunks=[])
+    mock_graph = _make_mock_graph(result)
 
-    mock_llm = MagicMock()
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
             e async for e in svc.stream_answer("anything", ["nonexistent-doc-id"], "single", None)
@@ -500,64 +469,148 @@ async def test_qa_no_context(test_db):
 
 @pytest.mark.asyncio
 async def test_qa_ollama_offline(test_db):
-    """LLM generate raises → exactly 1 SSE event with error='llm_unavailable'."""
+    """Graph raises (LLM unavailable) → SSE event with error='llm_unavailable'."""
     _engine, factory, tmp_path = test_db
-    doc_id = str(uuid.uuid4())
-    await _insert_doc(factory, tmp_path, doc_id)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(return_value=[_make_chunk(doc_id)])
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(side_effect=Exception("connection refused"))
 
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(side_effect=Exception("connection refused"))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
-            e async for e in svc.stream_answer("What is this about?", [doc_id], "single", None)
+            e async for e in svc.stream_answer("What is this about?", None, "all", None)
         ]
 
     data_lines = [e for e in events if e.startswith("data: ")]
     assert len(data_lines) == 1
     payload = json.loads(data_lines[0][len("data: "):])
     assert payload["error"] == "llm_unavailable"
+    assert payload["type"] == "error"
     assert payload["done"] is True
 
 
 @pytest.mark.asyncio
+async def test_s103_ollama_offline_sse_type_error(test_db):
+    """S103: litellm.acompletion raises ServiceUnavailableError during Path B streaming.
+
+    POST /qa must return HTTP 200 (SSE) with a single data event where:
+    - type == 'error'
+    - message contains 'Ollama is unreachable'
+    - done == True
+    No HTTP 500 must be returned; the SSE connection closes cleanly.
+    """
+    import litellm as _litellm
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    # Graph returns a state that requires Path B (LLM streaming): _llm_prompt is set.
+    result_with_prompt = {
+        "answer": "",
+        "citations": [],
+        "confidence": "low",
+        "not_found": False,
+        "chunks": [],
+        "_llm_prompt": "Answer the question.",
+        "_system_prompt": "",
+        "intent": "factual",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result_with_prompt)
+
+    # Simulate Ollama offline: acompletion raises ServiceUnavailableError.
+    offline_error = _litellm.ServiceUnavailableError(
+        message="Connection refused", llm_provider="ollama", model="ollama/mistral"
+    )
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("litellm.acompletion", new=AsyncMock(side_effect=offline_error)),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/qa",
+                json={"question": "What is this about?", "document_ids": [doc_id]},
+            )
+
+    assert resp.status_code == 200, "Must return 200 (SSE), not 500"
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+    data_lines = [ln for ln in resp.text.splitlines() if ln.startswith("data: ")]
+    assert len(data_lines) == 1, f"Expected 1 error event, got: {data_lines}"
+    payload = json.loads(data_lines[0][len("data: "):])
+    assert payload.get("type") == "error", f"Expected type='error', got: {payload}"
+    assert "Ollama is unreachable" in payload.get("message", ""), payload
+    assert payload.get("done") is True
+
+
+@pytest.mark.asyncio
+async def test_s103_api_connection_error_sse_type_error(test_db):
+    """S103: litellm.acompletion raises APIConnectionError during Path B streaming.
+
+    APIConnectionError fires when the TCP connection is refused outright (as opposed
+    to ServiceUnavailableError when the server returns 503). Both should yield the
+    same type=error SSE event.
+    """
+    import litellm as _litellm
+
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    result_with_prompt = {
+        "answer": "",
+        "citations": [],
+        "confidence": "low",
+        "not_found": False,
+        "chunks": [],
+        "_llm_prompt": "Answer the question.",
+        "_system_prompt": "",
+        "intent": "factual",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result_with_prompt)
+
+    conn_error = _litellm.APIConnectionError(
+        message="Connection refused", llm_provider="ollama", model="ollama/mistral"
+    )
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("litellm.acompletion", new=AsyncMock(side_effect=conn_error)),
+    ):
+        svc = QAService()
+        events = [e async for e in svc.stream_answer("What is this?", [doc_id], "single", None)]
+
+    data_lines = [e for e in events if e.startswith("data: ")]
+    assert len(data_lines) == 1
+    payload = json.loads(data_lines[0][len("data: "):])
+    assert payload.get("type") == "error"
+    assert "Ollama is unreachable" in payload.get("message", "")
+    assert payload.get("done") is True
+
+
+@pytest.mark.asyncio
 async def test_qa_with_mock_llm(test_db):
-    """Happy-path: mock LLM returns answer + citations → token events + done event."""
+    """Happy-path: graph returns answer + citations → token events + done event."""
     _engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, tmp_path, doc_id, "Time Machine")
 
     citations = [
-        {
-            "document_title": "Time Machine",
-            "section_heading": "Chapter 1",
-            "page": 3,
-            "excerpt": "...",
-        }
+        {"document_title": "Time Machine", "section_heading": "Chapter 1",
+         "page": 3, "excerpt": "..."}
     ]
-    llm_response = "The Time Traveller invented a machine." + json.dumps(
-        {"citations": citations, "confidence": "high"}
+    result = _make_graph_result(
+        answer="The Time Traveller invented a machine.",
+        citations=citations,
+        confidence="high",
     )
+    mock_graph = _make_mock_graph(result)
 
-    mock_retriever = MagicMock()
-    mock_retriever.retrieve = AsyncMock(
-        return_value=[_make_chunk(doc_id, text="time machine text")]
-    )
-
-    mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter([llm_response]))
-
-    with (
-        patch("app.services.qa.get_retriever", return_value=mock_retriever),
-        patch("app.services.qa.get_llm_service", return_value=mock_llm),
-    ):
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
             e async for e in svc.stream_answer(
@@ -571,3 +624,136 @@ async def test_qa_with_mock_llm(test_db):
     done_payload = json.loads(events[-1][len("data: "):])
     assert done_payload["done"] is True
     assert len(done_payload["citations"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# S61 — _enrich_citation_titles unit tests (unchanged)
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_citation_titles_single_scope_clears_title():
+    chunk = _make_chunk("doc-a", section="Intro")
+    citations = [{"document_title": "Some Book", "section_heading": "Intro", "page": 1}]
+    result = _enrich_citation_titles(citations, [chunk], {"doc-a": "Some Book"}, "single")
+    assert result[0]["document_title"] is None
+
+
+def test_enrich_citation_titles_all_scope_populates_from_chunks():
+    chunk = _make_chunk("doc-b", section="Chapter 2")
+    chunk.page = 5
+    citations = [{"document_title": "", "section_heading": "Chapter 2", "page": 5}]
+    result = _enrich_citation_titles(citations, [chunk], {"doc-b": "The Odyssey"}, "all")
+    assert result[0]["document_title"] == "The Odyssey"
+
+
+@pytest.mark.asyncio
+async def test_citations_passed_through_from_graph(test_db):
+    """Citations returned by graph are passed through in the done event."""
+    _engine, factory, tmp_path = test_db
+    doc_id_a = str(uuid.uuid4())
+    doc_id_b = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id_a, "Alice in Wonderland")
+    await _insert_doc(factory, tmp_path, doc_id_b, "The Odyssey")
+
+    citations = [
+        {
+            "document_title": "Alice in Wonderland",
+            "section_heading": "Ch1",
+            "page": 1,
+            "excerpt": "...",
+        },
+        {
+            "document_title": "The Odyssey",
+            "section_heading": "Book I",
+            "page": 10,
+            "excerpt": "...",
+        },
+    ]
+    result = _make_graph_result(
+        answer="Comparison answer.", citations=citations, confidence="medium"
+    )
+    mock_graph = _make_mock_graph(result)
+
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
+        svc = QAService()
+        events = [e async for e in svc.stream_answer("Compare the two books?", None, "all", None)]
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload["done"] is True
+    titles = {c["document_title"] for c in done_payload["citations"]}
+    assert "Alice in Wonderland" in titles
+    assert "The Odyssey" in titles
+
+
+@pytest.mark.asyncio
+async def test_citations_no_title_for_single_scope(test_db):
+    """Graph (synthesize_node) already cleared document_title for scope=single."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "Physics Textbook")
+
+    citations = [
+        {"document_title": None, "section_heading": "Forces", "page": 3, "excerpt": "F=ma"}
+    ]
+    result = _make_graph_result(
+        answer="Force equals mass times acceleration.",
+        citations=citations,
+        confidence="high",
+    )
+    mock_graph = _make_mock_graph(result)
+
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer(
+                "What is Newton's 2nd law?", [doc_id], "single", None
+            )
+        ]
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload["done"] is True
+    assert all(c["document_title"] is None for c in done_payload["citations"])
+
+
+# ---------------------------------------------------------------------------
+# S71 — _should_use_summary unit tests (unchanged)
+# ---------------------------------------------------------------------------
+
+
+def test_should_use_summary_matches_keywords():
+    assert _should_use_summary("Can you summarize this document?") is True
+    assert _should_use_summary("Give me an overview of the book") is True
+    assert _should_use_summary("What are the key points?") is True
+    assert _should_use_summary("What is this about?") is True
+
+
+def test_should_use_summary_no_match():
+    assert _should_use_summary("Who is Achilles?") is False
+    assert _should_use_summary("What happens in chapter 3?") is False
+
+
+@pytest.mark.asyncio
+async def test_qa_summary_question_routes_via_graph(test_db):
+    """Summary-intent question: S77 summary_node stub returns stub answer string."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, title="Iliad")
+
+    result = _make_graph_result(
+        answer="[summary_node stub]",
+        confidence="high",
+        intent="summary",
+    )
+    mock_graph = _make_mock_graph(result)
+
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
+        svc = QAService()
+        events = [
+            e async for e in svc.stream_answer(
+                "Can you summarize this document?", [doc_id], "single", None
+            )
+        ]
+
+    done_payload = json.loads(events[-1][len("data: "):])
+    assert done_payload["done"] is True
+    assert "summary_node" in done_payload["answer"]

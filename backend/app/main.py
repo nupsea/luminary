@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import logging.config
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,17 +18,29 @@ from app.config import Settings, get_settings
 from app.database import get_db, get_engine
 from app.db_init import create_all_tables
 from app.models import SettingsModel
+from app.routers.annotations import router as annotations_router
+from app.routers.chat_meta import router as chat_meta_router
+from app.routers.clips import router as clips_router
+from app.routers.code_executor import router as code_executor_router
 from app.routers.documents import router as documents_router
+from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
+from app.routers.feynman import router as feynman_router
 from app.routers.flashcards import router as flashcards_router
+from app.routers.goals import router as goals_router
 from app.routers.graph import router as graph_router
+from app.routers.images import router as images_router
+from app.routers.mastery import router as mastery_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.qa import router as qa_router
+from app.routers.reading import router as reading_router
+from app.routers.references import router as references_router
 from app.routers.search import router as search_router
+from app.routers.sections import router as sections_router
+from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
-from app.services.graph import get_graph_service
 from app.telemetry import setup_tracing
 
 
@@ -37,7 +50,9 @@ def configure_logging(log_level: str = "INFO") -> None:
         handler.setFormatter(JsonFormatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
     else:
         handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-    logging.basicConfig(level=log_level, handlers=[handler])
+    logger = logging.getLogger()
+    logger.handlers = [handler]
+    logger.setLevel(log_level)
 
 
 logger = logging.getLogger(__name__)
@@ -47,28 +62,30 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
-    data_dir = Path(settings.DATA_DIR).expanduser()
-    for subdir in ("raw", "models", "vectors"):
-        (data_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    # Initial DB setup
     engine = get_engine()
     await create_all_tables(engine)
-    setup_tracing(settings.PHOENIX_ENABLED, data_dir=str(data_dir))
-    FastAPIInstrumentor.instrument_app(app)
-    # SQLAlchemyInstrumentor is intentionally omitted — it instruments all
-    # SQLAlchemy engines globally, including Phoenix's own phoenix.db, creating
-    # a trace-feedback loop (Phoenix traces → phoenix.db write → new trace → …).
-    get_graph_service()  # initialise KuzuService and create schema on startup
 
-    # Ollama startup health-check — warn early if the local LLM is unreachable.
+    # Telemetry setup
+    if settings.PHOENIX_ENABLED:
+        setup_tracing(phoenix_enabled=True, data_dir=settings.DATA_DIR)
+        FastAPIInstrumentor.instrument_app(app)
+
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "corpus").mkdir(exist_ok=True)
+    (data_dir / "images").mkdir(exist_ok=True)
+    (data_dir / "notes").mkdir(exist_ok=True)
+    (data_dir / "audio").mkdir(exist_ok=True)
+
+    # Startup health check (Ollama)
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
-                logger.info("Ollama reachable at startup", extra={"url": settings.OLLAMA_URL})
-            else:
-                logger.warning(
-                    "Ollama returned non-200 at startup; LLM features may be degraded. "
-                    "URL: %s  status: %s",
+                logger.info(
+                    "Ollama check: reachable at %s (status %s)",
                     settings.OLLAMA_URL,
                     resp.status_code,
                 )
@@ -79,72 +96,82 @@ async def lifespan(app: FastAPI):
             settings.OLLAMA_URL,
         )
 
+    # ffmpeg check — required for video (MP4) ingestion.
+    _ffmpeg_path = shutil.which("ffmpeg")
+    if _ffmpeg_path is None:
+        logger.warning(
+            "ffmpeg not found at startup — video (MP4) ingestion will be unavailable. "
+            "Install with: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
+        )
+    else:
+        logger.info("ffmpeg found at startup", extra={"path": _ffmpeg_path})
+
+    # Register enrichment handlers and start the background worker (S141)
+    # Must be done before yielding so jobs enqueued during first request are dispatched.
+    from app.services.concept_linker import concept_link_handler  # noqa: PLC0415
+    from app.services.diagram_extractor import diagram_extract_handler  # noqa: PLC0415
+    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
+    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
+    from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
+    from app.services.prereq_extractor import prereq_extract_handler  # noqa: PLC0415
+    from app.services.reference_enricher import web_refs_handler  # noqa: PLC0415
+
+    _worker = get_enrichment_worker()
+    _worker.register("image_extract", image_extract_handler)
+    _worker.register("image_analyze", image_analyze_handler)
+    _worker.register("diagram_extract", diagram_extract_handler)
+    _worker.register("web_refs", web_refs_handler)
+    _worker.register("prerequisites", prereq_extract_handler)
+    _worker.register("concept_link", concept_link_handler)
+    await _worker.start()
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
+    from app.services.enrichment_worker import get_enrichment_worker as _get_worker  # noqa: PLC0415
+
+    await _get_worker().stop()
 
 
 app = FastAPI(title="Luminary", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:1420"],
+    allow_origin_regex=r"http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+app.include_router(annotations_router)
+app.include_router(clips_router)
+app.include_router(chat_meta_router)
 app.include_router(documents_router)
+app.include_router(evals_router)
 app.include_router(explain_router)
+app.include_router(goals_router)
+app.include_router(feynman_router)
 app.include_router(flashcards_router)
 app.include_router(graph_router)
+app.include_router(images_router)
 app.include_router(monitoring_router)
 app.include_router(notes_router)
 app.include_router(qa_router)
+app.include_router(reading_router)
+app.include_router(references_router)
 app.include_router(search_router)
+app.include_router(sections_router)
+app.include_router(settings_router)
+app.include_router(mastery_router)
 app.include_router(study_router)
+app.include_router(code_executor_router)
 app.include_router(summarize_router)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "1.0.0"}
-
-
-@app.get("/settings/llm")
-async def read_llm_settings(settings: Settings = Depends(get_settings)):
-    available_local_models: list[str] = []
-    processing_mode = "unavailable"
-
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                # Prefix with "ollama/" so LiteLLM can route the call correctly.
-                available_local_models = [
-                    f"ollama/{m['name']}" for m in data.get("models", [])
-                ]
-                processing_mode = "local"
-    except Exception:
-        pass
-
-    cloud_providers = [
-        {"name": "openai", "available": bool(settings.OPENAI_API_KEY)},
-        {"name": "anthropic", "available": bool(settings.ANTHROPIC_API_KEY)},
-        {"name": "gemini", "available": bool(settings.GOOGLE_API_KEY)},
-    ]
-
-    if processing_mode == "unavailable" and any(p["available"] for p in cloud_providers):
-        processing_mode = "cloud"
-
-    return {
-        "processing_mode": processing_mode,
-        "active_model": settings.LITELLM_DEFAULT_MODEL,
-        "available_local_models": available_local_models,
-        "cloud_providers": cloud_providers,
-    }
 
 
 @app.get("/settings")
@@ -168,12 +195,17 @@ async def read_settings(settings: Settings = Depends(get_settings)):
     }
 
 
+class SettingsUpdate(RootModel[dict[str, str]]):
+    pass
+
+
 @app.patch("/settings")
 async def patch_settings(
-    updates: dict[str, str],
+    request: SettingsUpdate,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     # TODO: migrate to OS keychain — see tech-debt-tracker.md
+    updates = request.root
     for key, value in updates.items():
         setting = SettingsModel(key=key, value=value)
         await session.merge(setting)
@@ -219,8 +251,11 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
         return round(total / (1024 * 1024), 2)
 
     return {
-        "data_dir": str(data_dir),
-        "raw_mb": dir_size_mb(data_dir / "raw"),
-        "vectors_mb": dir_size_mb(data_dir / "vectors"),
-        "models_mb": dir_size_mb(data_dir / "models"),
+        "corpus_mb": dir_size_mb(data_dir / "corpus"),
+        "images_mb": dir_size_mb(data_dir / "images"),
+        "notes_mb": dir_size_mb(data_dir / "notes"),
+        "audio_mb": dir_size_mb(data_dir / "audio"),
+        "db_mb": dir_size_mb(data_dir / "luminary.db")
+        if (data_dir / "luminary.db").exists()
+        else 0.0,
     }

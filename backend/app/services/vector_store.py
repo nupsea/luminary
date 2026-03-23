@@ -8,7 +8,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-TABLE_NAME = "chunk_vectors"
+TABLE_NAME = "chunk_vectors_v3"
 
 SCHEMA = pa.schema(
     [
@@ -17,9 +17,32 @@ SCHEMA = pa.schema(
         pa.field("content_type", pa.string()),
         pa.field("section_heading", pa.string()),
         pa.field("page", pa.int32()),
+        pa.field("chunk_index", pa.int32()),
         pa.field("speaker", pa.string()),
         pa.field("text", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 1024)),
+        pa.field("vector", pa.list_(pa.float32(), 384)),
+    ]
+)
+
+NOTE_TABLE_NAME = "note_vectors_v2"
+
+NOTE_SCHEMA = pa.schema(
+    [
+        pa.field("note_id", pa.string()),
+        pa.field("document_id", pa.string()),
+        pa.field("content", pa.string()),
+        pa.field("vector", pa.list_(pa.float32(), 384)),
+    ]
+)
+
+IMAGE_TABLE_NAME = "image_vectors_v1"
+
+IMAGE_SCHEMA = pa.schema(
+    [
+        pa.field("image_id", pa.string()),
+        pa.field("document_id", pa.string()),
+        pa.field("description", pa.string()),
+        pa.field("vector", pa.list_(pa.float32(), 384)),
     ]
 )
 
@@ -69,6 +92,95 @@ class LanceDBService:
         table = self._get_table()
         table.delete(f"document_id = '{document_id}'")
         logger.info("Deleted vectors for document %s from LanceDB", document_id)
+
+    def _get_note_table(self) -> Any:
+        self._connect()
+        existing = self._db.list_tables().tables
+        if NOTE_TABLE_NAME in existing:
+            return self._db.open_table(NOTE_TABLE_NAME)
+        return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
+
+    def upsert_note_vector(
+        self, note_id: str, document_id: str | None, content: str, vector: list[float]
+    ) -> None:
+        """Upsert a single note embedding keyed on note_id."""
+        table = self._get_note_table()
+        table.merge_insert("note_id").when_matched_update_all().when_not_matched_insert_all().execute(
+            [
+                {
+                    "note_id": note_id,
+                    "document_id": document_id or "",
+                    "content": content,
+                    "vector": vector,
+                }
+            ]
+        )
+        logger.debug("Upserted note vector note_id=%s", note_id)
+
+    def delete_note_vector(self, note_id: str) -> None:
+        """Delete the vector for the given note_id."""
+        try:
+            table = self._get_note_table()
+            table.delete(f"note_id = '{note_id}'")
+            logger.debug("Deleted note vector note_id=%s", note_id)
+        except Exception as exc:
+            logger.warning("delete_note_vector failed for note_id=%s: %s", note_id, exc)
+
+    def _get_image_table(self) -> Any:
+        self._connect()
+        existing = self._db.list_tables().tables
+        if IMAGE_TABLE_NAME in existing:
+            return self._db.open_table(IMAGE_TABLE_NAME)
+        return self._db.create_table(IMAGE_TABLE_NAME, schema=IMAGE_SCHEMA)
+
+    def upsert_image_vector(
+        self, image_id: str, document_id: str, description: str, vector: list[float]
+    ) -> None:
+        """Upsert a single image description embedding keyed on image_id."""
+        table = self._get_image_table()
+        table.merge_insert("image_id").when_matched_update_all().when_not_matched_insert_all().execute(
+            [
+                {
+                    "image_id": image_id,
+                    "document_id": document_id,
+                    "description": description,
+                    "vector": vector,
+                }
+            ]
+        )
+        logger.debug("Upserted image vector image_id=%s", image_id)
+
+    def search_image_vectors(
+        self,
+        query_vector: list[float],
+        document_ids: list[str] | None,
+        k: int = 5,
+        threshold: float = 0.5,
+    ) -> list[dict]:
+        """Cosine search image_vectors; returns rows where similarity >= threshold."""
+        try:
+            table = self._get_image_table()
+            search = table.search(query_vector).metric("cosine").limit(k)
+            if document_ids:
+                id_list = ", ".join(f"'{did}'" for did in document_ids)
+                search = search.where(f"document_id IN ({id_list})", prefilter=True)
+            rows = search.to_list()
+            return [
+                row for row in rows
+                if 1.0 - float(row.get("_distance", 1.0)) >= threshold
+            ]
+        except Exception as exc:
+            logger.warning("search_image_vectors failed: %s", exc)
+            return []
+
+    def delete_image_vectors_for_document(self, document_id: str) -> None:
+        """Delete all image vectors for the given document_id."""
+        try:
+            table = self._get_image_table()
+            table.delete(f"document_id = '{document_id}'")
+            logger.info("Deleted image vectors for document %s", document_id)
+        except Exception as exc:
+            logger.warning("delete_image_vectors_for_document failed doc=%s: %s", document_id, exc)
 
 
 _lancedb_service: LanceDBService | None = None

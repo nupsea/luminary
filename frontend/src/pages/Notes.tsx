@@ -18,14 +18,31 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2 } from "lucide-react"
-import ReactMarkdown from "react-markdown"
-import { useEffect, useRef, useState } from "react"
+import { BookOpen, Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { toast } from "sonner"
+import { GapDetectDialog } from "@/components/GapDetectDialog"
+import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteEditorDialog } from "@/components/NoteEditorDialog"
+import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
-import { relativeDate } from "@/components/library/utils"
+import { stripMarkdown } from "@/lib/utils"
+import { formatDate, relativeDate } from "@/components/library/utils"
+import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +66,18 @@ interface GroupsData { groups: GroupInfo[]; tags: TagInfo[] }
 interface DocumentItem {
   id: string
   title: string
+}
+
+interface Clip {
+  id: string
+  document_id: string
+  section_id: string | null
+  section_heading: string | null
+  pdf_page_number: number | null
+  selected_text: string
+  user_note: string
+  created_at: string
+  updated_at: string
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +121,11 @@ async function createNote(payload: {
   return res.json() as Promise<Note>
 }
 
+async function deleteNote(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
+  if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
+}
+
 async function patchNote(
   id: string,
   data: { content?: string; tags?: string[]; group_name?: string },
@@ -105,9 +139,345 @@ async function patchNote(
   return res.json() as Promise<Note>
 }
 
-async function deleteNote(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
+async function fetchClips(documentId?: string): Promise<Clip[]> {
+  const params = new URLSearchParams()
+  if (documentId) params.set("document_id", documentId)
+  const res = await fetch(`${API_BASE}/clips?${params.toString()}`)
+  if (!res.ok) throw new Error(`GET /clips failed: ${res.status}`)
+  return res.json() as Promise<Clip[]>
+}
+
+async function patchClipNote(id: string, userNote: string): Promise<Clip> {
+  const res = await fetch(`${API_BASE}/clips/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_note: userNote }),
+  })
+  if (!res.ok) throw new Error(`PATCH /clips/${id} failed: ${res.status}`)
+  return res.json() as Promise<Clip>
+}
+
+async function deleteClip(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/clips/${id}`, { method: "DELETE" })
+  if (!res.ok && res.status !== 204) throw new Error(`DELETE /clips/${id} failed: ${res.status}`)
+}
+
+async function createNoteFromClip(clip: Clip, docTitle: string): Promise<{ id: string }> {
+  const body = `> ${clip.selected_text}\n\n*Source: ${docTitle}${clip.section_heading ? ` — ${clip.section_heading}` : ""}*`
+  const res = await fetch(`${API_BASE}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: body,
+      tags: ["clip"],
+      document_id: clip.document_id,
+      section_id: clip.section_id ?? null,
+    }),
+  })
+  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
+  return res.json() as Promise<{ id: string }>
+}
+
+async function fetchSuggestedTags(id: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
+    if (!res.ok) return []
+    const data = (await res.json()) as { tags: string[] }
+    return data.tags ?? []
+  } catch {
+    return []
+  }
+}
+
+interface NoteSearchItem {
+  note_id: string
+  content: string
+  tags: string[]
+  group_name: string | null
+  document_id: string | null
+  score: number
+  source: string
+}
+
+interface NoteSearchResponse {
+  query: string
+  results: NoteSearchItem[]
+  total: number
+}
+
+async function fetchNoteSearch(q: string, k = 10): Promise<NoteSearchResponse> {
+  const params = new URLSearchParams({ q, k: String(k) })
+  const res = await fetch(`${API_BASE}/notes/search?${params.toString()}`)
+  if (!res.ok) throw new Error(`GET /notes/search failed: ${res.status}`)
+  return res.json() as Promise<NoteSearchResponse>
+}
+
+// ---------------------------------------------------------------------------
+// ClipCard — single clip entry in Reading Journal
+// ---------------------------------------------------------------------------
+
+interface ClipCardProps {
+  clip: Clip
+  docTitle: string
+  onDeleted: () => void
+  onConvertToNote: (clip: Clip) => void
+  onCreateFlashcard: (clip: Clip) => void
+  navigate: (url: string) => void
+}
+
+function ClipCard({ clip, docTitle, onDeleted, onConvertToNote, onCreateFlashcard, navigate }: ClipCardProps) {
+  const [confirming, setConfirming] = useState(false)
+  const [noteText, setNoteText] = useState(clip.user_note)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const abortRef = useRef<AbortController | null>(null)
+  const qc = useQueryClient()
+
+  const deleteMut = useMutation({
+    mutationFn: () => deleteClip(clip.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clips"] })
+      onDeleted()
+    },
+  })
+
+  async function handleNoteBlur() {
+    if (noteText === clip.user_note) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setSaveStatus("saving")
+    try {
+      await patchClipNote(clip.id, noteText)
+      setSaveStatus("saved")
+      void qc.invalidateQueries({ queryKey: ["clips"] })
+      setTimeout(() => setSaveStatus("idle"), 2000)
+    } catch {
+      if (!controller.signal.aborted) setSaveStatus("error")
+    }
+  }
+
+  const attribution = [
+    docTitle,
+    clip.section_heading,
+  ]
+    .filter(Boolean)
+    .join(" — ")
+
+  const sourceUrl = clip.section_id
+    ? `/?doc=${clip.document_id}&section_id=${clip.section_id}`
+    : clip.pdf_page_number
+      ? `/?doc=${clip.document_id}&page=${clip.pdf_page_number}`
+      : `/?doc=${clip.document_id}`
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+      {/* Blockquote */}
+      <blockquote className="border-l-4 border-l-blue-400 pl-3 text-sm italic text-foreground">
+        {clip.selected_text}
+      </blockquote>
+
+      {/* Attribution */}
+      <p className="text-xs text-muted-foreground">{attribution}</p>
+
+      {/* User note */}
+      <div className="relative">
+        <textarea
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          onBlur={() => void handleNoteBlur()}
+          placeholder="Add your note..."
+          className="w-full resize-none rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          rows={2}
+        />
+        {saveStatus === "saving" && (
+          <span className="absolute bottom-1 right-2 text-xs text-muted-foreground">Saving...</span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="absolute bottom-1 right-2 text-xs text-green-600">Saved</span>
+        )}
+        {saveStatus === "error" && (
+          <span className="absolute bottom-1 right-2 text-xs text-red-600">Save failed</span>
+        )}
+      </div>
+
+      {/* Actions row */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <button
+          onClick={() => navigate(sourceUrl)}
+          className="rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          Navigate to source
+        </button>
+        <button
+          onClick={() => onConvertToNote(clip)}
+          className="rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          Convert to Note
+        </button>
+        <button
+          onClick={() => onCreateFlashcard(clip)}
+          className="rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          Create Flashcard
+        </button>
+        <div className="flex-1" />
+        <span className="text-muted-foreground">{relativeDate(clip.created_at)}</span>
+        {confirming ? (
+          <>
+            <button
+              onClick={() => deleteMut.mutate()}
+              disabled={deleteMut.isPending}
+              className="rounded bg-destructive px-2 py-0.5 text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded border border-border px-2 py-0.5 hover:bg-accent"
+            >
+              No
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            className="rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-accent"
+            title="Delete clip"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ReadingJournalTab
+// ---------------------------------------------------------------------------
+
+interface ReadingJournalTabProps {
+  documents: DocumentItem[]
+  onConvertToNote: (clip: Clip) => void
+  onCreateFlashcard: (clip: Clip) => void
+  navigate: (url: string) => void
+}
+
+function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navigate }: ReadingJournalTabProps) {
+  const [groupByDoc, setGroupByDoc] = useState(false)
+  const qc = useQueryClient()
+
+  const { data: clips, isLoading, isError, refetch } = useQuery({
+    queryKey: ["clips"],
+    queryFn: () => fetchClips(),
+  })
+
+  const docTitleMap = Object.fromEntries(documents.map((d) => [d.id, d.title]))
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 w-full rounded-lg" />
+        ))}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <span className="flex-1">Could not load clips</span>
+        <button
+          onClick={() => void refetch()}
+          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (!clips || clips.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <BookOpen size={32} className="text-muted-foreground/50" />
+        <p className="text-base font-medium text-foreground">No clips yet</p>
+        <p className="text-sm text-muted-foreground">
+          Select text in the Document Reader and click &ldquo;Clip&rdquo; to save a passage.
+        </p>
+      </div>
+    )
+  }
+
+  function handleDeleted() {
+    void qc.invalidateQueries({ queryKey: ["clips"] })
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={groupByDoc}
+            onChange={(e) => setGroupByDoc(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-border"
+          />
+          Group by document
+        </label>
+        <span className="ml-auto text-xs text-muted-foreground">{clips.length} clip{clips.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {groupByDoc ? (
+        // Grouped view — native <details>/<summary> (no shadcn Accordion)
+        (() => {
+          const grouped = clips.reduce<Record<string, Clip[]>>((acc, c) => {
+            const key = c.document_id
+            ;(acc[key] ??= []).push(c)
+            return acc
+          }, {})
+          return Object.entries(grouped).map(([docId, docClips]) => (
+            <details key={docId} open className="rounded-lg border border-border">
+              <summary className="cursor-pointer rounded-t-lg bg-muted px-3 py-2 text-sm font-medium text-foreground select-none">
+                {docTitleMap[docId] ?? docId}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {docClips.length} clip{docClips.length !== 1 ? "s" : ""}
+                </span>
+              </summary>
+              <div className="flex flex-col gap-2 p-2">
+                {docClips.map((clip) => (
+                  <ClipCard
+                    key={clip.id}
+                    clip={clip}
+                    docTitle={docTitleMap[clip.document_id] ?? clip.document_id}
+                    onDeleted={handleDeleted}
+                    onConvertToNote={onConvertToNote}
+                    onCreateFlashcard={onCreateFlashcard}
+                    navigate={navigate}
+                  />
+                ))}
+              </div>
+            </details>
+          ))
+        })()
+      ) : (
+        // Flat list — newest first
+        clips.map((clip) => (
+          <ClipCard
+            key={clip.id}
+            clip={clip}
+            docTitle={docTitleMap[clip.document_id] ?? clip.document_id}
+            onDeleted={handleDeleted}
+            onConvertToNote={onConvertToNote}
+            onCreateFlashcard={onCreateFlashcard}
+            navigate={navigate}
+          />
+        ))
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +494,16 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
   const [content, setContent] = useState("")
   const [tagsRaw, setTagsRaw] = useState("")
   const [docId, setDocId] = useState<string>("")
+  const [createTab, setCreateTab] = useState<"write" | "preview">("write")
+  const createTaRef = useRef<HTMLTextAreaElement>(null)
   const qc = useQueryClient()
+
+  const adjustCreateHeight = useCallback(() => {
+    const ta = createTaRef.current
+    if (!ta) return
+    ta.style.height = "auto"
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [])
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -136,23 +515,62 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
           .filter(Boolean),
         document_id: docId || null,
       }),
-    onSuccess: () => {
+    onSuccess: (created: Note) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       void qc.invalidateQueries({ queryKey: ["notes-groups"] })
       onCreated()
       onClose()
+      // Fire-and-forget: suggest tags and silently patch the new note
+      void fetchSuggestedTags(created.id).then(async (suggestions) => {
+        if (suggestions.length > 0) {
+          try {
+            await patchNote(created.id, { tags: suggestions })
+            void qc.invalidateQueries({ queryKey: ["notes"] })
+          } catch {
+            // Non-fatal -- note exists without tags
+          }
+        }
+      })
     },
   })
 
   return (
     <div className="mb-4 rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-      <textarea
-        rows={4}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Write your note..."
-        className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
+      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
+        <button
+          onClick={() => setCreateTab("write")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            createTab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Write
+        </button>
+        <button
+          onClick={() => setCreateTab("preview")}
+          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+            createTab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Preview
+        </button>
+      </div>
+      {createTab === "write" ? (
+        <textarea
+          ref={createTaRef}
+          value={content}
+          onChange={(e) => { setContent(e.target.value); adjustCreateHeight() }}
+          placeholder="Write your note in Markdown..."
+          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      ) : (
+        <div className="min-h-[200px] rounded border border-border bg-background px-3 py-2">
+          {content ? (
+            <MarkdownRenderer>{content}</MarkdownRenderer>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
+          )}
+        </div>
+      )}
       <input
         type="text"
         value={tagsRaw}
@@ -196,29 +614,18 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
 }
 
 // ---------------------------------------------------------------------------
-// NoteCard
+// NoteCard — card view; editing is delegated to NoteEditorDialog
 // ---------------------------------------------------------------------------
 
 interface NoteCardProps {
   note: Note
-  onUpdated: () => void
+  onEdit: () => void
   onDeleted: () => void
 }
 
-function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
-  const [editing, setEditing] = useState(false)
+function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
-  const [content, setContent] = useState(note.content)
   const qc = useQueryClient()
-
-  const saveMut = useMutation({
-    mutationFn: () => patchNote(note.id, { content }),
-    onSuccess: () => {
-      setEditing(false)
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      onUpdated()
-    },
-  })
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -239,14 +646,14 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
           <span className="rounded-full bg-muted px-2 py-0.5">{note.group_name}</span>
         )}
         <button
-          onClick={() => { setEditing((v) => !v); setConfirming(false) }}
+          onClick={() => { onEdit(); setConfirming(false) }}
           className="hover:text-foreground"
           title="Edit"
         >
           <Pencil size={12} />
         </button>
         <button
-          onClick={() => { setConfirming((v) => !v); setEditing(false) }}
+          onClick={() => setConfirming((v) => !v)}
           className="hover:text-destructive"
           title="Delete"
         >
@@ -274,40 +681,11 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Content */}
-      {editing ? (
-        <div className="flex flex-col gap-2">
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="min-h-[80px] w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={() => saveMut.mutate()}
-              disabled={saveMut.isPending}
-              className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Check size={11} />
-              Save
-            </button>
-            <button
-              onClick={() => { setEditing(false); setContent(note.content) }}
-              className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </button>
-          </div>
+      {/* Content — click to open editor dialog */}
+      {!confirming && (
+        <div className="cursor-pointer" onClick={onEdit}>
+          <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
         </div>
-      ) : (
-        !confirming && (
-          <div
-            className="prose prose-sm max-w-none cursor-pointer text-foreground"
-            onClick={() => setEditing(true)}
-          >
-            <ReactMarkdown>{note.content.slice(0, 200)}</ReactMarkdown>
-          </div>
-        )
       )}
 
       {/* Tags */}
@@ -334,14 +712,23 @@ function NoteCard({ note, onUpdated, onDeleted }: NoteCardProps) {
 
 type FilterState =
   | { type: "all" }
+  | { type: "journal" }
   | { type: "group"; name: string }
   | { type: "tag"; name: string }
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const [showCreate, setShowCreate] = useState(false)
+  const [editingNote, setEditingNote] = useState<Note | null>(null)
+  const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
+  const [showGapDetect, setShowGapDetect] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
+  const notesView = useAppStore((s) => s.notesView)
+  const setNotesView = useAppStore((s) => s.setNotesView)
+  const navigate = useNavigate()
 
   useEffect(() => {
     logger.info("[Notes] mounted")
@@ -369,7 +756,22 @@ export default function NotesPage() {
   } = useQuery({
     queryKey: ["notes", groupParam, tagParam],
     queryFn: () => fetchNotes(undefined, groupParam, tagParam),
+    gcTime: 60_000,
   })
+
+  const {
+    data: searchData,
+    isLoading: searchLoading,
+    isError: searchError,
+    refetch: refetchSearch,
+  } = useQuery({
+    queryKey: ["notes-search", debouncedQuery],
+    queryFn: () => fetchNoteSearch(debouncedQuery),
+    enabled: debouncedQuery.trim().length > 0,
+    staleTime: 10_000,
+  })
+
+  const isSearchMode = debouncedQuery.trim().length > 0
 
   useEffect(() => {
     if (!notesLoading) {
@@ -383,19 +785,143 @@ export default function NotesPage() {
     void qc.invalidateQueries({ queryKey: ["notes-groups"] })
   }
 
+  async function handleConvertClipToNote(clip: Clip) {
+    const docTitle = documents.find((d) => d.id === clip.document_id)?.title ?? clip.document_id
+    try {
+      await createNoteFromClip(clip, docTitle)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+      toast.success("Note created from clip")
+    } catch {
+      toast.error("Failed to create note")
+    }
+  }
+
+  async function handleCreateFlashcardFromClip(clip: Clip) {
+    const docTitle = documents.find((d) => d.id === clip.document_id)?.title ?? clip.document_id
+    try {
+      await createNoteFromClip(clip, docTitle)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      toast.success("Note created from clip — select it in the dialog to generate flashcards")
+      setShowGenerateFlashcards(true)
+    } catch {
+      // still open the dialog even if note creation fails
+      setShowGenerateFlashcards(true)
+    }
+  }
+
   const noteList = notes ?? []
 
   // Determine right panel content
   let panelContent: React.ReactNode
 
-  if (notesLoading) {
+  if (filter.type === "journal") {
     panelContent = (
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-12 w-full rounded-md" />
-      </div>
+      <ReadingJournalTab
+        documents={documents}
+        onConvertToNote={(clip) => void handleConvertClipToNote(clip)}
+        onCreateFlashcard={(clip) => void handleCreateFlashcardFromClip(clip)}
+        navigate={navigate}
+      />
     )
+  } else if (isSearchMode) {
+    if (searchLoading) {
+      panelContent = (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-lg" />
+          ))}
+        </div>
+      )
+    } else if (searchError) {
+      panelContent = (
+        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="flex-1">Search failed</span>
+          <button
+            onClick={() => void refetchSearch()}
+            className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+          >
+            Retry
+          </button>
+        </div>
+      )
+    } else if (!searchData || searchData.results.length === 0) {
+      panelContent = (
+        <div className="flex flex-col items-center gap-3 py-20 text-center">
+          <p className="text-sm text-muted-foreground">No notes matching &ldquo;{debouncedQuery}&rdquo;</p>
+        </div>
+      )
+    } else {
+      panelContent = (
+        <div className="flex flex-col gap-3">
+          {searchData.results.map((result) => {
+            const matchedNote = noteList.find((n) => n.id === result.note_id)
+            return (
+              <div
+                key={result.note_id}
+                className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 cursor-pointer hover:bg-accent/50"
+                onClick={() => {
+                  if (matchedNote) setEditingNote(matchedNote)
+                }}
+              >
+                <div className="text-sm text-foreground line-clamp-3">
+                  {stripMarkdown(result.content).slice(0, 150)}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {result.tags.map((t) => (
+                    <span
+                      key={t}
+                      className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                    >
+                      <Tag size={9} />
+                      {t}
+                    </span>
+                  ))}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {result.source === "both" ? "FTS + Semantic" : result.source === "vector" ? "Semantic" : "FTS"}
+                    {" · "}
+                    {result.score.toFixed(4)}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )
+    }
+  } else if (notesLoading) {
+    panelContent =
+      notesView === "list" ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Title</TableHead>
+              <TableHead>Tags</TableHead>
+              <TableHead>Group</TableHead>
+              <TableHead>Created At</TableHead>
+              <TableHead>Document</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <TableRow key={i}>
+                <TableCell><Skeleton className="h-4 w-40" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Skeleton className="h-28 w-full rounded-lg" />
+          <Skeleton className="h-28 w-full rounded-lg" />
+        </div>
+      )
   } else if (notesError) {
     panelContent = (
       <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -423,6 +949,58 @@ export default function NotesPage() {
         </button>
       </div>
     )
+  } else if (notesView === "list") {
+    // Build doc title lookup from already-fetched document list
+    const docTitleMap = Object.fromEntries(documents.map((d) => [d.id, d.title]))
+
+    panelContent = (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Tags</TableHead>
+            <TableHead>Group</TableHead>
+            <TableHead>Created At</TableHead>
+            <TableHead>Document</TableHead>
+            <TableHead>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {noteList.map((note) => (
+            <TableRow
+              key={note.id}
+              className="cursor-pointer"
+              onClick={() => setEditingNote(note)}
+            >
+              <TableCell className="max-w-[200px] truncate font-medium text-foreground">
+                {stripMarkdown(note.content).slice(0, 60)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.tags.length > 0 ? note.tags.join(", ") : "—"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.group_name ?? "—"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatDate(note.created_at)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {note.document_id ? (docTitleMap[note.document_id] ?? note.document_id) : "Standalone"}
+              </TableCell>
+              <TableCell>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setEditingNote(note) }}
+                  className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent"
+                  title="Edit"
+                >
+                  <Pencil size={12} />
+                </button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    )
   } else {
     panelContent = (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -430,7 +1008,7 @@ export default function NotesPage() {
           <NoteCard
             key={note.id}
             note={note}
-            onUpdated={handleRefetch}
+            onEdit={() => setEditingNote(note)}
             onDeleted={handleRefetch}
           />
         ))}
@@ -452,6 +1030,18 @@ export default function NotesPage() {
         >
           All Notes
           <span className="ml-auto text-xs">{noteList.length}</span>
+        </button>
+
+        <button
+          onClick={() => setFilter({ type: "journal" })}
+          className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
+            filter.type === "journal"
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:bg-accent/60"
+          }`}
+        >
+          <BookOpen size={13} />
+          Reading Journal
         </button>
 
         {(groups?.groups ?? []).map((g) => (
@@ -497,27 +1087,66 @@ export default function NotesPage() {
 
       {/* Right panel */}
       <div className="flex-1 overflow-auto p-6">
-        {/* Panel header with + button */}
-        <div className="mb-4 flex items-center justify-between">
+        {/* Panel header with view toggle + button */}
+        <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
             {filter.type === "all"
               ? "All Notes"
-              : filter.type === "group"
-                ? filter.name
-                : `#${filter.name}`}
+              : filter.type === "journal"
+                ? "Reading Journal"
+                : filter.type === "group"
+                  ? filter.name
+                  : `#${filter.name}`}
           </h2>
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-            title="New note"
-          >
-            <Plus size={13} />
-            New
-          </button>
+          {filter.type !== "journal" && (
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search notes..."
+                  className="rounded border border-border bg-background px-3 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-48 pr-7"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    title="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <ViewToggle value={notesView} onChange={setNotesView} />
+              <button
+                onClick={() => setShowGapDetect(true)}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                title="Compare notes with a book to find gaps"
+              >
+                Compare with Book
+              </button>
+              <button
+                onClick={() => setShowGenerateFlashcards(true)}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                title="Generate flashcards from notes"
+              >
+                Generate Flashcards
+              </button>
+              <button
+                onClick={() => setShowCreate((v) => !v)}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                title="New note"
+              >
+                <Plus size={13} />
+                New
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Create form */}
-        {showCreate && (
+        {/* Create form — hidden in Reading Journal view */}
+        {showCreate && filter.type !== "journal" && (
           <CreateNoteForm
             documents={documents}
             onClose={() => setShowCreate(false)}
@@ -527,6 +1156,29 @@ export default function NotesPage() {
 
         {panelContent}
       </div>
+
+      {/* NoteEditorDialog — rendered once at page level */}
+      <NoteEditorDialog
+        note={editingNote}
+        onClose={() => setEditingNote(null)}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          setEditingNote(null)
+        }}
+      />
+
+      {/* GenerateFlashcardsDialog */}
+      <GenerateFlashcardsDialog
+        open={showGenerateFlashcards}
+        onClose={() => setShowGenerateFlashcards(false)}
+        availableTags={(groups?.tags ?? []).map((t) => t.name)}
+      />
+
+      {/* GapDetectDialog */}
+      <GapDetectDialog
+        open={showGapDetect}
+        onClose={() => setShowGapDetect(false)}
+      />
     </div>
   )
 }

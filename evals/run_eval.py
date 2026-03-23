@@ -17,25 +17,22 @@ evals/golden/manifest.json.  Re-runs skip ingestion.
 
 import argparse
 import json
+import re
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from datasets import Dataset
-from ragas import evaluate
-from ragas.metrics import (
-    answer_relevancy,
-    context_precision,
-    context_recall,
-    faithfulness,
-)
+
+# ragas and datasets are heavy optional dependencies used only for LLM-based scoring.
+# They are imported lazily inside main() so that this module can be imported by
+# backend unit tests (which run in a venv that does not include ragas/datasets).
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
 SCORES_HISTORY_PATH = Path(__file__).parent / "scores_history.jsonl"
-VALID_DATASETS = ["book", "paper", "conversation", "notes", "code"]
+VALID_DATASETS = ["book", "book_time_machine", "book_alice", "book_odyssey", "paper", "conversation", "notes", "code"]
 
 # Path to the repo root (two levels up from evals/)
 REPO_ROOT = Path(__file__).parent.parent
@@ -104,7 +101,8 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
     try:
         with file_path.open("rb") as fh:
             resp = httpx.post(
-                f"{backend_url}/ingest",
+                f"{backend_url}/documents/ingest",
+                data={"content_type": "book"},
                 files={"file": (file_path.name, fh, "text/plain")},
                 timeout=30.0,
             )
@@ -126,8 +124,9 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
             status_resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
             status_resp.raise_for_status()
             stage = status_resp.json().get("stage", "")
-            if stage == "complete":
-                print(f"  Ingestion complete: {source_file} -> {doc_id}")
+            # entity_extract, summarize, and complete all mean core indexing is DONE
+            if stage in ["complete", "summarize", "entity_extract"]:
+                print(f"  Ingestion finished enough: {source_file} -> {doc_id} (stage={stage})")
                 return doc_id
             if stage == "error":
                 print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)
@@ -140,10 +139,48 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
     return None
 
 
+def lookup_document_by_filename(backend_url: str, source_file: str) -> str | None:
+    """Return the document_id for an already-ingested file, or None if not found.
+
+    Calls GET /documents?page_size=100 and matches by the stem of source_file
+    (e.g. "time_machine" for "DATA/books/time_machine.txt").  Only returns a
+    document_id when the document's stage is "complete".
+    """
+    stem = Path(source_file).stem.lower()
+    try:
+        resp = httpx.get(
+            f"{backend_url}/documents",
+            params={"page_size": 100},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        for doc in items:
+            title = (doc.get("title") or "").lower()
+            if title == stem and doc.get("stage") == "complete":
+                return doc["id"]
+    except Exception as exc:
+        print(f"  WARNING: GET /documents failed: {exc}", file=sys.stderr)
+    return None
+
+
 def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]) -> str | None:
-    """Return the document_id for source_file, ingesting if not yet in manifest."""
+    """Return the document_id for source_file, ingesting if not yet in manifest.
+
+    Before ingesting, checks GET /documents for an existing completed document
+    matching the source filename stem.  This prevents duplicate documents on
+    repeated eval runs when manifest.json was deleted or never written.
+    """
     if source_file in manifest:
         return manifest[source_file]
+
+    # Check whether the backend already has this document before re-ingesting
+    doc_id = lookup_document_by_filename(backend_url, source_file)
+    if doc_id:
+        print(f"  Found existing document for {source_file} -> {doc_id} (skipping re-ingest)")
+        manifest[source_file] = doc_id
+        save_manifest(manifest)
+        return doc_id
 
     print(f"  Ingesting {source_file} (not yet in manifest)...")
     doc_id = ingest_document(backend_url, source_file)
@@ -159,22 +196,33 @@ def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]
 
 
 def search_chunks(backend_url: str, question: str, document_id: str | None) -> list[str]:
-    """Run GET /search and return a list of chunk texts (up to top 5)."""
+    """Run GET /search and return a list of chunk texts (up to top 5).
+
+    Uses the ``text`` field (full chunk text, up to 2000 chars) returned by the
+    search API.  The legacy ``text_excerpt`` field is only 200 chars and is
+    intended for UI display -- it is too short for context-hint substring matching.
+    """
     params: dict[str, str] = {"q": question}
     try:
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=30.0)
         resp.raise_for_status()
         body = resp.json()
-        chunks: list[str] = []
+
+        # The backend groups results by document. To get the global top-k,
+        # we must extract all matches, sort them by relevance_score desc,
+        # and then pick the top 5.
+        all_matches = []
         for group in body.get("results", []):
             # If document_id specified, filter to that document only
             if document_id and group.get("document_id") != document_id:
                 continue
             for match in group.get("matches", []):
-                chunks.append(match.get("text", ""))
-                if len(chunks) >= 5:
-                    return chunks
-        return chunks
+                all_matches.append(match)
+
+        # Sort globally by score
+        all_matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
+
+        return [m.get("text", "") for m in all_matches[:5]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
@@ -203,18 +251,35 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
         return {}
 
 
+def _norm(s: str) -> str:
+    """Collapse whitespace and normalise typographic quotes for robust substring matching.
+
+    Project Gutenberg plain-text files wrap lines at ~70 chars, so a passage
+    that reads "any real body" in the golden hint may appear as "any\nreal body"
+    inside a stored chunk.  Normalising whitespace and Unicode quotation marks
+    (U+2018/2019/201C/201D) to their ASCII equivalents eliminates false misses
+    when hints were authored with straight quotes against a source that uses
+    typographic curly quotes, or vice versa.
+    """
+    # Normalise typographic single/double quotes to ASCII equivalents
+    s = s.replace("\u2018", "'").replace("\u2019", "'")
+    s = s.replace("\u201c", '"').replace("\u201d", '"')
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
 def compute_hit_rate_5(samples: list[dict]) -> float:
     """HR@5: fraction of questions where context_hint substring is in top-5 retrieved chunks."""
     if not samples:
         return 0.0
     hits = 0
     for s in samples:
-        context_hint = s.get("context_hint", "").lower().strip()
+        context_hint = s.get("context_hint", "").strip()
         if not context_hint:
             # Fall back to ground truth prefix if no context_hint
-            context_hint = s.get("ground_truths", [""])[0].lower()[:50]
+            context_hint = s.get("ground_truths", [""])[0][:50]
+        hint_norm = _norm(context_hint)[:80]
         chunks = s.get("contexts", [])[:5]
-        if any(context_hint[:80] in ctx.lower() for ctx in chunks):
+        if any(hint_norm in _norm(ctx) for ctx in chunks):
             hits += 1
     return hits / len(samples)
 
@@ -225,13 +290,14 @@ def compute_mrr(samples: list[dict]) -> float:
         return 0.0
     reciprocal_ranks = []
     for s in samples:
-        context_hint = s.get("context_hint", "").lower().strip()
+        context_hint = s.get("context_hint", "").strip()
         if not context_hint:
-            context_hint = s.get("ground_truths", [""])[0].lower()[:50]
+            context_hint = s.get("ground_truths", [""])[0][:50]
+        hint_norm = _norm(context_hint)[:80]
         chunks = s.get("contexts", [])
         rank = None
         for i, ctx in enumerate(chunks, start=1):
-            if context_hint[:80] in ctx.lower():
+            if hint_norm in _norm(ctx):
                 rank = i
                 break
         reciprocal_ranks.append(1.0 / rank if rank else 0.0)
@@ -307,7 +373,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run RAGAS evaluation against a golden dataset.")
     parser.add_argument(
         "--dataset",
-        choices=VALID_DATASETS,
         required=True,
         help="Golden dataset name",
     )
@@ -393,6 +458,15 @@ def main() -> None:
     }
     if args.model:
         try:
+            from datasets import Dataset  # noqa: PLC0415 -- lazy import, see module docstring
+            from ragas import evaluate  # noqa: PLC0415
+            from ragas.metrics import (  # noqa: PLC0415
+                answer_relevancy,
+                context_precision,
+                context_recall,
+                faithfulness,
+            )
+
             dataset_hf = Dataset.from_list(
                 [
                     {
@@ -426,18 +500,19 @@ def main() -> None:
         **ragas_scores,
     }
 
-    # Check quality gates
-    violations: list[str] = []
-    if args.assert_thresholds:
-        if hr5 < THRESHOLDS["hit_rate_5"]:
-            violations.append(f"HR@5 {hr5:.4f} < {THRESHOLDS['hit_rate_5']}")
-        if mrr < THRESHOLDS["mrr"]:
-            violations.append(f"MRR {mrr:.4f} < {THRESHOLDS['mrr']}")
-        faith = ragas_scores.get("faithfulness")
-        if args.model and faith is not None and faith < THRESHOLDS["faithfulness"]:
-            violations.append(f"Faithfulness {faith:.4f} < {THRESHOLDS['faithfulness']}")
+    # Always evaluate threshold compliance so scores_history.jsonl accurately
+    # reflects quality.  The --assert-thresholds flag only controls exit code.
+    threshold_violations: list[str] = []
+    if hr5 < THRESHOLDS["hit_rate_5"]:
+        threshold_violations.append(f"HR@5 {hr5:.4f} < {THRESHOLDS['hit_rate_5']}")
+    if mrr < THRESHOLDS["mrr"]:
+        threshold_violations.append(f"MRR {mrr:.4f} < {THRESHOLDS['mrr']}")
+    faith = ragas_scores.get("faithfulness")
+    if args.model and faith is not None and faith < THRESHOLDS["faithfulness"]:
+        threshold_violations.append(f"Faithfulness {faith:.4f} < {THRESHOLDS['faithfulness']}")
 
-    passed = len(violations) == 0
+    passed = len(threshold_violations) == 0
+    violations = threshold_violations if args.assert_thresholds else []
 
     # Persist run to local history file
     append_history(args.dataset, args.model or "no-llm", metrics, passed)

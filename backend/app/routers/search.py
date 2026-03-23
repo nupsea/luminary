@@ -23,7 +23,8 @@ class SearchResult(BaseModel):
     content_type: str
     section_heading: str
     page: int
-    text_excerpt: str
+    text_excerpt: str  # 200-char preview for UI display
+    text: str  # full chunk text (capped at 2000 chars) for eval/API consumers
     relevance_score: float
 
 
@@ -94,6 +95,7 @@ async def search(
             section_heading=chunk.section_heading or "",
             page=chunk.page or 0,
             text_excerpt=chunk.text[:200],
+            text=chunk.text[:2000],
             relevance_score=round(chunk.score, 4),
         )
         groups.setdefault(doc_id, []).append(result_item)

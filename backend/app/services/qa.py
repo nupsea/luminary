@@ -1,4 +1,9 @@
-"""Grounded Q&A service — retrieval, citation extraction, Phoenix tracing."""
+"""Grounded Q&A service — retrieval, citation extraction, Phoenix tracing.
+
+V2: stream_answer() invokes the LangGraph chat router (app/runtime/chat_graph.py).
+The graph handles: intent classification, query rewriting, retrieval, LLM call,
+citation enrichment.  stream_answer() remains the thin SSE streaming layer.
+"""
 
 import json
 import logging
@@ -6,26 +11,149 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 
+import litellm
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
+from app.services.graph import get_graph_service
 from app.services.llm import get_llm_service
-from app.services.retriever import get_retriever
-from app.telemetry import trace_chain, trace_retrieval
+from app.telemetry import trace_chain
 from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
 
 NOT_FOUND_SENTINEL = "NOT_FOUND_IN_CONTENT"
 
+# ---------------------------------------------------------------------------
+# Query rewriting — resolve vague pronouns via Kuzu entity lookup
+# ---------------------------------------------------------------------------
+
+VAGUE_REF_RE = re.compile(
+    r"\b(they|he|she|it|them|the author|the speaker|the protagonist|"
+    r"the character|the narrator|the writer|both|the two|someone|anyone)\b",
+    re.IGNORECASE,
+)
+
+_REWRITE_SYSTEM = (
+    "Rewrite the question replacing vague references with specific names from the list. "
+    "Return only the rewritten question, no explanation."
+)
+
+
+async def _maybe_rewrite_query(
+    question: str, document_ids: list[str] | None, prior_context: str | None = None
+) -> str:
+    """Return a (possibly rewritten) query with vague references resolved.
+
+    Contract:
+    - No vague refs detected → returns question unchanged (0 LLM calls, 0 Kuzu queries).
+    - document_ids is None (all-docs scope) → returns question unchanged.
+    - Kuzu returns 0 entities → returns question unchanged.
+    - LLM fails → logs warning and returns question unchanged (non-fatal).
+    - prior_context: last user turn from conversation history — prepended to the
+      rewrite prompt so the LLM can resolve vague follow-up pronouns.
+    """
+    if VAGUE_REF_RE.search(question) is None:
+        return question
+    if document_ids is None:
+        return question
+    try:
+        entity_names = get_graph_service().get_entities_for_documents(document_ids)
+    except Exception:
+        logger.warning("_maybe_rewrite_query: Kuzu lookup failed", exc_info=True)
+        return question
+    if not entity_names:
+        return question
+    try:
+        llm = get_llm_service()
+        prompt = (
+            f"Question: {question}\n"
+            f"Available names: {', '.join(entity_names)}"
+        )
+        if prior_context:
+            prompt = f"Prior exchange:\n{prior_context}\n\n{prompt}"
+        result = await llm.generate(prompt, system=_REWRITE_SYSTEM, stream=False)
+        rewritten = str(result).strip()
+        if rewritten:
+            return rewritten
+    except Exception:
+        logger.warning("_maybe_rewrite_query: LLM rewrite failed", exc_info=True)
+    return question
+
+
+def _enrich_citation_titles(
+    citations: list[dict],
+    chunks: list[ScoredChunk],
+    doc_titles: dict[str, str],
+    scope: str,
+) -> list[dict]:
+    """Populate (or clear) document_title in each citation.
+
+    scope='single' — set document_title=None on all citations (redundant when
+    the user is already reading a specific document).
+
+    scope='all' — match each citation to a retrieved chunk by
+    (section_heading, page) and fill in the authoritative title from doc_titles.
+    If no chunk matches, keep whatever the LLM put in (graceful degradation).
+    """
+    if scope == "single":
+        for c in citations:
+            c["document_title"] = None
+        return citations
+
+    # Build lookup: (section_heading, page) -> document_id  (first match wins)
+    chunk_index: dict[tuple[str, int], str] = {}
+    for chunk in chunks:
+        key = (chunk.section_heading, chunk.page)
+        if key not in chunk_index:
+            chunk_index[key] = chunk.document_id
+
+    for c in citations:
+        heading = (c.get("section_heading") or "").strip()
+        page = int(c.get("page") or 0)
+        doc_id = chunk_index.get((heading, page))
+        if doc_id and doc_id in doc_titles:
+            c["document_title"] = doc_titles[doc_id]
+
+    return citations
+
+
+_SUMMARY_INTENT_KEYWORDS: frozenset[str] = frozenset({
+    "summarize", "summary", "summaries", "overview", "key points",
+    "what is this about", "main idea", "main ideas", "brief", "briefly",
+    "gist", "outline", "recap",
+})
+
+
+def _should_use_summary(question: str) -> bool:
+    """Return True if the question has summary-intent keywords."""
+    q = question.lower()
+    return any(kw in q for kw in _SUMMARY_INTENT_KEYWORDS)
+
+
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
     "Answer only using the provided context. "
     f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
     "Do not speculate. "
-    "Write your answer as prose. Then on a new line write this JSON: "
+    "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
+    "Then on a new line write this JSON: "
+    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
+    '"confidence":"high|medium|low"}'
+)
+
+# Used only for factual intent: falls back to general knowledge with a disclaimer
+# when the document doesn't contain the answer.
+QA_FACTUAL_SYSTEM_PROMPT = (
+    "You are a knowledgeable learning assistant. "
+    "Prefer the provided context when answering. "
+    "If the answer is not in the provided context, answer from your general knowledge "
+    "and begin that part of your answer with: 'This is not covered in your documents, but: '. "
+    f"Only respond exactly: {NOT_FOUND_SENTINEL} if you have no knowledge of the topic whatsoever. "
+    "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
+    "Then on a new line write this JSON: "
     '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
     '"confidence":"high|medium|low"}'
 )
@@ -61,7 +189,11 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
             break
 
     if json_start == -1:
-        return full_text.strip(), [], "low"
+        answer = full_text.strip()
+        # Default confidence based on answer length: short/empty answers are low,
+        # substantive answers without a JSON block default to medium.
+        confidence = "medium" if len(answer) > 80 else "low"
+        return answer, [], confidence
 
     # Parse the JSON block, tolerating truncation.
     parsed: dict = {}
@@ -76,26 +208,35 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
             except json.JSONDecodeError:
                 pass
 
-    citations: list[dict] = parsed.get("citations", [])
+    citations: list[dict] = [c for c in parsed.get("citations", []) if isinstance(c, dict)]
     confidence: str = parsed.get("confidence", "low")
+
+    def _strip_json_preamble(text: str) -> str:
+        """Remove trailing lines that are JSON label preambles, not answer content."""
+        lines = text.split("\n")
+        while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
+            lines.pop()
+        return "\n".join(lines).strip()
 
     # Style B: answer is embedded in the JSON.
     if "answer" in parsed and isinstance(parsed["answer"], str):
-        return parsed["answer"].strip(), citations, confidence
+        return _strip_json_preamble(parsed["answer"].strip()), citations, confidence
 
     # Style A: prose precedes the JSON block.
     prose = full_text[:json_start].strip()
     # Strip any trailing lines that are format labels, not answer content.
     # LLMs sometimes echo instruction fragments (e.g. "JSON:", "Here is the JSON:",
     # "ONLY JSON (no prose ...):") — these always contain the word "json".
-    lines = prose.split("\n")
-    while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
-        lines.pop()
-    return "\n".join(lines).strip(), citations, confidence
+    return _strip_json_preamble(prose), citations, confidence
 
 
 class QAService:
-    """Retrieve → ground → cite → stream answer over SSE."""
+    """Retrieve → ground → cite → stream answer over SSE.
+
+    V2: delegates to the LangGraph chat router.  stream_answer() is the thin
+    SSE streaming wrapper; all retrieval, LLM, and citation logic lives inside
+    the graph nodes (app/runtime/chat_graph.py).
+    """
 
     async def _fetch_doc_titles(self, document_ids: list[str]) -> dict[str, str]:
         if not document_ids:
@@ -141,119 +282,273 @@ class QAService:
         document_ids: list[str] | None,
         scope: str,
         model: str | None,
+        conversation_history: list[dict] | None = None,
+        web_enabled: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
-        Yields ``data: {"token": "..."}\\n\\n`` for each answer word.
-        Yields a final ``data: {"done": true, ...}\\n\\n`` event with citations.
-        On NOT_FOUND: yields ``data: {"done": true, "not_found": true}\\n\\n``.
+        V2: invokes the LangGraph chat router and streams the answer from the
+        graph result.  The SSE format is identical to V1:
+          data: {"token": "..."}\\n\\n   — one token event per word
+          data: {"done": true, ...}\\n\\n — final event with citations/confidence
+          data: {"error": "...", ...}\\n\\n — on error
 
         All exceptions are caught and yielded as SSE error events so the HTTP
-        stream is never silently dropped (which causes a generic frontend error).
+        stream is never silently dropped.
         """
         try:
             settings = get_settings()
             effective_model = model or settings.LITELLM_DEFAULT_MODEL
-            retriever = get_retriever()
-            llm = get_llm_service()
 
-            # Top-level CHAIN span for the entire Q&A journey
             with trace_chain("qa.answer", input_value=question) as root_span:
                 root_span.set_attribute("qa.scope", scope)
                 root_span.set_attribute("qa.model", effective_model)
                 if document_ids:
                     root_span.set_attribute("qa.document_ids", ", ".join(document_ids))
 
-                # Hybrid retrieval — RETRIEVER span
-                with trace_retrieval("hybrid", query=question) as ret_span:
-                    effective_doc_ids = document_ids if scope == "single" else None
-                    ret_span.set_attribute("retrieval.scope", scope)
-                    chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
-                    ret_span.set_attribute("retrieval.chunk_count", len(chunks))
-                    if chunks:
-                        ret_span.set_attribute("retrieval.top_score", round(chunks[0].score, 4))
+                from app.runtime.chat_graph import get_chat_graph  # noqa: PLC0415
 
-                # No-context guard
-                if not chunks:
-                    logger.warning(
-                        "stream_answer: no chunks retrieved",
-                        extra={"question": question},
-                    )
-                    root_span.set_attribute("error", True)
-                    root_span.set_attribute("error.message", "no_context")
-                    yield (
-                        'data: {"error": "no_context", '
-                        '"message": "No relevant content found. '
-                        'Make sure a document has been ingested.", "done": true}\n\n'
-                    )
-                    return
+                graph = get_chat_graph()
 
-                # Build context string
-                all_doc_ids = list({c.document_id for c in chunks})
-                doc_titles = await self._fetch_doc_titles(all_doc_ids)
-                context = _build_context(chunks, doc_titles)
-                prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
+                initial_state: dict = {
+                    "question": question,
+                    "doc_ids": document_ids or [],
+                    "scope": scope,
+                    "model": model,
+                    "intent": None,
+                    "rewritten_question": None,
+                    "chunks": [],
+                    "section_context": None,
+                    "answer": "",
+                    "citations": [],
+                    "confidence": "low",
+                    "not_found": False,
+                    "_llm_prompt": None,
+                    "_system_prompt": None,
+                    "retry_attempted": False,
+                    "primary_strategy": None,
+                    "conversation_history": conversation_history or [],
+                    "image_ids": [],
+                    # Web augmentation fields (S142)
+                    "web_enabled": web_enabled,
+                    "web_calls_used": 0,
+                    "web_snippets": [],
+                    # S148: chunk-derived source citations (populated by synthesize_node)
+                    "source_citations": [],
+                    # S158: retrieval transparency (populated by synthesize_node)
+                    "transparency": None,
+                    "transparency_augmented": False,
+                }
 
-                # LLM generation — LiteLLM is auto-instrumented so the LLM child
-                # span appears automatically; this block just handles error routing.
                 try:
-                    token_gen = await llm.generate(
-                        prompt, system=QA_SYSTEM_PROMPT, model=model, stream=True
-                    )
-                    collected: list[str] = []
-                    async for token in token_gen:
-                        collected.append(token)
+                    result = await graph.ainvoke(initial_state)
                 except Exception as exc:
-                    logger.warning(
-                        "stream_answer: LLM call failed",
-                        extra={"model": effective_model},
-                        exc_info=exc,
-                    )
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "llm_unavailable")
-                    yield (
-                        'data: {"error": "llm_unavailable", '
-                        '"message": "Ollama is not running or unreachable. '
-                        'Start it with: ollama serve", "done": true}\n\n'
+                    if isinstance(exc, ValueError):
+                        msg = "LLM provider not configured. Add your API key in Settings."
+                    elif isinstance(exc, litellm.AuthenticationError):
+                        msg = "LLM API key is invalid. Check your key in Settings."
+                    else:
+                        msg = "Ollama is unreachable. Start it with: ollama serve"
+                    payload = {
+                        "type": "error",
+                        "error": "llm_unavailable",
+                        "message": msg,
+                        "done": True,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    return
+
+                root_span.set_attribute("qa.intent", result.get("intent") or "")
+
+                # -----------------------------------------------------------------------
+                # __card__ SSE Protocol (established in S96; used by S97, S98, S99)
+                #
+                # A graph node that produces a structured UI card sets:
+                #   state["answer"] = "__card__" + json.dumps({...card payload...})
+                #
+                # This SSE loop detects the prefix and emits exactly two SSE events:
+                #   1. data: {"card": {...}}    -- the structured card payload
+                #   2. data: {"done": true}     -- signals stream completion to the client
+                #
+                # No "token" events are emitted for card answers.
+                # The card payload schema is node-specific (see notes_gap_node, etc.)
+                # but always contains at minimum {"type": "..."}
+                #
+                # Protocol contract: this prefix and the two-event sequence must not
+                # change in S97, S98, or S99. Extend by adding new node types only.
+                # "__card__" is exactly 8 characters; raw_answer[8:] strips the prefix.
+                # -----------------------------------------------------------------------
+                raw_answer = result.get("answer") or ""
+                if raw_answer.startswith("__card__"):
+                    card_json_str = raw_answer[8:]  # strip "__card__" prefix (8 chars)
+                    try:
+                        card_payload = json.loads(card_json_str)
+                    except json.JSONDecodeError:
+                        card_payload = {"type": "error", "error": "Malformed card payload"}
+                    yield f"data: {json.dumps({'card': card_payload})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    return
+
+                chunks_returned = result.get("chunks") or []
+
+                if result.get("not_found"):
+                    if not chunks_returned:
+                        # No context retrieved — surface as a distinct error
+                        root_span.set_attribute("error", True)
+                        root_span.set_attribute("error.message", "no_context")
+                        yield (
+                            'data: {"error": "no_context", '
+                            '"message": "No relevant content found. '
+                            'Make sure a document has been ingested.", "done": true}\n\n'
+                        )
+                    else:
+                        # Chunks present but LLM could not find the answer
+                        await self._store_qa(
+                            question, None, [], "low", None, scope, effective_model
+                        )
+                        root_span.set_attribute("qa.not_found", True)
+                        yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                    return
+
+            # --- Post-graph: stream answer tokens outside the trace span ---
+            #
+            # Two paths:
+            #   (A) Pass-through: a strategy node (e.g. summary_node with cached exec summary)
+            #       set state['answer'] directly.  Stream that answer word-by-word.
+            #   (B) LLM streaming: synthesize_node prepared _llm_prompt/_system_prompt.
+            #       Call the LLM streaming here so the SSE client receives tokens as they
+            #       are generated, not after the full response is buffered.
+            first_doc_id = document_ids[0] if document_ids else None
+            llm_prompt = result.get("_llm_prompt")
+
+            if llm_prompt:
+                # Path B — true streaming: call LLM here, yield tokens progressively
+                #
+                # _token_stream() is a lazy async generator: litellm.acompletion is not
+                # called until iteration begins. The try/except must therefore cover both
+                # the generate() call AND the subsequent iteration loops.
+                system_prompt = result.get("_system_prompt") or ""
+                llm = get_llm_service()
+                collected: list[str] = []
+                try:
+                    token_gen = await llm.generate(
+                        llm_prompt, system=system_prompt, model=effective_model, stream=True
                     )
+
+                    # Stream tokens as they arrive; stop before the citation JSON block.
+                    # NOT_FOUND_SENTINEL detection prevents yielding sentinel text as tokens.
+                    full_text_so_far = ""
+                    async for token in token_gen:
+                        collected.append(token)
+                        full_text_so_far += token
+                        # Stop streaming tokens once we hit the citation JSON block or sentinel
+                        if re.search(r'\{"citations"|\{"answer"', full_text_so_far):
+                            break
+                        if NOT_FOUND_SENTINEL in full_text_so_far:
+                            break
+                        yield f"data: {json.dumps({'token': token})}\n\n"
+
+                    # Drain any remaining tokens for full_text computation
+                    async for token in token_gen:
+                        collected.append(token)
+
+                except (
+                    litellm.ServiceUnavailableError,
+                    litellm.APIConnectionError,
+                    ValueError,
+                    litellm.AuthenticationError,
+                ) as exc:
+                    if isinstance(exc, ValueError):
+                        msg = "LLM provider not configured. Add your API key in Settings."
+                    elif isinstance(exc, litellm.AuthenticationError):
+                        msg = "LLM API key is invalid. Check your key in Settings."
+                    else:
+                        msg = "Ollama is unreachable. Start it with: ollama serve"
+                    payload = {
+                        "type": "error",
+                        "error": "llm_unavailable",
+                        "message": msg,
+                        "done": True,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
                     return
 
                 full_text = "".join(collected)
 
-                # NOT_FOUND check
                 if NOT_FOUND_SENTINEL in full_text:
-                    await self._store_qa(question, None, [], "low", None, scope, effective_model)
-                    root_span.set_attribute("qa.not_found", True)
-                    yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
-                    return
+                    sentinel_pos = full_text.index(NOT_FOUND_SENTINEL)
+                    prose_before = full_text[:sentinel_pos].strip()
+                    if not prose_before:
+                        # True not-found: sentinel at the start of response
+                        await self._store_qa(question, None, [], "low", None,
+                                             scope, effective_model)
+                        yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                        return
+                    # LLM appended sentinel after a real answer — use the prose portion
+                    full_text = prose_before
 
-                # Parse citations JSON from the end of the response
                 answer_text, citations, confidence = _split_response(full_text)
 
-                # Record the answer on the root span for Phoenix to show Q→A
-                root_span.set_attribute("output.value", answer_text[:2000])
-                root_span.set_attribute("qa.confidence", confidence)
-                root_span.set_attribute("qa.citation_count", len(citations))
+                scored_chunks_for_citation = [
+                    ScoredChunk(
+                        chunk_id=c.get("chunk_id", ""),
+                        document_id=c.get("document_id", ""),
+                        text=c.get("text", ""),
+                        section_heading=c.get("section_heading", ""),
+                        page=c.get("page", 0),
+                        score=c.get("score", 0.0),
+                        source=c.get("source", "vector"),  # type: ignore[arg-type]
+                    )
+                    for c in chunks_returned
+                ]
+                chunk_doc_ids = list(
+                    {c["document_id"] for c in chunks_returned if c.get("document_id")}
+                )
+                doc_titles = await self._fetch_doc_titles(chunk_doc_ids)
+                citations = _enrich_citation_titles(
+                    citations, scored_chunks_for_citation, doc_titles, scope
+                )
 
-            # Stream answer as token events (word granularity)
-            # NOTE: streaming happens outside the trace_chain block intentionally —
-            # the span is closed once we have the full answer (before streaming starts).
-            for word in answer_text.split():
-                yield f'data: {json.dumps({"token": word + " "})}\n\n'
+            else:
+                # Path A — pass-through: strategy node set answer directly
+                answer_text = result.get("answer") or ""
+                for word in answer_text.split():
+                    yield f'data: {json.dumps({"token": word + " "})}\n\n'
+                citations = result.get("citations") or []
+                confidence = result.get("confidence") or "low"
 
-            # Persist Q&A history
-            first_doc_id = document_ids[0] if document_ids else None
+            # S158: emit 'transparency' SSE event before 'done' if TransparencyInfo available.
+            # confidence_level is filled in here after _split_response() determines it.
+            transparency = result.get("transparency")
+            if transparency:
+                transparency_event = {
+                    "type": "transparency",
+                    "confidence_level": confidence,
+                    "strategy_used": transparency.get("strategy_used", "hybrid_retrieval"),
+                    "chunk_count": transparency.get("chunk_count", 0),
+                    "section_count": transparency.get("section_count", 0),
+                    "augmented": transparency.get("augmented", False),
+                }
+                yield f"data: {json.dumps(transparency_event)}\n\n"
+
+            # Persist Q&A history and yield final SSE event
             qa_id = await self._store_qa(
                 question, answer_text, citations, confidence, first_doc_id, scope, effective_model
             )
-
-            # Final SSE event with citations and metadata
             final = {
                 "done": True,
                 "answer": answer_text,
                 "citations": citations,
                 "confidence": confidence,
                 "qa_id": qa_id,
+                "image_ids": result.get("image_ids") or [],
+                # Web augmentation fields (S142) -- web_snippets not stored in DB
+                "web_sources": result.get("web_snippets") or [],
+                "web_calls_used": result.get("web_calls_used") or 0,
+                # S148: chunk-derived source citations for trust/navigation
+                "source_citations": result.get("source_citations") or [],
             }
             yield f"data: {json.dumps(final)}\n\n"
 
@@ -267,7 +562,7 @@ _qa_service: QAService | None = None
 
 
 def get_qa_service() -> QAService:
-    global _qa_service
+    global _qa_service  # noqa: PLW0603
     if _qa_service is None:
         _qa_service = QAService()
     return _qa_service

@@ -1,0 +1,467 @@
+"""
+book_parser.py
+==============
+Chapter-aware parsing for book-format documents (TXT, PDF, DOCX, MD).
+
+Supports hierarchical section detection (e.g. Parts -> Chapters).
+Discovers patterns across a corpus of diverse books:
+  P1  CHAPTER N. [optional subtitle on next line]
+  P2  Roman numeral alone  +  subtitle on next line
+  P3  I. STORY TITLE on one line (Sherlock style)
+  P4  Centred roman numeral (leading whitespace ≥4)
+  P5  Chapter N: / Chapter N.  arabic/inline
+  P6  PART N. / BOOK N. / ordinal BOOK (superstructure)
+  P7  CHAPTER N (no dot) + confirmed by HERE ENDETH
+  P8  The [Nth] Book of / The Gospel According
+  P9  ADVENTURE N. TITLE
+
+Metadata stripping:
+  - Gutenberg preamble/footer
+  - Table-of-Contents blocks (extremely conservative)
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+
+import chardet
+import fitz  # PyMuPDF
+from docx import Document as DocxDocument
+from markdown_it import MarkdownIt
+
+from app.types import ParsedDocument, Section
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Shared regex patterns
+# ---------------------------------------------------------------------------
+
+# Gutenberg delimiters
+_RE_PG_START = re.compile(
+    r"\*{3}\s*START OF (?:THE |THIS )?PROJECT GUTENBERG EBOOK[^\n]*\*{3}",
+    re.IGNORECASE,
+)
+_RE_PG_END = re.compile(
+    r"\*{3}\s*END OF (?:THE |THIS )?PROJECT GUTENBERG EBOOK[^\n]*\*{3}",
+    re.IGNORECASE,
+)
+
+# Roman numeral helper (I–MMMCMXCIX)
+_ROMAN = (
+    r"(?=[IVXLCDM])"
+    r"(?:M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))"
+)
+
+# Ordinal words for "FIRST BOOK", "SECOND BOOK" etc.
+_ORDINALS = (
+    r"(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|"
+    r"ELEVENTH|TWELFTH|THIRTEENTH|FOURTEENTH|FIFTEENTH|SIXTEENTH|SEVENTEENTH|"
+    r"EIGHTEENTH|NINETEENTH|TWENTIETH)"
+)
+
+# Number words for "Chapter One"
+_WORDS_N = (
+    r"(?:ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|"
+    r"FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY)"
+)
+
+# Pattern families (compiled) with default hierarchy levels.
+# level=1 is the highest (Story/Part), level=2 is sub-chapter.
+_PATTERNS: list[tuple[str, re.Pattern[str], int]] = [
+    # P1: CHAPTER N. [dot optional] – most explicit
+    (
+        "P1",
+        re.compile(
+            rf"^[ \t]*(?:CHAPTER|CHAP\.?)\s+({_ROMAN}|\d+|{_WORDS_N})[\.:]?\s*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        1,
+    ),
+    # P7: CHAPTER N (no dot, Gita style) – requires HERE ENDETH confirmation
+    (
+        "P7",
+        re.compile(
+            rf"^[ \t]*CHAPTER\s+({_ROMAN}|\d+|{_WORDS_N})\s*$",
+            re.MULTILINE,
+        ),
+        1,
+    ),
+    # P3: I. CAPS TITLE on one line (Sherlock Holmes Stories)
+    (
+        "P3",
+        re.compile(
+            rf"^[ \t]*({_ROMAN})\.?[ \t]+([A-Z][A-Za-z0-9 ’',\-:&]{{2,79}})[ \t]*$",
+            re.MULTILINE,
+        ),
+        1,
+    ),
+    # P9: ADVENTURE I. CAPS TITLE
+    (
+        "P9",
+        re.compile(
+            rf"^[ \t]*ADVENTURE\s+({_ROMAN}|\d+)\.?[ \t]+([A-Z][A-Za-z0-9 ’',\-:&]{{2,79}})[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        1,
+    ),
+    # P6a: PART N. / BOOK N. (superstructure)
+    (
+        "P6a",
+        re.compile(
+            rf"^(?:PART|BOOK|SECTION|VOLUME)\s+({_ROMAN}|\d+|{_WORDS_N})[\.]?(?:\s+[^\n]+)?$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        1,
+    ),
+    # P6b: ordinal BOOK / ordinal MEDITATION (Marcus Aurelius)
+    (
+        "P6b",
+        re.compile(
+            rf"^[ \t]*(?:THE\s+)?{_ORDINALS}\s+(?:BOOK|SECTION|MEDITATION)(?:\s+OF\s+[^\n]+)?$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        1,
+    ),
+    # P8: Bible book headings – match full heading line
+    (
+        "P8",
+        re.compile(
+            r"^(?:The\s+(?:First|Second|Third|Fourth|Fifth)\s+Book\s+of\b[^\n]*"
+            r"|The\s+Book\s+of\s+\w+[^\n]*"
+            r"|The\s+Gospel\s+According\s+to\b[^\n]*"
+            r"|The\s+(?:First|Second|Third)\s+Epistle\b[^\n]*"
+            r"|The\s+Acts\s+of[^\n]*|The\s+Revelation\b[^\n]*)",
+            re.MULTILINE,
+        ),
+        1,
+    ),
+    # P2: standalone roman numeral line + subtitle on next non-empty line
+    # (Wells / Sherlock Subchapters)
+    (
+        "P2",
+        re.compile(
+            rf"^[ \t]*({_ROMAN})\.\s*$",
+            re.MULTILINE,
+        ),
+        2,  # Usually a sub-section when other markers are present
+    ),
+    # P4: centred roman numeral (≥4 leading spaces, Gatsby-style)
+    (
+        "P4",
+        re.compile(
+            rf"^[ \t]{{4,}}({_ROMAN})[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        2,
+    ),
+    # P5: Chapter N: / Chapter N. with inline title (tech books)
+    (
+        "P5",
+        re.compile(
+            r"^Chapter\s+(\d+|" + _WORDS_N + r")[\.:\s]\s*(\S.{0,120})$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        1,
+    ),
+    # Horizontal-rule divider (8+ dashes, equals, or asterisks on own line)
+    (
+        "HR",
+        re.compile(
+            r"^[-=*_]{8,}\s*$",
+            re.MULTILINE,
+        ),
+        1,
+    ),
+]
+
+# TOC detection: line that looks like a TOC entry
+_RE_TOC_LINE = re.compile(
+    rf"^\s*(?:{_ROMAN}|Chapter\s+\d+|CHAPTER\s+{_ROMAN})"
+    r"(?:[.:]\s+\S|\s+[A-Z]\S)",
+    re.MULTILINE,
+)
+
+# HERE ENDETH confirmation (Gita)
+_RE_ENDETH = re.compile(r"HERE ENDETH CHAPTER", re.IGNORECASE)
+
+# Metadata signals
+_METADATA_SIGNALS = frozenset(
+    [
+        "contents", "table of contents", "index", "preface", "foreword",
+        "acknowledgements", "acknowledgments", "copyright", "dedication",
+        "about the author", "bibliography", "references", "appendix",
+        "produced by", "project gutenberg", "end of the project gutenberg",
+    ]
+)
+
+_MIN_CHAPTERS = 2
+
+def _is_metadata(heading: str) -> bool:
+    return heading.lower().strip() in _METADATA_SIGNALS
+
+def _clean_heading(heading: str) -> str:
+    h = re.sub(r"\s+", " ", heading).strip()
+    h = re.sub(r"\.\s*$", "", h).strip()
+    return h
+
+def _match_any_pattern(text: str) -> int | None:
+    for pid, pat, level in _PATTERNS:
+        if pid == "HR":
+            continue
+        if pat.match(text.strip()):
+            return level
+    return None
+
+
+class BookParser:
+    """Chapter-aware parser for book-format documents."""
+
+    def parse(self, file_path: Path, fmt: str) -> ParsedDocument | None:
+        fmt = fmt.lower()
+        try:
+            if fmt == "txt":
+                return self._parse_txt(file_path)
+            if fmt == "pdf":
+                return self._parse_pdf(file_path)
+            if fmt in ("docx", "doc"):
+                return self._parse_docx(file_path)
+            if fmt in ("md", "markdown"):
+                return self._parse_md(file_path)
+            if fmt in ("html", "htm"):
+                return self._parse_html(file_path)
+        except Exception:
+            logger.exception("BookParser failed for %s", file_path)
+        return None
+
+    def _parse_txt(self, file_path: Path) -> ParsedDocument | None:
+        raw_bytes = file_path.read_bytes()
+        detected = chardet.detect(raw_bytes)
+        encoding = detected.get("encoding") or "utf-8"
+        raw_text = raw_bytes.decode(encoding, errors="replace")
+        clean_text, raw_no_meta = self._strip_gutenberg(raw_text)
+        sections = self._segment_chapters(clean_text)
+        if sections is None:
+            return None
+        return ParsedDocument(
+            title=file_path.stem.replace("_", " ").title(),
+            format="txt", pages=0, word_count=len(raw_no_meta.split()),
+            sections=sections, raw_text=raw_no_meta,
+        )
+
+    def _parse_pdf(self, file_path: Path) -> ParsedDocument | None:
+        doc = fitz.open(str(file_path))
+        if len(doc) == 0:
+            return None
+        # PDF logic extracts all text then segments
+        all_text = "\n".join([page.get_text() for page in doc])
+        clean_text, _ = self._strip_gutenberg(all_text)
+        sections = self._segment_chapters(clean_text)
+        if not sections:
+            return None
+        return ParsedDocument(
+            title=file_path.stem.replace("_", " ").title(),
+            format="pdf", pages=len(doc), word_count=len(all_text.split()),
+            sections=sections, raw_text=all_text,
+        )
+
+    def _parse_docx(self, file_path: Path) -> ParsedDocument | None:
+        doc = DocxDocument(str(file_path))
+        raw_parts = [p.text for p in doc.paragraphs if p.text.strip()]
+        full_text = "\n".join(raw_parts)
+        sections = self._segment_chapters(full_text)
+        if not sections:
+            return None
+        return ParsedDocument(
+            title=file_path.stem.replace("_", " ").title(),
+            format="docx", pages=0, word_count=len(full_text.split()),
+            sections=sections, raw_text=full_text,
+        )
+
+    def _parse_md(self, file_path: Path) -> ParsedDocument | None:
+        raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+        md = MarkdownIt()
+        tokens = md.parse(raw_text)
+
+        sections: list[Section] = []
+        current_heading = "Introduction"
+        current_level = 1
+        current_texts: list[str] = []
+        in_heading = False
+        pending_heading = ""
+        pending_level = 1
+
+        def flush(next_heading: str, next_level: int) -> None:
+            nonlocal current_heading, current_level, current_texts
+            body = "\n".join(current_texts).strip()
+            if body and not _is_metadata(current_heading):
+                sections.append(
+                    Section(
+                        heading=current_heading,
+                        level=current_level,
+                        text=body,
+                        page_start=0,
+                        page_end=0,
+                    )
+                )
+            current_heading, current_level, current_texts = next_heading, next_level, []
+
+        for token in tokens:
+            if token.type == "heading_open":
+                in_heading = True
+                pending_level = int(token.tag[1]) if token.tag else 1
+            elif token.type == "inline" and in_heading:
+                pending_heading = token.content
+            elif token.type == "heading_close":
+                in_heading = False
+                flush(pending_heading, pending_level)
+            elif token.type == "inline":
+                current_texts.append(token.content)
+
+        flush("_end", 0)
+        if len(sections) < _MIN_CHAPTERS:
+            return None
+
+        return ParsedDocument(
+            title=file_path.stem.replace("_", " ").title(),
+            format="md",
+            pages=0,
+            word_count=len(raw_text.split()),
+            sections=sections,
+            raw_text=raw_text,
+        )
+
+
+    def _parse_html(self, file_path: Path) -> ParsedDocument | None:
+        raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+        text = re.sub(r"<[^>]+>", " ", raw_text)
+        sections = self._segment_chapters(text)
+        if not sections:
+            return None
+        return ParsedDocument(
+            title=file_path.stem.replace("_", " ").title(),
+            format="html", pages=0, word_count=len(text.split()),
+            sections=sections, raw_text=text,
+        )
+
+    def _strip_gutenberg(self, text: str) -> tuple[str, str]:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        m_start = _RE_PG_START.search(text)
+        if m_start:
+            text = text[m_start.end():]
+        m_end = _RE_PG_END.search(text)
+        if m_end:
+            text = text[:m_end.start()]
+        raw_clean = text
+        
+        # New conservative TOC stripper: only active if "Contents" is found near start.
+        if re.search(
+            r"^\s*(?:Contents|TABLE OF CONTENTS)\s*$",
+            text[:5000],
+            re.IGNORECASE | re.MULTILINE,
+        ):
+            text = self._strip_toc_block(text)
+        
+        return text, raw_clean
+
+    def _strip_toc_block(self, text: str) -> str:
+        """Remove TOC block. Stops at the first significant gap to preserve body headers."""
+        cutoff = min(len(text) // 10, 3000) # Smaller window for TOC
+        head = text[:cutoff]
+        lines = head.splitlines()
+        toc_start = toc_end = -1
+        run = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                if run >= 3:
+                    break 
+                run = 0
+                continue
+            if _RE_TOC_LINE.match(line):
+                if toc_start == -1:
+                    toc_start = i
+                run += 1
+                toc_end = i
+            else:
+                if run >= 3:
+                    break
+                toc_start = toc_end = -1
+                run = 0
+        if toc_start != -1 and toc_end - toc_start >= 3:
+            # Verify we aren't stripping the start of the body
+            # If the block contains more than 50% of the head, don't strip
+            if (toc_end - toc_start) > len(lines) * 0.8:
+                return text
+            text = (
+                "\n".join(lines[:toc_start])
+                + "\n"
+                + "\n".join(lines[toc_end+1:])
+                + text[cutoff:]
+            )
+        return text
+
+    def _segment_chapters(self, text: str) -> list[Section] | None:
+        """Segment text into hierarchical sections using multiple active patterns."""
+        active_patterns: list[tuple[str, re.Pattern[str], int]] = []
+        for pid, pat, level in _PATTERNS:
+            if pid == "P7" and not _RE_ENDETH.search(text):
+                continue
+            if len(pat.findall(text)) >= _MIN_CHAPTERS:
+                active_patterns.append((pid, pat, level))
+        
+        if not active_patterns:
+            return None
+
+        all_matches = []
+        for pid, pat, level in active_patterns:
+            for m in pat.finditer(text):
+                all_matches.append({
+                    "start": m.start(), "end": m.end(), "pid": pid, "level": level,
+                    "raw_heading": m.group(0).strip(),
+                })
+        all_matches.sort(key=lambda x: x["start"])
+        if not all_matches:
+            return None
+
+        filtered = [all_matches[0]]
+        for m in all_matches[1:]:
+            last = filtered[-1]
+            if m["start"] < last["end"]:
+                if m["level"] < last["level"]:
+                    filtered[-1] = m
+                continue
+            filtered.append(m)
+
+        sections: list[Section] = []
+        for i, m in enumerate(filtered):
+            body_start = m["end"]
+            body_end = filtered[i+1]["start"] if i+1 < len(filtered) else len(text)
+            body_chunk = text[body_start:body_end].lstrip("\n")
+            lines = body_chunk.splitlines()
+            subtitle = ""
+            body_offset = 0
+            for li, line in enumerate(lines[:3]):
+                stripped = line.strip()
+                if stripped:
+                    if len(stripped) <= 100 and (
+                        len(stripped.split()) <= 5 or stripped[-1] not in ".!?"
+                    ):
+                        subtitle = stripped
+                        body_offset = li + 1
+                    break
+            heading = _clean_heading(m["raw_heading"])
+            if subtitle and subtitle.upper() != subtitle:
+                heading = f"{heading} — {subtitle}"
+            elif subtitle:
+                heading = f"{heading} {subtitle}"
+            if _is_metadata(heading):
+                continue
+            sections.append(Section(
+                heading=heading, level=m["level"],
+                text="\n".join(lines[body_offset:]).strip(),
+                page_start=0, page_end=0,
+            ))
+        return sections if len(sections) >= _MIN_CHAPTERS else None

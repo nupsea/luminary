@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from stubs import MockEmbeddingService as _MockEmbeddingService
 
 import app.database as db_module
 from app.database import make_engine
@@ -291,8 +292,7 @@ def test_vector_search_returns_scored_chunks(monkeypatch):
     mock_lancedb = MagicMock()
     mock_lancedb._get_table.return_value = mock_table
 
-    mock_embedder = MagicMock()
-    mock_embedder.encode.return_value = [[0.1] * 1024]
+    mock_embedder = _MockEmbeddingService()
 
     with (
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
@@ -320,8 +320,7 @@ def test_vector_search_filters_by_document_id(monkeypatch):
     mock_lancedb = MagicMock()
     mock_lancedb._get_table.return_value = mock_table
 
-    mock_embedder = MagicMock()
-    mock_embedder.encode.return_value = [[0.0] * 1024]
+    mock_embedder = _MockEmbeddingService()
 
     with (
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
@@ -409,3 +408,81 @@ def test_diversify_round_robin_visits_sections_by_relevance():
     assert result[1].chunk_id == "a0"
     assert result[2].chunk_id == "b1"
     assert result[3].chunk_id == "a1"
+
+
+# ---------------------------------------------------------------------------
+# S59 — Speaker-diversity tests
+# ---------------------------------------------------------------------------
+
+
+def _sc(chunk_id: str, speaker: str | None, score: float) -> ScoredChunk:
+    """Helper to build a ScoredChunk with a speaker field."""
+    return ScoredChunk(
+        chunk_id=chunk_id,
+        document_id="doc1",
+        text=f"text {chunk_id}",
+        section_heading="",
+        page=0,
+        score=score,
+        source="vector",
+        chunk_index=0,
+        speaker=speaker,
+    )
+
+
+def test_diversify_speaker_balanced():
+    """8 chunks from Alice + 2 from Bob → both speakers in k=5 result."""
+    from app.services.retriever import _diversify
+
+    candidates = [_sc(f"a{i}", "Alice", 0.9 - i * 0.05) for i in range(8)] + [
+        _sc("b0", "Bob", 0.45),
+        _sc("b1", "Bob", 0.40),
+    ]
+    result = _diversify(candidates, k=5)
+
+    assert len(result) == 5
+    speakers = {c.speaker for c in result}
+    assert "Alice" in speakers, "Alice should be in k=5 result"
+    assert "Bob" in speakers, "Bob should be in k=5 result (speaker-diversity)"
+
+
+def test_diversify_speaker_no_op_when_diverse():
+    """3 speakers with 2 chunks each (33% each) → no reorder needed."""
+    from app.services.retriever import _diversify
+
+    candidates = [
+        _sc("a0", "Alice", 0.9),
+        _sc("b0", "Bob", 0.85),
+        _sc("c0", "Carol", 0.80),
+        _sc("a1", "Alice", 0.75),
+        _sc("b1", "Bob", 0.70),
+        _sc("c1", "Carol", 0.65),
+    ]
+    result = _diversify(candidates, k=5)
+
+    # Concentration = 2/5 = 40% < 60% threshold → should just return top-k
+    assert len(result) == 5
+    # Order should be unchanged (top 5 by score)
+    assert result[0].chunk_id == "a0"
+    assert result[1].chunk_id == "b0"
+    assert result[2].chunk_id == "c0"
+
+
+def test_diversify_falls_through_to_section_when_no_speaker():
+    """When all chunks have speaker=None, section-diversity path is used."""
+    from app.services.retriever import _diversify
+
+    # 8 chunks in Section A + 2 in Section B → section diversity should kick in
+    candidates = [
+        ScoredChunk(f"a{i}", "doc", f"t{i}", "Section A", 0, 0.9 - i * 0.05, "vector")
+        for i in range(8)
+    ] + [
+        ScoredChunk("b0", "doc", "tb0", "Section B", 0, 0.45, "vector"),
+        ScoredChunk("b1", "doc", "tb1", "Section B", 0, 0.40, "vector"),
+    ]
+    result = _diversify(candidates, k=5)
+
+    assert len(result) == 5
+    sections = {c.section_heading for c in result}
+    assert "Section A" in sections
+    assert "Section B" in sections, "Section B should appear via section-diversity"

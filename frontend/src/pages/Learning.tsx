@@ -1,7 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookPlus, FileText, Plus, Trash2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { MapPin } from "lucide-react"
+import {
+  BookPlus,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  FileText,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
+import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { FilterBar } from "@/components/library/FilterBar"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
@@ -14,13 +36,14 @@ import type {
   DocumentListItem,
   DocumentListResponse,
   SortOption,
-  ViewMode,
 } from "@/components/library/types"
+import { STATUS_LABELS, STATUS_VARIANTS, formatDate } from "@/components/library/utils"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 const PAGE_SIZE = 20
 
 interface SearchMatch {
@@ -96,6 +119,142 @@ async function deleteDocument(id: string): Promise<void> {
   await fetch(`${API_BASE}/documents/${id}`, { method: "DELETE" })
 }
 
+// ---------------------------------------------------------------------------
+// LibraryOverview — holistic summary across all ingested documents
+// ---------------------------------------------------------------------------
+
+function LibraryOverview() {
+  const [summary, setSummary] = useState<string>("")
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [notEnough, setNotEnough] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+  const generated = useRef(false)
+
+  async function generate(forceRefresh = false) {
+    if (generated.current && !forceRefresh) return
+    generated.current = true
+    setError(null)
+    setNotEnough(false)
+    setIsStreaming(true)
+    setSummary("")
+    try {
+      const res = await fetch(`${API_BASE}/summarize/all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "executive", model: null, force_refresh: forceRefresh }),
+      })
+      if (!res.ok || !res.body) throw new Error("Failed")
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? ""
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
+              if (typeof payload["token"] === "string") {
+                setSummary((s) => s + payload["token"])
+              }
+              if (payload["error"] === "not_enough_summaries") {
+                setNotEnough(true)
+                setIsStreaming(false)
+              } else if (payload["error"] === "llm_unavailable") {
+                setError(
+                  typeof payload["message"] === "string"
+                    ? payload["message"]
+                    : "Ollama is not running. Start it with: ollama serve",
+                )
+                setIsStreaming(false)
+              }
+              if (payload["done"] === true) {
+                setIsStreaming(false)
+              }
+            } catch {
+              // skip malformed SSE event
+            }
+          }
+        }
+      }
+    } catch {
+      generated.current = false
+      setIsStreaming(false)
+      setError("Failed to generate library overview.")
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <button
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <span className="text-sm font-semibold text-foreground">Library Overview</span>
+        <ChevronDown
+          size={14}
+          className={cn(
+            "text-muted-foreground transition-transform",
+            collapsed && "-rotate-90",
+          )}
+        />
+      </button>
+      {!collapsed && (
+        <div className="border-t border-border px-4 pb-4 pt-3">
+          {error && (
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {error}
+            </div>
+          )}
+          {notEnough ? (
+            <p className="text-sm text-muted-foreground">
+              Ingest at least one document to get a library overview.
+            </p>
+          ) : isStreaming && !summary ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 size={14} className="animate-spin" />
+              Summarizing...
+            </div>
+          ) : summary ? (
+            <div className="space-y-2">
+              <div>
+                <MarkdownRenderer>{summary}</MarkdownRenderer>
+                {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
+              </div>
+              {!isStreaming && (
+                <button
+                  title="Regenerate summary (uses LLM — may take a moment)"
+                  onClick={() => void generate(true)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw size={12} />
+                  Regenerate
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                Generate a holistic summary across all your documents.
+              </p>
+              <button
+                onClick={() => void generate()}
+                className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Generate
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LoadingSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -103,6 +262,140 @@ function LoadingSkeleton() {
         <Skeleton key={i} className="h-28 w-full" />
       ))}
     </div>
+  )
+}
+
+type TableSortCol = "title" | "created_at"
+
+interface LibraryTableProps {
+  items: DocumentListItem[]
+  isLoading: boolean
+  isError: boolean
+  onRowClick: (id: string) => void
+  onRetry: () => void
+}
+
+function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }: LibraryTableProps) {
+  const [sortCol, setSortCol] = useState<TableSortCol | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+
+  function handleColClick(col: TableSortCol) {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortCol(col)
+      setSortDir("asc")
+    }
+  }
+
+  function SortIcon({ col }: { col: TableSortCol }) {
+    if (sortCol !== col) return <ChevronsUpDown size={12} className="ml-1 inline text-muted-foreground/50" />
+    return sortDir === "asc"
+      ? <ChevronUp size={12} className="ml-1 inline text-foreground" />
+      : <ChevronDown size={12} className="ml-1 inline text-foreground" />
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    if (!sortCol) return 0
+    const dir = sortDir === "asc" ? 1 : -1
+    if (sortCol === "title") return a.title.localeCompare(b.title) * dir
+    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir
+  })
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <span className="flex-1">Could not load library. Check that the backend is running.</span>
+        <button
+          onClick={onRetry}
+          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>
+            <button
+              onClick={() => handleColClick("title")}
+              className="flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Title
+              <SortIcon col="title" />
+            </button>
+          </TableHead>
+          <TableHead>Content Type</TableHead>
+          <TableHead>Format</TableHead>
+          <TableHead>
+            <button
+              onClick={() => handleColClick("created_at")}
+              className="flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Ingested At
+              <SortIcon col="created_at" />
+            </button>
+          </TableHead>
+          <TableHead className="text-right">Chunks</TableHead>
+          <TableHead>Status</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {isLoading
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <TableRow key={i}>
+                <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-10" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+              </TableRow>
+            ))
+          : sorted.length === 0
+          ? (
+              <TableRow>
+                <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                  No documents yet. Upload your first document to get started.
+                </TableCell>
+              </TableRow>
+            )
+          : sorted.map((doc) => (
+              <TableRow
+                key={doc.id}
+                className="cursor-pointer"
+                onClick={() => onRowClick(doc.id)}
+              >
+                <TableCell className="font-medium text-foreground">
+                  {doc.title}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="gray" className="capitalize">
+                    {doc.content_type}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground capitalize">
+                  {doc.format}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {formatDate(doc.created_at)}
+                </TableCell>
+                <TableCell className="text-right text-xs text-muted-foreground">
+                  {doc.chunk_count}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
+                    {STATUS_LABELS[doc.learning_status]}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+      </TableBody>
+    </Table>
   )
 }
 
@@ -245,17 +538,120 @@ function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Where to Start panel (S139) -- shown for tech_book / tech_article documents
+// ---------------------------------------------------------------------------
+
+interface StartConceptItem {
+  concept: string
+  prereq_chain_length: number
+  flashcard_count: number
+  rationale: string
+}
+
+interface StartConceptsData {
+  document_id: string
+  concepts: StartConceptItem[]
+}
+
+async function fetchStartConcepts(documentId: string): Promise<StartConceptsData> {
+  const res = await fetch(
+    `${API_BASE}/study/start?document_id=${encodeURIComponent(documentId)}`
+  )
+  if (!res.ok) throw new Error("Failed to fetch start concepts")
+  return res.json() as Promise<StartConceptsData>
+}
+
+function WhereToStartPanel({
+  documentId,
+  contentType,
+}: {
+  documentId: string
+  contentType: string
+}) {
+  const isTechDoc = contentType === "tech_book" || contentType === "tech_article"
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["start-concepts", documentId],
+    queryFn: () => fetchStartConcepts(documentId),
+    staleTime: 60_000,
+    enabled: isTechDoc,
+  })
+
+  if (!isTechDoc) return null
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-border bg-card mb-4">
+        <p className="text-sm font-semibold px-4 py-2 border-b">Where to Start</p>
+        <div className="flex flex-col gap-2 p-4">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-5 w-1/2" />
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 mb-4 text-xs text-amber-800">
+        Could not load starting concepts.{" "}
+        <button
+          onClick={() => void refetch()}
+          className="underline hover:no-underline"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (!data || data.concepts.length === 0) return null
+
+  return (
+    <div className="rounded-lg border border-border bg-card mb-4">
+      <div className="flex items-center gap-2 px-4 py-2 border-b">
+        <MapPin size={14} className="text-muted-foreground" />
+        <p className="text-sm font-semibold">Where to Start</p>
+      </div>
+      <div className="flex flex-col gap-2 p-4">
+        {data.concepts.map((c) => (
+          <div key={c.concept} className="flex items-center justify-between text-sm">
+            <span className="font-medium">{c.concept}</span>
+            <span className="text-xs text-muted-foreground">{c.rationale}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const libraryView = useAppStore((s) => s.libraryView)
+  const setLibraryView = useAppStore((s) => s.setLibraryView)
   const queryClient = useQueryClient()
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tagFilter = searchParams.get("tag")
+  // S148: citation deep-link params — doc opens DocumentReader, page sets initial PDF page
+  // Capture into state so they survive URL param cleanup (params are cleared after first use
+  // but DocumentReader needs them after its async doc fetch completes).
+  const docParam = searchParams.get("doc")
+  const [savedSectionId, setSavedSectionId] = useState<string | undefined>(
+    searchParams.get("section_id") ?? undefined,
+  )
+  const [savedPage, setSavedPage] = useState<number | undefined>(() => {
+    const raw = searchParams.get("page")
+    if (!raw) return undefined
+    const n = parseInt(raw, 10)
+    return isNaN(n) ? undefined : n
+  })
+
   const [search, setSearch] = useState("")
-  const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
   const [page, setPage] = useState(1)
-  const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
@@ -263,7 +659,7 @@ export default function Learning() {
 
   const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
 
-  const { data: pageData, isLoading } = useQuery({
+  const { data: pageData, isLoading, isError, isSuccess, refetch } = useQuery({
     queryKey: ["documents", content_type, tagFilter, sort, page, PAGE_SIZE],
     queryFn: () =>
       fetchDocuments({
@@ -273,6 +669,8 @@ export default function Learning() {
         page,
         page_size: PAGE_SIZE,
       }),
+    staleTime: 10_000,
+    gcTime: 60_000,
   })
 
   const { data: recentItems } = useQuery({
@@ -311,12 +709,21 @@ export default function Learning() {
   }
 
   function handleTagClick(tag: string) {
-    setTagFilter(tag)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set("tag", tag)
+      return next
+    })
     setPage(1)
   }
 
   function handleTagsChange(id: string, tags: string[]) {
     tagsMutation.mutate({ id, tags })
+  }
+
+  function handleContentTypeChange(_id: string, _contentType: ContentType) {
+    void queryClient.invalidateQueries({ queryKey: ["documents"] })
+    void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
   }
 
   function handleSelect(id: string, sel: boolean) {
@@ -361,12 +768,53 @@ export default function Learning() {
     setPage(1)
   }
 
+  // S148: when arriving from a citation deep-link, open the referenced document
+  // then clear doc/section_id/page params so the Back button and next doc-open work correctly
+  useEffect(() => {
+    if (docParam) {
+      // Snapshot deep-link params into state before clearing URL
+      const sectionId = searchParams.get("section_id") ?? undefined
+      const rawPage = searchParams.get("page")
+      const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
+      setSavedSectionId(sectionId)
+      setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
+
+      setActiveDocument(docParam)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("doc")
+        next.delete("section_id")
+        next.delete("page")
+        return next
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docParam])
+
   if (activeDocumentId) {
+    // Look up content_type for the active document from cached data
+    const allKnownDocs = [
+      ...(pageData?.items ?? []),
+      ...(recentItems ?? []),
+    ]
+    const activeDoc = allKnownDocs.find((d) => d.id === activeDocumentId)
+    const activeContentType = activeDoc?.content_type ?? ""
+
     return (
-      <DocumentReader
-        documentId={activeDocumentId}
-        onBack={() => setActiveDocument(null)}
-      />
+      <div className="flex h-full flex-col">
+        <WhereToStartPanel
+          documentId={activeDocumentId}
+          contentType={activeContentType}
+        />
+        <div className="flex-1 min-h-0">
+          <DocumentReader
+            documentId={activeDocumentId}
+            onBack={() => { setActiveDocument(null); setSavedSectionId(undefined); setSavedPage(undefined) }}
+            initialSectionId={savedSectionId}
+            initialPage={savedPage}
+          />
+        </div>
+      </div>
     )
   }
 
@@ -382,7 +830,7 @@ export default function Learning() {
         {!searchActive && (
           <>
             <SortSelect value={sort} onChange={handleSortChange} />
-            <ViewToggle value={viewMode} onChange={setViewMode} />
+            <ViewToggle value={libraryView} onChange={setLibraryView} />
           </>
         )}
         <button
@@ -413,7 +861,11 @@ export default function Learning() {
           <span className="text-xs text-muted-foreground">Filtered by tag:</span>
           <button
             onClick={() => {
-              setTagFilter(null)
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev)
+                next.delete("tag")
+                return next
+              })
               setPage(1)
             }}
             className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
@@ -430,9 +882,9 @@ export default function Learning() {
         <>
           <FilterBar selected={selectedTypes} onChange={handleTypesChange} />
 
-          {isLoading ? (
+          {isLoading && libraryView === "grid" ? (
             <LoadingSkeleton />
-          ) : total === 0 && !tagFilter && selectedTypes.size === 0 ? (
+          ) : isSuccess && total === 0 && !tagFilter && selectedTypes.size === 0 ? (
             <EmptyState onAdd={() => setUploadOpen(true)} />
           ) : (
             <>
@@ -457,13 +909,18 @@ export default function Learning() {
                 </div>
               )}
 
+              {/* Library overview — only on first page, no active filters */}
+              {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
+                <LibraryOverview />
+              )}
+
               {/* Recently accessed — hide when filters active */}
               {recentItems && recentItems.length > 0 && selectedTypes.size === 0 && !tagFilter && page === 1 && (
                 <section>
                   <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Recently accessed
                   </h2>
-                  {viewMode === "grid" ? (
+                  {libraryView === "grid" ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                       {recentItems.map((doc) => (
                         <DocumentCard
@@ -473,6 +930,7 @@ export default function Learning() {
                           onTagClick={handleTagClick}
                           onTagsChange={handleTagsChange}
                           onDelete={!selectMode ? handleDeleteDocument : undefined}
+                          onContentTypeChange={handleContentTypeChange}
                           selected={selectedIds.has(doc.id)}
                           onSelect={selectMode ? handleSelect : undefined}
                         />
@@ -501,11 +959,31 @@ export default function Learning() {
                     </span>
                   )}
                 </h2>
-                {items.length === 0 ? (
+                {libraryView === "list" ? (
+                  <LibraryTable
+                    items={items}
+                    isLoading={isLoading}
+                    isError={isError}
+                    onRowClick={handleDocumentClick}
+                    onRetry={() => void refetch()}
+                  />
+                ) : isError ? (
+                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <span className="flex-1">Could not load library. Check that the backend is running.</span>
+                    <button
+                      onClick={() => void refetch()}
+                      className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : items.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">
-                    No documents match your filters.
+                    {tagFilter
+                      ? `No documents tagged "${tagFilter}".`
+                      : "No documents match your filters."}
                   </p>
-                ) : viewMode === "grid" ? (
+                ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {items.map((doc) => (
                       <DocumentCard
@@ -515,15 +993,10 @@ export default function Learning() {
                         onTagClick={handleTagClick}
                         onTagsChange={handleTagsChange}
                         onDelete={!selectMode ? handleDeleteDocument : undefined}
+                        onContentTypeChange={handleContentTypeChange}
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}
                       />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {items.map((doc) => (
-                      <DocumentRow key={doc.id} doc={doc} onClick={handleDocumentClick} />
                     ))}
                   </div>
                 )}

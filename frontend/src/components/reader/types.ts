@@ -6,6 +6,8 @@ export interface SectionItem {
   page_end: number
   section_order: number
   preview: string
+  admonition_type: string | null
+  parent_section_id: string | null
 }
 
 export interface DocumentDetail {
@@ -20,6 +22,32 @@ export interface DocumentDetail {
   created_at: string
   last_accessed_at: string
   sections: SectionItem[]
+  reading_progress_pct: number  // 0.0 to 1.0
+  audio_duration_seconds: number | null
+  source_url: string | null
+  video_title: string | null
+}
+
+export interface AnnotationItem {
+  id: string
+  document_id: string
+  section_id: string
+  chunk_id: string | null
+  selected_text: string
+  start_offset: number
+  end_offset: number
+  color: "yellow" | "green" | "blue" | "pink"
+  note_text: string | null
+  page_number: number | null
+  created_at: string
+}
+
+export interface SectionContentItem {
+  section_id: string
+  heading: string
+  level: number
+  section_order: number
+  content: string
 }
 
 export type SummaryMode = "one_sentence" | "executive" | "detailed" | "conversation"

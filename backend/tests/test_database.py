@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -30,8 +30,8 @@ async def test_insert_and_retrieve_document(db_session: AsyncSession):
         page_count=10,
         file_path="/tmp/test.pdf",
         stage="complete",
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        last_accessed_at=datetime.now(UTC),
     )
     db_session.add(doc)
     await db_session.commit()

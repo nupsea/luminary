@@ -7,12 +7,13 @@ import { cn } from "@/lib/utils"
 import { logger } from "@/lib/logger"
 import { Progress } from "@/components/ui/progress"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
-const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md"]
+const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4", ".epub"]
 
 const STAGE_LABELS: Record<string, string> = {
   parsing: "Parsing document...",
+  transcribing: "Transcribing...",
   classifying: "Classifying content...",
   chunking: "Chunking text...",
   embedding: "Generating embeddings...",
@@ -21,8 +22,41 @@ const STAGE_LABELS: Record<string, string> = {
   complete: "Complete!",
 }
 
-type DialogTab = "upload" | "paste"
-type ContentTypeOption = "auto" | "book" | "paper" | "conversation" | "notes"
+const CONTENT_TYPE_OPTIONS = [
+  {
+    value: "book" as const,
+    label: "Book",
+    description: "For novels, non-fiction, full-length documents",
+  },
+  {
+    value: "conversation" as const,
+    label: "Conversation",
+    description: "For chat exports, interviews, meeting transcripts",
+  },
+  {
+    value: "notes" as const,
+    label: "Notes",
+    description: "For personal notes, articles, papers, web clips",
+  },
+  {
+    value: "audio" as const,
+    label: "Audio",
+    description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)",
+  },
+  {
+    value: "video" as const,
+    label: "Video",
+    description: "For lecture recordings, screen captures, video talks (MP4)",
+  },
+  {
+    value: "epub" as const,
+    label: "EPUB",
+    description: "For EPUB e-books (auto-detected from .epub files)",
+  },
+]
+
+type ContentTypeValue = "book" | "conversation" | "notes" | "audio" | "video" | "epub"
+type DialogTab = "upload" | "paste" | "youtube"
 type Mode = "idle" | "uploading" | "processing" | "success" | "error"
 
 interface StatusResponse {
@@ -37,11 +71,41 @@ interface UploadDialogProps {
   onClose: () => void
 }
 
-async function submitFile(file: File): Promise<string> {
+async function submitFile(file: File, contentType: ContentTypeValue): Promise<string> {
   const form = new FormData()
   form.append("file", file)
+  form.append("content_type", contentType)
   const res = await fetch(`${API_BASE}/documents/ingest`, { method: "POST", body: form })
   if (!res.ok) throw new Error("Upload failed")
+  const data = (await res.json()) as { document_id: string }
+  return data.document_id
+}
+
+async function submitKindleFile(file: File): Promise<{ document_ids: string[]; book_count: number }> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await fetch(`${API_BASE}/documents/ingest-kindle`, { method: "POST", body: form })
+  if (!res.ok) {
+    const data = (await res.json()) as { detail?: string }
+    throw new Error(data.detail ?? "Kindle import failed")
+  }
+  return res.json() as Promise<{ document_ids: string[]; book_count: number }>
+}
+
+function isKindleClippings(filename: string): boolean {
+  return /clippings/i.test(filename)
+}
+
+async function submitYouTubeUrl(url: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/documents/ingest-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  })
+  if (!res.ok) {
+    const data = (await res.json()) as { detail?: string }
+    throw new Error(data.detail ?? "YouTube ingestion failed")
+  }
   const data = (await res.json()) as { document_id: string }
   return data.document_id
 }
@@ -54,9 +118,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [tab, setTab] = useState<DialogTab>("upload")
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
-  const [pasteType, setPasteType] = useState<ContentTypeOption>("auto")
+  const [pasteType, setPasteType] = useState<ContentTypeValue | null>(null)
+  const [typeError, setTypeError] = useState(false)
+  const [youtubeUrl, setYoutubeUrl] = useState("")
+  const [youtubeUrlError, setYoutubeUrlError] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Upload progress state
@@ -99,9 +167,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     clearPolling()
     clearAutoClose()
     setSelectedFile(null)
+    setUploadType(null)
     setPasteLabel("")
     setPasteText("")
-    setPasteType("auto")
+    setPasteType(null)
+    setTypeError(false)
+    setYoutubeUrl("")
+    setYoutubeUrlError("")
     setTab("upload")
     setMode("idle")
     setProgress(0)
@@ -127,12 +199,20 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     e.preventDefault()
     setIsDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file && isAccepted(file)) setSelectedFile(file)
+    if (file && isAccepted(file)) {
+      setSelectedFile(file)
+      // Auto-set type for EPUB files
+      if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file && isAccepted(file)) setSelectedFile(file)
+    if (file && isAccepted(file)) {
+      setSelectedFile(file)
+      // Auto-set type for EPUB files
+      if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
+    }
   }
 
   // Time estimate — stage-aware.
@@ -166,7 +246,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           if (!res.ok) return
           const data = (await res.json()) as StatusResponse
 
-          if (data.error_message ?? data.stage === "error") {
+          if (data.stage === "error" || data.error_message) {
             clearPolling()
             const errMsg = data.error_message ?? "Ingestion failed"
             logger.error("[Upload] failed", { stage: data.stage, error_message: errMsg, doc_id: docId })
@@ -216,7 +296,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }, 2000)
   }
 
-  async function doSubmit(file: File, title: string) {
+  async function doSubmit(file: File, title: string, contentType: ContentTypeValue) {
     const startTime = Date.now()
     uploadStartRef.current = startTime
     const sizeMB = file.size / (1024 * 1024)
@@ -225,10 +305,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setProgress(0)
     setStageLabel("Uploading...")
     setDocTitle(title)
-    logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2) })
+    logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2), content_type: contentType })
 
     try {
-      const docId = await submitFile(file)
+      const docId = await submitFile(file, contentType)
       logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId })
       toast.loading("Processing document...", { id: docId })
       setMode("processing")
@@ -246,24 +326,108 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function handleUploadSubmit() {
     if (!selectedFile) return
+
+    // Kindle My Clippings.txt: bypass normal content type selection
+    if (isKindleClippings(selectedFile.name)) {
+      await doSubmitKindle(selectedFile)
+      return
+    }
+
+    if (!uploadType) {
+      setTypeError(true)
+      return
+    }
+    setTypeError(false)
     const title = selectedFile.name.replace(/\.[^/.]+$/, "")
-    await doSubmit(selectedFile, title)
+    await doSubmit(selectedFile, title, uploadType)
+  }
+
+  async function doSubmitKindle(file: File) {
+    const startTime = Date.now()
+    uploadStartRef.current = startTime
+    setMode("uploading")
+    setProgress(0)
+    setStageLabel("Uploading Kindle clippings...")
+    setDocTitle(file.name)
+    logger.info("[Upload] kindle start", { filename: file.name })
+    try {
+      const result = await submitKindleFile(file)
+      const bookCount = result.book_count
+      logger.info("[Upload] kindle uploaded", { filename: file.name, book_count: bookCount })
+      setProgress(100)
+      setStageLabel(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""}!`)
+      setMode("success")
+      toast.success(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""} from Kindle clippings`)
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      autoCloseTimerRef.current = setTimeout(() => {
+        reset()
+        onClose()
+      }, 3000)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Kindle import failed."
+      logger.error("[Upload] kindle failed", { error_message: errMsg, filename: file.name })
+      setMode("error")
+      setErrorMessage(errMsg)
+      toast.error(errMsg)
+    }
   }
 
   async function handlePasteSubmit() {
     if (!pasteLabel.trim() || !pasteText.trim()) return
+    if (!pasteType) {
+      setTypeError(true)
+      return
+    }
+    setTypeError(false)
     const filename =
       pasteLabel.trim().replace(/[^a-z0-9_-]/gi, "_").toLowerCase() + ".txt"
     const file = new File([pasteText], filename, { type: "text/plain" })
-    await doSubmit(file, pasteLabel.trim())
+    await doSubmit(file, pasteLabel.trim(), pasteType)
+  }
+
+  async function handleYouTubeSubmit() {
+    const url = youtubeUrl.trim()
+    if (!url) {
+      setYoutubeUrlError("Enter a YouTube URL")
+      return
+    }
+    if (!url.includes("youtube.com/watch") && !url.includes("youtu.be/")) {
+      setYoutubeUrlError("Must be a YouTube watch URL (youtube.com/watch?v= or youtu.be/)")
+      return
+    }
+    setYoutubeUrlError("")
+    const startTime = Date.now()
+    uploadStartRef.current = startTime
+    setMode("uploading")
+    setProgress(0)
+    setStageLabel("Downloading audio from YouTube...")
+    setDocTitle(url)
+    logger.info("[Upload] youtube start", { url })
+    try {
+      const docId = await submitYouTubeUrl(url)
+      toast.loading("Processing YouTube video...", { id: docId })
+      setMode("processing")
+      setProgress(5)
+      setStageLabel("Transcribing...")
+      startPolling(docId, url, startTime)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "YouTube ingestion failed."
+      logger.error("[Upload] youtube failed", { error_message: errMsg, url })
+      setMode("error")
+      setErrorMessage(errMsg)
+      toast.error(errMsg)
+    }
   }
 
   async function handleRetry() {
     setErrorMessage("")
-    if (tab === "upload" && selectedFile) {
+    if (tab === "upload" && selectedFile && uploadType) {
       await handleUploadSubmit()
-    } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim()) {
+    } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim() && pasteType) {
       await handlePasteSubmit()
+    } else if (tab === "youtube" && youtubeUrl.trim()) {
+      await handleYouTubeSubmit()
     } else {
       setMode("idle")
     }
@@ -272,6 +436,55 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   if (!open) return null
 
   const isActive = mode === "uploading" || mode === "processing"
+
+  // Shared RadioGroup for content type selection
+  function ContentTypeRadioGroup({
+    value,
+    onChange,
+  }: {
+    value: ContentTypeValue | null
+    onChange: (v: ContentTypeValue) => void
+  }) {
+    return (
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-foreground">
+          Document type <span className="text-red-500">*</span>
+        </label>
+        <div className="space-y-1.5">
+          {CONTENT_TYPE_OPTIONS.map((opt) => (
+            <label
+              key={opt.value}
+              className={cn(
+                "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors",
+                value === opt.value
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50",
+              )}
+            >
+              <input
+                type="radio"
+                name="content_type"
+                value={opt.value}
+                checked={value === opt.value}
+                onChange={() => {
+                  onChange(opt.value)
+                  setTypeError(false)
+                }}
+                className="mt-0.5 accent-primary"
+              />
+              <div>
+                <p className="text-sm font-medium text-foreground">{opt.label}</p>
+                <p className="text-xs text-muted-foreground">{opt.description}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+        {typeError && (
+          <p className="text-xs text-red-600">Please select a document type</p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -362,7 +575,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           <>
             {/* Tabs */}
             <div className="mb-4 flex gap-1 rounded-md bg-muted p-1">
-              {(["upload", "paste"] as const).map((t) => (
+              {(["upload", "paste", "youtube"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -373,13 +586,61 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {t === "upload" ? "Upload File" : "Paste Text"}
+                  {t === "upload" ? "Upload File" : t === "paste" ? "Paste Text" : "YouTube URL"}
                 </button>
               ))}
             </div>
 
-            {tab === "upload" ? (
+            {tab === "youtube" ? (
               <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-foreground">
+                    YouTube URL <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={(e) => {
+                      setYoutubeUrl(e.target.value)
+                      setYoutubeUrlError("")
+                    }}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  {youtubeUrlError && (
+                    <p className="mt-1 text-xs text-red-600">{youtubeUrlError}</p>
+                  )}
+                  {!youtubeUrl && !youtubeUrlError && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Audio is downloaded and transcribed locally. No file is uploaded to any service.
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => void handleYouTubeSubmit()}
+                  disabled={!youtubeUrl.trim()}
+                  className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                >
+                  Ingest
+                </button>
+              </div>
+            ) : tab === "upload" ? (
+              <div className="space-y-4">
+                {/* Content type selector — hidden for auto-detected formats */}
+                {selectedFile && isKindleClippings(selectedFile.name) ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-sm font-medium text-amber-800">Kindle clippings detected</p>
+                    <p className="text-xs text-amber-700">
+                      Each book's highlights will be imported as a separate document tagged with Kindle.
+                    </p>
+                  </div>
+                ) : (
+                  <ContentTypeRadioGroup
+                    value={uploadType}
+                    onChange={setUploadType}
+                  />
+                )}
+
                 {/* Drop zone */}
                 <div
                   onDragOver={(e) => {
@@ -421,7 +682,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handleUploadSubmit()}
-                  disabled={!selectedFile}
+                  disabled={!selectedFile || (!uploadType && !(selectedFile && isKindleClippings(selectedFile.name)))}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Ingest
@@ -429,6 +690,12 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Content type selector */}
+                <ContentTypeRadioGroup
+                  value={pasteType}
+                  onChange={setPasteType}
+                />
+
                 <div>
                   <label className="mb-1 block text-sm font-medium text-foreground">
                     Label <span className="text-red-500">*</span>
@@ -440,23 +707,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     placeholder="Document title"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-foreground">
-                    Content type
-                  </label>
-                  <select
-                    value={pasteType}
-                    onChange={(e) => setPasteType(e.target.value as ContentTypeOption)}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="auto">Auto-detect</option>
-                    <option value="book">Book</option>
-                    <option value="paper">Paper</option>
-                    <option value="conversation">Conversation</option>
-                    <option value="notes">Notes</option>
-                  </select>
                 </div>
 
                 <div>
@@ -474,7 +724,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handlePasteSubmit()}
-                  disabled={!pasteLabel.trim() || !pasteText.trim()}
+                  disabled={!pasteLabel.trim() || !pasteText.trim() || !pasteType}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Ingest

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S51: Study tab — GET /study/due and POST /flashcards/generate error shape.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. GET /study/due — must return 200 with JSON array
 BODY=$(curl -sf "${BASE}/study/due?limit=1")

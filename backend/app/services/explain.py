@@ -11,26 +11,26 @@ logger = logging.getLogger(__name__)
 
 EXPLAIN_SYSTEM_BASE = (
     "You are explaining a concept using only the context from the source document. "
-    "Do not introduce information from outside this text."
+    "Use only information present in the provided text."
 )
 
 MODE_INSTRUCTIONS: dict[str, str] = {
     "plain": "Explain in simple, clear English.",
-    "eli5": "Explain as if to a curious 10-year-old. Use a concrete everyday analogy.",
+    "eli5": "Explain as if to a curious 10-year-old, using a concrete everyday analogy.",
     "analogy": "Create a memorable analogy from everyday life that captures the core idea.",
     "formal": "Give the precise formal definition as stated or implied in the source material.",
 }
 
 GLOSSARY_SYSTEM = (
-    "You are a precise technical terminology extractor. "
-    "Output only valid JSON, no preamble, no markdown code fences."
+    "You are a technical terminology extractor. "
+    "Output a JSON array with no preamble or markdown."
 )
 
 GLOSSARY_USER_TMPL = (
     "Extract all domain-specific technical terms from this text. "
-    "For each term, provide a definition based only on how it is used in the text. "
-    'Output a JSON array: [{{"term": str, "definition": str, "first_mention_page": int}}]. '
-    "Output only JSON.\n\nText:\n{text}"
+    "For each term, define it based only on how it is used in the text. "
+    'Output a JSON array: [{{"term": str, "definition": str, "first_mention_page": int}}]\n\n'
+    "Text:\n{text}"
 )
 
 # Approximate token limit for glossary context (8000 tokens ≈ 32000 chars)

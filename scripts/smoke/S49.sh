@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test for S49: Viz tab — GET /graph endpoint returns 200 with nodes/edges structure.
-# Requires the backend to be running on localhost:8000.
+# Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="http://localhost:7820"
 
 # 1. GET /graph with no doc_ids — must return 200 with nodes array
 BODY=$(curl -sf "${BASE}/graph?doc_ids=")

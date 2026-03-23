@@ -6,11 +6,16 @@ requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "arize-phoenix>=13.3.0",
+    "beautifulsoup4>=4.14.3",
+    "bleach>=6.3.0",
     "chardet>=6.0.0.post1",
+    "ebooklib>=0.20",
     "fastapi>=0.132.0",
+    "faster-whisper>=1.2.1",
     "fsrs>=6.3.0",
     "gliner>=0.2.25",
     "httpx>=0.28.1",
+    "keyring>=25.7.0",
     "kuzu>=0.11.3",
     "lancedb>=0.29.2",
     "langchain-core>=1.2.15",
@@ -41,6 +46,7 @@ dependencies = [
     "tree-sitter-rust>=0.24.0",
     "tree-sitter-typescript>=0.23.2",
     "uvicorn[standard]>=0.41.0",
+    "yt-dlp>=2026.3.13",
 ]
 
 [tool.ruff]
@@ -66,6 +72,7 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-m 'not slow and not e2e'"
+pythonpath = ["tests"]
 markers = [
     "slow: marks tests as slow (real ML model downloads; excluded from make test fast path)",
     "e2e: requires live backend + Ollama; excluded from make ci",
@@ -80,4 +87,5 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "reportlab>=4.4.10",
     "ruff>=0.15.2",
+    "tiktoken>=0.12.0",
 ]

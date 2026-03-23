@@ -9,9 +9,20 @@ import { useEffect, useRef, useState } from "react"
 
 export type ExplainMode = "plain" | "eli5" | "analogy"
 
+export interface HighlightInfo {
+  text: string
+  sectionId: string // data-section-id of the nearest ancestor li
+  startOffset: number // character offset within the section preview text
+  endOffset: number
+  // Toolbar position (relative to container) for positioning the popover
+  x: number
+  y: number
+}
+
 interface FloatingToolbarProps {
   containerRef: React.RefObject<HTMLElement | null>
   onExplain: (text: string, mode: ExplainMode) => void
+  onHighlight?: (info: HighlightInfo) => void
 }
 
 interface Position {
@@ -25,10 +36,11 @@ const TOOLBAR_BUTTONS: { label: string; mode: ExplainMode }[] = [
   { label: "Analogy", mode: "analogy" },
 ]
 
-export function FloatingToolbar({ containerRef, onExplain }: FloatingToolbarProps) {
+export function FloatingToolbar({ containerRef, onExplain, onHighlight }: FloatingToolbarProps) {
   const [position, setPosition] = useState<Position | null>(null)
   const [selectedText, setSelectedText] = useState("")
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const pendingHighlightInfo = useRef<HighlightInfo | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -47,12 +59,48 @@ export function FloatingToolbar({ containerRef, onExplain }: FloatingToolbarProp
         if (!text || !selection || selection.rangeCount === 0) {
           setPosition(null)
           setSelectedText("")
+          pendingHighlightInfo.current = null
           return
         }
 
         const range = selection.getRangeAt(0)
         const rect = range.getBoundingClientRect()
         const containerRect = nonNullContainer.getBoundingClientRect()
+
+        // Compute highlight offsets within section preview
+        if (onHighlight) {
+          // Walk up from startContainer to find [data-section-id] li
+          let node: Node | null = range.startContainer
+          let sectionId = ""
+          while (node) {
+            if (node instanceof HTMLElement && node.dataset["sectionId"]) {
+              sectionId = node.dataset["sectionId"]
+              break
+            }
+            node = node.parentElement
+          }
+          // Find preview <p> text within that li
+          const previewEl = (node as HTMLElement | null)?.querySelector("p.section-preview")
+          const previewText = previewEl?.textContent ?? ""
+          const selText = text
+          const startOffset = previewText.indexOf(selText)
+          const endOffset = startOffset >= 0 ? startOffset + selText.length : -1
+
+          const toolbarTop = rect.top - containerRect.top - 44
+          const toolbarLeft = rect.left - containerRect.left + rect.width / 2
+          if (sectionId && startOffset >= 0) {
+            pendingHighlightInfo.current = {
+              text: selText,
+              sectionId,
+              startOffset,
+              endOffset,
+              x: toolbarLeft,
+              y: toolbarTop,
+            }
+          } else {
+            pendingHighlightInfo.current = null
+          }
+        }
 
         setSelectedText(text)
         setPosition({
@@ -66,6 +114,7 @@ export function FloatingToolbar({ containerRef, onExplain }: FloatingToolbarProp
       if (toolbarRef.current?.contains(e.target as Node)) return
       setPosition(null)
       setSelectedText("")
+      pendingHighlightInfo.current = null
     }
 
     nonNullContainer.addEventListener("mouseup", handleMouseUp)
@@ -74,7 +123,7 @@ export function FloatingToolbar({ containerRef, onExplain }: FloatingToolbarProp
       nonNullContainer.removeEventListener("mouseup", handleMouseUp)
       document.removeEventListener("mousedown", handleMouseDown)
     }
-  }, [containerRef])
+  }, [containerRef, onHighlight])
 
   if (!position || !selectedText) return null
 
@@ -98,6 +147,22 @@ export function FloatingToolbar({ containerRef, onExplain }: FloatingToolbarProp
           {label}
         </button>
       ))}
+      {onHighlight && pendingHighlightInfo.current && (
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            if (pendingHighlightInfo.current) {
+              onHighlight(pendingHighlightInfo.current)
+            }
+            setPosition(null)
+            setSelectedText("")
+            pendingHighlightInfo.current = null
+          }}
+          className="rounded px-2.5 py-1 text-xs font-medium text-yellow-700 hover:bg-yellow-100 dark:text-yellow-400 dark:hover:bg-yellow-900/30"
+        >
+          Highlight
+        </button>
+      )}
     </div>
   )
 }

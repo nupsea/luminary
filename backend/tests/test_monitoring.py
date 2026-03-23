@@ -1,5 +1,6 @@
 """Tests for GET /monitoring/traces, GET /monitoring/overview, and eval endpoints."""
 
+import unittest.mock
 import uuid
 from datetime import UTC, datetime
 
@@ -478,3 +479,68 @@ async def test_model_usage_empty_when_no_qa_history(test_db):
 
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# S72 — GET /monitoring/phoenix-url
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_phoenix_url_returns_url_and_enabled_flag(test_db, monkeypatch):
+    """When Phoenix is enabled and reachable, enabled=true is returned."""
+    import httpx
+
+    from app.routers import monitoring as mon_module
+
+    # Clear any cached result from previous tests
+    mon_module._phoenix_reachability_cache.clear()
+
+    class _FakeResponse:
+        status_code = 200
+
+    async def _fake_head(self, url, **kwargs):  # noqa: ARG001
+        return _FakeResponse()
+
+    monkeypatch.setenv("PHOENIX_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    with unittest.mock.patch.object(httpx.AsyncClient, "head", _fake_head):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/monitoring/phoenix-url")
+
+    get_settings.cache_clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "url" in body
+    assert body["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_phoenix_url_disabled_when_unreachable(test_db, monkeypatch):
+    """When Phoenix HEAD request times out, enabled=false is returned."""
+    import httpx
+
+    from app.routers import monitoring as mon_module
+
+    mon_module._phoenix_reachability_cache.clear()
+
+    async def _timeout_head(self, url, **kwargs):  # noqa: ARG001
+        raise httpx.ConnectError("unreachable")
+
+    monkeypatch.setenv("PHOENIX_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    with unittest.mock.patch.object(httpx.AsyncClient, "head", _timeout_head):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/monitoring/phoenix-url")
+
+    get_settings.cache_clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "url" in body
+    assert body["enabled"] is False

@@ -163,3 +163,59 @@ def test_groups_returns_correct_counts(client):
     tag_map = {t["name"]: t["count"] for t in data["tags"]}
     assert tag_map.get(tag1) == 2
     assert tag_map.get(tag2) == 2
+
+# ---------------------------------------------------------------------------
+# section_id support (S106)
+# ---------------------------------------------------------------------------
+
+
+def test_create_note_with_section_id(client):
+    """POST /notes with section_id stores and returns it."""
+    resp = client.post(
+        "/notes",
+        json={"content": "Section note", "document_id": "doc-1", "section_id": "sec-42"},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["section_id"] == "sec-42"
+
+
+def test_list_notes_returns_section_id(client):
+    """GET /notes?document_id=X returns section_id in each note object."""
+    client.post(
+        "/notes",
+        json={"content": "Note for section", "document_id": "doc-s106", "section_id": "sec-7"},
+    )
+    resp = client.get("/notes?document_id=doc-s106")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert any(n["section_id"] == "sec-7" for n in data)
+
+
+def test_patch_note_updates_section_id(client):
+    """PATCH /notes/{id} with section_id updates it; notes without it return null."""
+    create_resp = client.post("/notes", json={"content": "No section yet"})
+    assert create_resp.status_code == 201
+    note_id = create_resp.json()["id"]
+    assert create_resp.json()["section_id"] is None  # nullable default
+
+    patch_resp = client.patch(f"/notes/{note_id}", json={"section_id": "sec-99"})
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["section_id"] == "sec-99"
+
+
+def test_patch_note_null_section_id_does_not_clear(client):
+    """PATCH /notes/{id} with section_id=null does NOT clear it (PATCH semantics)."""
+    create_resp = client.post(
+        "/notes",
+        json={"content": "Has section", "section_id": "sec-original"},
+    )
+    note_id = create_resp.json()["id"]
+
+    # Sending null should be a no-op (cannot clear via PATCH)
+    patch_resp = client.patch(f"/notes/{note_id}", json={"content": "Updated", "section_id": None})
+    assert patch_resp.status_code == 200
+    data = patch_resp.json()
+    assert data["content"] == "Updated"
+    # section_id unchanged because None means "field not sent"
+    assert data["section_id"] == "sec-original"

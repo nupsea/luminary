@@ -4,6 +4,23 @@ Loads 'urchade/gliner_multi_pii-v1' on first use and caches to DATA_DIR/models/g
 Extracts entities from chunk texts with custom entity types, then applies layered
 post-extraction filters to remove pronouns, possessive phrases, generic geographic
 terms, bare-number dates, and other common noise patterns from literary/prose text.
+
+Entity types (13 total):
+  Standard:
+    PERSON        -- named individuals (Einstein, Watson)
+    ORGANIZATION  -- companies, institutions, teams
+    PLACE         -- geographic locations, venues
+    CONCEPT       -- abstract ideas, theories, principles
+    EVENT         -- named occurrences, battles, conferences
+    TECHNOLOGY    -- generic technology terms (fallback for unclassified tech)
+    DATE          -- temporal expressions (years, months, seasons)
+  Tech-specific (active for code, tech_book, tech_article content types):
+    LIBRARY       -- software libraries, frameworks, packages (numpy, React, SQLAlchemy)
+    DESIGN_PATTERN -- architectural/code patterns (Singleton, Repository, Factory)
+    ALGORITHM     -- named algorithms and methods (BFS, Dijkstra, QuickSort)
+    DATA_STRUCTURE -- data organization types (B-tree, heap, hash table, ndarray)
+    PROTOCOL      -- communication and interchange protocols (HTTP, REST, gRPC)
+    API_ENDPOINT  -- named API paths or service endpoints
 """
 
 import logging
@@ -24,7 +41,19 @@ ENTITY_TYPES = [
     "EVENT",
     "TECHNOLOGY",
     "DATE",
+    # Tech-specific types (S135) — active for code/tech_book/tech_article
+    "LIBRARY",
+    "DESIGN_PATTERN",
+    "ALGORITHM",
+    "DATA_STRUCTURE",
+    "PROTOCOL",
+    "API_ENDPOINT",
 ]
+
+# Tech entity types that require extra noise filtering
+_TECH_ENTITY_TYPES: frozenset[str] = frozenset({
+    "LIBRARY", "DESIGN_PATTERN", "ALGORITHM", "DATA_STRUCTURE", "PROTOCOL", "API_ENDPOINT",
+})
 
 # ---------------------------------------------------------------------------
 # Noise-filter constants
@@ -76,6 +105,24 @@ _GENERIC_ORGS: frozenset[str] = frozenset({
     "company", "corporation", "council", "department", "enterprise",
     "firm", "foundation", "group", "guild", "institution", "ministry",
     "office", "organization", "party", "society", "team", "union",
+})
+
+# Generic single-word tech terms that GLiNER commonly mis-extracts as LIBRARY,
+# DESIGN_PATTERN, ALGORITHM, or DATA_STRUCTURE.  These are programming vocabulary
+# words, not specific library or algorithm names.
+_TECH_NOISE_LIBRARY: frozenset[str] = frozenset({
+    "class", "function", "method", "object", "type", "interface",
+    "module", "package", "library", "framework", "tool", "service",
+    "system", "component", "layer", "api", "endpoint", "protocol",
+    "abstract", "instance", "variable", "attribute", "property",
+    "constructor", "decorator", "iterator", "generator", "callback",
+    "handler", "middleware", "controller", "model", "view", "template",
+    "schema", "query", "index", "table", "column", "row", "field",
+    "value", "key", "data", "struct", "enum", "union",
+    "array", "list", "map", "set", "dict", "tuple", "string", "number",
+    "boolean", "null", "undefined", "void", "error", "exception",
+    "thread", "process", "task", "event", "stream", "buffer", "socket",
+    "request", "response", "header", "body", "path", "status",
 })
 
 # A DATE must match at least one of these patterns; bare integers are rejected.
@@ -146,6 +193,11 @@ def _is_valid_entity(name: str, entity_type: str) -> bool:
         if name in _GENERIC_ORGS:
             return False
 
+    elif entity_type in _TECH_ENTITY_TYPES:
+        # Single generic programming keyword — not a specific library/algorithm name
+        if len(tokens) == 1 and name in _TECH_NOISE_LIBRARY:
+            return False
+
     return True
 
 
@@ -214,28 +266,72 @@ class EntityExtractor:
         """
         model = self._load_model()
 
-        # For non-code documents, TECHNOLOGY is almost always noise (pronouns
-        # like "it" are the most common false-positive in that category).
-        is_code = content_type == "code"
-        active_types = ENTITY_TYPES if is_code else [t for t in ENTITY_TYPES if t != "TECHNOLOGY"]
+        # For tech content, include the 6 tech-specific types alongside existing ones.
+        # For non-tech documents, exclude TECHNOLOGY and all 6 tech-specific types —
+        # these are almost always false positives in literary/prose text.
+        is_tech = content_type in ("code", "tech_book", "tech_article")
+        _non_tech = {"TECHNOLOGY"} | _TECH_ENTITY_TYPES
+        active_types = ENTITY_TYPES if is_tech else [t for t in ENTITY_TYPES if t not in _non_tech]
 
-        # Higher threshold than default 0.5 — reduces low-confidence false positives
-        # while retaining genuine entities that GLiNER is confident about.
-        threshold = 0.65
+        # Base confidence threshold — reduces low-confidence false positives while
+        # retaining genuine entities that GLiNER is confident about.
+        # Code-block boost: chunks with has_code=True use a lower threshold (0.55)
+        # so that entities mentioned inside code (e.g. 'import numpy') are extracted
+        # even at confidence 0.58.  Prose chunks stay at 0.65.
+        PROSE_THRESHOLD = 0.65
+        CODE_THRESHOLD = 0.55  # effective minimum after +0.10 code-block boost
 
         entities: list[dict] = []
 
-        # Filter empty chunks up front so batch indices stay aligned.
-        valid_chunks = [c for c in chunks if c["text"].strip()]
+        # Strip context headers [Book > Section] before entity extraction.
+        # These are injected during chunking for search but are noise for NER.
+        header_pattern = re.compile(r"^\[.*? > .*?\]\s*")
+
+        valid_chunks = []
+        for c in chunks:
+            text = c.get("text", "").strip()
+            if not text:
+                continue
+            # Strip header only for NER, don't modify the original chunk dict
+            clean_text = header_pattern.sub("", text)
+            valid_chunks.append({**c, "text": clean_text})
 
         total_batches = (len(valid_chunks) + _NER_BATCH_SIZE - 1) // _NER_BATCH_SIZE
         for batch_idx in range(0, len(valid_chunks), _NER_BATCH_SIZE):
             batch = valid_chunks[batch_idx : batch_idx + _NER_BATCH_SIZE]
-            texts = [c["text"] for c in batch]
 
-            # One forward pass for all texts in the batch — significantly faster
-            # than calling predict_entities per chunk on CPU.
-            batch_results = model.batch_predict_entities(texts, active_types, threshold=threshold)
+            # Split batch by has_code to apply different thresholds.
+            # Entities in code blocks get a lower threshold (code-block boost).
+            code_group = [(i, c) for i, c in enumerate(batch) if c.get("has_code")]
+            prose_group = [(i, c) for i, c in enumerate(batch) if not c.get("has_code")]
+
+            batch_results: list[list[dict]] = [[] for _ in batch]
+
+            if code_group and is_tech:
+                code_texts = [c["text"] for _, c in code_group]
+                code_preds = model.batch_predict_entities(
+                    code_texts, active_types, threshold=CODE_THRESHOLD
+                )
+                for (i, _), preds in zip(code_group, code_preds):
+                    batch_results[i] = preds
+
+            if prose_group:
+                prose_texts = [c["text"] for _, c in prose_group]
+                # Include code_group in prose pass if not is_tech (no split needed)
+                prose_preds = model.batch_predict_entities(
+                    prose_texts, active_types, threshold=PROSE_THRESHOLD
+                )
+                for (i, _), preds in zip(prose_group, prose_preds):
+                    batch_results[i] = preds
+
+            if not is_tech and code_group:
+                # Non-tech doc: run code chunks at prose threshold too
+                code_texts = [c["text"] for _, c in code_group]
+                code_preds = model.batch_predict_entities(
+                    code_texts, active_types, threshold=PROSE_THRESHOLD
+                )
+                for (i, _), preds in zip(code_group, code_preds):
+                    batch_results[i] = preds
 
             for chunk, chunk_entities in zip(batch, batch_results):
                 chunk_id = chunk["id"]

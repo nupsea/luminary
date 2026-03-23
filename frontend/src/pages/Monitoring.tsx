@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react"
 import { X as XIcon } from "lucide-react"
+import { toast } from "sonner"
 import {
   Bar,
   BarChart,
@@ -34,7 +35,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,6 +98,23 @@ interface EvalHistoryItem {
 interface LLMSettings {
   processing_mode: string
   active_model: string
+}
+
+interface EvalResultItem {
+  dataset: string
+  run_at: string
+  hit_rate_5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  context_precision: number | null
+  context_recall: number | null
+  answer_relevancy: number | null
+  passed_thresholds: boolean | null
+}
+
+interface PhoenixUrl {
+  url: string
+  enabled: boolean
 }
 
 interface Document {
@@ -167,6 +185,33 @@ async function fetchEvalHistory(): Promise<EvalHistoryItem[]> {
   const res = await fetch(`${API_BASE}/monitoring/eval-history`)
   if (!res.ok) throw new Error("eval-history failed")
   return res.json() as Promise<EvalHistoryItem[]>
+}
+
+async function fetchPhoenixUrl(): Promise<PhoenixUrl> {
+  const res = await fetch(`${API_BASE}/monitoring/phoenix-url`)
+  if (!res.ok) throw new Error("phoenix-url failed")
+  return res.json() as Promise<PhoenixUrl>
+}
+
+async function fetchEvalResults(): Promise<EvalResultItem[]> {
+  const res = await fetch(`${API_BASE}/evals/results`)
+  if (!res.ok) throw new Error("evals/results failed")
+  return res.json() as Promise<EvalResultItem[]>
+}
+
+async function fetchEvalDatasets(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/evals/datasets`)
+  if (!res.ok) throw new Error("evals/datasets failed")
+  return res.json() as Promise<string[]>
+}
+
+async function triggerEvalRun(dataset: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/evals/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset }),
+  })
+  if (!res.ok) throw new Error(`evals/run failed: ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -318,10 +363,13 @@ function MetricCardSkeleton() {
 
 const DATASET_COLORS: Record<string, string> = {
   book: "#6366f1",
+  book_time_machine: "#8b5cf6",
+  book_alice: "#ec4899",
+  book_odyssey: "#f97316",
   paper: "#0ea5e9",
   notes: "#22c55e",
   conversation: "#f59e0b",
-  code: "#ec4899",
+  code: "#a78bfa",
 }
 
 function buildSparklineData(history: EvalHistoryItem[]) {
@@ -489,10 +537,439 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Traces card — Phoenix link
+// ---------------------------------------------------------------------------
+
+function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
+  const enabled = phoenix?.enabled ?? false
+  const url = phoenix?.url ?? "http://localhost:6006"
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-block h-2.5 w-2.5 rounded-full ${enabled ? "bg-green-500" : "bg-gray-400"}`}
+        />
+        <span className="text-sm font-medium text-foreground">Arize Phoenix — Distributed Tracing</span>
+      </div>
+      <button
+        disabled={!enabled}
+        onClick={() => window.open(url, "_blank")}
+        title={
+          enabled
+            ? "Open Phoenix UI"
+            : "Start Phoenix: cd backend && uv run python -m phoenix.server.main"
+        }
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          enabled
+            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+            : "cursor-not-allowed bg-secondary text-muted-foreground"
+        }`}
+      >
+        View Traces
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// EvalPanel — RAGAS eval results from /evals/results with threshold coloring
+// ---------------------------------------------------------------------------
+
+const EVAL_THRESHOLDS: Record<string, number> = {
+  hit_rate_5: 0.60,
+  mrr: 0.45,
+  faithfulness: 0.65,
+  context_precision: 0.65,
+}
+
+function scoreColor(value: number | null, metricKey: string): string {
+  if (value === null) return "text-muted-foreground"
+  const threshold = EVAL_THRESHOLDS[metricKey]
+  if (threshold === undefined) return "text-foreground"
+  if (value >= threshold) return "text-green-700 dark:text-green-400 font-semibold"
+  if (value >= threshold * 0.75) return "text-amber-600 dark:text-amber-400 font-semibold"
+  return "text-muted-foreground"
+}
+
+function EvalPanel() {
+  const [state, setState] = useState<SectionState<EvalResultItem[]>>(initSection([]))
+  const [datasetsState, setDatasetsState] = useState<SectionState<string[]>>(initSection([]))
+  const [runningDatasets, setRunningDatasets] = useState<Set<string>>(new Set())
+  const [selectedDataset, setSelectedDataset] = useState<string>("")
+
+  useEffect(() => {
+    let cancelled = false
+    fetchEvalResults()
+      .then((d) => {
+        if (!cancelled) setState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] EvalPanel fetch failed", e)
+        if (!cancelled) setState({ loading: false, data: [], error: true })
+      })
+
+    fetchEvalDatasets()
+      .then((d) => {
+        if (!cancelled) {
+           setDatasetsState({ loading: false, data: d, error: false })
+           if (d.length > 0) setSelectedDataset(d[0])
+        }
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] EvalDatasets fetch failed", e)
+        if (!cancelled) setDatasetsState({ loading: false, data: [], error: true })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function handleRunEval(dataset: string) {
+    if (!dataset) return
+    setRunningDatasets((prev) => new Set(prev).add(dataset))
+    triggerEvalRun(dataset)
+      .then(() => {
+        toast.success(`Eval run started for dataset: ${dataset}`)
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] EvalPanel run failed", dataset, e)
+        toast.error(`Failed to start eval for dataset: ${dataset}`)
+      })
+      .finally(() => {
+        setRunningDatasets((prev) => {
+          const next = new Set(prev)
+          next.delete(dataset)
+          return next
+        })
+      })
+  }
+
+  if (state.loading || datasetsState.loading) {
+    return <SectionSkeleton rows={3} />
+  }
+  if (state.error) {
+    return <SectionErrorCard name="RAGAS Eval Results" />
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <select
+          value={selectedDataset}
+          onChange={(e) => setSelectedDataset(e.target.value)}
+          className="rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {datasetsState.data.map(d => <option key={d} value={d}>{d}</option>)}
+          {datasetsState.data.length === 0 && <option value="" disabled>No datasets found</option>}
+        </select>
+        <button
+          onClick={() => handleRunEval(selectedDataset)}
+          disabled={!selectedDataset || runningDatasets.has(selectedDataset)}
+          className="rounded px-3 py-1 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+        >
+          {runningDatasets.has(selectedDataset) ? "Starting..." : "Run New Eval"}
+        </button>
+      </div>
+
+      {state.data.length === 0 ? (
+        <EmptyState message="No eval results yet. Run an eval above to populate." />
+      ) : (
+        <div className="overflow-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Dataset</th>
+                <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Run At</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">HR@5</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">MRR</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Faithfulness</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Ctx Precision</th>
+                <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.data.map((item) => (
+                <tr key={item.dataset} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2 font-medium text-foreground">{item.dataset}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">
+                    {item.run_at ? new Date(item.run_at).toLocaleString() : "—"}
+                  </td>
+                  <td className={`px-4 py-2 text-right ${scoreColor(item.hit_rate_5, "hit_rate_5")}`}>
+                    {item.hit_rate_5 !== null ? item.hit_rate_5.toFixed(3) : "—"}
+                  </td>
+                  <td className={`px-4 py-2 text-right ${scoreColor(item.mrr, "mrr")}`}>
+                    {item.mrr !== null ? item.mrr.toFixed(3) : "—"}
+                  </td>
+                  <td className={`px-4 py-2 text-right ${scoreColor(item.faithfulness, "faithfulness")}`}>
+                    {item.faithfulness !== null ? item.faithfulness.toFixed(3) : "—"}
+                  </td>
+                  <td className={`px-4 py-2 text-right ${scoreColor(item.context_precision, "context_precision")}`}>
+                    {item.context_precision !== null ? item.context_precision.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    <button
+                      onClick={() => handleRunEval(item.dataset)}
+                      disabled={runningDatasets.has(item.dataset)}
+                      className="rounded px-2 py-1 text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                    >
+                      {runningDatasets.has(item.dataset) ? "Starting..." : "Run Again"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Mastery types and API (S145)
+// ---------------------------------------------------------------------------
+
+interface ConceptMasteryItem {
+  concept: string
+  mastery: number
+  card_count: number
+  due_soon: number
+  no_flashcards: boolean
+  document_ids: string[]
+}
+
+interface HeatmapCellItem {
+  chapter: string
+  concept: string
+  mastery: number | null
+  card_count: number
+}
+
+interface MasteryConceptsResponse {
+  document_ids: string[]
+  concepts: ConceptMasteryItem[]
+}
+
+interface MasteryHeatmapResponse {
+  document_id: string
+  chapters: string[]
+  concepts: string[]
+  cells: HeatmapCellItem[]
+}
+
+async function fetchMasteryConcepts(documentIds: string[]): Promise<MasteryConceptsResponse> {
+  const params = new URLSearchParams()
+  documentIds.forEach((id) => params.append("document_ids", id))
+  const res = await fetch(`${API_BASE}/mastery/concepts?${params.toString()}`)
+  if (!res.ok) throw new Error("mastery/concepts failed")
+  return res.json() as Promise<MasteryConceptsResponse>
+}
+
+async function fetchMasteryHeatmap(documentId: string): Promise<MasteryHeatmapResponse> {
+  const res = await fetch(`${API_BASE}/mastery/heatmap?document_id=${encodeURIComponent(documentId)}`)
+  if (!res.ok) throw new Error("mastery/heatmap failed")
+  return res.json() as Promise<MasteryHeatmapResponse>
+}
+
+function masteryColor(mastery: number | null): string {
+  if (mastery === null) return "bg-gray-100 dark:bg-gray-800"
+  if (mastery < 0.3) return "bg-blue-200 dark:bg-blue-900"
+  if (mastery < 0.6) return "bg-blue-400 dark:bg-blue-700"
+  if (mastery < 0.8) return "bg-green-400 dark:bg-green-700"
+  return "bg-green-600 dark:bg-green-500"
+}
+
+function MasteryPanel({ documents }: { documents: Document[] }) {
+  const [selectedDocId, setSelectedDocId] = useState<string>(documents[0]?.id ?? "")
+  const [conceptsState, setConceptsState] = useState<SectionState<MasteryConceptsResponse | null>>(
+    initSection(null),
+  )
+  const [heatmapState, setHeatmapState] = useState<SectionState<MasteryHeatmapResponse | null>>(
+    initSection(null),
+  )
+
+  // When documents load after mount (selectedDocId is ""), auto-select the first
+  useEffect(() => {
+    if (!selectedDocId && documents.length > 0) {
+      setSelectedDocId(documents[0].id)
+    }
+  }, [documents, selectedDocId])
+
+  useEffect(() => {
+    if (!selectedDocId) return
+    let cancelled = false
+    setConceptsState(initSection(null))
+    setHeatmapState(initSection(null))
+
+    fetchMasteryConcepts([selectedDocId])
+      .then((d) => {
+        if (!cancelled) setConceptsState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] mastery/concepts failed", e)
+        if (!cancelled) setConceptsState({ loading: false, data: null, error: true })
+      })
+
+    fetchMasteryHeatmap(selectedDocId)
+      .then((d) => {
+        if (!cancelled) setHeatmapState({ loading: false, data: d, error: false })
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Monitoring] mastery/heatmap failed", e)
+        if (!cancelled) setHeatmapState({ loading: false, data: null, error: true })
+      })
+
+    return () => { cancelled = true }
+  }, [selectedDocId])
+
+  if (documents.length === 0) {
+    return <EmptyState message="No documents yet. Ingest a document to see mastery data." />
+  }
+
+  const concepts = conceptsState.data?.concepts ?? []
+  const heatmap = heatmapState.data
+  const weakSpots = concepts.filter((c) => c.mastery < 0.4 && c.card_count >= 1).slice(0, 5)
+  const noCards = concepts.filter((c) => c.no_flashcards).slice(0, 5)
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Document selector */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium text-foreground">Document:</label>
+        <select
+          value={selectedDocId}
+          onChange={(e) => setSelectedDocId(e.target.value)}
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground"
+        >
+          {documents.map((d) => (
+            <option key={d.id} value={d.id}>{d.title}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Heatmap */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Concept Mastery Heatmap</h2>
+        {heatmapState.loading ? (
+          <SectionSkeleton rows={4} />
+        ) : heatmapState.error ? (
+          <SectionErrorCard name="Mastery Heatmap" />
+        ) : !heatmap || heatmap.concepts.length === 0 ? (
+          <EmptyState message="No entities found for this document. Ensure the document has been enriched." />
+        ) : (
+          <div className="overflow-auto rounded-lg border border-border">
+            <table className="border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="min-w-24 bg-secondary px-3 py-2 text-left text-muted-foreground">Concept \ Chapter</th>
+                  {heatmap.chapters.map((ch) => (
+                    <th key={ch} className="min-w-20 bg-secondary px-2 py-2 text-center text-muted-foreground" title={ch}>
+                      {ch.length > 14 ? ch.slice(0, 12) + "…" : ch}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {heatmap.concepts.map((concept) => (
+                  <tr key={concept} className="border-t border-border">
+                    <td className="px-3 py-1 font-medium text-foreground">{concept}</td>
+                    {heatmap.chapters.map((chapter) => {
+                      const cell = heatmap.cells.find(
+                        (c) => c.chapter === chapter && c.concept === concept
+                      )
+                      const mastery = cell?.mastery ?? null
+                      const cardCount = cell?.card_count ?? 0
+                      return (
+                        <td key={chapter} className="px-1 py-1 text-center">
+                          <div
+                            className={`mx-auto h-6 w-12 rounded ${masteryColor(mastery)}`}
+                            title={
+                              mastery === null
+                                ? `${concept} / ${chapter}: no flashcards`
+                                : `${concept} / ${chapter}: mastery ${(mastery * 100).toFixed(0)}% (${cardCount} cards)`
+                            }
+                          />
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex items-center gap-3 p-3 text-xs text-muted-foreground">
+              <span>Color:</span>
+              <span className="h-3 w-6 rounded bg-gray-100 dark:bg-gray-800 border" /> No cards
+              <span className="h-3 w-6 rounded bg-blue-200 dark:bg-blue-900" /> &lt;30%
+              <span className="h-3 w-6 rounded bg-blue-400 dark:bg-blue-700" /> 30-60%
+              <span className="h-3 w-6 rounded bg-green-400 dark:bg-green-700" /> 60-80%
+              <span className="h-3 w-6 rounded bg-green-600 dark:bg-green-500" /> &gt;80%
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Weak spots panel */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Weak Spots</h2>
+        {conceptsState.loading ? (
+          <SectionSkeleton rows={3} />
+        ) : conceptsState.error ? (
+          <SectionErrorCard name="Weak Spots" />
+        ) : weakSpots.length === 0 ? (
+          <EmptyState message="No weak spots. Either mastery is solid or no flashcards exist yet." />
+        ) : (
+          <div className="flex flex-col gap-2">
+            {weakSpots.map((c) => (
+              <div key={c.concept} className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+                <span className="font-medium text-foreground">{c.concept}</span>
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <span>{(c.mastery * 100).toFixed(0)}% mastery</span>
+                  <span>{c.card_count} cards</span>
+                  {c.due_soon > 0 && (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                      {c.due_soon} due soon
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const names = weakSpots.map((c) => c.concept).join(", ")
+                toast.info(`Weak spots: ${names}. Go to the Study tab to review.`)
+              }}
+              className="mt-1 self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Quick study weak spots
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* No flashcards panel */}
+      {noCards.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold text-foreground">No Flashcards Yet</h2>
+          <div className="flex flex-wrap gap-2">
+            {noCards.map((c) => (
+              <span key={c.concept} className="rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                {c.concept}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Monitoring page
 // ---------------------------------------------------------------------------
 
 export default function Monitoring() {
+  const [activeTab, setActiveTab] = useState<"overview" | "mastery">("overview")
   const [overviewState, setOverviewState] = useState<SectionState<MonitoringOverview | null>>(
     initSection(null),
   )
@@ -508,6 +985,9 @@ export default function Monitoring() {
   )
   const [llmState, setLlmState] = useState<SectionState<LLMSettings | null>>(initSection(null))
   const [docsState, setDocsState] = useState<SectionState<Document[]>>(initSection([]))
+  const [phoenixUrlState, setPhoenixUrlState] = useState<SectionState<PhoenixUrl | null>>(
+    initSection(null),
+  )
 
   const [selectedTrace, setSelectedTrace] = useState<TraceItem | null>(null)
 
@@ -577,8 +1057,22 @@ export default function Monitoring() {
         if (!cancelled) setDocsState({ loading: false, data: [], error: true })
       })
 
+    const loadPhoenixUrl = () => {
+      fetchPhoenixUrl()
+        .then((d) => {
+          if (!cancelled) setPhoenixUrlState({ loading: false, data: d, error: false })
+        })
+        .catch((e: unknown) => {
+          logger.warn("[Monitoring] section failed", "Phoenix URL", e)
+          if (!cancelled) setPhoenixUrlState({ loading: false, data: null, error: true })
+        })
+    }
+    loadPhoenixUrl()
+    const phoenixInterval = setInterval(loadPhoenixUrl, 30_000)
+
     return () => {
       cancelled = true
+      clearInterval(phoenixInterval)
     }
   }, [])
 
@@ -588,7 +1082,47 @@ export default function Monitoring() {
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8">
-      <h1 className="text-2xl font-semibold text-foreground">Monitoring</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-foreground">Monitoring</h1>
+        {/* Tab bar */}
+        <div className="flex gap-1 rounded-lg border border-border bg-secondary p-1">
+          {(["overview", "mastery"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === tab
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab === "overview" ? "Overview" : "Mastery"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Mastery tab */}
+      {activeTab === "mastery" && (
+        <MasteryPanel documents={docsState.data} />
+      )}
+
+      {/* Overview tab sections -- hidden when mastery tab is active */}
+      {activeTab === "overview" && (
+        <>
+      {/* 0. Traces link card */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold text-foreground">Traces</h2>
+        {phoenixUrlState.loading ? (
+          <Skeleton className="h-12 w-full rounded-lg" />
+        ) : phoenixUrlState.error ? (
+          <div className="flex h-12 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-sm text-red-600">
+            Could not check Phoenix status.
+          </div>
+        ) : (
+          <TracesCard phoenix={phoenixUrlState.data} />
+        )}
+      </section>
 
       {/* 1. System Status */}
       <section className="flex flex-col gap-3">
@@ -742,7 +1276,16 @@ export default function Monitoring() {
         )}
       </section>
 
-      {/* 7. Eval Runs */}
+      {/* 7a. RAGAS Eval Results — from /evals/results */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">RAGAS Eval Results</h2>
+        <p className="text-xs text-muted-foreground">
+          Latest result per dataset. Green = meets threshold, amber = close, grey = below. Click Run Eval to trigger a background eval run.
+        </p>
+        <EvalPanel />
+      </section>
+
+      {/* 7b. Eval Runs (legacy /monitoring/evals) */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Eval Runs</h2>
         {evalRunsState.loading ? (
@@ -799,6 +1342,8 @@ export default function Monitoring() {
       {/* Trace detail panel */}
       {selectedTrace && (
         <TraceDetailPanel trace={selectedTrace} onClose={() => setSelectedTrace(null)} />
+      )}
+        </>
       )}
     </div>
   )

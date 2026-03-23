@@ -78,6 +78,82 @@ async def test_get_document_unknown_id_returns_404(test_db):
     _assert_detail_str(r.json())
 
 
+# ---------------------------------------------------------------------------
+# /documents/{id}/audio — S120 audio endpoint contracts
+# ---------------------------------------------------------------------------
+
+
+async def test_get_audio_unknown_document_returns_404(test_db):
+    """GET /documents/{id}/audio returns 404 when the document does not exist."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/documents/{_UNKNOWN_ID}/audio")
+    assert r.status_code == 404
+    _assert_detail_str(r.json())
+
+
+async def test_get_audio_non_audio_document_returns_400(test_db):
+    """GET /documents/{id}/audio returns 400 when content_type != audio."""
+    import uuid
+
+    import app.database as db_module
+    from app.models import DocumentModel
+
+    # Insert a text document into the test DB
+    doc_id = str(uuid.uuid4())
+    factory = db_module._session_factory
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="A text doc",
+                format="txt",
+                content_type="notes",
+                word_count=0,
+                page_count=0,
+                file_path="/tmp/noop.txt",
+                stage="complete",
+                tags=[],
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/documents/{doc_id}/audio")
+    assert r.status_code == 400
+    _assert_detail_str(r.json())
+
+
+async def test_get_audio_missing_file_returns_404(test_db):
+    """GET /documents/{id}/audio returns 404 when the file is absent from disk."""
+    import uuid
+
+    import app.database as db_module
+    from app.models import DocumentModel
+
+    doc_id = str(uuid.uuid4())
+    factory = db_module._session_factory
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Phantom audio",
+                format="mp3",
+                content_type="audio",
+                word_count=0,
+                page_count=0,
+                file_path="/nonexistent/path/phantom.mp3",
+                stage="complete",
+                tags=[],
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/documents/{doc_id}/audio")
+    assert r.status_code == 404
+    _assert_detail_str(r.json())
+
+
 async def test_get_document_status_unknown_id_returns_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get(f"/documents/{_UNKNOWN_ID}/status")
@@ -116,6 +192,7 @@ async def test_ingest_unsupported_extension_returns_400(test_db):
         r = await c.post(
             "/documents/ingest",
             files={"file": ("image.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+            data={"content_type": "notes"},
         )
     assert r.status_code == 400
     body = r.json()
@@ -129,6 +206,7 @@ async def test_ingest_unsupported_binary_returns_400(test_db):
         r = await c.post(
             "/documents/ingest",
             files={"file": ("program.exe", b"MZ\x90\x00", "application/octet-stream")},
+            data={"content_type": "notes"},
         )
     assert r.status_code == 400
     _assert_detail_str(r.json())
