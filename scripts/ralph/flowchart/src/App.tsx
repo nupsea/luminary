@@ -205,13 +205,15 @@ interface Story {
   acceptanceCriteria: string[]
 }
 
-const stories = prd.stories as Story[]
+// Phase 1 only — Phase 2 stories (S171-S175) exist in the PRD but have no layout yet
+const PHASE1 = new Set(['S161','S162','S163','S170','S164','S165','S167','S168','S166','S169'])
+const stories = (prd.stories as Story[]).filter(s => PHASE1.has(s.id))
 
 // short labels for nodes
 const shortTitle: Record<string, string[]> = {
   S161: ['S161 · P1', 'Collections', 'Schema + API'],
   S162: ['S162 · P2', 'Hierarchical Tags', 'Shadow Index + API'],
-  S163: ['S163 · P3', 'Notes → Kuzu', 'GLiNER entity edges'],
+  S163: ['S163 · P3', 'Notes → Kuzu', 'GLiNER · chat context'],
   S170: ['S170 · P4', 'Perf Refactor', 'Vector dim + indexes'],
   S164: ['S164 · P5', 'Collections UI', 'Sidebar + CRUD'],
   S165: ['S165 · P6', 'Tag Browser UI', 'Autocomplete + merge'],
@@ -222,16 +224,37 @@ const shortTitle: Record<string, string[]> = {
 }
 
 const storyPositions: Record<string, { x: number; y: number }> = {
-  S161: { x: 60,   y: 80  },
-  S162: { x: 60,   y: 240 },
-  S163: { x: 60,   y: 400 },
-  S170: { x: 340,  y: 160 },
-  S164: { x: 620,  y: 80  },
-  S165: { x: 620,  y: 260 },
-  S167: { x: 900,  y: 80  },
-  S168: { x: 900,  y: 260 },
-  S166: { x: 1180, y: 80  },
-  S169: { x: 1180, y: 260 },
+  S161: { x: 60,   y: 60  },
+  S162: { x: 60,   y: 220 },
+  S163: { x: 60,   y: 380 },
+  S170: { x: 340,  y: 140 },
+  S164: { x: 620,  y: 60  },
+  S165: { x: 620,  y: 240 },
+  S167: { x: 900,  y: 60  },
+  S168: { x: 900,  y: 240 },
+  S166: { x: 1180, y: 60  },
+  S169: { x: 1180, y: 240 },
+}
+
+// Ghost node representing Phase 2 scope — shows where S163 flows after Phase 1
+const phase2GhostNode: Node = {
+  id: 'phase2',
+  data: { label: (
+    <div style={{ textAlign: 'center', opacity: 0.6 }}>
+      <div style={{ fontSize: 10, marginBottom: 2 }}>unlocks</div>
+      <div style={{ fontSize: 12, fontWeight: 700 }}>Phase 2</div>
+      <div style={{ fontSize: 10 }}>S172 · Notes in Viz</div>
+    </div>
+  )},
+  position: { x: 340, y: 380 },
+  style: {
+    background: '#1e293b',
+    color: '#64748b',
+    border: '2px dashed #334155',
+    borderRadius: 10,
+    padding: '8px 14px',
+    minWidth: 150,
+  },
 }
 
 function storyNode(s: Story): Node {
@@ -291,6 +314,14 @@ const storyEdges: Edge[] = [
   { id: 'e-170-166', source: 'S170', target: 'S166', label: '1024-dim vectors', labelStyle: { fontSize: 10 }, ...depEdgeStyle },
   { id: 'e-161-169', source: 'S161', target: 'S169', ...depEdgeStyle },
   { id: 'e-162-169', source: 'S162', target: 'S169', ...depEdgeStyle },
+  // S163 is self-contained in Phase 1 (enriches chat); unlocks Phase 2 Viz
+  {
+    id: 'e-163-p2', source: 'S163', target: 'phase2',
+    label: 'chat enrichment live', labelStyle: { fontSize: 10 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#334155' },
+    style: { stroke: '#334155', strokeWidth: 1.5, strokeDasharray: '6,3' },
+    type: 'smoothstep' as const,
+  },
 ]
 
 // ── LEGEND helpers ───────────────────────────────────────────────
@@ -418,7 +449,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('stories')
   const [selectedStory, setSelectedStory] = useState<Story | null>(null)
 
-  const storyNodes = stories.map(storyNode)
+  const storyNodes = [...stories.map(storyNode), phase2GhostNode]
   const doneCnt = stories.filter(s => s.passes).length
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
@@ -442,7 +473,7 @@ export default function App() {
         </span>
         <div style={{ display: 'flex', gap: 6 }}>
           <button style={tabStyle('stories')} onClick={() => setTab('stories')}>
-            Story Map ({stories.length})
+            Story Map · Phase 1 ({stories.length})
           </button>
           <button style={tabStyle('run')} onClick={() => setTab('run')}>
             Run Flow
