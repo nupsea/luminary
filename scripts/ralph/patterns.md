@@ -22,6 +22,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - mock at graph level with `patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph)` where `mock_graph.ainvoke` is AsyncMock
 - Performance tests: use `LUMINARY_PERF_TESTS` env guard + `pytest.mark.skipif`
 - Book fixture is "The Odyssey" (not "The Iliad") — use Odyssey-specific entities for relational tests
+- **AsyncClient (httpx) test pattern**: `TestClient(app)` as a context manager triggers FastAPI lifespan (startup events). `AsyncClient(transport=ASGITransport(app=app))` does NOT trigger lifespan. Use the `test_db` fixture to initialize the DB when writing async tests with AsyncClient.
 
 ---
 
@@ -67,6 +68,9 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - SectionSummaryModel batch lookup by (document_id, heading) using SQLAlchemy OR conditions — avoids N+1 queries
 - pack_context groups by section_id or section_heading fallback; sorts groups by max(relevance_score) desc
 - To get the latest executive summary per document across all documents, use a subquery grouped by document_id with `func.max(created_at)`, then join back to SummaryModel and DocumentModel. Do not use DISTINCT ON (not supported by SQLite).
+- **Shadow table sync pattern (_sync_tag_index)**: Call sync helpers synchronously within the same DB transaction as the primary write (NOT `asyncio.create_task`). Use `INSERT OR IGNORE` for idempotent shadow rows; use `ON CONFLICT(id) DO UPDATE SET count = count + 1` for atomic counter increments. SQLite serializes concurrent writes so no race condition exists with `asyncio.gather`.
+- **Prefix-match hierarchical tag filter**: Match a tag and all children in one SQL query: `tag_full = :tag OR tag_full LIKE :tag || '/%'`. In SQLAlchemy: `NoteModel.id.in_(select(NoteTagIndexModel.note_id).where(or_(...)))`.
+- **Backfill SQL for complex computed columns**: When backfill logic is too complex for pure SQLite (no REVERSE, no regex), set the column to a safe default (empty string) during migration. Recompute the correct value at write time via a helper function. Ensure queries never depend on the backfilled value being correct (e.g. use a different column like `tag_full` for filtering instead of `tag_parent`).
 
 ---
 

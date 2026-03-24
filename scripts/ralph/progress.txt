@@ -1739,3 +1739,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - fire-and-forget background tasks must open a fresh AsyncSession inside the task (async for db in _get_db(): ... break) to avoid sharing the request-scope session that FastAPI closes after the response
 ---
 2026-03-24 S161 DONE  Added NoteCollectionModel/NoteCollectionMemberModel, migrated group_name values, and implemented full /collections CRUD API with 2-level nesting enforcement and collection_id filter on GET /notes.
+
+## 2026-03-25T00:00:00Z - S162
+- What was implemented: NoteTagIndexModel shadow table, CanonicalTagModel registry, TagAliasModel; _sync_tag_index helper wired into note create/update/delete; GET /notes?tag= rewritten to O(1) prefix query; new routers/tags.py with 7 endpoints; db_init.py migration with backfill; 10 new tests
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/notes.py, backend/app/routers/tags.py (new), backend/app/main.py, backend/tests/test_tags.py, scripts/smoke/S162.sh (new)
+- **Learnings for future iterations:**
+  - _sync_tag_index pattern: called synchronously within the same DB transaction as the note write (NOT asyncio.create_task). Uses INSERT OR IGNORE for note_tag_index rows; ON CONFLICT DO UPDATE for canonical_tags increments note_count atomically (SQLite serializes concurrent writes, so no race condition with async.gather).
+  - The backfill SQL for tag_parent is complex in pure SQLite (no REVERSE, no regex). Solution: set tag_parent='' for backfilled rows; recompute correctly at write time via _sync_tag_index. Filter queries use tag_full prefix (LIKE 'tag/%') not tag_parent, so backfill gap is non-critical.
+  - async test using AsyncClient (httpx) needs the test_db fixture to initialize tables -- the TestClient(app) as context manager triggers lifespan, but AsyncClient does NOT. Use the test_db fixture to set up the in-memory DB when using AsyncClient.
+  - async def test_ functions work automatically with asyncio_mode="auto" in pyproject.toml -- no @pytest.mark.anyio needed for pytest-asyncio, but existing tests use anyio so either marker style works.
+  - GET /tags/{tag_id}/notes uses plain {tag_id} path parameter; tags with slashes in their IDs need URL encoding (%2F) from clients. For the smoke test, use tag IDs without slashes to avoid routing issues.
+---
