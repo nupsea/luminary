@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
+    CanonicalTagModel,
     ChunkModel,
     ClipModel,
     CodeSnippetModel,
@@ -23,6 +24,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     NoteCollectionMemberModel,
     NoteCollectionModel,
     NoteModel,
+    NoteTagIndexModel,
     PredictionEventModel,
     QAHistoryModel,
     ReadingPositionModel,
@@ -32,6 +34,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     SettingsModel,
     StudySessionModel,
     SummaryModel,
+    TagAliasModel,
     WebReferenceModel,
 )
 
@@ -157,6 +160,71 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 FROM notes
                 JOIN note_collections ON notes.group_name = note_collections.name
                 WHERE notes.group_name IS NOT NULL
+                """
+            )
+        )
+
+        # S162: explicit indexes on note_tag_index for O(1) prefix lookup.
+        # CREATE INDEX IF NOT EXISTS is idempotent.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_note_tag_index_tag_full "
+                "ON note_tag_index(tag_full)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_note_tag_index_note_id "
+                "ON note_tag_index(note_id)"
+            )
+        )
+
+        # S162: backfill note_tag_index from existing notes.tags JSON.
+        # tag_parent set to '' for all rows; _sync_tag_index recomputes it on
+        # any future note update. For hierarchical tags already in the DB, the
+        # prefix-search filter only uses tag_full (not tag_parent), so filtering
+        # is correct even before a note is updated.
+        # INSERT OR IGNORE for idempotency.
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO note_tag_index (note_id, tag_full, tag_root, tag_parent)
+                SELECT
+                    n.id AS note_id,
+                    j.value AS tag_full,
+                    CASE
+                        WHEN instr(j.value, '/') > 0
+                        THEN substr(j.value, 1, instr(j.value, '/') - 1)
+                        ELSE j.value
+                    END AS tag_root,
+                    '' AS tag_parent
+                FROM notes n, json_each(n.tags) AS j
+                WHERE json_type(n.tags) = 'array'
+                """
+            )
+        )
+        # Backfill canonical_tags from note_tag_index (idempotent via INSERT OR IGNORE).
+        # display_name = last path segment (correct for 1-2 level tags);
+        # parent_tag = NULL for top-level, first segment for simple 2-level tags.
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO canonical_tags
+                    (id, display_name, parent_tag, note_count, created_at)
+                SELECT
+                    tag_full AS id,
+                    CASE
+                        WHEN instr(tag_full, '/') = 0 THEN tag_full
+                        ELSE substr(tag_full, instr(tag_full, '/') + 1)
+                    END AS display_name,
+                    CASE
+                        WHEN instr(tag_full, '/') = 0 THEN NULL
+                        ELSE substr(tag_full, 1, instr(tag_full, '/') - 1)
+                    END AS parent_tag,
+                    COUNT(DISTINCT note_id) AS note_count,
+                    datetime('now') AS created_at
+                FROM note_tag_index
+                GROUP BY tag_full
                 """
             )
         )

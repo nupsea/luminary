@@ -12,11 +12,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
-from app.models import NoteCollectionMemberModel, NoteModel
+from app.models import NoteCollectionMemberModel, NoteModel, NoteTagIndexModel
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +146,78 @@ async def _fts_update(
     await _fts_insert(note_id, content, document_id, session)
 
 
+async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -> None:
+    """Sync NoteTagIndexModel and CanonicalTagModel for a note.
+
+    Called synchronously within the same DB write transaction as the note.
+    Handles create (empty -> new tags), update (old -> new tags), and delete
+    (call with tags=[] to remove all rows for this note).
+    """
+    # Load currently indexed tags for this note
+    old_rows = (
+        await session.execute(
+            select(NoteTagIndexModel.tag_full).where(NoteTagIndexModel.note_id == note_id)
+        )
+    ).scalars().all()
+    old_tags: set[str] = set(old_rows)
+    new_tags: set[str] = set(tags)
+
+    removed = old_tags - new_tags
+    added = new_tags - old_tags
+
+    # Remove rows for deleted tags and decrement canonical counts
+    for tag in removed:
+        await session.execute(
+            delete(NoteTagIndexModel).where(
+                NoteTagIndexModel.note_id == note_id,
+                NoteTagIndexModel.tag_full == tag,
+            )
+        )
+        await session.execute(
+            text(
+                "UPDATE canonical_tags SET note_count = MAX(0, note_count - 1) WHERE id = :tag"
+            ),
+            {"tag": tag},
+        )
+
+    # Insert rows for new tags and upsert canonical registry
+    for tag in added:
+        segments = tag.split("/")
+        tag_root = segments[0]
+        tag_parent = "/".join(segments[:-1]) if len(segments) > 1 else ""
+        display_name = segments[-1]
+        canonical_parent = tag_parent if tag_parent else None
+
+        await session.execute(
+            text(
+                "INSERT OR IGNORE INTO note_tag_index"
+                " (note_id, tag_full, tag_root, tag_parent)"
+                " VALUES (:note_id, :tag_full, :tag_root, :tag_parent)"
+            ),
+            {
+                "note_id": note_id,
+                "tag_full": tag,
+                "tag_root": tag_root,
+                "tag_parent": tag_parent,
+            },
+        )
+        # Upsert canonical tag: insert or increment note_count atomically.
+        await session.execute(
+            text(
+                "INSERT INTO canonical_tags"
+                " (id, display_name, parent_tag, note_count, created_at)"
+                " VALUES (:id, :display_name, :parent_tag, 1, datetime('now'))"
+                " ON CONFLICT(id) DO UPDATE SET"
+                " note_count = canonical_tags.note_count + 1"
+            ),
+            {
+                "id": tag,
+                "display_name": display_name,
+                "parent_tag": canonical_parent,
+            },
+        )
+
+
 async def _embed_and_store_note(note_id: str, content: str, document_id: str | None) -> None:
     """Embed note content and upsert vector. Non-fatal if embedding model unavailable.
 
@@ -205,6 +277,7 @@ async def create_note(
     )
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
+    await _sync_tag_index(note.id, note.tags or [], session)
     await session.commit()
     await session.refresh(note)
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
@@ -285,11 +358,17 @@ async def list_notes(
     if group:
         stmt = stmt.where(NoteModel.group_name == group)
     if tag:
-        # Filter notes whose tags JSON array contains the requested tag via EXISTS
+        # Filter notes using NoteTagIndexModel prefix query.
+        # 'science' matches notes tagged 'science', 'science/biology', 'science/physics/quantum'.
         stmt = stmt.where(
-            text(
-                "EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE json_each.value = :tag)"
-            ).bindparams(tag=tag)
+            NoteModel.id.in_(
+                select(NoteTagIndexModel.note_id).where(
+                    or_(
+                        NoteTagIndexModel.tag_full == tag,
+                        NoteTagIndexModel.tag_full.like(f"{tag}/%"),
+                    )
+                )
+            )
         )
     if collection_id:
         stmt = stmt.where(
@@ -325,6 +404,8 @@ async def _apply_note_update(
 
     await session.flush()  # Ensure content update is visible to other queries if needed
     await _fts_update(note.id, note.content, note.document_id, session)
+    if req.tags is not None:
+        await _sync_tag_index(note.id, note.tags or [], session)
     await session.commit()
     await session.refresh(note)
     # Delete stale vector synchronously so hybrid search doesn't return the
@@ -371,6 +452,7 @@ async def delete_note(
         raise HTTPException(status_code=404, detail="Note not found")
 
     await _fts_delete(note_id, session)
+    await _sync_tag_index(note_id, [], session)
     await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
     await session.commit()
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415

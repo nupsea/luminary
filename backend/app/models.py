@@ -602,6 +602,53 @@ class NoteCollectionMemberModel(Base):
     )
 
 
+class NoteTagIndexModel(Base):
+    """Shadow/denorm table: one row per (note, tag) pair for O(1) tag prefix lookup.
+
+    note_id has no FK (shadow table -- avoids FK overhead and cascade complexity).
+    tag_full: full tag path e.g. 'science/biology/genetics'
+    tag_root: first segment e.g. 'science'
+    tag_parent: all-but-last segment e.g. 'science/biology', empty string if top-level
+    Composite PK on (note_id, tag_full) enforces uniqueness without a surrogate key.
+    """
+
+    __tablename__ = "note_tag_index"
+
+    note_id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_full: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_root: Mapped[str] = mapped_column(String, nullable=False)
+    tag_parent: Mapped[str] = mapped_column(String, nullable=False, default="")
+
+
+class CanonicalTagModel(Base):
+    """Registry of canonical tag slugs with slash-convention hierarchy.
+
+    id is the full slug (PK), e.g. 'science/biology'.
+    parent_tag is the parent slug e.g. 'science', or None for top-level tags.
+    note_count is denormalized -- kept accurate by _sync_tag_index.
+    """
+
+    __tablename__ = "canonical_tags"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # full slug
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    parent_tag: Mapped[str | None] = mapped_column(String, nullable=True)
+    note_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class TagAliasModel(Base):
+    """Maps a deprecated/aliased tag slug to its canonical replacement.
+
+    Created when tags are merged (source -> target).
+    """
+
+    __tablename__ = "tag_aliases"
+
+    alias: Mapped[str] = mapped_column(String, primary_key=True)
+    canonical_tag_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 

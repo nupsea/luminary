@@ -42,6 +42,7 @@ from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
+from app.routers.tags import router as tags_router
 from app.telemetry import setup_tracing
 
 
@@ -169,6 +170,7 @@ app.include_router(mastery_router)
 app.include_router(study_router)
 app.include_router(code_executor_router)
 app.include_router(summarize_router)
+app.include_router(tags_router)
 
 
 @app.get("/health")
