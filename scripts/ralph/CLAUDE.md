@@ -20,7 +20,7 @@ You are an autonomous coding agent implementing Luminary stories.
    (Priority 1 = implement first; do not skip ahead.)
 
 6. Read or create the execution plan at `docs/exec-plans/active/<STORY_ID>.md`.
-   If it does not exist, create it now: title, goal, files to touch, step sequence.
+   If it does not exist, invoke the `luminary-planner` agent to create it.
 
 7. Explore the codebase -- read every file you will modify before writing any code.
    Skipping exploration causes regressions.
@@ -41,12 +41,16 @@ You are an autonomous coding agent implementing Luminary stories.
     Run: `bash scripts/smoke/<STORY_ID>.sh`
     If it fails, fix the root cause then re-run gates + smoke.
 
-11. When all gates pass and smoke exits 0:
+11. Run the `luminary-reviewer` agent. Pass the story ID.
+    - If it returns any **Critical** items: fix them, re-run gates + smoke, re-run reviewer.
+    - Warning items: note them in progress.txt but do not block.
+
+12. When all gates pass, smoke exits 0, and reviewer returns no Critical items:
     - Set `passes: true` for this story in the PRD
     - Commit ALL changes: `feat: <STORY_ID> - <Story Title>`
     - Move `docs/exec-plans/active/<STORY_ID>.md` to `docs/exec-plans/completed/`
 
-12. Append your progress to `scripts/ralph/progress.txt` (never replace, always append):
+13. Append your progress to `scripts/ralph/progress.txt` (never replace, always append):
 
 ```
 ## <Date/Time> - <STORY_ID>
@@ -59,8 +63,7 @@ You are an autonomous coding agent implementing Luminary stories.
 ---
 ```
 
-13. If you discover a **reusable pattern**, add it to `scripts/ralph/patterns.md`
-    (update in-place, do not append chronologically).
+14. Run the `luminary-docs` agent to update `scripts/ralph/patterns.md` with any new reusable patterns.
 
 ## Quality Requirements
 
