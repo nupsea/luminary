@@ -3,6 +3,7 @@
 Schema:
   Nodes: Entity(id, name, type, frequency, aliases), Document(id, title, content_type)
          DiagramNode(id, name, node_type, source_image_id, document_id, frequency) -- S136
+         Note(id, note_id, preview, created_at) -- S163
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
          RELATED_TO(Entity->Entity, relation_label, confidence),
@@ -21,6 +22,9 @@ Schema:
          REFERENCES_DM(DiagramNode->DiagramNode, document_id)        -- S136
          LEADS_TO(DiagramNode->DiagramNode, document_id, condition)  -- S136
          DEPICTS(DiagramNode->Entity, document_id)                   -- S136
+         WRITTEN_ABOUT(Note->Entity, confidence)                     -- S163
+         TAG_IS_CONCEPT(Note->Entity, tag)                           -- S163
+         DERIVED_FROM(Note->Document)                                -- S163
 
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
@@ -32,6 +36,7 @@ contradiction_note (STRING), prefer_source (STRING "a"|"b"|"").
 """
 
 import logging
+import threading
 from pathlib import Path
 
 import kuzu
@@ -56,6 +61,8 @@ class KuzuService:
         db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
         self._db = kuzu.Database(db_path)
         self._conn = kuzu.Connection(self._db)
+        # Kuzu connection is not thread-safe. Serialise all _conn.execute() calls.
+        self._lock = threading.Lock()
         self._create_schema()
         logger.info("KuzuService initialized", extra={"db_path": db_path})
 
@@ -118,6 +125,15 @@ class KuzuService:
             " source_doc_id STRING, target_doc_id STRING,"
             " confidence FLOAT, contradiction INT64,"
             " contradiction_note STRING, prefer_source STRING)",
+            # Note graph (S163) -- Note nodes + edges to Entity and Document
+            "CREATE NODE TABLE IF NOT EXISTS Note("
+            "id STRING PRIMARY KEY, note_id STRING, preview STRING, created_at STRING)",
+            "CREATE REL TABLE IF NOT EXISTS WRITTEN_ABOUT("
+            "FROM Note TO Entity, confidence FLOAT)",
+            "CREATE REL TABLE IF NOT EXISTS TAG_IS_CONCEPT("
+            "FROM Note TO Entity, tag STRING)",
+            "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM("
+            "FROM Note TO Document)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)

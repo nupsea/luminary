@@ -1750,3 +1750,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - async def test_ functions work automatically with asyncio_mode="auto" in pyproject.toml -- no @pytest.mark.anyio needed for pytest-asyncio, but existing tests use anyio so either marker style works.
   - GET /tags/{tag_id}/notes uses plain {tag_id} path parameter; tags with slashes in their IDs need URL encoding (%2F) from clients. For the smoke test, use tag IDs without slashes to avoid routing issues.
 ---
+
+## 2026-03-25T09:00:00Z - S163
+- What was implemented: Note node type in Kuzu + 3 relationship tables (WRITTEN_ABOUT, TAG_IS_CONCEPT, DERIVED_FROM); NoteGraphService (upsert_note_node, delete_note_node, get_entities_for_note, get_notes_for_entity); asyncio.create_task for graph upsert on POST/PUT notes; await delete_note_node in DELETE handler; GET /notes/{id}/entities endpoint; chat_graph.py notes_node enrichment appending entity names to top-3 note context; threading.Lock added to KuzuService for thread-safety when asyncio.to_thread runs Kuzu writes concurrently
+- Files changed: backend/app/services/graph.py, backend/app/services/note_graph.py (new), backend/app/routers/notes.py, backend/app/runtime/chat_graph.py, backend/tests/test_note_graph.py (new), scripts/smoke/S163.sh (new), scripts/ralph/prd-v3.json (S163 passes=true)
+- **Learnings for future iterations:**
+  - session.refresh(note) after session.commit() is unnecessary when expire_on_commit=False -- all attributes set in Python before commit are preserved. Keeping the refresh creates an await point where background asyncio tasks (e.g. GLiNER inference via asyncio.to_thread) can run and interfere with session state under heavy load. Remove session.refresh() when expire_on_commit=False.
+  - asyncio.to_thread for GLiNER inference runs in thread pool. Multiple concurrent upsert_note_node calls (15 notes created in rapid succession) can cause enough GIL contention / async event loop interference to corrupt SQLAlchemy session operations if an unnecessary await exists between commit and refresh. Solution: eliminate the unnecessary await.
+  - asyncio.get_event_loop().run_until_complete() is deprecated in Python 3.10+. Use asyncio.run() in test helpers instead.
+  - Kuzu threading.Lock: acquire it in ALL callers of _conn.execute(), not just new note_graph.py methods. Pre-existing graph.py methods and chat_graph.py direct _conn access bypass the lock -- a pre-existing gap made visible when asyncio.to_thread runs note upserts concurrently. Flag as tech debt for a future story.
+  - GLiNER runs OUTSIDE the Kuzu lock (inference is slow; only Kuzu writes need the lock). This is the correct pattern: run slow inference in the background thread before acquiring any lock.
+---

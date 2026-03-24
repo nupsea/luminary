@@ -926,7 +926,22 @@ async def notes_node(state: ChatState) -> dict:
         logger.info("notes_node: no note results for query=%r", q[:50])
         return {"chunks": [], "section_context": None}
 
-    note_lines = ["[From your notes] " + r.content for r in results]
+    # Enrich top-3 notes with Kuzu entity names (S163)
+    note_lines = []
+    for i, r in enumerate(results):
+        line = "[From your notes] " + r.content
+        if i < 3:
+            try:
+                from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+                entities = await get_note_graph_service().get_entities_for_note(r.note_id)
+                if entities:
+                    entity_names = ", ".join(e["name"] for e in entities[:5])
+                    line += f" [Entities: {entity_names}]"
+            except Exception:
+                pass  # Entity enrichment is non-blocking
+        note_lines.append(line)
+
     section_context = "\n\n".join(note_lines)
     logger.info("notes_node: found %d notes, ctx_len=%d", len(results), len(section_context))
     return {"chunks": [], "section_context": section_context}

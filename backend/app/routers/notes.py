@@ -96,6 +96,13 @@ class NoteSearchResponse(BaseModel):
     total: int
 
 
+class NoteEntityItem(BaseModel):
+    name: str
+    type: str
+    confidence: float
+    edge_type: str  # "WRITTEN_ABOUT" | "TAG_IS_CONCEPT"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -218,6 +225,19 @@ async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) 
         )
 
 
+async def _upsert_note_graph(
+    note_id: str, content: str, document_id: str | None, tags: list[str]
+) -> None:
+    """Fire-and-forget: upsert Note node and edges in Kuzu graph."""
+    try:
+        from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+        await get_note_graph_service().upsert_note_node(note_id, content, document_id, tags)
+        logger.debug("Note graph upserted note_id=%s", note_id)
+    except Exception as exc:
+        logger.warning("_upsert_note_graph failed (non-fatal): %s", exc)
+
+
 async def _embed_and_store_note(note_id: str, content: str, document_id: str | None) -> None:
     """Embed note content and upsert vector. Non-fatal if embedding model unavailable.
 
@@ -279,10 +299,14 @@ async def create_note(
     await _fts_insert(note.id, note.content, note.document_id, session)
     await _sync_tag_index(note.id, note.tags or [], session)
     await session.commit()
-    await session.refresh(note)
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    graph_task = asyncio.create_task(
+        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [])
+    )
+    _background_tasks.add(graph_task)
+    graph_task.add_done_callback(_background_tasks.discard)
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note)
 
@@ -407,7 +431,6 @@ async def _apply_note_update(
     if req.tags is not None:
         await _sync_tag_index(note.id, note.tags or [], session)
     await session.commit()
-    await session.refresh(note)
     # Delete stale vector synchronously so hybrid search doesn't return the
     # old embedding while the background task re-embeds the new content.
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
@@ -416,6 +439,11 @@ async def _apply_note_update(
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    graph_task = asyncio.create_task(
+        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [])
+    )
+    _background_tasks.add(graph_task)
+    graph_task.add_done_callback(_background_tasks.discard)
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(note)
 
@@ -453,12 +481,25 @@ async def delete_note(
 
     await _fts_delete(note_id, session)
     await _sync_tag_index(note_id, [], session)
+    # Delete Note graph node synchronously before removing the SQL row
+    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+    await get_note_graph_service().delete_note_node(note_id)
     await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
     await session.commit()
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
     get_lancedb_service().delete_note_vector(note_id)
     logger.info("Deleted note", extra={"note_id": note_id})
+
+
+@router.get("/{note_id}/entities", response_model=list[NoteEntityItem])
+async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
+    """Return entities linked to a note via WRITTEN_ABOUT or TAG_IS_CONCEPT Kuzu edges."""
+    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+    entities = await get_note_graph_service().get_entities_for_note(note_id)
+    return [NoteEntityItem(**e) for e in entities]
 
 
 class NoteFlashcardGenerateRequest(BaseModel):
