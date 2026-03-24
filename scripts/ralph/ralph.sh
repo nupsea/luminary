@@ -64,7 +64,8 @@ if pending:
 PYEOF
 }
 
-PRD_PATH="$PRD" RAW=$(find_next_story)
+export PRD_PATH="$PRD"
+RAW=$(find_next_story)
 
 if [[ -z "$RAW" ]]; then
   echo "==> All stories pass. Nothing to do."
@@ -156,7 +157,7 @@ case "$TOOL" in
 esac
 
 # ── verify story was marked done ──────────────────────────────────
-PRD_PATH="$PRD" DONE=$(python3 - <<PYEOF
+DONE=$(python3 - <<PYEOF
 import json, os
 with open(os.environ['PRD_PATH']) as f:
     prd = json.load(f)
