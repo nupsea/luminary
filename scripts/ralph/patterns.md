@@ -38,6 +38,9 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 - `asyncio.gather` with Semaphore: wrap each coro in `async with semaphore:` inside an inner async fn, then `gather(*[inner(i) for i in units])`
 - `litellm.ServiceUnavailableError` must be caught at the `asyncio.gather` call site — catching inside each unit coro doesn't propagate through gather; use try/except around gather to catch and return 0
+- `asyncio.run()` instead of `asyncio.get_event_loop().run_until_complete()` in test helpers — the latter is deprecated in Python 3.10+
+- **Slow sync work outside locks**: when using `asyncio.to_thread` for slow work (e.g. GLiNER inference) before a Kuzu operation, run the slow work OUTSIDE the lock, acquire the lock only for the Kuzu writes. This prevents GIL contention from blocking other async tasks.
+- **Kuzu thread-safety with asyncio.to_thread**: acquire `KuzuService._lock` (threading.Lock) in ALL callers of `_conn.execute()`, including existing direct callers in chat_graph and graph.py. Multiple concurrent `asyncio.to_thread` tasks can corrupt state without serialization.
 
 ---
 
@@ -71,6 +74,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Shadow table sync pattern (_sync_tag_index)**: Call sync helpers synchronously within the same DB transaction as the primary write (NOT `asyncio.create_task`). Use `INSERT OR IGNORE` for idempotent shadow rows; use `ON CONFLICT(id) DO UPDATE SET count = count + 1` for atomic counter increments. SQLite serializes concurrent writes so no race condition exists with `asyncio.gather`.
 - **Prefix-match hierarchical tag filter**: Match a tag and all children in one SQL query: `tag_full = :tag OR tag_full LIKE :tag || '/%'`. In SQLAlchemy: `NoteModel.id.in_(select(NoteTagIndexModel.note_id).where(or_(...)))`.
 - **Backfill SQL for complex computed columns**: When backfill logic is too complex for pure SQLite (no REVERSE, no regex), set the column to a safe default (empty string) during migration. Recompute the correct value at write time via a helper function. Ensure queries never depend on the backfilled value being correct (e.g. use a different column like `tag_full` for filtering instead of `tag_parent`).
+- **No session.refresh() when expire_on_commit=False**: after `await session.commit()`, do NOT call `session.refresh(instance)`. When expire_on_commit=False, all attributes set in Python before commit are preserved. The refresh creates an extra await point where background tasks (asyncio.to_thread GLiNER) can run and corrupt session state under load.
 
 ---
 
