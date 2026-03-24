@@ -65,24 +65,30 @@ PYEOF
 }
 
 export PRD_PATH="$PRD"
-RAW=$(find_next_story)
+STORIES_DONE=0
 
-if [[ -z "$RAW" ]]; then
-  echo "==> All stories pass. Nothing to do."
-  exit 0
-fi
+# ── main loop: one claude invocation per story ────────────────────
+while true; do
+  RAW=$(find_next_story)
 
-STORY_ID=$(echo "$RAW" | cut -d'|' -f1)
-STORY_TITLE=$(echo "$RAW" | cut -d'|' -f4)
-PRIORITY=$(echo "$RAW" | cut -d'|' -f7)
-REMAINING=$(echo "$RAW" | cut -d'|' -f10)
+  if [[ -z "$RAW" ]]; then
+    echo "==> All stories pass. Ralph is done. ($STORIES_DONE completed this run)"
+    exit 0
+  fi
 
-echo "==> Next story : $STORY_ID (P${PRIORITY}) -- $STORY_TITLE"
-echo "==> Remaining  : $REMAINING stories pending"
-echo ""
+  STORY_ID=$(echo "$RAW" | cut -d'|' -f1)
+  STORY_TITLE=$(echo "$RAW" | cut -d'|' -f4)
+  PRIORITY=$(echo "$RAW" | cut -d'|' -f7)
+  REMAINING=$(echo "$RAW" | cut -d'|' -f10)
 
-# ── build the implementation prompt ──────────────────────────────
-PROMPT="You are Ralph, the Luminary implementation agent.
+  echo "════════════════════════════════════════════════════════════"
+  echo "==> Story $STORY_ID (P${PRIORITY}) -- $STORY_TITLE"
+  echo "==> Remaining: $REMAINING pending   Done this run: $STORIES_DONE"
+  echo "════════════════════════════════════════════════════════════"
+  echo ""
+
+  # ── build the implementation prompt ────────────────────────────
+  PROMPT="You are Ralph, the Luminary implementation agent.
 
 Your task is to implement story $STORY_ID from the PRD at:
   $PRD
@@ -141,23 +147,23 @@ Do NOT set passes=true before smoke exits 0.
 Do NOT skip the exec plan step -- it is the alignment checkpoint.
 Do NOT use pip, Poetry, or npm install (uv and the existing node_modules only)."
 
-# ── invoke the tool ───────────────────────────────────────────────
-case "$TOOL" in
-  claude)
-    claude \
-      --dangerously-skip-permissions \
-      --max-budget-usd "$MAX_BUDGET" \
-      --add-dir "$REPO_ROOT" \
-      -p "$PROMPT"
-    ;;
-  *)
-    echo "Unknown tool: $TOOL (only 'claude' supported)"
-    exit 1
-    ;;
-esac
+  # ── invoke the tool ────────────────────────────────────────────
+  case "$TOOL" in
+    claude)
+      claude \
+        --dangerously-skip-permissions \
+        --max-budget-usd "$MAX_BUDGET" \
+        --add-dir "$REPO_ROOT" \
+        -p "$PROMPT"
+      ;;
+    *)
+      echo "Unknown tool: $TOOL (only 'claude' supported)"
+      exit 1
+      ;;
+  esac
 
-# ── verify story was marked done ──────────────────────────────────
-DONE=$(python3 - <<PYEOF
+  # ── verify story was marked done ───────────────────────────────
+  DONE=$(python3 - <<PYEOF
 import json, os
 with open(os.environ['PRD_PATH']) as f:
     prd = json.load(f)
@@ -166,11 +172,14 @@ print('yes' if s and s.get('passes') else 'no')
 PYEOF
 )
 
-echo ""
-if [[ "$DONE" == "yes" ]]; then
-  echo "==> $STORY_ID marked passes=true. Run ralph again for the next story."
-else
-  echo "==> WARNING: $STORY_ID did not reach passes=true within the budget."
-  echo "    Increase the budget or debug the failure, then re-run."
-  exit 1
-fi
+  echo ""
+  if [[ "$DONE" == "yes" ]]; then
+    STORIES_DONE=$((STORIES_DONE + 1))
+    echo "==> $STORY_ID complete. Moving to next story..."
+    echo ""
+  else
+    echo "==> WARNING: $STORY_ID did not reach passes=true within the \$$MAX_BUDGET budget."
+    echo "    Increase the budget or debug the failure, then re-run."
+    exit 1
+  fi
+done
