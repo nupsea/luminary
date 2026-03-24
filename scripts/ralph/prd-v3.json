@@ -11,7 +11,8 @@
       "Collections replace group_name. Notes belong to zero or many named collections (many-to-many). Collections have metadata (description, color) and support 2-level nesting. Semantic clustering (HDBSCAN) auto-suggests collections from embedding similarity -- human approves, machine proposes.",
       "Performance contracts are explicit. The 1024-dim vector schema must match the embedding model (bge-m3). Tag index queries must pass p95 < 100ms at 1,000 notes. Every new async path follows the established asyncio.create_task fire-and-forget pattern with explicit error logging.",
       "Cross-tab navigation is event-driven. Clicking a tag node in the Viz tab fires a 'luminary:navigate' DOM event; App.tsx routes to Notes tab with the tag pre-applied. No URL hacks, no shared global state beyond Zustand store.",
-      "Every new service method and every new API endpoint must have at least one pytest test. No exceptions (inherited from v2 philosophy)."
+      "Every new service method and every new API endpoint must have at least one pytest test. No exceptions (inherited from v2 philosophy).",
+      "Phase 2 seed (post Phase 1): note-to-note bidirectional links (S171), notes visible in Knowledge graph (S172), collection health reports (S173), export to Obsidian vault and Anki (S174), multi-document notes (S175). Phase 2 begins only after all Phase 1 stories pass and docs/v3-phase1-completion.md validation checklist is fully checked."
     ]
   },
   "architecture": {
@@ -312,6 +313,135 @@
         "Unit test: 422 when both collection_id and note_ids in request",
         "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
         "scripts/smoke/S169.sh exits 0"
+      ]
+    },
+    {
+      "id": "S171",
+      "title": "Note-to-note bidirectional links: explicit Zettelkasten-style connections",
+      "phase": "V3 Phase 2 - Note Intelligence and Synthesis",
+      "priority": 11,
+      "featureRef": "F-NOTES-V3",
+      "passes": false,
+      "description": "CONTEXT: Phase 1 connects notes to entities (WRITTEN_ABOUT) and to documents (DERIVED_FROM) in Kuzu, but notes cannot reference each other directly. Zettelkasten research shows that explicit note-to-note links -- where each link carries a typed relationship -- are the primary driver of emergent knowledge structure at scale. Without them, related notes can only be discovered via shared tags or shared entities; the user cannot express 'this note elaborates on that note', 'this note contradicts that note', or 'see also'. This story adds a NoteLink model and a LINKS_TO Kuzu edge type, a link-creation UI in the note detail view, and bidirectional backlink display in NoteEditorDialog. USER JOURNEY: User is editing a note on 'Backpropagation' -> types '[[' to trigger note link autocomplete -> types 'grad' -> dropdown shows 'Gradient Descent' and 'Gradient Tape' notes -> selects 'Gradient Descent' with link type 'elaborates' -> the note gains an outgoing link chip 'elaborates -> Gradient Descent' -> Gradient Descent note's editor now shows a backlink 'backlinked by: Backpropagation (elaborates)'. CROSS-STORY IMPACT: NoteEditorDialog (S87, S164, S165) gains [[link]] trigger inside the content textarea. Notes as Kuzu nodes (S163) -- LINKS_TO edge type added to the same graph schema. GET /notes/{id} must return outgoing link_ids and incoming backlink_ids. BACKEND: NoteLinkModel in models.py: id (UUID PK), source_note_id (FK notes.id cascade delete), target_note_id (FK notes.id cascade delete), link_type (str: 'elaborates'|'contradicts'|'see-also'|'supports'|'questions'), created_at. Unique composite (source_note_id, target_note_id, link_type). db_init.py: CREATE TABLE note_links. Kuzu graph.py: add REL TABLE LINKS_TO(FROM Note TO Note) {link_type: STRING}. NoteGraphService: async upsert_note_link(source_id, target_id, link_type): upsert LINKS_TO edge in Kuzu. async delete_note_link(source_id, target_id, link_type): delete edge. Called from router. Router notes.py: POST /notes/{note_id}/links {target_note_id, link_type} -- creates NoteLinkModel row and fires async Kuzu upsert. DELETE /notes/{note_id}/links/{target_note_id}?link_type= -- removes row and fires async Kuzu delete. GET /notes/{note_id}/links -- returns {outgoing: [{target_note_id, target_preview, link_type}], incoming: [{source_note_id, source_preview, link_type}]}. GET /notes and GET /notes/{id}: add outgoing_link_count int field (denorm from JOIN). Note autocomplete for link target: GET /notes/autocomplete?q= (prefix search on content[:100], returns up to 8 {id, preview} results). FRONTEND: NoteEditorDialog content textarea: watch for [[ typed inside a word boundary. On trigger: open LinkAutocomplete popover anchored to cursor. Calls GET /notes/autocomplete?q= (debounced 150ms). Results show note preview. On select: inserts [[note_id|preview text]] marker in markdown. Markdown renderer: render [[id|text]] as a styled chip link (not a real hyperlink -- just highlighted text in preview pane). NoteEditorDialog below content area: 'Links' section showing outgoing link chips (type badge, target preview, X to remove) and incoming backlinks list (source preview, type badge, read-only). Link type selector: 5-option segmented control (elaborates/contradicts/see-also/supports/questions) shown in autocomplete before confirmation. STATES: LinkAutocomplete loading: spinner. No results: 'No matching notes'. Broken [[id|text]] reference (note deleted): chip renders in muted red with 'deleted note' label. TESTS: Unit test: POST /notes/{id}/links creates NoteLinkModel and fires LINKS_TO Kuzu edge upsert. Unit test: DELETE removes NoteLinkModel row and fires Kuzu edge delete. Unit test: GET /notes/{id}/links returns correct outgoing and incoming lists. Vitest: [[ trigger opens LinkAutocomplete in NoteEditorDialog.",
+      "acceptanceCriteria": [
+        "NoteLinkModel in models.py: id, source_note_id (FK cascade), target_note_id (FK cascade), link_type (elaborates|contradicts|see-also|supports|questions), created_at; unique (source, target, link_type)",
+        "db_init.py: CREATE TABLE note_links; Kuzu: LINKS_TO(FROM Note TO Note) {link_type} rel table added to graph schema",
+        "POST /notes/{id}/links creates NoteLinkModel and fires async Kuzu LINKS_TO edge upsert",
+        "DELETE /notes/{id}/links/{target_id}?link_type= removes NoteLinkModel and fires async Kuzu edge delete",
+        "GET /notes/{id}/links returns {outgoing: [{target_note_id, target_preview, link_type}], incoming: [{source_note_id, source_preview, link_type}]}",
+        "GET /notes/autocomplete?q= returns up to 8 notes by content prefix for link target search",
+        "NoteEditorDialog: typing [[ triggers LinkAutocomplete popover with debounced search; selecting inserts [[id|text]] marker",
+        "NoteEditorDialog 'Links' section: outgoing chips (type badge + target preview + X to remove) and incoming backlinks list (read-only)",
+        "[[id|text]] rendered as styled chip in markdown preview pane; broken reference renders in muted red",
+        "Deleting a note cascades to remove all its NoteLinkModel rows (FK cascade); Kuzu node delete removes LINKS_TO edges",
+        "Unit test: POST creates row and queues Kuzu edge upsert; DELETE removes row",
+        "Unit test: GET /links returns correct outgoing and incoming for a 3-note chain fixture",
+        "Vitest: [[ trigger opens LinkAutocomplete; selection inserts marker",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S171.sh exits 0"
+      ]
+    },
+    {
+      "id": "S172",
+      "title": "Note nodes in Viz Knowledge and Learning Path graph modes",
+      "phase": "V3 Phase 2 - Note Intelligence and Synthesis",
+      "priority": 12,
+      "featureRef": "F-NOTES-V3",
+      "passes": false,
+      "description": "CONTEXT: After Phase 1, Note nodes exist in Kuzu with WRITTEN_ABOUT, TAG_IS_CONCEPT, and DERIVED_FROM edges. However the Viz tab Knowledge and Learning Path graph modes only query Entity and Document nodes -- Note nodes are invisible to the user in the graph. This story adds a 'Show notes' toggle to the Viz sidebar that overlays Note nodes onto the existing Knowledge graph: each Note node renders as a distinct shape (square vs Entity's circle), sized by outgoing link count, positioned by ForceAtlas2 near the entities it references via WRITTEN_ABOUT edges. Clicking a Note node opens the note detail panel rather than the entity popover. USER JOURNEY: User is viewing the Knowledge graph for 'Domain-Driven Design' -> toggles 'Show notes' -> 12 note nodes appear near the Entity clusters they reference -- 3 blue squares near 'Aggregate Root', 2 near 'Bounded Context' -> user clicks a note node -> note preview panel slides in showing the full content and a 'Open in Notes tab' button. CROSS-STORY IMPACT: Viz tab (S112, S135, S136) sidebar and canvas -- adds Note nodes to the existing Sigma.js graph. Note nodes (S163) Kuzu schema used. Note-to-note links (S171) LINKS_TO edges also rendered when 'Show notes' is active. GET /graph/{doc_id} backend must return Note nodes and edges. BACKEND: graph.py get_graph() method: when include_notes=True query param set, run additional Cypher: MATCH (n:Note)-[:WRITTEN_ABOUT|:TAG_IS_CONCEPT]->(e:Entity) WHERE e.id IN (existing_entity_ids) RETURN n.note_id, n.preview, collect(e.id). Also MATCH (n1:Note)-[l:LINKS_TO]->(n2:Note) RETURN n1.note_id, n2.note_id, l.link_type. Append note nodes (type='note', id=note_id, label=first 40 chars of preview, note_count=outgoing_link_count) and WRITTEN_ABOUT / LINKS_TO edges to the graph response. GET /graph/{doc_id} and GET /graph (library-wide): add optional include_notes: bool query param (default false). FRONTEND: Viz sidebar: 'Notes' layer toggle checkbox (below existing Diagrams / Prerequisites / Cross-book toggles). When checked: fetches graph with include_notes=true; adds Note nodes to Graphology graph using a custom square node renderer (reuse the custom WebGL program pattern from DiagramNode hexagon). Note node color: indigo (#6366f1). Size: max(8, sqrt(outgoing_link_count) * 5). On click: opens NotePreviewPanel (new component) anchored to the right side -- shows note preview, tags, collection memberships, 'Open in Notes tab' button. LINKS_TO edges between Note nodes: rendered as dashed indigo lines. WRITES_ABOUT edges (Note -> Entity): thin grey lines. STATES: Toggle on with no notes in Kuzu: no extra nodes appear (graceful empty). Note node click: panel loading state while fetching full note (GET /notes/{id}). Note node with deleted source note: skipped in rendering (note_id not found in GET /notes returns gracefully). TESTS: Unit test: get_graph with include_notes=True returns note nodes with correct entity edge list. Unit test: note with no WRITTEN_ABOUT edges does not appear in graph response (isolated notes excluded). Vitest: Note nodes render with correct color and shape from mock graph fixture. Vitest: note node click opens NotePreviewPanel with correct content.",
+      "acceptanceCriteria": [
+        "GET /graph/{doc_id}?include_notes=true returns Note nodes (type='note', label, note_id) and WRITTEN_ABOUT + LINKS_TO edges in graph response",
+        "Note nodes only included when they have at least one WRITTEN_ABOUT or TAG_IS_CONCEPT edge to an entity in the current graph scope",
+        "GET /graph library-wide also supports include_notes param",
+        "Viz sidebar: 'Notes' layer toggle below Diagrams/Prerequisites/Cross-book; off by default",
+        "Note nodes rendered as indigo squares (custom WebGL or SVG node); size proportional to outgoing_link_count",
+        "WRITTEN_ABOUT edges rendered as thin grey lines between note and entity nodes",
+        "LINKS_TO edges (note-to-note) rendered as dashed indigo lines when both notes are visible",
+        "Clicking a Note node opens NotePreviewPanel (right side): preview, tags, collections, 'Open in Notes tab' button",
+        "'Open in Notes tab' button activates Notes tab via luminary:navigate event with note filter",
+        "Empty state: toggling Notes with no note nodes in scope adds nothing gracefully",
+        "Unit test: include_notes=True returns correct note nodes and edges for fixture",
+        "Unit test: isolated note (no entity edges) excluded from response",
+        "Vitest: note nodes render with correct color; click opens panel",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S172.sh exits 0"
+      ]
+    },
+    {
+      "id": "S173",
+      "title": "Collection health report: cohesion score, orphaned notes, coverage gaps, stale notes",
+      "phase": "V3 Phase 2 - Note Intelligence and Synthesis",
+      "priority": 13,
+      "featureRef": "F-NOTES-V3",
+      "passes": false,
+      "description": "CONTEXT: Collections (S161) organize notes into named groups, but there is no feedback loop telling the user whether a collection is coherent, growing stale, or missing flashcard coverage. The Deck Health Report (S160) provides this for flashcard decks; this story provides the equivalent for note collections. A low-cohesion collection (notes have very different embedding vectors) signals it needs splitting. Orphaned notes (in no collection) signal organizational debt. Notes with no linked flashcards signal study coverage gaps. USER JOURNEY: User opens Notes tab -> clicks gear icon on 'Machine Learning' collection -> Collection Health panel opens: Cohesion 78% (green), 3 orphaned notes in library, 5 notes with no flashcard coverage, 2 notes not edited in 90+ days (stale) -> user clicks 'Move uncovered notes to study queue' -> GenerateFlashcardsDialog pre-populated with those 5 notes -> user generates 10 new cards. CROSS-STORY IMPACT: NoteCollectionModel (S161) is the target entity. FlashcardModel.source_content_hash (S169) used to identify notes already covered. Note embeddings from note_vectors_v2 (S170 dim fix) used for cohesion score. BACKEND: CollectionHealthService in app/services/collection_health.py. CollectionHealthReport TypedDict: {collection_id, collection_name, cohesion_score: float, note_count: int, orphaned_notes: list[str], uncovered_notes: list[{note_id, preview}], stale_notes: list[{note_id, preview, last_updated}], hotspot_tags: list[{tag, count}]}. cohesion_score: fetch vectors for all note_ids in collection from LanceDB (asyncio.to_thread), compute mean pairwise cosine similarity, return as 0-1 float. If < 6 notes: return None (insufficient data). orphaned_notes: SELECT id FROM notes WHERE id NOT IN (SELECT DISTINCT note_id FROM note_collection_members) -- notes belonging to no collection at all (not just this collection). uncovered_notes: notes in this collection whose id has no FlashcardModel row with source='note' and deck=collection.name. stale_notes: notes in this collection with updated_at < now - 90 days. hotspot_tags: top 5 tags by count across notes in this collection. GET /collections/{id}/health: returns CollectionHealthReport. POST /collections/{id}/health/archive-stale: sets a new NoteModel.archived (bool, nullable) column = True for stale notes; returns {archived: int}. Archived notes hidden from default GET /notes list (add WHERE archived IS NOT TRUE filter). NoteModel: add archived (bool default False) column via db_init.py ALTER TABLE. FRONTEND: CollectionTree item: gear icon on hover (alongside the existing rename/delete). Gear click opens CollectionHealthPanel (Sheet or Dialog). Panel sections: Cohesion score pill (green >= 0.7, yellow >= 0.5, red < 0.5); Uncovered Notes list with 'Generate Flashcards' button (opens GenerateFlashcardsDialog pre-populated with those note_ids); Stale Notes list with 'Archive' button; Orphaned Notes count with 'Review' button (filters Notes tab to unassigned notes). STATES: Loading: skeleton sections. No data (< 6 notes): 'Not enough notes to compute cohesion' message. Cohesion unavailable: show dashes. TESTS: Unit test: cohesion_score of 6 identical vectors = 1.0; 6 random unit vectors < 0.5. Unit test: uncovered_notes excludes notes that have a matching deck card. Unit test: stale_notes selects only notes older than 90 days. Unit test: archive-stale sets archived=True and GET /notes excludes them by default.",
+      "acceptanceCriteria": [
+        "NoteModel.archived (bool, default False) column added via db_init.py ALTER TABLE; GET /notes excludes archived notes by default (WHERE archived IS NOT TRUE)",
+        "CollectionHealthService in app/services/collection_health.py with cohesion_score, orphaned_notes, uncovered_notes, stale_notes, hotspot_tags fields",
+        "cohesion_score: mean pairwise cosine similarity of note vectors (asyncio.to_thread for LanceDB); None when < 6 notes",
+        "uncovered_notes: notes in collection with no FlashcardModel row for source='note' and deck=collection.name",
+        "stale_notes: notes with updated_at < now - 90 days",
+        "orphaned_notes: all notes (library-wide) not in any collection",
+        "GET /collections/{id}/health returns CollectionHealthReport",
+        "POST /collections/{id}/health/archive-stale sets NoteModel.archived=True for stale notes; returns {archived: int}",
+        "CollectionTree gear icon opens CollectionHealthPanel (Sheet or Dialog)",
+        "Panel shows cohesion pill (green/yellow/red by threshold), uncovered notes list with 'Generate Flashcards' button, stale list with 'Archive' button, orphaned count with 'Review' button",
+        "'Generate Flashcards' from health panel pre-populates GenerateFlashcardsDialog with uncovered note_ids",
+        "Unit test: identical vectors yield cohesion 1.0; uncovered/stale logic correct",
+        "Unit test: archive-stale excludes stale notes from default GET /notes",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S173.sh exits 0"
+      ]
+    },
+    {
+      "id": "S174",
+      "title": "Export: collections as Obsidian-compatible Markdown vault and as Anki deck",
+      "phase": "V3 Phase 2 - Note Intelligence and Synthesis",
+      "priority": 14,
+      "featureRef": "F-NOTES-V3",
+      "passes": false,
+      "description": "CONTEXT: Notes and flashcards are currently locked inside Luminary's SQLite database. Users who want to review outside the app (on mobile, in Obsidian, or in Anki) have no path. This story adds two export formats: (1) Obsidian-compatible Markdown vault -- one .md file per note, YAML frontmatter with tags and collection path, [[note_id|title]] links converted to [[note title]] wikilinks, exported as a .zip; (2) Anki deck -- one .apkg file containing all flashcards in a collection (or all note-sourced cards), using the standard Anki note model fields (Front, Back). USER JOURNEY: User opens CollectionTree -> right-click or actions menu on 'Quantum Mechanics' collection -> 'Export' menu with two options: 'Markdown Vault (.zip)' and 'Anki Deck (.apkg)' -> selects Markdown Vault -> browser downloads quantum-mechanics-vault.zip -> unzipping reveals .md files with YAML frontmatter and note content. CROSS-STORY IMPACT: NoteLinkModel (S171) -- [[id|text]] markers in note content converted to Obsidian [[target title]] wikilinks. FlashcardModel (S93, S169) -- Anki export includes cards where deck=collection.name. NoteCollectionModel (S161) -- collection path used as Obsidian folder path in zip. BACKEND: ExportService in app/services/export_service.py. export_collection_markdown(collection_id, db) -> bytes: fetch all notes in collection (including child collections via NoteCollectionMemberModel join). For each note: build YAML frontmatter (tags, collection path as folder list, created_at, source document title if set). Convert note content: replace [[note_id|text]] markers with [[{target_note_preview[:40]}]] Obsidian wikilinks (resolve target by note_id lookup). Write each note as {note_id[:8]}-{slugified-first-line}.md. Zip all files with zipfile.ZipFile in memory. Return bytes. export_collection_anki(collection_id, db) -> bytes: use genanki library (add to pyproject.toml) to build a Deck with id=hash(collection_name), name=collection_name. For each FlashcardModel where deck=collection.name: create genanki.Note(fields=[flashcard.question, flashcard.answer]). Package as .apkg bytes. GET /collections/{id}/export?format=markdown: returns .zip with Content-Disposition attachment. GET /collections/{id}/export?format=anki: returns .apkg with Content-Disposition attachment. FRONTEND: CollectionTree item actions menu (three-dot or right-click): add 'Export' submenu with 'Markdown Vault' and 'Anki Deck' items. On click: trigger browser download via window.location.href = /collections/{id}/export?format=markdown (or anki). Show loading toast while downloading; success toast on completion. STATES: No notes in collection: export returns empty zip / minimal apkg gracefully. No flashcards for Anki export: apkg with 0 cards returned with a warning toast 'No flashcards found for this collection -- generate some first'. TESTS: Unit test: export_collection_markdown for a 3-note collection returns a valid zip with 3 .md files containing correct YAML frontmatter. Unit test: [[id|text]] markers are converted to [[target title]] wikilinks. Unit test: export_collection_anki returns a non-empty bytes object with genanki-valid structure. Unit test: GET /collections/{id}/export?format=markdown returns 200 with Content-Type application/zip.",
+      "acceptanceCriteria": [
+        "genanki added to pyproject.toml",
+        "ExportService in app/services/export_service.py: export_collection_markdown returns zip bytes (one .md per note, YAML frontmatter, Obsidian wikilinks); export_collection_anki returns .apkg bytes",
+        "YAML frontmatter includes: tags, collection path (folder list), created_at, source document title",
+        "[[note_id|text]] link markers resolved to Obsidian [[target title]] wikilinks; unresolved links rendered as plain text",
+        "GET /collections/{id}/export?format=markdown returns .zip with Content-Disposition: attachment; filename=<slug>-vault.zip",
+        "GET /collections/{id}/export?format=anki returns .apkg with Content-Disposition: attachment",
+        "CollectionTree item actions menu: 'Export' submenu with 'Markdown Vault' and 'Anki Deck' options",
+        "Browser download triggered on menu click; loading toast while in flight; success toast on completion",
+        "Empty collection: export returns minimal valid zip / apkg gracefully",
+        "No flashcards for Anki: returns valid empty apkg with warning toast in UI",
+        "Unit test: 3-note collection export produces zip with correct file count and frontmatter",
+        "Unit test: [[id|text]] markers converted correctly; unresolvable IDs handled gracefully",
+        "Unit test: anki export bytes parseable as valid zip (genanki .apkg is a zip internally)",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S174.sh exits 0"
+      ]
+    },
+    {
+      "id": "S175",
+      "title": "Multi-document notes: cross-book annotations with dual entity edge support",
+      "phase": "V3 Phase 2 - Note Intelligence and Synthesis",
+      "priority": 15,
+      "featureRef": "F-NOTES-V3",
+      "passes": false,
+      "description": "CONTEXT: NoteModel.document_id is a single nullable FK. A user comparing a concept across two books (e.g. 'Bounded Context in DDD vs Microservices') cannot formally link their note to both source documents. The DERIVED_FROM edge in Kuzu (S163) is also single-target. This story upgrades notes to support multiple source documents via a NoteSourceModel pivot table, updates the Kuzu graph to emit DERIVED_FROM edges for all source documents, and upgrades the NoteEditorDialog source picker to a multi-select. USER JOURNEY: User is reading both 'Domain-Driven Design' and 'Building Microservices' -> creates a note 'Bounded Context vs Service Boundary: both texts agree on loose coupling but disagree on team ownership' -> in NoteEditorDialog source picker selects both books -> note now has DERIVED_FROM edges to both Document nodes in Kuzu -> GET /notes?document_id={ddd_id} and GET /notes?document_id={ms_id} both return this note -> in Knowledge graph with 'Show notes' (S172) the note appears near entities from both books. CROSS-STORY IMPACT: NoteModel.document_id (S89) is deprecated and nullable -- kept for backward compat but new source pivots stored in NoteSourceModel. Notes as Kuzu nodes (S163) NoteGraphService.upsert_note_node must emit DERIVED_FROM edge for each NoteSourceModel row. GET /notes?document_id= filter must join NoteSourceModel in addition to NoteModel.document_id. NoteEditorDialog (S87, S164, S165) document selector upgraded from single-select to multi-select. BACKEND: NoteSourceModel in models.py: note_id (FK cascade), document_id (FK cascade), added_at. Composite PK (note_id, document_id). db_init.py: CREATE TABLE note_sources. Migration: INSERT INTO note_sources(note_id, document_id, added_at) SELECT id, document_id, created_at FROM notes WHERE document_id IS NOT NULL. NoteGraphService.upsert_note_node: after existing DERIVED_FROM logic for NoteModel.document_id, also query NoteSourceModel rows for this note_id and emit a DERIVED_FROM edge for each. Notes router: POST /notes and PUT/PATCH /notes/{id}: accept source_document_ids (list[str], optional) in request body alongside legacy document_id. On save: sync NoteSourceModel rows (delete rows not in new list, insert new ones), call upsert_note_node. GET /notes?document_id= filter: WHERE notes.document_id = :doc_id OR notes.id IN (SELECT note_id FROM note_sources WHERE document_id = :doc_id). GET /notes/{id} response: add source_document_ids: list[str] field from NoteSourceModel join. FRONTEND: NoteEditorDialog source section: replace single DocumentSelector dropdown with a multi-select DocumentSelector (checkboxes or tags-style, loading from GET /documents). Show selected document titles as chips with X to remove. On save: pass source_document_ids in request body. Reading Journal tab (S148) 'Convert to Note' button: pre-populates document_id as the single source -- still works via legacy path. STATES: Loading document list in multi-select: skeleton. No documents ingested: 'Ingest a book to link notes to it'. TESTS: Unit test: NoteSourceModel rows created for each source_document_id in POST /notes. Unit test: GET /notes?document_id={id} returns notes linked via NoteSourceModel pivot as well as NoteModel.document_id. Unit test: upsert_note_node emits DERIVED_FROM edge for each NoteSourceModel row. Unit test: migration inserts NoteSourceModel rows for all notes with non-null document_id.",
+      "acceptanceCriteria": [
+        "NoteSourceModel in models.py: note_id (FK cascade), document_id (FK cascade), added_at; composite PK (note_id, document_id)",
+        "db_init.py: CREATE TABLE note_sources; migration inserts rows from notes.document_id where non-null",
+        "POST /notes and PUT/PATCH /notes/{id} accept optional source_document_ids: list[str]; sync NoteSourceModel rows on each write",
+        "GET /notes?document_id= returns notes linked via NoteSourceModel in addition to NoteModel.document_id",
+        "GET /notes/{id} response includes source_document_ids: list[str] from NoteSourceModel",
+        "NoteGraphService.upsert_note_node emits DERIVED_FROM edge for each NoteSourceModel row (in addition to legacy NoteModel.document_id edge)",
+        "NoteEditorDialog source section: multi-select DocumentSelector showing ingested documents as checkboxes or tag chips with X to remove",
+        "Reading Journal 'Convert to Note' pre-populates single source_document_id via legacy path -- continues to work",
+        "Knowledge graph 'Show notes' (S172): note with 2 source docs appears near entity clusters from both documents",
+        "Unit test: NoteSourceModel rows created correctly; GET /notes?document_id= returns multi-source notes",
+        "Unit test: upsert_note_node emits DERIVED_FROM for each NoteSourceModel row",
+        "Unit test: migration correctly backfills NoteSourceModel from notes.document_id",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S175.sh exits 0"
       ]
     }
   ],
