@@ -1,185 +1,104 @@
-#!/usr/bin/env bash
-# ralph.sh -- Luminary AI agent loop
-#
-# Usage:
-#   ./scripts/ralph/ralph.sh --tool claude <max_budget_usd>
-#
+#!/bin/bash
+# Ralph - Long-running AI agent loop for Luminary
+# Usage: ./ralph.sh [--tool claude] [max_iterations]
 # Examples:
-#   ./scripts/ralph/ralph.sh --tool claude 12    # implement next story, $12 budget cap
-#   ./scripts/ralph/ralph.sh --tool claude 60    # implement next story, $60 budget cap
-#
-# The script finds the first story with passes=false (ordered by priority),
-# invokes the selected tool with a full implementation prompt, then loops
-# until no more stories remain or the budget is consumed.
-#
-# Permissions: runs claude with --dangerously-skip-permissions so the agent
-# can read/write files and run shell commands without pausing for approval.
-# Only run this in the Luminary repo on your local machine.
+#   ./ralph.sh --tool claude 12    # run up to 12 story iterations
 
-set -euo pipefail
+set -e
 
 TOOL="claude"
-MAX_BUDGET=12
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+MAX_ITERATIONS=10
 
-# ── parse args ────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --tool) TOOL="$2"; shift 2 ;;
-    --help|-h)
-      sed -n '2,18p' "$0" | sed 's/^# \?//'
-      exit 0
+    --tool)
+      TOOL="$2"
+      shift 2
       ;;
-    [0-9]*) MAX_BUDGET="$1"; shift ;;
-    *) echo "Unknown argument: $1"; exit 1 ;;
+    --tool=*)
+      TOOL="${1#*=}"
+      shift
+      ;;
+    *)
+      if [[ "$1" =~ ^[0-9]+$ ]]; then
+        MAX_ITERATIONS="$1"
+      fi
+      shift
+      ;;
   esac
 done
 
-# ── detect active PRD from git branch ────────────────────────────
-BRANCH=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+if [[ "$TOOL" != "claude" ]]; then
+  echo "Error: Invalid tool '$TOOL'. Only 'claude' is supported."
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLAUDE_MD="$SCRIPT_DIR/CLAUDE.md"
+PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
+ARCHIVE_DIR="$SCRIPT_DIR/archive"
+LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
+
+# Detect active PRD from git branch
+BRANCH=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 case "$BRANCH" in
-  ralph/luminary-v3) PRD="$REPO_ROOT/scripts/ralph/prd-v3.json" ;;
-  ralph/luminary-v2) PRD="$REPO_ROOT/scripts/ralph/prd-v2.json" ;;
-  *)                 PRD="$REPO_ROOT/scripts/ralph/prd-v3.json" ;;
+  ralph/luminary-v3) PRD_FILE="$SCRIPT_DIR/prd-v3.json" ;;
+  ralph/luminary-v2) PRD_FILE="$SCRIPT_DIR/prd-v2.json" ;;
+  *)                 PRD_FILE="$SCRIPT_DIR/prd-v3.json" ;;
 esac
 
-echo "==> Ralph"
-echo "    tool      : $TOOL"
-echo "    budget    : \$$MAX_BUDGET"
-echo "    branch    : $BRANCH"
-echo "    prd       : $PRD"
-echo ""
+# Archive previous run if branch changed
+if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
+  LAST_BRANCH=$(cat "$LAST_BRANCH_FILE" 2>/dev/null || echo "")
+  if [ -n "$BRANCH" ] && [ -n "$LAST_BRANCH" ] && [ "$BRANCH" != "$LAST_BRANCH" ]; then
+    DATE=$(date +%Y-%m-%d)
+    FOLDER_NAME=$(echo "$LAST_BRANCH" | sed 's|^ralph/||')
+    ARCHIVE_FOLDER="$ARCHIVE_DIR/$DATE-$FOLDER_NAME"
+    echo "Archiving previous run: $LAST_BRANCH"
+    mkdir -p "$ARCHIVE_FOLDER"
+    [ -f "$PRD_FILE" ] && cp "$PRD_FILE" "$ARCHIVE_FOLDER/"
+    [ -f "$PROGRESS_FILE" ] && cp "$PROGRESS_FILE" "$ARCHIVE_FOLDER/"
+    echo "   Archived to: $ARCHIVE_FOLDER"
+    echo "# Ralph Progress Log" > "$PROGRESS_FILE"
+    echo "Started: $(date)" >> "$PROGRESS_FILE"
+    echo "---" >> "$PROGRESS_FILE"
+  fi
+fi
 
-# ── find next pending story ───────────────────────────────────────
-find_next_story() {
-  python3 - <<PYEOF
-import json, os, sys
-with open(os.environ['PRD_PATH']) as f:
-    prd = json.load(f)
-pending = [s for s in prd['stories'] if not s.get('passes', False)]
-pending.sort(key=lambda s: s['priority'])
-if pending:
-    s = pending[0]
-    print(f"{s['id']}|||{s['title'][:70]}|||{s['priority']}|||{len(pending)}")
-PYEOF
-}
+# Track current branch
+echo "$BRANCH" > "$LAST_BRANCH_FILE"
 
-export PRD_PATH="$PRD"
-STORIES_DONE=0
+# Initialise progress file if missing
+if [ ! -f "$PROGRESS_FILE" ]; then
+  echo "# Ralph Progress Log" > "$PROGRESS_FILE"
+  echo "Started: $(date)" >> "$PROGRESS_FILE"
+  echo "---" >> "$PROGRESS_FILE"
+fi
 
-# ── main loop: one claude invocation per story ────────────────────
-while true; do
-  RAW=$(find_next_story)
+echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+echo "Branch: $BRANCH"
+echo "PRD: $PRD_FILE"
 
-  if [[ -z "$RAW" ]]; then
-    echo "==> All stories pass. Ralph is done. ($STORIES_DONE completed this run)"
+for i in $(seq 1 $MAX_ITERATIONS); do
+  echo ""
+  echo "==============================================================="
+  echo "  Ralph Iteration $i of $MAX_ITERATIONS"
+  echo "==============================================================="
+
+  OUTPUT=$(claude --dangerously-skip-permissions --print < "$CLAUDE_MD" 2>&1 | tee /dev/stderr) || true
+
+  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+    echo ""
+    echo "Ralph completed all tasks!"
+    echo "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
   fi
 
-  STORY_ID=$(echo "$RAW" | cut -d'|' -f1)
-  STORY_TITLE=$(echo "$RAW" | cut -d'|' -f4)
-  PRIORITY=$(echo "$RAW" | cut -d'|' -f7)
-  REMAINING=$(echo "$RAW" | cut -d'|' -f10)
-
-  echo "════════════════════════════════════════════════════════════"
-  echo "==> Story $STORY_ID (P${PRIORITY}) -- $STORY_TITLE"
-  echo "==> Remaining: $REMAINING pending   Done this run: $STORIES_DONE"
-  echo "════════════════════════════════════════════════════════════"
-  echo ""
-
-  # ── build the implementation prompt ────────────────────────────
-  PROMPT="You are Ralph, the Luminary implementation agent.
-
-Your task is to implement story $STORY_ID from the PRD at:
-  $PRD
-
-Follow the ralph run flow contract in:
-  $REPO_ROOT/docs/ralph-run-flow.md
-
-Read the codebase patterns before touching any code:
-  $REPO_ROOT/scripts/ralph/patterns.md
-
-== Step-by-step ==
-
-1. Read story $STORY_ID from the PRD (full description + all acceptance criteria).
-
-2. Create or read the execution plan at:
-     $REPO_ROOT/docs/exec-plans/active/${STORY_ID}.md
-   If it does not exist, create it now (title, goal, file list, step sequence).
-
-3. Explore the codebase -- read every file you will touch before writing any code.
-   Skipping this step causes regressions.
-
-4. Implement backend changes:
-   - models.py  (SQLAlchemy models if schema changes)
-   - db_init.py (DDL migration if new tables/indexes)
-   - service layer in backend/app/services/
-   - router in backend/app/routers/
-   - pytest tests in backend/tests/
-
-5. Implement frontend changes:
-   - components in frontend/src/components/
-   - page files in frontend/src/pages/ if needed
-   - Zustand store additions in frontend/src/store/
-   - Vitest tests
-
-6. Run quality gates IN ORDER -- stop and fix before moving on:
-   a. cd $REPO_ROOT/backend && uv run ruff check .
-   b. cd $REPO_ROOT/backend && uv run pytest
-   c. cd $REPO_ROOT/frontend && npx tsc --noEmit
-   If any gate fails, fix the errors then restart from gate (a).
-
-7. Run the smoke test. If it does not exist, create it:
-     $REPO_ROOT/scripts/smoke/${STORY_ID}.sh
-   The smoke script must verify the full observable contract:
-   curl each new endpoint, check HTTP status, and assert key response fields.
-   Run it: bash $REPO_ROOT/scripts/smoke/${STORY_ID}.sh
-   If it fails, fix the root cause then re-run gates + smoke.
-
-8. When all gates pass and smoke exits 0:
-   - Set passes=true for $STORY_ID in $PRD
-   - Append one line to $REPO_ROOT/scripts/ralph/progress.txt:
-       $(date +%Y-%m-%d) $STORY_ID DONE  <one-sentence summary>
-   - Move $REPO_ROOT/docs/exec-plans/active/${STORY_ID}.md to
-       $REPO_ROOT/docs/exec-plans/completed/${STORY_ID}.md
-
-Do NOT set passes=true before smoke exits 0.
-Do NOT skip the exec plan step -- it is the alignment checkpoint.
-Do NOT use pip, Poetry, or npm install (uv and the existing node_modules only)."
-
-  # ── invoke the tool ────────────────────────────────────────────
-  case "$TOOL" in
-    claude)
-      claude \
-        --dangerously-skip-permissions \
-        --max-budget-usd "$MAX_BUDGET" \
-        --add-dir "$REPO_ROOT" \
-        -p "$PROMPT"
-      ;;
-    *)
-      echo "Unknown tool: $TOOL (only 'claude' supported)"
-      exit 1
-      ;;
-  esac
-
-  # ── verify story was marked done ───────────────────────────────
-  DONE=$(python3 - <<PYEOF
-import json, os
-with open(os.environ['PRD_PATH']) as f:
-    prd = json.load(f)
-s = next((s for s in prd['stories'] if s['id'] == '$STORY_ID'), None)
-print('yes' if s and s.get('passes') else 'no')
-PYEOF
-)
-
-  echo ""
-  if [[ "$DONE" == "yes" ]]; then
-    STORIES_DONE=$((STORIES_DONE + 1))
-    echo "==> $STORY_ID complete. Moving to next story..."
-    echo ""
-  else
-    echo "==> WARNING: $STORY_ID did not reach passes=true within the \$$MAX_BUDGET budget."
-    echo "    Increase the budget or debug the failure, then re-run."
-    exit 1
-  fi
+  echo "Iteration $i complete. Continuing..."
+  sleep 2
 done
+
+echo ""
+echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks."
+echo "Check $PROGRESS_FILE for status."
+exit 1
