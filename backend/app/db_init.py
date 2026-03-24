@@ -20,6 +20,8 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     LearningObjectiveModel,
     LibrarySummaryModel,
     MisconceptionModel,
+    NoteCollectionMemberModel,
+    NoteCollectionModel,
     NoteModel,
     PredictionEventModel,
     QAHistoryModel,
@@ -116,5 +118,47 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 await conn.execute(text(ddl))
             except Exception:
                 pass  # column already exists
+
+        # S161: migrate distinct group_name values into note_collections (idempotent).
+        # Uses INSERT OR IGNORE so re-running on an already-migrated DB is safe.
+        # The collection id is derived from the group_name to be deterministic across runs.
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO note_collections
+                    (id, name, color, sort_order, created_at, updated_at)
+                SELECT
+                    lower(hex(randomblob(16))) AS id,
+                    group_name AS name,
+                    '#6366F1' AS color,
+                    0 AS sort_order,
+                    datetime('now') AS created_at,
+                    datetime('now') AS updated_at
+                FROM (
+                    SELECT DISTINCT group_name
+                    FROM notes
+                    WHERE group_name IS NOT NULL
+                ) AS distinct_groups
+                WHERE group_name NOT IN (SELECT name FROM note_collections)
+                """
+            )
+        )
+
+        # S161: populate note_collection_members from group_name (idempotent via INSERT OR IGNORE).
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO note_collection_members (id, note_id, collection_id, added_at)
+                SELECT
+                    lower(hex(randomblob(16))) AS id,
+                    notes.id AS note_id,
+                    note_collections.id AS collection_id,
+                    datetime('now') AS added_at
+                FROM notes
+                JOIN note_collections ON notes.group_name = note_collections.name
+                WHERE notes.group_name IS NOT NULL
+                """
+            )
+        )
 
     logger.info("Database tables and FTS5 index initialized")

@@ -16,7 +16,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
-from app.models import NoteModel
+from app.models import NoteCollectionMemberModel, NoteModel
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +274,7 @@ async def list_notes(
     document_id: str | None = Query(default=None),
     group: str | None = Query(default=None),
     tag: str | None = Query(default=None),
+    collection_id: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteResponse]:
     """List notes with optional filters."""
@@ -289,6 +290,14 @@ async def list_notes(
             text(
                 "EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE json_each.value = :tag)"
             ).bindparams(tag=tag)
+        )
+    if collection_id:
+        stmt = stmt.where(
+            NoteModel.id.in_(
+                select(NoteCollectionMemberModel.note_id).where(
+                    NoteCollectionMemberModel.collection_id == collection_id
+                )
+            )
         )
 
     result = await session.execute(stmt)

@@ -22,6 +22,7 @@ from app.routers.annotations import router as annotations_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.clips import router as clips_router
 from app.routers.code_executor import router as code_executor_router
+from app.routers.collections import router as collections_router
 from app.routers.documents import router as documents_router
 from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
@@ -146,6 +147,7 @@ app.add_middleware(
 
 app.include_router(annotations_router)
 app.include_router(clips_router)
+app.include_router(collections_router)
 app.include_router(chat_meta_router)
 app.include_router(documents_router)
 app.include_router(evals_router)

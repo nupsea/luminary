@@ -1738,3 +1738,4 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - HealthSection and DeckHealthReport TypedDicts belong in app/types.py, not inline in the service
   - fire-and-forget background tasks must open a fresh AsyncSession inside the task (async for db in _get_db(): ... break) to avoid sharing the request-scope session that FastAPI closes after the response
 ---
+2026-03-24 S161 DONE  Added NoteCollectionModel/NoteCollectionMemberModel, migrated group_name values, and implemented full /collections CRUD API with 2-level nesting enforcement and collection_id filter on GET /notes.

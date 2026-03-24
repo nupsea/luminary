@@ -562,6 +562,46 @@ class ReadingPositionModel(Base):
     )
 
 
+class NoteCollectionModel(Base):
+    """A named collection of notes supporting up to 2 levels of nesting.
+
+    parent_collection_id is null for top-level collections.
+    Max depth: child collections may not themselves have children (enforced at API layer).
+    """
+
+    __tablename__ = "note_collections"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="#6366F1")
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Self-FK for 2-level hierarchy; null = top-level collection
+    parent_collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class NoteCollectionMemberModel(Base):
+    """Pivot table: maps notes to collections (many-to-many).
+
+    A note may belong to multiple collections.
+    Duplicate (note_id, collection_id) pairs are silently ignored via ON CONFLICT DO NOTHING.
+    """
+
+    __tablename__ = "note_collection_members"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    note_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    collection_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        UniqueConstraint("note_id", "collection_id", name="uq_note_collection_member"),
+    )
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 
