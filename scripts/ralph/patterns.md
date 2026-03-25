@@ -41,6 +41,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - `asyncio.run()` instead of `asyncio.get_event_loop().run_until_complete()` in test helpers — the latter is deprecated in Python 3.10+
 - **Slow sync work outside locks**: when using `asyncio.to_thread` for slow work (e.g. GLiNER inference) before a Kuzu operation, run the slow work OUTSIDE the lock, acquire the lock only for the Kuzu writes. This prevents GIL contention from blocking other async tasks.
 - **Kuzu thread-safety with asyncio.to_thread**: acquire `KuzuService._lock` (threading.Lock) in ALL callers of `_conn.execute()`, including existing direct callers in chat_graph and graph.py. Multiple concurrent `asyncio.to_thread` tasks can corrupt state without serialization.
+- **In-memory TTL cache pattern**: Module-level `_cache: dict = {}` with keys "graph" → result, "ts" → float. Check freshness with `time.monotonic() - _cache["ts"] < TTL` (not `time.time()`, which can go backwards). Invalidate via `_cache.clear()`. Lazy-import the invalidation function in dependent modules to avoid circular imports.
 
 ---
 
@@ -77,6 +78,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Backfill SQL for complex computed columns**: When backfill logic is too complex for pure SQLite (no REVERSE, no regex), set the column to a safe default (empty string) during migration. Recompute the correct value at write time via a helper function. Ensure queries never depend on the backfilled value being correct (e.g. use a different column like `tag_full` for filtering instead of `tag_parent`).
 - **No session.refresh() when expire_on_commit=False**: after `await session.commit()`, do NOT call `session.refresh(instance)`. When expire_on_commit=False, all attributes set in Python before commit are preserved. The refresh creates an extra await point where background tasks (asyncio.to_thread GLiNER) can run and corrupt session state under load.
 - **Bulk one-to-many loading pattern**: after fetching a list of rows, do a single query for all IDs to load related junction table rows. Build a `dict[id, list[related_ids]]` map, then pass to response constructor. Prevents N+1 queries when building responses with one-to-many relationships (e.g., notes with their collection_ids).
+- **Self-join co-occurrence pattern**: To find undirected pairs of related entities, self-join on their common relationship: `JOIN table b ON a.foreign_key = b.foreign_key AND a.id < b.id` (string comparison ensures each pair appears once, no self-loops). Apply HAVING COUNT(*) >= min_weight to filter weak edges. Example: `a.tag_full < b.tag_full` for tag co-occurrence on shared notes.
 
 ---
 
@@ -120,6 +122,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Vitest node environment + Zustand store**: when vitest environment is "node", do NOT import React components that transitively depend on Zustand stores (localStorage is read at module load). Solution: extract pure logic functions to a separate utility file with no React/store imports (e.g., `src/lib/collectionUtils.ts`, `src/lib/tagUtils.ts`), and test only from that utility. Component test files must import from the utility, not the component.
 - **Hierarchical API response schema**: when a child record displays or initializes UI based on parent relationship, include the parent reference in the nested child response (e.g., `parent_tag: str | None` in TagTreeItem) even though it's redundant with tree structure. Without it, the UI cannot pre-select the current parent in a dropdown.
 - **HTML5 drag-and-drop**: add `draggable` attribute to draggable element, `onDragStart={(e) => e.dataTransfer.setData("text/plain", id)}` to set data. Drop target: `onDragOver={(e) => e.preventDefault()}` + `onDrop={(e) => e.dataTransfer.getData("text/plain")}`. No DnD library needed.
+- **New UI mode guards in existing tabs**: when adding a fundamentally different viewMode (e.g., "tags" to Viz.tsx without document scope), guard ALL document-specific UI controls, state booleans, and queries with `viewMode !== "new_mode"` checks. Easy to miss: showEmpty/showAllHidden/isLoading/isError in state overlays. List all guarded items in a comment to catch inconsistencies.
 
 ---
 

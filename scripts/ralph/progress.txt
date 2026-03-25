@@ -1803,3 +1803,24 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
 - Vitest node environment + Zustand: extract pure logic to tagUtils.ts (no React/store imports). Tests target only utility functions. Component files import Zustand which touches localStorage at module load -- not safe in vitest node env.
 - TagTreeItem schema: include parent_tag in tree response so TagManagementPanel can initialize Set Parent dropdown with current value.
 ---
+
+## 2026-03-25 - S167
+- Implemented TagGraphService (build_tag_graph, in-memory cache with 60s TTL, invalidate_tag_graph_cache)
+- Co-occurrence query: self-join on note_tag_index with a.tag_full < b.tag_full to get unique pairs; HAVING COUNT(*) >= 2; cap to 500 edges and 200 nodes
+- GET /tags/graph added as static path to tags.py BEFORE /{tag_id} routes; lazy import of build_tag_graph to avoid circular deps
+- Cache invalidation hooked into _sync_tag_index via lazy import (noqa: PLC0415); only invalidates when `removed or added` is non-empty
+- Frontend: tagGraphUtils.ts with pure functions (colorFromParentTag deterministic hash, buildNavigateEvent CustomEvent, nodeSizeFromCount sqrt-scaled, edgeWidthFromWeight proportional)
+- TagGraph.tsx: Sigma.js + Graphology component with loading/empty (< 3 nodes)/error states; ForceAtlas2 with 50 iterations
+- Viz.tsx: added "tags" to viewMode union; Tags button; useQuery for ["tag-graph"]; hides doc picker/scope/search/layers/entity filter when viewMode === "tags"; guard showEmpty/showAllHidden/isLoading/isError to exclude tags mode
+- App.tsx: luminary:navigate event listener in AppShell; calls setActiveTag + navigate("/notes") for tab="notes" events
+- Files changed: backend/app/services/tag_graph.py (new), backend/app/routers/notes.py, backend/app/routers/tags.py, backend/tests/test_tag_graph.py (new), frontend/src/lib/tagGraphUtils.ts (new), frontend/src/components/TagGraph.test.ts (new), frontend/src/components/TagGraph.tsx (new), frontend/src/pages/Viz.tsx, frontend/src/App.tsx, scripts/smoke/S167.sh (new)
+- Quality gates: ruff PASS, pytest 1148 passed, tsc 0 errors, smoke 12/12
+- **Learnings for future iterations:**
+  - Self-join co-occurrence: `JOIN note_tag_index b ON a.note_id = b.note_id AND a.tag_full < b.tag_full` is the canonical pattern for undirected co-occurrence pairs
+  - When adding a new "mode" to Viz.tsx that is fundamentally different (e.g. no document scope), guard ALL document-specific controls (picker, scope, search, layers, entity filter) and the showEmpty/showAllHidden state booleans; easy to miss the loading/error state guards
+  - FastAPI static paths: always add new static routes like /graph, /tree, /autocomplete BEFORE /{param} routes to avoid 405 Method Not Allowed (path matched by param route, wrong verb)
+  - In-memory cache pattern: use `_cache: dict = {}` at module level; `_cache.clear()` for invalidation; `time.monotonic()` for TTL tracking (not `time.time()` which can go backwards)
+  - Lazy import for cache invalidation in _sync_tag_index: `from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415` -- avoids circular import between routers/ and services/
+  - CustomEvent in Node env (Vitest): `new CustomEvent(...)` works in node because jsdom is configured; the component's Sigma instance can't be tested (WebGL required), so test only the pure utility functions
+  - Reviewer warnings (non-blocking): test_cache_invalidation tests the function directly, not via HTTP path through _sync_tag_index; Vitest only covers utility functions not component wiring
+---
