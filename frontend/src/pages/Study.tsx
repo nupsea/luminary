@@ -20,6 +20,7 @@ import {
   ChevronUp,
   Copy,
   Download,
+  Folder,
   Loader2,
   Pencil,
   PlayCircle,
@@ -167,6 +168,15 @@ interface DeckHealthReport {
   hotspot_sections: HealthSection[]
 }
 
+// S169: Deck list type
+interface DeckItem {
+  deck: string
+  source_type: "document" | "collection" | "note"
+  card_count: number
+  document_id: string | null
+  collection_id: string | null
+}
+
 // S153: Bloom's taxonomy coverage audit types
 interface BloomGap {
   section_id: string
@@ -232,6 +242,12 @@ async function fetchFlashcards(
   const res = await fetch(`${API_BASE}/flashcards/${documentId}${query ? `?${query}` : ""}`)
   if (!res.ok) return []
   return res.json() as Promise<Flashcard[]>
+}
+
+async function fetchDecks(): Promise<DeckItem[]> {
+  const res = await fetch(`${API_BASE}/flashcards/decks`)
+  if (!res.ok) return []
+  return res.json() as Promise<DeckItem[]>
 }
 
 async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
@@ -1959,6 +1975,13 @@ export default function Study() {
     staleTime: 30_000,
   })
 
+  // S169: All decks list
+  const { data: deckList = [] } = useQuery<DeckItem[]>({
+    queryKey: ["flashcard-decks"],
+    queryFn: fetchDecks,
+    staleTime: 60_000,
+  })
+
   useEffect(() => {
     logger.info("[Study] mounted")
   }, [])
@@ -2142,6 +2165,35 @@ export default function Study() {
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-6">
+      {/* S169: All Decks panel */}
+      {deckList.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-foreground">All Decks</h2>
+          <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card">
+            {deckList.map((deck) => (
+              <div key={deck.deck} className="flex items-center gap-3 px-4 py-2.5">
+                {deck.source_type === "collection" ? (
+                  <Folder size={16} className="shrink-0 text-indigo-500" />
+                ) : (
+                  <BookOpen size={16} className="shrink-0 text-slate-500" />
+                )}
+                <span className="flex-1 text-sm font-medium text-foreground truncate">{deck.deck}</span>
+                <span className="text-xs text-muted-foreground">{deck.card_count} cards</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    deck.source_type === "collection"
+                      ? "bg-indigo-100 text-indigo-700"
+                      : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {deck.source_type}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Document selector */}
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium text-muted-foreground shrink-0">Document</label>

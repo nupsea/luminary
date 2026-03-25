@@ -529,8 +529,10 @@ async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
 class NoteFlashcardGenerateRequest(BaseModel):
     tag: str | None = None
     note_ids: list[str] | None = None
+    collection_id: str | None = None
     count: int = 5
     difficulty: Literal["easy", "medium", "hard"] = "medium"
+    force_regenerate: bool = False
 
 
 class NoteFlashcardItem(BaseModel):
@@ -543,17 +545,86 @@ class NoteFlashcardItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
-@router.post("/flashcards/generate", response_model=list[NoteFlashcardItem], status_code=201)
+class NoteFlashcardGenerateResponse(BaseModel):
+    created: int
+    skipped: int
+    deck: str
+
+
+@router.get("/flashcards/generate/preview")
+async def preview_note_flashcard_generation(
+    collection_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return {total_notes, already_covered} for a collection without generating (S169)."""
+    from sqlalchemy import func as sa_func  # noqa: PLC0415
+
+    from app.models import (  # noqa: PLC0415
+        FlashcardModel,
+        NoteCollectionMemberModel,
+        NoteCollectionModel,
+    )
+
+    coll_result = await session.execute(
+        select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+    )
+    collection = coll_result.scalar_one_or_none()
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    member_result = await session.execute(
+        select(sa_func.count()).select_from(NoteCollectionMemberModel).where(
+            NoteCollectionMemberModel.collection_id == collection_id
+        )
+    )
+    total_notes = member_result.scalar_one()
+
+    covered_result = await session.execute(
+        select(sa_func.count(FlashcardModel.source_content_hash.distinct())).where(
+            FlashcardModel.deck == collection.name,
+            FlashcardModel.source == "note",
+            FlashcardModel.source_content_hash.is_not(None),
+        )
+    )
+    already_covered = covered_result.scalar_one()
+
+    return {"total_notes": total_notes, "already_covered": already_covered}
+
+
+@router.post("/flashcards/generate", status_code=201)
 async def generate_note_flashcards(
     req: NoteFlashcardGenerateRequest,
     session: AsyncSession = Depends(get_db),
-) -> list[NoteFlashcardItem]:
-    """Generate flashcards from user notes scoped by tag or explicit note IDs."""
+) -> list[NoteFlashcardItem] | NoteFlashcardGenerateResponse:
+    """Generate flashcards from user notes scoped by tag, note IDs, or collection (S169)."""
     import litellm  # noqa: PLC0415
 
     from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
 
+    # 422 guard: collection_id and note_ids are mutually exclusive
+    if req.collection_id and req.note_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either collection_id or note_ids, not both",
+        )
+
     try:
+        if req.collection_id:
+            result = await get_flashcard_service().generate_from_collection(
+                collection_id=req.collection_id,
+                count_per_note=req.count,
+                difficulty=req.difficulty,
+                session=session,
+                force_regenerate=req.force_regenerate,
+            )
+            logger.info(
+                "Collection flashcard gen: created=%d skipped=%d deck=%s",
+                result["created"],
+                result["skipped"],
+                result["deck"],
+            )
+            return NoteFlashcardGenerateResponse(**result)
+
         cards = await get_flashcard_service().generate_from_notes(
             tag=req.tag,
             note_ids=req.note_ids,

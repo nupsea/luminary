@@ -125,6 +125,9 @@ class FlashcardModel(Base):
     bloom_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
     cloze_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # S169: 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
+    # for collection-based generation. Null for non-collection cards.
+    source_content_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

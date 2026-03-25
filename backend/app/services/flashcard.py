@@ -1,6 +1,7 @@
 """Flashcard generation service — LLM-based QA flashcard generation."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -9,10 +10,18 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import litellm
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, DocumentModel, FlashcardModel, NoteModel, SectionModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    FlashcardModel,
+    NoteCollectionMemberModel,
+    NoteCollectionModel,
+    NoteModel,
+    SectionModel,
+)
 from app.services.llm import get_llm_service
 from app.telemetry import trace_chain
 
@@ -630,6 +639,115 @@ class FlashcardService:
                 await session.refresh(card)
 
         return flashcards
+
+    async def generate_from_collection(
+        self,
+        collection_id: str,
+        count_per_note: int,
+        difficulty: Literal["easy", "medium", "hard"],
+        session: AsyncSession,
+        force_regenerate: bool = False,
+    ) -> dict:
+        """Generate flashcards for every note in a collection with hash-based deduplication.
+
+        Each note is processed sequentially (I-1: no asyncio.gather with shared session).
+        Returns {created: int, skipped: int, deck: str}.
+        """
+        llm = get_llm_service()
+
+        # 1. Fetch collection name
+        coll_result = await session.execute(
+            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+        )
+        collection = coll_result.scalar_one_or_none()
+        if collection is None:
+            raise ValueError(f"Collection {collection_id!r} not found")
+
+        deck_name = collection.name
+
+        # 2. Fetch member note_ids
+        member_result = await session.execute(
+            select(NoteCollectionMemberModel.note_id).where(
+                NoteCollectionMemberModel.collection_id == collection_id
+            )
+        )
+        note_ids = [row[0] for row in member_result.all()]
+
+        created = 0
+        skipped = 0
+
+        # 3. Process each note sequentially
+        for note_id in note_ids:
+            note_result = await session.execute(
+                select(NoteModel).where(NoteModel.id == note_id)
+            )
+            note = note_result.scalar_one_or_none()
+            if note is None or not note.content:
+                continue
+
+            content_hash = hashlib.sha256(
+                note.content[:500].encode()
+            ).hexdigest()[:16]
+
+            if not force_regenerate:
+                count_result = await session.execute(
+                    select(func.count()).select_from(FlashcardModel).where(
+                        FlashcardModel.deck == deck_name,
+                        FlashcardModel.source == "note",
+                        FlashcardModel.source_content_hash == content_hash,
+                    )
+                )
+                existing = count_result.scalar_one()
+                if existing > 0:
+                    skipped += 1
+                    continue
+
+            combined_text = note.content[:_CHUNK_CHAR_LIMIT]
+            prompt = FLASHCARD_USER_TMPL.format(
+                count=count_per_note,
+                difficulty=difficulty,
+                difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+                extra_instructions="",
+                text=combined_text,
+            )
+
+            raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
+            cards_data = _parse_llm_response(raw, note_id)
+
+            now = datetime.now(UTC)
+            for item in cards_data:
+                if not isinstance(item, dict):
+                    continue
+                question = str(item.get("question", "")).strip()
+                answer = str(item.get("answer", "")).strip()
+                source_excerpt = str(item.get("source_excerpt", "")).strip()
+                if not question or not answer:
+                    continue
+                card = FlashcardModel(
+                    id=str(uuid.uuid4()),
+                    document_id=None,
+                    chunk_id=None,
+                    source="note",
+                    deck=deck_name,
+                    source_content_hash=content_hash,
+                    question=question,
+                    answer=answer,
+                    source_excerpt=source_excerpt,
+                    difficulty=difficulty,
+                    fsrs_state="new",
+                    fsrs_stability=0.0,
+                    fsrs_difficulty=0.0,
+                    due_date=now,
+                    reps=0,
+                    lapses=0,
+                    created_at=now,
+                )
+                session.add(card)
+                created += 1
+
+            await session.commit()
+
+        return {"created": created, "skipped": skipped, "deck": deck_name}
 
     async def generate_from_gaps(
         self,

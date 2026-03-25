@@ -239,4 +239,13 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
+        # S169: source_content_hash column for incremental collection-based flashcard generation.
+        # ALTER TABLE is idempotent -- column is silently ignored if it already exists.
+        try:
+            await conn.execute(
+                text("ALTER TABLE flashcards ADD COLUMN source_content_hash TEXT")
+            )
+        except Exception:
+            pass  # Column already exists (idempotent)
+
     logger.info("Database tables and FTS5 index initialized")

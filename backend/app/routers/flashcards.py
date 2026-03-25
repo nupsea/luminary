@@ -36,7 +36,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ChunkModel, DocumentModel, FlashcardModel, ReviewEventModel, SectionModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    FlashcardModel,
+    NoteCollectionModel,
+    ReviewEventModel,
+    SectionModel,
+)
 from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.flashcard import FlashcardService, get_flashcard_service
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
@@ -598,6 +605,79 @@ async def fill_uncovered_sections(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return FillUncoveredResponse(queued=len(req.section_ids))
+
+
+# ---------------------------------------------------------------------------
+# Deck list (S169)
+# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
+# from matching the literal segment "decks" as a document_id wildcard.
+# ---------------------------------------------------------------------------
+
+
+class DeckItem(BaseModel):
+    deck: str
+    source_type: str  # "document" | "collection" | "note"
+    card_count: int
+    document_id: str | None
+    collection_id: str | None
+
+
+@router.get("/decks", response_model=list[DeckItem])
+async def list_flashcard_decks(
+    session: AsyncSession = Depends(get_db),
+) -> list[DeckItem]:
+    """Return all distinct decks with card counts and source type (S169).
+
+    source_type is derived by joining deck name against NoteCollectionModel.name:
+    - "collection" when the deck matches a NoteCollectionModel.name
+    - "document" when document_id is non-null (source='document')
+    - "note" otherwise (tag-scoped or note_ids-scoped)
+    """
+    from sqlalchemy import func as sa_func  # noqa: PLC0415
+
+    rows = (
+        await session.execute(
+            select(
+                FlashcardModel.deck,
+                FlashcardModel.source,
+                sa_func.count().label("card_count"),
+                sa_func.max(FlashcardModel.document_id).label("document_id"),
+            )
+            .group_by(FlashcardModel.deck)
+        )
+    ).all()
+
+    # Fetch all collection names in one query
+    coll_result = await session.execute(
+        select(NoteCollectionModel.id, NoteCollectionModel.name)
+    )
+    name_to_id = {row[1]: row[0] for row in coll_result.all()}
+
+    items: list[DeckItem] = []
+    for deck, source, card_count, doc_id in rows:
+        deck_str = deck or "default"
+        if deck_str in name_to_id:
+            source_type = "collection"
+            collection_id: str | None = name_to_id[deck_str]
+            document_id: str | None = None
+        elif doc_id is not None or source == "document":
+            source_type = "document"
+            collection_id = None
+            document_id = doc_id
+        else:
+            source_type = "note"
+            collection_id = None
+            document_id = None
+        items.append(
+            DeckItem(
+                deck=deck_str,
+                source_type=source_type,
+                card_count=card_count,
+                document_id=document_id,
+                collection_id=collection_id,
+            )
+        )
+    return items
 
 
 @router.get("/{document_id}/export/csv")

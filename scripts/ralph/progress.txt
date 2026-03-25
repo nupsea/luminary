@@ -1868,3 +1868,22 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Rate-limit check for background tasks: query for pending suggestions before spawning create_task; return early with {cached: True} when within the rate window.
   - `NoteCollectionMemberModel` uses a string `id` PK (not composite PK); use `INSERT OR IGNORE INTO note_collection_members (id, note_id, collection_id, added_at) VALUES (...)` with `str(uuid.uuid4())` for each row -- same pattern as collections.py router.
 ---
+
+## 2026-03-26 - S169
+- Implemented collection-based flashcard generation with content-hash deduplication
+- Files changed:
+  - backend/app/services/flashcard.py (added generate_from_collection method; added hashlib, func imports; added NoteCollectionModel/NoteCollectionMemberModel to imports)
+  - backend/app/routers/flashcards.py (added DeckItem schema, GET /flashcards/decks endpoint; registered before /{document_id} catch-all; added NoteCollectionModel import)
+  - backend/app/routers/notes.py (extended NoteFlashcardGenerateRequest with collection_id + force_regenerate; added NoteFlashcardGenerateResponse; added GET /notes/flashcards/generate/preview endpoint; POST /flashcards/generate branches on collection_id)
+  - frontend/src/components/GenerateFlashcardsDialog.tsx (added "By Collection" mode with collection picker, preview line, and collection success display; widened mode type to "tag" | "notes" | "collection")
+  - frontend/src/pages/Study.tsx (added DeckItem type, fetchDecks(), deckList TanStack query, deck list panel above document picker; added Folder icon import)
+  - backend/tests/test_flashcard_collection.py (new - 4 unit tests)
+  - scripts/smoke/S169.sh (new)
+- **Learnings for future iterations:**
+  - content_hash dedup pattern: sha256(note.content[:500].encode()).hexdigest()[:16] -- store as source_content_hash TEXT column on FlashcardModel
+  - generate_from_collection must process notes sequentially (I-1: no asyncio.gather with shared AsyncSession)
+  - GET /flashcards/decks must be registered BEFORE /{document_id} -- add it with a comment matching the pattern used for /audit, /cloze, /health
+  - Preview endpoint at /notes/flashcards/generate/preview -- must be registered before /{note_id} catch-all in notes.py
+  - When POST endpoint can return two different response types (list vs dict), drop the response_model from the decorator and return the appropriate type from the handler
+  - Smoke script: use python3 URL encoding for collection IDs in query strings: `python3 -c "import urllib.parse; print(urllib.parse.quote('$COLL_ID'))"`
+---

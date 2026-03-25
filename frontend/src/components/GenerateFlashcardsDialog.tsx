@@ -1,17 +1,17 @@
 /**
- * GenerateFlashcardsDialog -- generate flashcards from notes scoped by tag or note IDs.
+ * GenerateFlashcardsDialog -- generate flashcards from notes scoped by tag, note IDs, or collection.
  *
  * Props:
  *   open        — controls dialog visibility
  *   onClose     — called when dialog should close
  *   availableTags   — list of tag names from GET /notes/groups
  *
- * Scope: user selects EITHER a tag (all notes with that tag) OR specific notes from a
- * multi-select list. Generate button is disabled until tag or at least one note is chosen.
+ * Scope: user selects EITHER a tag, specific notes, or a collection.
+ * Generate button is disabled until a valid scope is chosen.
  * 503 Ollama error is shown as 'Ollama is unavailable. Start it with: ollama serve'.
  */
 
-import { Search, X, Loader2, CheckSquare, Square, CreditCard, Tag as TagIcon } from "lucide-react"
+import { Search, X, Loader2, CheckSquare, Square, CreditCard, Tag as TagIcon, Folder } from "lucide-react"
 import { useMemo, useState, useEffect } from "react"
 import {
   Dialog,
@@ -21,8 +21,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useQuery } from "@tanstack/react-query"
 
 import { API_BASE } from "@/lib/config"
+import { flattenCollectionTree } from "@/lib/collectionUtils"
+import type { CollectionTreeItem } from "@/lib/collectionUtils"
 
 interface NoteStub {
   id: string
@@ -35,6 +38,12 @@ interface NoteFlashcardItem {
   answer: string
   source_excerpt: string
   source: string
+}
+
+interface CollectionGenerateResponse {
+  created: number
+  skipped: number
+  deck: string
 }
 
 interface GenerateFlashcardsDialogProps {
@@ -52,6 +61,20 @@ async function fetchNoteStubs(): Promise<NoteStub[]> {
   } catch {
     return []
   }
+}
+
+async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
+  const res = await fetch(`${API_BASE}/collections/tree`)
+  if (!res.ok) throw new Error("Failed to load collections")
+  return res.json() as Promise<CollectionTreeItem[]>
+}
+
+async function fetchCollectionPreview(collectionId: string): Promise<{ total_notes: number; already_covered: number }> {
+  const res = await fetch(
+    `${API_BASE}/notes/flashcards/generate/preview?collection_id=${encodeURIComponent(collectionId)}`
+  )
+  if (!res.ok) throw new Error("Preview failed")
+  return res.json() as Promise<{ total_notes: number; already_covered: number }>
 }
 
 async function generateNoteFlashcards(
@@ -80,20 +103,48 @@ async function generateNoteFlashcards(
   return res.json() as Promise<NoteFlashcardItem[]>
 }
 
+async function generateCollectionFlashcards(
+  collectionId: string,
+  count: number,
+  difficulty: "easy" | "medium" | "hard",
+  forceRegenerate: boolean,
+): Promise<CollectionGenerateResponse> {
+  const res = await fetch(`${API_BASE}/notes/flashcards/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      collection_id: collectionId,
+      count,
+      difficulty,
+      force_regenerate: forceRegenerate,
+    }),
+  })
+  if (res.status === 503) {
+    throw new Error("Ollama is unavailable. Start it with: ollama serve")
+  }
+  if (!res.ok) {
+    const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
+    throw new Error(detail)
+  }
+  return res.json() as Promise<CollectionGenerateResponse>
+}
+
 export function GenerateFlashcardsDialog({
   open,
   onClose,
   availableTags,
 }: GenerateFlashcardsDialogProps) {
-  const [mode, setMode] = useState<"tag" | "notes">("tag")
+  const [mode, setMode] = useState<"tag" | "notes" | "collection">("tag")
   const [selectedTag, setSelectedTag] = useState<string>("")
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([])
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string>("")
   const [availableNotes, setAvailableNotes] = useState<NoteStub[]>([])
   const [noteSearch, setNoteSearch] = useState("")
   const [count, setCount] = useState(5)
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedCards, setGeneratedCards] = useState<NoteFlashcardItem[]>([])
+  const [collectionResult, setCollectionResult] = useState<CollectionGenerateResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
@@ -104,13 +155,35 @@ export function GenerateFlashcardsDialog({
     }
   }, [open])
 
+  const { data: collectionTree } = useQuery({
+    queryKey: ["collections-tree"],
+    queryFn: fetchCollectionTree,
+    staleTime: 30_000,
+    enabled: open && mode === "collection",
+  })
+
+  const { data: collectionPreview } = useQuery({
+    queryKey: ["collection-flashcard-preview", selectedCollectionId],
+    queryFn: () => fetchCollectionPreview(selectedCollectionId),
+    staleTime: 0,
+    enabled: !!selectedCollectionId && mode === "collection",
+  })
+
+  const flatCollections = useMemo(
+    () => (collectionTree ? flattenCollectionTree(collectionTree) : []),
+    [collectionTree],
+  )
+
   const filteredNotes = useMemo(() => {
     if (!noteSearch.trim()) return availableNotes
     const q = noteSearch.toLowerCase()
     return availableNotes.filter((n) => n.content.toLowerCase().includes(q))
   }, [availableNotes, noteSearch])
 
-  const canGenerate = (mode === "tag" && !!selectedTag) || (mode === "notes" && selectedNoteIds.length > 0)
+  const canGenerate =
+    (mode === "tag" && !!selectedTag) ||
+    (mode === "notes" && selectedNoteIds.length > 0) ||
+    (mode === "collection" && !!selectedCollectionId)
 
   function toggleNoteId(id: string) {
     setSelectedNoteIds((prev) =>
@@ -137,14 +210,27 @@ export function GenerateFlashcardsDialog({
     setError(null)
     setSuccess(false)
     try {
-      const cards = await generateNoteFlashcards(
-        mode === "tag" ? selectedTag : null,
-        mode === "notes" ? selectedNoteIds : null,
-        count,
-        difficulty,
-      )
-      setGeneratedCards(cards)
-      setSuccess(true)
+      if (mode === "collection") {
+        const result = await generateCollectionFlashcards(
+          selectedCollectionId,
+          count,
+          difficulty,
+          false,
+        )
+        setCollectionResult(result)
+        setGeneratedCards([])
+        setSuccess(true)
+      } else {
+        const cards = await generateNoteFlashcards(
+          mode === "tag" ? selectedTag : null,
+          mode === "notes" ? selectedNoteIds : null,
+          count,
+          difficulty,
+        )
+        setGeneratedCards(cards)
+        setCollectionResult(null)
+        setSuccess(true)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed")
     } finally {
@@ -155,12 +241,14 @@ export function GenerateFlashcardsDialog({
   function handleClose() {
     setSelectedTag("")
     setSelectedNoteIds([])
+    setSelectedCollectionId("")
     setNoteSearch("")
     setCount(5)
     setDifficulty("medium")
     setError(null)
     setSuccess(false)
     setGeneratedCards([])
+    setCollectionResult(null)
     onClose()
   }
 
@@ -179,7 +267,7 @@ export function GenerateFlashcardsDialog({
             {/* Mode Switcher */}
             <div className="flex flex-col gap-2">
               <label className="text-sm font-semibold text-foreground">1. Choose scope</label>
-              <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
+              <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted p-1">
                 <button
                   onClick={() => setMode("tag")}
                   className={`flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
@@ -197,6 +285,15 @@ export function GenerateFlashcardsDialog({
                 >
                   <CreditCard size={14} />
                   Specific Notes
+                </button>
+                <button
+                  onClick={() => setMode("collection")}
+                  className={`flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
+                    mode === "collection" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Folder size={14} />
+                  By Collection
                 </button>
               </div>
             </div>
@@ -216,7 +313,7 @@ export function GenerateFlashcardsDialog({
                 </select>
                 <p className="text-xs text-muted-foreground">All notes with this tag will be used.</p>
               </div>
-            ) : (
+            ) : mode === "notes" ? (
               <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-right-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-semibold text-foreground">2. Select notes</label>
@@ -288,6 +385,35 @@ export function GenerateFlashcardsDialog({
                   </div>
                 </div>
               </div>
+            ) : (
+              <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-right-2">
+                <label className="text-sm font-semibold text-foreground">2. Select a collection</label>
+                <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-background">
+                  {flatCollections.length > 0 ? (
+                    flatCollections.map((coll) => (
+                      <button
+                        key={coll.id}
+                        onClick={() => setSelectedCollectionId(coll.id)}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors hover:bg-accent/50 ${
+                          selectedCollectionId === coll.id ? "bg-primary/10 font-medium" : ""
+                        }`}
+                      >
+                        <Folder size={14} className="shrink-0 text-muted-foreground" />
+                        <span>{coll.name}</span>
+                        <span className="ml-auto text-xs text-muted-foreground">{coll.note_count} notes</span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="py-8 text-center text-sm text-muted-foreground">No collections found.</div>
+                  )}
+                </div>
+                {selectedCollectionId && collectionPreview && (
+                  <p className="text-xs text-muted-foreground">
+                    {collectionPreview.total_notes} notes,{" "}
+                    {collectionPreview.already_covered} already covered
+                  </p>
+                )}
+              </div>
             )}
 
             {/* Count & Action */}
@@ -343,7 +469,19 @@ export function GenerateFlashcardsDialog({
               </div>
             )}
 
-            {/* Success Results */}
+            {/* Success Results -- collection mode */}
+            {success && collectionResult && (
+              <div className="flex flex-col gap-2 rounded-md border border-green-200 bg-green-50 p-4 animate-in fade-in slide-in-from-top-2">
+                <p className="text-sm font-semibold text-green-800">
+                  Deck &quot;{collectionResult.deck}&quot; updated
+                </p>
+                <p className="text-sm text-green-700">
+                  {collectionResult.created} created, {collectionResult.skipped} skipped (already covered)
+                </p>
+              </div>
+            )}
+
+            {/* Success Results -- tag/notes mode */}
             {success && generatedCards.length > 0 && (
               <div className="flex flex-col gap-4 border-t border-border pt-6 animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
@@ -367,7 +505,7 @@ export function GenerateFlashcardsDialog({
               </div>
             )}
 
-            {success && generatedCards.length === 0 && (
+            {success && !collectionResult && generatedCards.length === 0 && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-center">
                 <p className="text-sm text-amber-800 italic">No flashcards were generated. Try broadening your selection.</p>
               </div>
@@ -387,4 +525,3 @@ export function GenerateFlashcardsDialog({
     </Dialog>
   )
 }
-
