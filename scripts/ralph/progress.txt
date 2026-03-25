@@ -1783,3 +1783,23 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - HTML5 drag-and-drop: `draggable` attribute on `<tr>`, `onDragStart` sets `e.dataTransfer.setData("text/plain", noteId)`. Drop target uses `onDragOver` + `e.preventDefault()` + `onDrop` reads `e.dataTransfer.getData("text/plain")`. No library needed.
   - Bulk collection_ids loading: after fetching notes list, do a single JOIN query for all note_ids, build a `dict[str, list[str]]` map, then pass to `_to_response(note, coll_map.get(n.id, []))`. Never N+1.
 ---
+
+## S165 - Tag browser UI (2026-03-25) passes=true
+
+### What was built
+- POST /tags/merge endpoint (atomic: replace tag in notes, create alias, delete source, rollback on failure)
+- TagTree.tsx: collapsible hierarchical tree from GET /tags/tree; gear icon on hover opens TagManagementPanel
+- TagManagementPanel.tsx: rename (PUT display_name), set-parent (PUT parent_tag), merge-into (POST /tags/merge) with toast feedback
+- TagAutocomplete.tsx: replaces flat tag input in NoteEditorDialog; debounced 200ms; chip display; arrow/enter/escape/backspace nav
+- tagUtils.ts: pure utility functions (no React/store) for tree ops, breadcrumb parsing, merge/autocomplete URL building
+- store.ts: activeTag/setActiveTag Zustand state
+- Notes.tsx: TagTree in sidebar, activeTag drives ?tag= filter, hierarchical breadcrumb display in cards/table
+- NoteEditorDialog.tsx: replaced flat tag input with TagAutocomplete
+- 4 pytest tests, 57 Vitest tests, 13/13 smoke checks
+
+### Patterns discovered
+- FastAPI route ordering: static routes MUST precede dynamic /{param} routes. POST /merge placed before GET|PUT|DELETE /{tag_id} or FastAPI matches "merge" as a tag_id and returns 405.
+- Pydantic model_fields_set: use `if "field" in req.model_fields_set` to distinguish "not supplied" from "explicitly set to null" in PATCH-style updates. Needed for clearing parent_tag back to null.
+- Vitest node environment + Zustand: extract pure logic to tagUtils.ts (no React/store imports). Tests target only utility functions. Component files import Zustand which touches localStorage at module load -- not safe in vitest node env.
+- TagTreeItem schema: include parent_tag in tree response so TagManagementPanel can initialize Set Parent dropdown with current value.
+---

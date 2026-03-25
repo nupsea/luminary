@@ -24,6 +24,7 @@ import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { CollectionTree } from "@/components/CollectionTree"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
+import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -697,18 +698,24 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Tags */}
+      {/* Tags -- breadcrumb style: root in text-primary, /child in text-muted-foreground */}
       {note.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {note.tags.map((t) => (
-            <span
-              key={t}
-              className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-            >
-              <Tag size={9} />
-              {t}
-            </span>
-          ))}
+          {note.tags.map((t) => {
+            const parts = t.split("/")
+            return (
+              <span
+                key={t}
+                className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs"
+              >
+                <Tag size={9} className="text-muted-foreground" />
+                <span className="text-primary">{parts[0]}</span>
+                {parts.length > 1 && (
+                  <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                )}
+              </span>
+            )
+          })}
         </div>
       )}
     </div>
@@ -739,6 +746,7 @@ export default function NotesPage() {
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
+  const activeTag = useAppStore((s) => s.activeTag)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -757,7 +765,8 @@ export default function NotesPage() {
   })
 
   const groupParam = filter.type === "group" ? filter.name : undefined
-  const tagParam = filter.type === "tag" ? filter.name : undefined
+  // activeTag from store takes precedence over sidebar filter tag
+  const tagParam = activeTag ?? (filter.type === "tag" ? filter.name : undefined)
   // When a collection is active, clear group/tag params and use collection filter instead.
   const collectionParam = activeCollectionId ?? undefined
 
@@ -881,15 +890,21 @@ export default function NotesPage() {
                   {stripMarkdown(result.content).slice(0, 150)}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {result.tags.map((t) => (
-                    <span
-                      key={t}
-                      className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                    >
-                      <Tag size={9} />
-                      {t}
-                    </span>
-                  ))}
+                  {result.tags.map((t) => {
+                    const parts = t.split("/")
+                    return (
+                      <span
+                        key={t}
+                        className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs"
+                      >
+                        <Tag size={9} className="text-muted-foreground" />
+                        <span className="text-primary">{parts[0]}</span>
+                        {parts.length > 1 && (
+                          <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                        )}
+                      </span>
+                    )
+                  })}
                   <span className="ml-auto text-xs text-muted-foreground">
                     {result.source === "both" ? "FTS + Semantic" : result.source === "vector" ? "Semantic" : "FTS"}
                     {" · "}
@@ -990,8 +1005,24 @@ export default function NotesPage() {
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
                 {stripMarkdown(note.content).slice(0, 60)}
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {note.tags.length > 0 ? note.tags.join(", ") : "—"}
+              <TableCell className="text-xs">
+                {note.tags.length > 0 ? (
+                  <span className="flex flex-wrap gap-1">
+                    {note.tags.map((t) => {
+                      const parts = t.split("/")
+                      return (
+                        <span key={t} className="whitespace-nowrap">
+                          <span className="text-primary">{parts[0]}</span>
+                          {parts.length > 1 && (
+                            <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                          )}
+                        </span>
+                      )
+                    })}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {note.group_name ?? "—"}
@@ -1083,28 +1114,13 @@ export default function NotesPage() {
           </button>
         </div>
 
-        {(groups?.tags ?? []).length > 0 && (
-          <div className="mt-3">
-            <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Tags
-            </p>
-            {groups!.tags.map((t) => (
-              <button
-                key={t.name}
-                onClick={() => setFilter({ type: "tag", name: t.name })}
-                className={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm text-left ${
-                  filter.type === "tag" && filter.name === t.name
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60"
-                }`}
-              >
-                <Tag size={11} />
-                {t.name}
-                <span className="ml-auto text-xs">{t.count}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Tags section */}
+        <div className="mt-3">
+          <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Tags
+          </p>
+          <TagTree />
+        </div>
       </div>
 
       {/* Right panel */}

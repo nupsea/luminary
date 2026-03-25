@@ -44,6 +44,7 @@ class TagResponse(BaseModel):
 class TagTreeItem(BaseModel):
     id: str
     display_name: str
+    parent_tag: str | None
     note_count: int  # inclusive of descendants
     children: list["TagTreeItem"]
 
@@ -67,6 +68,15 @@ class TagCreateRequest(BaseModel):
 class TagUpdateRequest(BaseModel):
     display_name: str | None = None
     parent_tag: str | None = None
+
+
+class TagMergeRequest(BaseModel):
+    source_tag_id: str
+    target_tag_id: str
+
+
+class TagMergeResponse(BaseModel):
+    affected_notes: int
 
 
 class NoteItem(BaseModel):
@@ -154,6 +164,9 @@ async def get_tag_tree(
         if t.parent_tag:
             children_by_parent.setdefault(t.parent_tag, []).append(t.id)
 
+    # Build lookup for display_name and parent_tag by id
+    tag_by_id: dict[str, CanonicalTagModel] = {t.id: t for t in all_tags}
+
     # Build tree: top-level nodes only (no parent_tag)
     top_level: list[TagTreeItem] = []
     for t in all_tags:
@@ -161,9 +174,10 @@ async def get_tag_tree(
             children = [
                 TagTreeItem(
                     id=child_id,
-                    display_name=next(
-                        (x.display_name for x in all_tags if x.id == child_id), child_id
+                    display_name=(
+                        tag_by_id[child_id].display_name if child_id in tag_by_id else child_id
                     ),
+                    parent_tag=t.id,
                     note_count=_compute_inclusive_count(child_id, count_by_id, children_by_parent),
                     children=[],  # max 2 levels supported in query; deeper children truncated
                 )
@@ -173,6 +187,7 @@ async def get_tag_tree(
                 TagTreeItem(
                     id=t.id,
                     display_name=t.display_name,
+                    parent_tag=None,
                     note_count=_compute_inclusive_count(t.id, count_by_id, children_by_parent),
                     children=children,
                 )
@@ -221,6 +236,107 @@ async def create_tag(
     return _to_response(tag)
 
 
+@router.post("/merge", response_model=TagMergeResponse)
+async def merge_tags(
+    req: TagMergeRequest,
+    session: AsyncSession = Depends(get_db),
+) -> TagMergeResponse:
+    """Merge source_tag into target_tag atomically.
+
+    For every note that contains source_tag_id in its tags list:
+    - Replace source_tag_id with target_tag_id (deduplicating)
+    - Update NoteTagIndexModel via _sync_tag_index
+
+    Then creates a TagAliasModel (source -> target) and deletes the source
+    CanonicalTagModel. All changes roll back if any step fails.
+    """
+    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
+
+    source_id = req.source_tag_id
+    target_id = req.target_tag_id
+
+    if source_id == target_id:
+        raise HTTPException(status_code=422, detail="Source and target tags must differ")
+
+    # Validate both tags exist
+    source_tag = (
+        await session.execute(
+            select(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
+        )
+    ).scalar_one_or_none()
+    if source_tag is None:
+        raise HTTPException(status_code=404, detail=f"Source tag '{source_id}' not found")
+
+    target_tag = (
+        await session.execute(
+            select(CanonicalTagModel).where(CanonicalTagModel.id == target_id)
+        )
+    ).scalar_one_or_none()
+    if target_tag is None:
+        raise HTTPException(status_code=404, detail=f"Target tag '{target_id}' not found")
+
+    # Find all notes with the source tag via NoteTagIndexModel
+    note_ids_result = await session.execute(
+        select(NoteTagIndexModel.note_id)
+        .where(NoteTagIndexModel.tag_full == source_id)
+        .distinct()
+    )
+    note_ids = [row[0] for row in note_ids_result.all()]
+
+    if not note_ids:
+        # No notes to update -- still create alias and delete source
+        pass
+    else:
+        # Load notes
+        notes_result = await session.execute(
+            select(NoteModel).where(NoteModel.id.in_(note_ids))
+        )
+        notes = list(notes_result.scalars().all())
+
+        try:
+            for note in notes:
+                current_tags: list[str] = note.tags or []
+                # Replace source with target, deduplicate, preserve order
+                new_tags: list[str] = []
+                seen: set[str] = set()
+                for tag in current_tags:
+                    replacement = target_id if tag == source_id else tag
+                    if replacement not in seen:
+                        seen.add(replacement)
+                        new_tags.append(replacement)
+
+                note.tags = new_tags
+                session.add(note)
+                await _sync_tag_index(note.id, new_tags, session)
+        except Exception:
+            await session.rollback()
+            raise HTTPException(
+                status_code=500, detail="Merge failed during note updates -- rolled back"
+            )
+
+    try:
+        # Create alias: source -> target
+        alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
+        session.add(alias)
+
+        # Delete source canonical tag
+        await session.execute(
+            delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
+        )
+
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500, detail="Merge failed during alias/cleanup -- rolled back"
+        )
+
+    logger.info(
+        "Merged tag %r -> %r, affected_notes=%d", source_id, target_id, len(note_ids)
+    )
+    return TagMergeResponse(affected_notes=len(note_ids))
+
+
 @router.get("/{tag_id}/notes", response_model=list[NoteItem])
 async def get_notes_for_tag(
     tag_id: str,
@@ -262,7 +378,9 @@ async def update_tag(
 
     if req.display_name is not None:
         tag.display_name = req.display_name
-    if req.parent_tag is not None:
+    # Use model_fields_set to distinguish "not supplied" from "explicitly null".
+    # Setting parent_tag=null in the request clears the tag to top-level.
+    if "parent_tag" in req.model_fields_set:
         tag.parent_tag = req.parent_tag
 
     await session.commit()

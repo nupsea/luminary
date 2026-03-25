@@ -21,6 +21,8 @@ interface AppState {
   chatPreload: { text: string; documentId: string | null } | null
   // S164: Active collection filter for Notes tab.
   activeCollectionId: string | null
+  // S165: Active tag filter for Notes tab (hierarchical prefix match).
+  activeTag: string | null
   setActiveDocument: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
@@ -30,6 +32,7 @@ interface AppState {
   setChatPreload: (preload: { text: string; documentId: string | null }) => void
   clearChatPreload: () => void
   setActiveCollectionId: (id: string | null) => void
+  setActiveTag: (tag: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -43,6 +46,7 @@ export const useAppStore = create<AppState>((set) => ({
   studySectionFilter: null,
   chatPreload: null,
   activeCollectionId: null,
+  activeTag: null,
   setActiveDocument: (id) => set({ activeDocumentId: id }),
   setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
   setLibraryView: (view) => set({ libraryView: view }),
@@ -55,4 +59,5 @@ export const useAppStore = create<AppState>((set) => ({
   setChatPreload: (preload) => set({ chatPreload: preload }),
   clearChatPreload: () => set({ chatPreload: null }),
   setActiveCollectionId: (id) => set({ activeCollectionId: id }),
+  setActiveTag: (tag) => set({ activeTag: tag }),
 }))

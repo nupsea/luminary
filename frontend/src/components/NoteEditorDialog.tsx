@@ -23,9 +23,10 @@
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Loader2, Tag, X } from "lucide-react"
+import { Loader2, Tag } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { TagAutocomplete } from "@/components/TagAutocomplete"
 import {
   Dialog,
   DialogContent,
@@ -123,7 +124,6 @@ interface NoteEditorDialogProps {
 export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogProps) {
   const [content, setContent] = useState(note?.content ?? "")
   const [editTags, setEditTags] = useState<string[]>(note?.tags ?? [])
-  const [tagInput, setTagInput] = useState("")
   const [isSaved, setIsSaved] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
@@ -151,7 +151,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     if (note) {
       setContent(note.content)
       setEditTags(note.tags ?? [])
-      setTagInput("")
       setIsSaved(false)
       setSuggestedTags([])
       setSavedNote(null)
@@ -236,15 +235,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     },
   })
 
-  function commitTagInput() {
-    const trimmed = tagInput.trim().replace(/,+$/, "").trim()
-    if (trimmed && !editTags.includes(trimmed)) {
-      setEditTags((prev) => [...prev, trimmed])
-      setIsSaved(false)
-    }
-    setTagInput("")
-  }
-
   const isOpen = note !== null
   const unchanged =
     content === (note?.content ?? "") &&
@@ -300,40 +290,12 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             />
             {/* Editable tags section below write pane */}
             <div className="shrink-0 border-t border-border px-4 py-2">
-              <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                {editTags.map((t) => (
-                  <span
-                    key={t}
-                    className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                  >
-                    <Tag size={9} />
-                    {t}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditTags((prev) => prev.filter((x) => x !== t))
-                        setIsSaved(false)
-                      }}
-                      className="ml-0.5 hover:text-foreground"
-                      aria-label={`Remove tag ${t}`}
-                    >
-                      <X size={9} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <input
-                type="text"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === ",") {
-                    e.preventDefault()
-                    commitTagInput()
-                  }
+              <TagAutocomplete
+                tags={editTags}
+                onChange={(newTags) => {
+                  setEditTags(newTags)
                 }}
-                placeholder="Add tag..."
-                className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+                onUnsavedChange={() => setIsSaved(false)}
               />
             </div>
 
