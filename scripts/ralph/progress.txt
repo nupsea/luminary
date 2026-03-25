@@ -1824,3 +1824,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - CustomEvent in Node env (Vitest): `new CustomEvent(...)` works in node because jsdom is configured; the component's Sigma instance can't be tested (WebGL required), so test only the pure utility functions
   - Reviewer warnings (non-blocking): test_cache_invalidation tests the function directly, not via HTTP path through _sync_tag_index; Vitest only covers utility functions not component wiring
 ---
+
+## 2026-03-26T07:50:00Z - S168 - Smart tag normalization: embedding similarity scan, merge suggestions, accept/reject drawer
+- Implemented: TagMergeSuggestionModel (models.py + db_init.py), SmartTagNormalizerService (tag_normalizer.py) with scan/get_pending_suggestions/get_suggestion_for_accept/reject_suggestion, 4 normalization endpoints in tags.py router (scan, list, accept, reject), NormalizationDrawer.tsx Dialog component, TagTree.tsx wrench icon integration, 6 unit tests (test_tag_normalizer.py), smoke script
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/tag_normalizer.py (NEW), backend/app/routers/tags.py, backend/tests/test_tag_normalizer.py (NEW), frontend/src/components/NormalizationDrawer.tsx (NEW), frontend/src/components/TagTree.tsx, scripts/smoke/S168.sh (NEW), scripts/ralph/prd-v3.json
+- **Learnings for future iterations:**
+  - asyncio.to_thread mock pattern: use AsyncMock(return_value=...) NOT MagicMock(side_effect=lambda: coroutine). MagicMock side_effect returning a coroutine does not result in the coroutine being awaited -- the mock returns the coroutine object as a value, and the code sees `raw_embeddings = coroutine` not `raw_embeddings = awaited_result`. AsyncMock.return_value is the correct pattern.
+  - Six-layer rule applies to services importing from routers: `_sync_tag_index` is a router-layer helper. Services must not import from routers. Fix: move merge execution logic into the router endpoint that calls the service for validation/data only. The service returns validated data; the router does the side-effectful work.
+  - Dialog is the correct shadcn/ui substitute when Sheet is not installed. The project only has: badge, card, dialog, progress, skeleton, table in ui/. Sheet is not available; Dialog provides equivalent modal behavior.
+  - Server must be fully restarted (not just reloaded) after structural changes to routers -- `kill -9 uvicorn` and fresh start required; `pkill -f uvicorn` may not work reliably if multiple processes share the name.
+  - prd-v3.json, docs/, and scripts/ralph/ are in .gitignore -- use `git add -f` to force-add them.
+---

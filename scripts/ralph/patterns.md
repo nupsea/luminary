@@ -23,14 +23,16 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Performance tests: use `LUMINARY_PERF_TESTS` env guard + `pytest.mark.skipif`
 - Book fixture is "The Odyssey" (not "The Iliad") — use Odyssey-specific entities for relational tests
 - **AsyncClient (httpx) test pattern**: `TestClient(app)` as a context manager triggers FastAPI lifespan (startup events). `AsyncClient(transport=ASGITransport(app=app))` does NOT trigger lifespan. Use the `test_db` fixture to initialize the DB when writing async tests with AsyncClient.
+- **asyncio.to_thread mocking**: use `AsyncMock(return_value=expected_value)`, NOT `MagicMock(side_effect=lambda fn, *args: coroutine_obj)`. The MagicMock returns the coroutine object itself (unwraped), so `result = await asyncio.to_thread(...)` sees a coroutine object as the value, not the awaited result. AsyncMock's `__call__` returns an awaitable that correctly resolves to `return_value`.
 
 ---
 
-## Commands
+## Commands and Git
 
 - All uv/pytest commands run from the absolute path `/Users/sethurama/DEV/LM/learning-mate/backend` — never `cd backend &&` prefix in subprocess calls
 - Run tests: `uv run pytest` (from backend dir)
 - Run lint: `uv run ruff check .` (from backend dir)
+- **Force-add .gitignored story deliverables**: `docs/`, `scripts/ralph/`, and other execution/tracking files are in `.gitignore`. Use `git add -f <path>` when committing story changes to prd-v3.json, progress.txt, or docs/exec-plans/ files. Without `-f`, these files stay untracked and are not included in the commit.
 
 ---
 
@@ -51,6 +53,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Lazy import for cross-service calls: `from app.services.summarizer import get_summarization_service  # noqa: PLC0415` inside the method body
 - Cross-router lazy import for shared helpers: when two routers share a helper (e.g., `_sync_tag_index` in notes.py used by tags.py), lazy-import it inside the method body: `from app.routers.notes import _sync_tag_index  # noqa: PLC0415`. Avoids circular imports at module level between routers.
 - qa.py helpers (_split_response, _build_context, etc.) stay at module level — chat_graph.py imports them directly from app.services.qa
+- **Six-layer rule: services must not import from routers**: Routers are the API layer; services are the business logic layer. If a service needs to call a router-layer side effect (e.g. `_sync_tag_index`), move the side-effectful work to the router endpoint. The service returns validated/prepared data; the router endpoint executes the side effects. This preserves layering: Types → Config → Repo → Service → Runtime → API.
 
 ---
 
