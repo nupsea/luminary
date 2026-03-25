@@ -19,6 +19,8 @@ interface AppState {
   studySectionFilter: StudySectionFilter | null
   // S147: Pre-populate Chat input when user selects "Ask in Chat" from SelectionActionBar.
   chatPreload: { text: string; documentId: string | null } | null
+  // S164: Active collection filter for Notes tab.
+  activeCollectionId: string | null
   setActiveDocument: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
@@ -27,6 +29,7 @@ interface AppState {
   setStudySectionFilter: (filter: StudySectionFilter | null) => void
   setChatPreload: (preload: { text: string; documentId: string | null }) => void
   clearChatPreload: () => void
+  setActiveCollectionId: (id: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -39,6 +42,7 @@ export const useAppStore = create<AppState>((set) => ({
   reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
   studySectionFilter: null,
   chatPreload: null,
+  activeCollectionId: null,
   setActiveDocument: (id) => set({ activeDocumentId: id }),
   setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
   setLibraryView: (view) => set({ libraryView: view }),
@@ -50,4 +54,5 @@ export const useAppStore = create<AppState>((set) => ({
   setStudySectionFilter: (filter) => set({ studySectionFilter: filter }),
   setChatPreload: (preload) => set({ chatPreload: preload }),
   clearChatPreload: () => set({ chatPreload: null }),
+  setActiveCollectionId: (id) => set({ activeCollectionId: id }),
 }))

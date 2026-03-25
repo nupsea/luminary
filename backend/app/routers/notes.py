@@ -55,6 +55,7 @@ class NoteResponse(BaseModel):
     content: str
     tags: list[str]
     group_name: str | None
+    collection_ids: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -108,7 +109,7 @@ class NoteEntityItem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _to_response(note: NoteModel) -> NoteResponse:
+def _to_response(note: NoteModel, collection_ids: list[str] | None = None) -> NoteResponse:
     return NoteResponse(
         id=note.id,
         document_id=note.document_id,
@@ -117,6 +118,7 @@ def _to_response(note: NoteModel) -> NoteResponse:
         content=note.content,
         tags=note.tags or [],
         group_name=note.group_name,
+        collection_ids=collection_ids or [],
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -404,8 +406,24 @@ async def list_notes(
         )
 
     result = await session.execute(stmt)
-    notes = result.scalars().all()
-    return [_to_response(n) for n in notes]
+    notes = list(result.scalars().all())
+
+    # Bulk-load collection memberships for all returned notes in one query.
+    coll_map: dict[str, list[str]] = {}
+    if notes:
+        note_ids = [n.id for n in notes]
+        member_rows = (
+            await session.execute(
+                select(
+                    NoteCollectionMemberModel.note_id,
+                    NoteCollectionMemberModel.collection_id,
+                ).where(NoteCollectionMemberModel.note_id.in_(note_ids))
+            )
+        ).all()
+        for row in member_rows:
+            coll_map.setdefault(row[0], []).append(row[1])
+
+    return [_to_response(n, coll_map.get(n.id, [])) for n in notes]
 
 
 async def _apply_note_update(
@@ -567,6 +585,33 @@ async def list_note_flashcards(
     )
     cards = list(result.scalars().all())
     return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
+@router.get("/{note_id}", response_model=NoteResponse)
+async def get_note(
+    note_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> NoteResponse:
+    """Get a single note by ID, including collection_ids.
+
+    Registered AFTER all static-path GET routes (/search, /groups, /flashcards)
+    to prevent the dynamic {note_id} segment from shadowing them.
+    """
+    note = (
+        await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    member_rows = (
+        await session.execute(
+            select(NoteCollectionMemberModel.collection_id).where(
+                NoteCollectionMemberModel.note_id == note_id
+            )
+        )
+    ).scalars().all()
+
+    return _to_response(note, list(member_rows))
 
 
 class GapDetectRequest(BaseModel):

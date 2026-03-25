@@ -18,10 +18,12 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookOpen, Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
+import { BookOpen, Check, FileText, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import { CollectionTree } from "@/components/CollectionTree"
+import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -55,6 +57,7 @@ interface Note {
   content: string
   tags: string[]
   group_name: string | null
+  collection_ids: string[]
   created_at: string
   updated_at: string
 }
@@ -84,11 +87,17 @@ interface Clip {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchNotes(documentId?: string, group?: string, tag?: string): Promise<Note[]> {
+async function fetchNotes(
+  documentId?: string,
+  group?: string,
+  tag?: string,
+  collectionId?: string,
+): Promise<Note[]> {
   const params = new URLSearchParams()
   if (documentId) params.set("document_id", documentId)
   if (group) params.set("group", group)
   if (tag) params.set("tag", tag)
+  if (collectionId) params.set("collection_id", collectionId)
   const res = await fetch(`${API_BASE}/notes?${params.toString()}`)
   if (!res.ok) throw new Error(`GET /notes failed: ${res.status}`)
   return res.json() as Promise<Note[]>
@@ -722,12 +731,14 @@ export default function NotesPage() {
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)
+  const [showCreateCollection, setShowCreateCollection] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
+  const activeCollectionId = useAppStore((s) => s.activeCollectionId)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -747,6 +758,8 @@ export default function NotesPage() {
 
   const groupParam = filter.type === "group" ? filter.name : undefined
   const tagParam = filter.type === "tag" ? filter.name : undefined
+  // When a collection is active, clear group/tag params and use collection filter instead.
+  const collectionParam = activeCollectionId ?? undefined
 
   const {
     data: notes,
@@ -754,8 +767,8 @@ export default function NotesPage() {
     isError: notesError,
     refetch,
   } = useQuery({
-    queryKey: ["notes", groupParam, tagParam],
-    queryFn: () => fetchNotes(undefined, groupParam, tagParam),
+    queryKey: ["notes", groupParam, tagParam, collectionParam],
+    queryFn: () => fetchNotes(undefined, groupParam, tagParam, collectionParam),
     gcTime: 60_000,
   })
 
@@ -971,6 +984,8 @@ export default function NotesPage() {
               key={note.id}
               className="cursor-pointer"
               onClick={() => setEditingNote(note)}
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData("text/plain", note.id)}
             >
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
                 {stripMarkdown(note.content).slice(0, 60)}
@@ -1044,22 +1059,29 @@ export default function NotesPage() {
           Reading Journal
         </button>
 
-        {(groups?.groups ?? []).map((g) => (
-          <div key={g.name}>
+        {/* Collections section */}
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between px-1">
+            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Collections
+            </p>
             <button
-              onClick={() => setFilter({ type: "group", name: g.name })}
-              className={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm text-left ${
-                filter.type === "group" && filter.name === g.name
-                  ? "bg-accent font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60"
-              }`}
+              onClick={() => setShowCreateCollection(true)}
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+              title="New collection"
             >
-              <FolderOpen size={13} />
-              {g.name}
-              <span className="ml-auto text-xs">{g.count}</span>
+              <Plus size={12} />
             </button>
           </div>
-        ))}
+          <CollectionTree />
+          <button
+            onClick={() => setShowCreateCollection(true)}
+            className="mt-1 flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          >
+            <Plus size={11} />
+            New Collection
+          </button>
+        </div>
 
         {(groups?.tags ?? []).length > 0 && (
           <div className="mt-3">
@@ -1178,6 +1200,12 @@ export default function NotesPage() {
       <GapDetectDialog
         open={showGapDetect}
         onClose={() => setShowGapDetect(false)}
+      />
+
+      {/* CreateCollectionDialog */}
+      <CreateCollectionDialog
+        open={showCreateCollection}
+        onClose={() => setShowCreateCollection(false)}
       />
     </div>
   )

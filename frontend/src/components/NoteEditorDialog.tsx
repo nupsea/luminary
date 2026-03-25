@@ -8,6 +8,12 @@
  * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when not yet saved).
  * Tags section is editable: chips with X to remove, inline input to add.
  *
+ * Collections section (S164):
+ *   - Scrollable checkbox list of all collections (GET /collections/tree, flattened)
+ *   - Pre-checked based on note's collection_ids
+ *   - Check: POST /collections/{id}/notes immediately (no Save required)
+ *   - Uncheck: DELETE /collections/{id}/notes/{note_id} immediately
+ *
  * After save:
  *   - isFetchingTags=true shows 'Suggesting tags...' with Loader2
  *   - If suggest-tags returns novel tags: dashed-border chips shown
@@ -18,7 +24,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Loader2, Tag, X } from "lucide-react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import {
   Dialog,
@@ -28,8 +34,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeleton"
 
 import { API_BASE } from "@/lib/config"
+import { flattenCollectionTree } from "@/lib/collectionUtils"
+import type { CollectionTreeItem } from "@/lib/collectionUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +51,7 @@ interface Note {
   content: string
   tags: string[]
   group_name: string | null
+  collection_ids: string[]
   created_at: string
   updated_at: string
 }
@@ -77,6 +87,29 @@ async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<str
   }
 }
 
+async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
+  const res = await fetch(`${API_BASE}/collections/tree`)
+  if (!res.ok) return []
+  return res.json() as Promise<CollectionTreeItem[]>
+}
+
+async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note_ids: [noteId] }),
+  })
+  if (!res.ok) throw new Error(`POST /collections/${collectionId}/notes failed`)
+}
+
+async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes/${noteId}`, {
+    method: "DELETE",
+  })
+  if (!res.ok && res.status !== 204)
+    throw new Error(`DELETE /collections/${collectionId}/notes/${noteId} failed`)
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -96,9 +129,22 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [noSuggestionsMsg, setNoSuggestionsMsg] = useState(false)
   const [savedNote, setSavedNote] = useState<Note | null>(null)
+  // Collection IDs that this note belongs to (tracked locally for immediate UI updates).
+  const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(
+    new Set(note?.collection_ids ?? []),
+  )
   const qc = useQueryClient()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Collections list
+  const { data: collectionTree, isLoading: collectionsLoading } = useQuery({
+    queryKey: ["collections-tree"],
+    queryFn: fetchCollectionTree,
+    staleTime: 30_000,
+    enabled: note !== null,
+  })
+  const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
 
   // Re-initialise state when note changes (new note selected)
   useEffect(() => {
@@ -111,6 +157,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
       setSavedNote(null)
       setIsFetchingTags(false)
       setNoSuggestionsMsg(false)
+      setCheckedCollectionIds(new Set(note.collection_ids ?? []))
       saveMut.reset()
     }
     // saveMut.reset is stable; note drives initialisation
@@ -168,6 +215,24 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
       setEditTags(updated.tags)
       void qc.invalidateQueries({ queryKey: ["notes"] })
       setSuggestedTags((prev) => prev.filter((t) => !updated.tags.includes(t)))
+    },
+  })
+
+  // Immediately fire collection membership changes (no Save required).
+  const collectionToggleMut = useMutation({
+    mutationFn: ({ collectionId, add }: { collectionId: string; add: boolean }) =>
+      add
+        ? addNoteToCollection(collectionId, note!.id)
+        : removeNoteFromCollection(collectionId, note!.id),
+    onSuccess: (_data, { collectionId, add }) => {
+      setCheckedCollectionIds((prev) => {
+        const next = new Set(prev)
+        if (add) next.add(collectionId)
+        else next.delete(collectionId)
+        return next
+      })
+      void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+      void qc.invalidateQueries({ queryKey: ["notes"] })
     },
   })
 
@@ -236,11 +301,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             {/* Editable tags section below write pane */}
             <div className="shrink-0 border-t border-border px-4 py-2">
               <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                {note?.group_name && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {note.group_name}
-                  </span>
-                )}
                 {editTags.map((t) => (
                   <span
                     key={t}
@@ -275,6 +335,46 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                 placeholder="Add tag..."
                 className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
               />
+            </div>
+
+            {/* Collections section */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Collections</p>
+              {collectionsLoading ? (
+                <div className="flex flex-col gap-1">
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <Skeleton key={i} className="h-5 w-full rounded" />
+                  ))}
+                </div>
+              ) : allCollections.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No collections yet</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5">
+                  {allCollections.map((col) => (
+                    <label
+                      key={col.id}
+                      className="flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checkedCollectionIds.has(col.id)}
+                        onChange={(e) => {
+                          collectionToggleMut.mutate({
+                            collectionId: col.id,
+                            add: e.target.checked,
+                          })
+                        }}
+                        className="h-3 w-3 rounded border-border"
+                      />
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: col.color }}
+                      />
+                      <span className="flex-1 truncate">{col.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
