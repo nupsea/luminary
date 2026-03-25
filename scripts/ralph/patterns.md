@@ -75,6 +75,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Prefix-match hierarchical tag filter**: Match a tag and all children in one SQL query: `tag_full = :tag OR tag_full LIKE :tag || '/%'`. In SQLAlchemy: `NoteModel.id.in_(select(NoteTagIndexModel.note_id).where(or_(...)))`.
 - **Backfill SQL for complex computed columns**: When backfill logic is too complex for pure SQLite (no REVERSE, no regex), set the column to a safe default (empty string) during migration. Recompute the correct value at write time via a helper function. Ensure queries never depend on the backfilled value being correct (e.g. use a different column like `tag_full` for filtering instead of `tag_parent`).
 - **No session.refresh() when expire_on_commit=False**: after `await session.commit()`, do NOT call `session.refresh(instance)`. When expire_on_commit=False, all attributes set in Python before commit are preserved. The refresh creates an extra await point where background tasks (asyncio.to_thread GLiNER) can run and corrupt session state under load.
+- **Bulk one-to-many loading pattern**: after fetching a list of rows, do a single query for all IDs to load related junction table rows. Build a `dict[id, list[related_ids]]` map, then pass to response constructor. Prevents N+1 queries when building responses with one-to-many relationships (e.g., notes with their collection_ids).
 
 ---
 
@@ -105,6 +106,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 - **Admin key header dependency**: capture `X-Admin-Key` with `Header(default=None)` parameter; validate with `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`. Allows unauthenticated access if `ADMIN_KEY` is not set.
 - **Fire-and-forget background task in router**: use `asyncio.create_task` to spawn the task; inside the task body, create a fresh AsyncSession with `async with get_session_factory()()`. Never reuse the request-scoped session (it closes after handler returns, leaving the task with a closed session).
+- **Dynamic path parameter route ordering**: when a router has both `GET /{dynamic_id}` and static GET routes with the same prefix (e.g., `/search`, `/flashcards`), the dynamic route MUST be registered AFTER all static routes. If placed before, `GET /flashcards` will match the dynamic pattern with dynamic_id="flashcards" and return 404. Safe position: immediately after the last static GET route.
 
 ---
 
@@ -113,6 +115,8 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - List/table views must NOT use MarkdownRenderer inline — block-level elements (h1, ul) inside a td break layout. Use a stripMarkdown() utility to strip heading markers, bold, italic, blockquote, and backtick symbols for single-line text previews. Card and detail views should use the full renderer.
 - stripMarkdown() is a pure function in src/lib/utils.ts. It strips `#`, `**`, `__`, `*`, `_`, `>` markers from preview text without rendering HTML.
 - Vite dev server does NOT hot-reload tailwind.config.cjs changes. Restart `npm run dev` after any config change. `npm run build` always produces correct output.
+- **Vitest node environment + Zustand store**: when vitest environment is "node", do NOT import React components that transitively depend on Zustand stores (localStorage is read at module load). Solution: extract pure logic functions to a separate utility file with no React/store imports (e.g., `src/lib/collectionUtils.ts`), and test only from that utility. Component test files must import from the utility, not the component.
+- **HTML5 drag-and-drop**: add `draggable` attribute to draggable element, `onDragStart={(e) => e.dataTransfer.setData("text/plain", id)}` to set data. Drop target: `onDragOver={(e) => e.preventDefault()}` + `onDrop={(e) => e.dataTransfer.getData("text/plain")}`. No DnD library needed.
 
 ---
 
