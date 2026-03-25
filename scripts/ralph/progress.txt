@@ -1761,3 +1761,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Kuzu threading.Lock: acquire it in ALL callers of _conn.execute(), not just new note_graph.py methods. Pre-existing graph.py methods and chat_graph.py direct _conn access bypass the lock -- a pre-existing gap made visible when asyncio.to_thread runs note upserts concurrently. Flag as tech debt for a future story.
   - GLiNER runs OUTSIDE the Kuzu lock (inference is slow; only Kuzu writes need the lock). This is the correct pattern: run slow inference in the background thread before acquiring any lock.
 ---
+
+## 2026-03-25T10:00:00Z - S170 - Notes performance refactor: fix vector dimension mismatch (384->1024), add tag indexes, batch reindex
+- What was implemented: NOTE_VECTOR_DIM=1024 constant in vector_store.py; _get_or_create_note_table() dim introspection with drop+recreate on mismatch; ADMIN_KEY setting in config.py; ReindexService (reindex_notes with asyncio.to_thread LanceDB calls, ReindexReport TypedDict); POST /admin/notes/reindex with X-Admin-Key auth; @pytest.mark.slow performance test (1,000-note tag query p95 < 100ms guarded by LUMINARY_PERF_TESTS env var); smoke script S170.sh
+- Files changed: backend/app/services/vector_store.py, backend/app/config.py, backend/app/services/reindex_service.py (new), backend/app/routers/admin.py (new), backend/app/main.py, backend/tests/test_reindex.py (new), scripts/smoke/S170.sh (new), docs/exec-plans/completed/S170.md (moved from active/), scripts/ralph/prd-v3.json (S170 passes=true)
+- **Learnings for future iterations:**
+  - LanceDB schema introspection: use `tbl.schema.field("vector").type.list_size` (PyArrow FixedSizeList type exposes `list_size`). If the field doesn't exist or the attribute is absent, catch Exception and log a warning -- do not hard-fail.
+  - Drop+recreate pattern: `self._db.drop_table(TABLE_NAME)` via the LanceDB connection object (not `tbl.drop()`). Then call `self._db.create_table(TABLE_NAME, schema=NEW_SCHEMA)`.
+  - asyncio.create_task fire-and-forget in router handler: create a background session with `async with get_session_factory()()` inside the task body. Never reuse the request session in a background task (the request session closes after the handler returns, leaving the task with a closed session).
+  - Admin key check as FastAPI dependency: `Header(default=None)` captures `X-Admin-Key` header; check `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`.
+  - Performance test pattern: bulk insert using `session.add()` in a loop inside a single transaction, commit once. In-memory SQLite with NoteTagIndexModel indexes: tag prefix query p95 stays well under 100ms even at 1,000 rows.
+---
