@@ -10,6 +10,7 @@ Routes:
   DELETE /tags/{tag_id}             -- 409 if note_count > 0
 """
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -18,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel, TagAliasModel
 
 logger = logging.getLogger(__name__)
@@ -386,6 +387,218 @@ async def merge_tags(
         "Merged tag %r -> %r, affected_notes=%d", source_id, target_id, len(note_ids)
     )
     return TagMergeResponse(affected_notes=len(note_ids))
+
+
+# ---------------------------------------------------------------------------
+# Normalization schemas
+# ---------------------------------------------------------------------------
+
+
+class TagInfo(BaseModel):
+    id: str
+    display_name: str
+    note_count: int
+
+
+class TagMergeSuggestionResponse(BaseModel):
+    id: str
+    tag_a: TagInfo
+    tag_b: TagInfo
+    similarity: float
+    suggested_canonical_id: str
+    status: str
+    created_at: datetime
+
+
+class NormalizationScanResponse(BaseModel):
+    queued: bool
+
+
+class NormalizationAcceptResponse(BaseModel):
+    affected_notes: int
+
+
+# ---------------------------------------------------------------------------
+# Normalization endpoints (static paths -- must come before /{tag_id})
+# ---------------------------------------------------------------------------
+
+
+@router.post("/normalization/scan", response_model=NormalizationScanResponse)
+async def scan_for_normalization(
+    session: AsyncSession = Depends(get_db),
+) -> NormalizationScanResponse:
+    """Trigger an async scan for semantically similar tag pairs.
+
+    The scan runs as a background task with its own DB session (the request
+    session closes after the response returns). Returns immediately with
+    {queued: true}.
+    """
+    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
+
+    service = get_tag_normalizer_service()
+
+    async def _run_scan() -> None:
+        async with get_session_factory()() as scan_session:
+            try:
+                count = await service.scan(scan_session)
+                logger.info("Background tag normalization scan created %d suggestions", count)
+            except Exception:
+                logger.exception("Background tag normalization scan failed")
+
+    asyncio.create_task(_run_scan())
+    return NormalizationScanResponse(queued=True)
+
+
+@router.get(
+    "/normalization/suggestions", response_model=list[TagMergeSuggestionResponse]
+)
+async def get_normalization_suggestions(
+    session: AsyncSession = Depends(get_db),
+) -> list[TagMergeSuggestionResponse]:
+    """Return pending tag merge suggestions with expanded tag info."""
+    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
+
+    service = get_tag_normalizer_service()
+    details = await service.get_pending_suggestions(session)
+    return [
+        TagMergeSuggestionResponse(
+            id=d.id,
+            tag_a=TagInfo(
+                id=d.tag_a_id,
+                display_name=d.tag_a_display_name,
+                note_count=d.tag_a_note_count,
+            ),
+            tag_b=TagInfo(
+                id=d.tag_b_id,
+                display_name=d.tag_b_display_name,
+                note_count=d.tag_b_note_count,
+            ),
+            similarity=d.similarity,
+            suggested_canonical_id=d.suggested_canonical_id,
+            status=d.status,
+            created_at=d.created_at,
+        )
+        for d in details
+    ]
+
+
+@router.post(
+    "/normalization/suggestions/{suggestion_id}/accept",
+    response_model=NormalizationAcceptResponse,
+)
+async def accept_normalization_suggestion(
+    suggestion_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> NormalizationAcceptResponse:
+    """Accept a merge suggestion: merge source tag into the suggested canonical.
+
+    Merge logic lives here (not in the service layer) because _sync_tag_index is
+    a router-layer helper and Services must not import from the API/Router layer
+    (six-layer invariant).
+    """
+    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
+    from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
+    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
+
+    service = get_tag_normalizer_service()
+    try:
+        suggestion, source_id, target_id = await service.get_suggestion_for_accept(
+            suggestion_id, session
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # Validate both tags still exist
+    source_tag = (
+        await session.execute(
+            select(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
+        )
+    ).scalar_one_or_none()
+    target_tag = (
+        await session.execute(
+            select(CanonicalTagModel).where(CanonicalTagModel.id == target_id)
+        )
+    ).scalar_one_or_none()
+    if source_tag is None or target_tag is None:
+        # Tag was deleted -- mark suggestion rejected and return
+        suggestion.status = "rejected"
+        session.add(suggestion)
+        await session.commit()
+        return NormalizationAcceptResponse(affected_notes=0)
+
+    # Find and update notes with the source tag (same logic as POST /tags/merge)
+    note_ids_result = await session.execute(
+        select(NoteTagIndexModel.note_id)
+        .where(NoteTagIndexModel.tag_full == source_id)
+        .distinct()
+    )
+    note_ids = [row[0] for row in note_ids_result.all()]
+
+    affected_notes = 0
+    if note_ids:
+        notes_result = await session.execute(
+            select(NoteModel).where(NoteModel.id.in_(note_ids))
+        )
+        notes = list(notes_result.scalars().all())
+        try:
+            for note in notes:
+                current_tags: list[str] = note.tags or []
+                new_tags: list[str] = []
+                seen: set[str] = set()
+                for tag in current_tags:
+                    replacement = target_id if tag == source_id else tag
+                    if replacement not in seen:
+                        seen.add(replacement)
+                        new_tags.append(replacement)
+                note.tags = new_tags
+                session.add(note)
+                await _sync_tag_index(note.id, new_tags, session)
+            affected_notes = len(notes)
+        except Exception:
+            await session.rollback()
+            raise HTTPException(
+                status_code=500, detail="Merge failed during note updates -- rolled back"
+            )
+
+    try:
+        alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
+        session.add(alias)
+        await session.execute(
+            delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
+        )
+        suggestion.status = "accepted"
+        session.add(suggestion)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500, detail="Merge failed during alias/cleanup -- rolled back"
+        )
+
+    invalidate_tag_graph_cache()
+    logger.info(
+        "Accepted tag normalization suggestion %s: %r -> %r, affected_notes=%d",
+        suggestion_id,
+        source_id,
+        target_id,
+        affected_notes,
+    )
+    return NormalizationAcceptResponse(affected_notes=affected_notes)
+
+
+@router.post("/normalization/suggestions/{suggestion_id}/reject", status_code=204)
+async def reject_normalization_suggestion(
+    suggestion_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Reject a merge suggestion."""
+    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
+
+    service = get_tag_normalizer_service()
+    try:
+        await service.reject_suggestion(suggestion_id, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{tag_id}/notes", response_model=list[NoteItem])

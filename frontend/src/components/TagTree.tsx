@@ -11,10 +11,11 @@
  * States: loading (skeleton), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Settings2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Settings2, Wrench } from "lucide-react"
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
+import { NormalizationDrawer } from "@/components/NormalizationDrawer"
 import { TagManagementPanel } from "@/components/TagManagementPanel"
 import { API_BASE } from "@/lib/config"
 import { useAppStore } from "@/store"
@@ -129,6 +130,8 @@ function TagTreeItemRow({
 
 export function TagTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [normOpen, setNormOpen] = useState(false)
+  const [scanInFlight, setScanInFlight] = useState(false)
   const activeTag = useAppStore((s) => s.activeTag)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
 
@@ -143,6 +146,16 @@ export function TagTree() {
     staleTime: 30_000,
   })
 
+  async function handleNormalize() {
+    setScanInFlight(true)
+    try {
+      await fetch(`${API_BASE}/tags/normalization/scan`, { method: "POST" })
+    } finally {
+      setScanInFlight(false)
+      setNormOpen(true)
+    }
+  }
+
   function toggleExpand(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -152,64 +165,92 @@ export function TagTree() {
     })
   }
 
+  const normalizeButton = (
+    <button
+      type="button"
+      onClick={() => void handleNormalize()}
+      disabled={scanInFlight}
+      className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+      title="Normalize tags (find duplicates)"
+    >
+      <Wrench size={12} className={scanInFlight ? "animate-spin" : ""} />
+    </button>
+  )
+
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-1">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-7 w-full rounded" />
-        ))}
-      </div>
+      <>
+        <div className="flex items-center mb-1">{normalizeButton}</div>
+        <div className="flex flex-col gap-1">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-7 w-full rounded" />
+          ))}
+        </div>
+        <NormalizationDrawer open={normOpen} onOpenChange={setNormOpen} />
+      </>
     )
   }
 
   if (isError) {
     return (
-      <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        <span>Could not load tags</span>
-        <button
-          onClick={() => void refetch()}
-          className="self-start rounded border border-amber-300 bg-white px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-50"
-        >
-          Retry
-        </button>
-      </div>
+      <>
+        <div className="flex items-center mb-1">{normalizeButton}</div>
+        <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <span>Could not load tags</span>
+          <button
+            onClick={() => void refetch()}
+            className="self-start rounded border border-amber-300 bg-white px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-50"
+          >
+            Retry
+          </button>
+        </div>
+        <NormalizationDrawer open={normOpen} onOpenChange={setNormOpen} />
+      </>
     )
   }
 
   if (!tree || tree.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-1 py-4 text-center text-xs text-muted-foreground">
-        <span>Notes you save will be auto-tagged</span>
-      </div>
+      <>
+        <div className="flex items-center mb-1">{normalizeButton}</div>
+        <div className="flex flex-col items-center gap-1 py-4 text-center text-xs text-muted-foreground">
+          <span>Notes you save will be auto-tagged</span>
+        </div>
+        <NormalizationDrawer open={normOpen} onOpenChange={setNormOpen} />
+      </>
     )
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
-      {tree.map((item) => (
-        <div key={item.id}>
-          <TagTreeItemRow
-            item={item}
-            depth={0}
-            isExpanded={expanded.has(item.id)}
-            onToggleExpand={() => toggleExpand(item.id)}
-            isActive={activeTag === item.id}
-            onSelect={() => setActiveTag(activeTag === item.id ? null : item.id)}
-          />
-          {expanded.has(item.id) &&
-            item.children.map((child) => (
-              <TagTreeItemRow
-                key={child.id}
-                item={child}
-                depth={1}
-                isExpanded={false}
-                onToggleExpand={() => {}}
-                isActive={activeTag === child.id}
-                onSelect={() => setActiveTag(activeTag === child.id ? null : child.id)}
-              />
-            ))}
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="flex items-center mb-1">{normalizeButton}</div>
+      <div className="flex flex-col gap-0.5">
+        {tree.map((item) => (
+          <div key={item.id}>
+            <TagTreeItemRow
+              item={item}
+              depth={0}
+              isExpanded={expanded.has(item.id)}
+              onToggleExpand={() => toggleExpand(item.id)}
+              isActive={activeTag === item.id}
+              onSelect={() => setActiveTag(activeTag === item.id ? null : item.id)}
+            />
+            {expanded.has(item.id) &&
+              item.children.map((child) => (
+                <TagTreeItemRow
+                  key={child.id}
+                  item={child}
+                  depth={1}
+                  isExpanded={false}
+                  onToggleExpand={() => {}}
+                  isActive={activeTag === child.id}
+                  onSelect={() => setActiveTag(activeTag === child.id ? null : child.id)}
+                />
+              ))}
+          </div>
+        ))}
+      </div>
+      <NormalizationDrawer open={normOpen} onOpenChange={setNormOpen} />
+    </>
   )
 }

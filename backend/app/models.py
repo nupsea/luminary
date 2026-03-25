@@ -649,6 +649,24 @@ class TagAliasModel(Base):
     canonical_tag_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
 
+class TagMergeSuggestionModel(Base):
+    """Suggested tag pair merges from SmartTagNormalizerService.
+
+    status: 'pending' | 'accepted' | 'rejected'
+    suggested_canonical_id: whichever of tag_a or tag_b has higher note_count (the merge target).
+    """
+
+    __tablename__ = "tag_merge_suggestions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_a_id: Mapped[str] = mapped_column(String, nullable=False)
+    tag_b_id: Mapped[str] = mapped_column(String, nullable=False)
+    similarity: Mapped[float] = mapped_column(Float, nullable=False)
+    suggested_canonical_id: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 

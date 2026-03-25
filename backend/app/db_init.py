@@ -35,6 +35,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     StudySessionModel,
     SummaryModel,
     TagAliasModel,
+    TagMergeSuggestionModel,
     WebReferenceModel,
 )
 
@@ -226,6 +227,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 FROM note_tag_index
                 GROUP BY tag_full
                 """
+            )
+        )
+
+        # S168: index on tag_merge_suggestions.status for efficient pending-suggestion queries.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_tag_merge_suggestions_status "
+                "ON tag_merge_suggestions(status)"
             )
         )
 
