@@ -24,6 +24,8 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Book fixture is "The Odyssey" (not "The Iliad") — use Odyssey-specific entities for relational tests
 - **AsyncClient (httpx) test pattern**: `TestClient(app)` as a context manager triggers FastAPI lifespan (startup events). `AsyncClient(transport=ASGITransport(app=app))` does NOT trigger lifespan. Use the `test_db` fixture to initialize the DB when writing async tests with AsyncClient.
 - **asyncio.to_thread mocking**: use `AsyncMock(return_value=expected_value)`, NOT `MagicMock(side_effect=lambda fn, *args: coroutine_obj)`. The MagicMock returns the coroutine object itself (unwraped), so `result = await asyncio.to_thread(...)` sees a coroutine object as the value, not the awaited result. AsyncMock's `__call__` returns an awaitable that correctly resolves to `return_value`.
+- **HDBSCAN unit test mocking**: HDBSCAN with small synthetic datasets (6-10 vectors) rarely produces clusters due to density requirements. Instead of brittle fixture engineering, mock the HDBSCAN class: `patch("sklearn.cluster.HDBSCAN", return_value=mock_instance)` where `mock_instance.fit_predict.return_value = np.array([0, 0, 0, -1, -1, -1])`. This ensures deterministic test behavior.
+- **sklearn.cluster lazy import patching**: When HDBSCAN is lazily imported inside `asyncio.to_thread` (e.g., `from sklearn.cluster import HDBSCAN`), patch it at `sklearn.cluster.HDBSCAN` — Python resolves the name in `sys.modules['sklearn.cluster']` at import time, so the lambda capturing it will receive the patched version.
 
 ---
 
@@ -82,6 +84,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **No session.refresh() when expire_on_commit=False**: after `await session.commit()`, do NOT call `session.refresh(instance)`. When expire_on_commit=False, all attributes set in Python before commit are preserved. The refresh creates an extra await point where background tasks (asyncio.to_thread GLiNER) can run and corrupt session state under load.
 - **Bulk one-to-many loading pattern**: after fetching a list of rows, do a single query for all IDs to load related junction table rows. Build a `dict[id, list[related_ids]]` map, then pass to response constructor. Prevents N+1 queries when building responses with one-to-many relationships (e.g., notes with their collection_ids).
 - **Self-join co-occurrence pattern**: To find undirected pairs of related entities, self-join on their common relationship: `JOIN table b ON a.foreign_key = b.foreign_key AND a.id < b.id` (string comparison ensures each pair appears once, no self-loops). Apply HAVING COUNT(*) >= min_weight to filter weak edges. Example: `a.tag_full < b.tag_full` for tag co-occurrence on shared notes.
+- **Junction table with string PK pattern**: For many-to-many tables with a string primary key (e.g. NoteCollectionMemberModel with id=uuid), insert via raw SQL with `INSERT OR IGNORE` to handle deduplication based on the UniqueConstraint: `INSERT OR IGNORE INTO note_collection_members (id, note_id, collection_id, added_at) VALUES (:id, :note_id, :collection_id, :added_at)` with `str(uuid.uuid4())` for the id. The unique constraint on (note_id, collection_id) prevents duplicates automatically.
 
 ---
 

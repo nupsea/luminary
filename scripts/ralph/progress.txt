@@ -1835,3 +1835,36 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Server must be fully restarted (not just reloaded) after structural changes to routers -- `kill -9 uvicorn` and fresh start required; `pkill -f uvicorn` may not work reliably if multiple processes share the name.
   - prd-v3.json, docs/, and scripts/ralph/ are in .gitignore -- use `git add -f` to force-add them.
 ---
+
+## 2026-03-26T00:00:00Z - S166 - Semantic note clustering via HDBSCAN
+- What was implemented:
+  - ClusterSuggestionModel in models.py (id, suggested_name, note_ids JSON, confidence_score, status, created_at)
+  - ClusterSuggestionModel import in db_init.py for Base.metadata.create_all
+  - ClusteringService in app/services/clustering_service.py:
+    - cluster_notes(): rate-limit check, LanceDB vector fetch via asyncio.to_thread, HDBSCAN (min_cluster_size=3, min_samples=2, metric='cosine'), per-cluster medoid selection, confidence_score = mean pairwise cosine, LiteLLM name generation
+    - accept_suggestion(): creates NoteCollectionModel + NoteCollectionMemberModel rows via INSERT OR IGNORE text SQL
+    - reject_suggestion(), get_pending_suggestions(), get_pending_last_run()
+  - 4 new endpoints in notes.py (static paths before /{note_id} catch-all):
+    - POST /notes/cluster (fire-and-forget, rate-limit check, 202)
+    - GET /notes/cluster/suggestions (pending rows, confidence DESC, with note previews)
+    - POST /notes/cluster/suggestions/{id}/accept (creates collection, returns {collection_id})
+    - POST /notes/cluster/suggestions/{id}/reject (sets status=rejected)
+  - Frontend: Notes.tsx gains "Suggested Collections" section in sidebar with Wand2 Auto-organize button, suggestion cards (name, note count, confidence bar, 3 excerpts, Accept/Reject), isClusterQueued spinner state
+  - scikit-learn >= 1.3 added to pyproject.toml
+  - 9 tests in test_clustering.py, smoke script scripts/smoke/S166.sh
+- Files changed:
+  - backend/pyproject.toml
+  - backend/app/models.py
+  - backend/app/db_init.py
+  - backend/app/services/clustering_service.py (new)
+  - backend/app/routers/notes.py
+  - backend/tests/test_clustering.py (new)
+  - frontend/src/pages/Notes.tsx
+  - scripts/smoke/S166.sh (new)
+- **Learnings for future iterations:**
+  - HDBSCAN with small synthetic datasets (6 vectors) rarely produces clusters due to density requirements; mock the HDBSCAN.fit_predict return value (`patch("sklearn.cluster.HDBSCAN", return_value=mock_instance)`) for deterministic unit tests rather than relying on real HDBSCAN with tiny fixtures.
+  - `asyncio.to_thread` with a lambda wrapping HDBSCAN works correctly; patch `sklearn.cluster.HDBSCAN` at the sklearn source to intercept it inside the lambda.
+  - Lazy import patch target for LanceDB in clustering_service: `app.services.vector_store.get_lancedb_service` (the symbol lives in vector_store.py, not in clustering_service.py).
+  - Rate-limit check for background tasks: query for pending suggestions before spawning create_task; return early with {cached: True} when within the rate window.
+  - `NoteCollectionMemberModel` uses a string `id` PK (not composite PK); use `INSERT OR IGNORE INTO note_collection_members (id, note_id, collection_id, added_at) VALUES (...)` with `str(uuid.uuid4())` for each row -- same pattern as collections.py router.
+---
