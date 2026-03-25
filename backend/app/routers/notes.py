@@ -226,6 +226,12 @@ async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) 
             },
         )
 
+    # Invalidate tag graph cache when tag index changes (S167)
+    if removed or added:
+        from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
+
+        invalidate_tag_graph_cache()
+
 
 async def _upsert_note_graph(
     note_id: str, content: str, document_id: str | None, tags: list[str]

@@ -8,9 +8,10 @@ import {
 import type { QueryKey } from "@tanstack/react-query"
 import { BookOpen, MessageSquare, Network, BarChart2, Activity, StickyNote } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
+import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
+import { useAppStore } from "./store"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { SearchDialog } from "./components/SearchDialog"
@@ -227,9 +228,24 @@ function Sidebar() {
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const setActiveTag = useAppStore((s) => s.setActiveTag)
 
   // S118: review reminder notifications
   useReviewNotification()
+
+  // S167: cross-tab navigation from tag graph node click
+  useEffect(() => {
+    function onLuminaryNavigate(e: Event) {
+      const detail = (e as CustomEvent<{ tab: string; tagFilter?: string }>).detail
+      if (detail.tab === "notes") {
+        setActiveTag(detail.tagFilter ?? null)
+        navigate("/notes")
+      }
+    }
+    window.addEventListener("luminary:navigate", onLuminaryNavigate)
+    return () => window.removeEventListener("luminary:navigate", onLuminaryNavigate)
+  }, [navigate, setActiveTag])
 
   // Startup prefetch: documents list + LLM settings
   useEffect(() => {

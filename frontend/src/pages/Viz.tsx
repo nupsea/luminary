@@ -77,7 +77,25 @@ class VizErrorBoundary extends Component<{ children: ReactNode }, { error: strin
 // ---------------------------------------------------------------------------
 
 import { API_BASE } from "@/lib/config"
+import TagGraph from "@/components/TagGraph"
+import type { TagNodeData, TagEdgeData } from "@/components/TagGraph"
 const SIDEBAR_W = 240
+
+// ---------------------------------------------------------------------------
+// Tag graph types and fetcher (S167)
+// ---------------------------------------------------------------------------
+
+interface TagGraphData {
+  nodes: TagNodeData[]
+  edges: TagEdgeData[]
+  generated_at: number
+}
+
+async function fetchTagGraph(): Promise<TagGraphData> {
+  const res = await fetch(`${API_BASE}/tags/graph`)
+  if (!res.ok) throw new Error("Failed to fetch tag graph")
+  return res.json() as Promise<TagGraphData>
+}
 
 const ALL_ENTITY_TYPES = [
   "PERSON",
@@ -377,7 +395,7 @@ export default function Viz() {
   const [activeTypes, setActiveTypes] = useState<Set<EntityType>>(new Set(ALL_ENTITY_TYPES))
   const [search, setSearch] = useState("")
   const [scope, setScope] = useState<"document" | "all">("document")
-  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path">("knowledge_graph")
+  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path" | "tags">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
   // Diagrams layer toggle: show/hide diagram-derived nodes (S136)
@@ -404,7 +422,7 @@ export default function Viz() {
     queryKey,
     queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode as "knowledge_graph" | "call_graph", showCrossBook),
     staleTime: 30_000,
-    enabled: !noDocSelected && viewMode !== "learning_path",
+    enabled: !noDocSelected && viewMode !== "learning_path" && viewMode !== "tags",
   })
 
   // Learning path query (S117)
@@ -420,6 +438,19 @@ export default function Viz() {
     enabled: viewMode === "learning_path" && !!activeDocumentId && !!learningPathStart,
   })
 
+  // Tag graph query (S167)
+  const {
+    data: tagGraphData,
+    isLoading: tagGraphLoading,
+    isError: tagGraphError,
+    refetch: tagGraphRefetch,
+  } = useQuery({
+    queryKey: ["tag-graph"],
+    queryFn: fetchTagGraph,
+    staleTime: 60_000,
+    enabled: viewMode === "tags",
+  })
+
   useEffect(() => {
     if (!isLoading && data) {
       logger.info("[Viz] loaded", {
@@ -430,7 +461,9 @@ export default function Viz() {
   }, [isLoading, data])
 
   // Build filtered graphology graph from API data + active entity types (or learning path)
+  // Not used for "tags" mode -- TagGraph component builds its own graphology instance.
   const filteredGraph = useMemo(() => {
+    if (viewMode === "tags") return null
     if (viewMode === "learning_path") {
       if (!lpData || lpData.nodes.length === 0) return null
       return buildLearningPathGraph(lpData)
@@ -594,9 +627,19 @@ export default function Viz() {
   // Render helpers
   // ---------------------------------------------------------------------------
   const showEmpty =
-    !noDocSelected && !isLoading && !isError && (!data || data.nodes.length === 0) && viewMode !== "learning_path"
+    !noDocSelected &&
+    !isLoading &&
+    !isError &&
+    (!data || data.nodes.length === 0) &&
+    viewMode !== "learning_path" &&
+    viewMode !== "tags"
   const showAllHidden =
-    filteredGraph !== null && filteredGraph.order === 0 && !!data && data.nodes.length > 0 && viewMode !== "learning_path"
+    filteredGraph !== null &&
+    filteredGraph.order === 0 &&
+    !!data &&
+    data.nodes.length > 0 &&
+    viewMode !== "learning_path" &&
+    viewMode !== "tags"
 
   // Learning path render helpers (S117)
   const lpNoInput = viewMode === "learning_path" && !learningPathStart
@@ -637,22 +680,24 @@ export default function Viz() {
           className="flex flex-col gap-4 border-r border-border bg-background p-4 overflow-y-auto"
           style={{ position: "absolute", left: 0, top: 0, width: SIDEBAR_W, bottom: 0 }}
         >
-          {/* Document picker */}
-          <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Document
-            </p>
-            <select
-              value={activeDocumentId ?? ""}
-              onChange={(e) => setActiveDocument(e.target.value || null)}
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="">Select a document…</option>
-              {(docList ?? []).map((doc) => (
-                <option key={doc.id} value={doc.id}>{doc.title}</option>
-              ))}
-            </select>
-          </div>
+          {/* Document picker -- hidden for Tags mode (no document scope) */}
+          {viewMode !== "tags" && (
+            <div>
+              <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Document
+              </p>
+              <select
+                value={activeDocumentId ?? ""}
+                onChange={(e) => setActiveDocument(e.target.value || null)}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">Select a document…</option>
+                {(docList ?? []).map((doc) => (
+                  <option key={doc.id} value={doc.id}>{doc.title}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* View toggle */}
           <div>
@@ -660,7 +705,7 @@ export default function Viz() {
               View
             </p>
             <div className="flex flex-col rounded-md border border-border overflow-hidden text-xs">
-              {(["knowledge_graph", "call_graph", "learning_path"] as const).map((v) => (
+              {(["knowledge_graph", "call_graph", "learning_path", "tags"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => {
@@ -673,7 +718,13 @@ export default function Viz() {
                       : "text-muted-foreground hover:bg-accent"
                   }`}
                 >
-                  {v === "knowledge_graph" ? "Knowledge" : v === "call_graph" ? "Call Graph" : "Learning Path"}
+                  {v === "knowledge_graph"
+                    ? "Knowledge"
+                    : v === "call_graph"
+                      ? "Call Graph"
+                      : v === "learning_path"
+                        ? "Learning Path"
+                        : "Tags"}
                 </button>
               ))}
             </div>
@@ -682,6 +733,9 @@ export default function Viz() {
             )}
             {viewMode === "learning_path" && (
               <p className="mt-1 text-xs text-muted-foreground">Orange arrows = PREREQUISITE_OF</p>
+            )}
+            {viewMode === "tags" && (
+              <p className="mt-1 text-xs text-muted-foreground">Click a node to filter Notes</p>
             )}
           </div>
 
@@ -710,8 +764,8 @@ export default function Viz() {
             </div>
           )}
 
-          {/* Scope toggle */}
-          <div>
+          {/* Scope toggle -- hidden for Tags mode */}
+          {viewMode !== "tags" && <div>
             <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Scope
             </p>
@@ -733,89 +787,93 @@ export default function Viz() {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
-          {/* Search */}
-          <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Search
-            </p>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Find entity..."
-              className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
+          {/* Search, layers, entity filter -- hidden for Tags mode */}
+          {viewMode !== "tags" && (
+            <>
+              <div>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Search
+                </p>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Find entity..."
+                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
 
-          {/* Layer toggles (S136, S139) */}
-          <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Layers
-            </p>
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showDiagramNodes}
-                  onChange={() => setShowDiagramNodes((v) => !v)}
-                  className="accent-primary"
-                />
-                <span className="text-xs text-foreground">Diagrams</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showPrerequisites}
-                  onChange={() => setShowPrerequisites((v) => !v)}
-                  className="accent-primary"
-                />
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: PREREQ_EDGE_COLOR }}
-                />
-                <span className="text-xs text-foreground">Prerequisites</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showCrossBook}
-                  onChange={() => setShowCrossBook((v) => !v)}
-                  className="accent-primary"
-                />
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: SAME_CONCEPT_COLOR }}
-                />
-                <span className="text-xs text-foreground">Cross-book</span>
-              </label>
-            </div>
-          </div>
+              {/* Layer toggles (S136, S139) */}
+              <div>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Layers
+                </p>
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showDiagramNodes}
+                      onChange={() => setShowDiagramNodes((v) => !v)}
+                      className="accent-primary"
+                    />
+                    <span className="text-xs text-foreground">Diagrams</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showPrerequisites}
+                      onChange={() => setShowPrerequisites((v) => !v)}
+                      className="accent-primary"
+                    />
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: PREREQ_EDGE_COLOR }}
+                    />
+                    <span className="text-xs text-foreground">Prerequisites</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showCrossBook}
+                      onChange={() => setShowCrossBook((v) => !v)}
+                      className="accent-primary"
+                    />
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: SAME_CONCEPT_COLOR }}
+                    />
+                    <span className="text-xs text-foreground">Cross-book</span>
+                  </label>
+                </div>
+              </div>
 
-          {/* Entity type filter */}
-          <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Entity types
-            </p>
-            <div className="space-y-1.5">
-              {ALL_ENTITY_TYPES.map((type) => (
-                <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={activeTypes.has(type)}
-                    onChange={() => toggleType(type)}
-                    className="accent-primary"
-                  />
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: TYPE_COLORS[type] }}
-                  />
-                  <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+              {/* Entity type filter */}
+              <div>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Entity types
+                </p>
+                <div className="space-y-1.5">
+                  {ALL_ENTITY_TYPES.map((type) => (
+                    <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={activeTypes.has(type)}
+                        onChange={() => toggleType(type)}
+                        className="accent-primary"
+                      />
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: TYPE_COLORS[type] }}
+                      />
+                      <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ---- Graph area ---- */}
@@ -824,7 +882,7 @@ export default function Viz() {
         >
           {/* State overlays — all use absolute fill so they sit in the same space */}
 
-          {noDocSelected && (
+          {noDocSelected && viewMode !== "tags" && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
               <Network size={40} className="text-muted-foreground/40" />
               <p className="text-base font-semibold text-foreground">No document selected</p>
@@ -878,14 +936,14 @@ export default function Viz() {
             </div>
           )}
 
-          {!noDocSelected && isLoading && (
+          {!noDocSelected && isLoading && viewMode !== "tags" && (
             <div className="absolute inset-0 flex flex-col gap-4 p-6">
               <Skeleton className="h-8 w-48" />
               <Skeleton className="flex-1 w-full rounded-lg" />
             </div>
           )}
 
-          {!noDocSelected && !isLoading && isError && (
+          {!noDocSelected && !isLoading && isError && viewMode !== "tags" && (
             <div className="absolute inset-0 flex items-center justify-center p-6">
               <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
                 <p className="font-medium">Failed to load knowledge graph</p>
@@ -920,11 +978,25 @@ export default function Viz() {
             </div>
           )}
 
+          {/* Tag co-occurrence graph (S167) -- shown only in Tags mode */}
+          {viewMode === "tags" && (
+            <div className="absolute inset-0">
+              <TagGraph
+                nodes={tagGraphData?.nodes ?? []}
+                edges={tagGraphData?.edges ?? []}
+                isLoading={tagGraphLoading}
+                isError={tagGraphError}
+                onRetry={() => void tagGraphRefetch()}
+              />
+            </div>
+          )}
+
           {/* The actual sigma canvas div — always rendered so canvasRef is always populated.
-              Sigma mounts into this div via useEffect above. */}
+              Sigma mounts into this div via useEffect above.
+              Hidden in Tags mode (TagGraph has its own canvas). */}
           <div
             ref={canvasRef}
-            style={{ width: "100%", height: "100%" }}
+            style={{ width: "100%", height: "100%", display: viewMode === "tags" ? "none" : "block" }}
           />
 
           {/* Camera controls */}

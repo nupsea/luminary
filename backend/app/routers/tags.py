@@ -87,6 +87,25 @@ class NoteItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TagNodeItem(BaseModel):
+    id: str
+    display_name: str
+    parent_tag: str | None
+    note_count: int
+
+
+class TagEdgeItem(BaseModel):
+    tag_a: str
+    tag_b: str
+    weight: int
+
+
+class TagGraphResponse(BaseModel):
+    nodes: list[TagNodeItem]
+    edges: list[TagEdgeItem]
+    generated_at: float
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -119,6 +138,38 @@ def _compute_inclusive_count(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/graph", response_model=TagGraphResponse)
+async def get_tag_graph_endpoint(
+    session: AsyncSession = Depends(get_db),
+) -> TagGraphResponse:
+    """Return the tag co-occurrence graph (top-200 nodes, top-500 edges, weight >= 2).
+
+    Result is cached in memory for 60 seconds. Cache is invalidated whenever
+    _sync_tag_index writes new tag data (note create/update/delete or merge).
+
+    Static path (/graph) registered before /{tag_id} to avoid route shadowing.
+    """
+    from app.services.tag_graph import build_tag_graph  # noqa: PLC0415
+
+    graph = await build_tag_graph(session)
+    return TagGraphResponse(
+        nodes=[
+            TagNodeItem(
+                id=n.id,
+                display_name=n.display_name,
+                parent_tag=n.parent_tag,
+                note_count=n.note_count,
+            )
+            for n in graph.nodes
+        ],
+        edges=[
+            TagEdgeItem(tag_a=e.tag_a, tag_b=e.tag_b, weight=e.weight)
+            for e in graph.edges
+        ],
+        generated_at=graph.generated_at,
+    )
 
 
 @router.get("/autocomplete", response_model=list[TagAutocompleteResult])
