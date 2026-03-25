@@ -25,13 +25,14 @@ SCHEMA = pa.schema(
 )
 
 NOTE_TABLE_NAME = "note_vectors_v2"
+NOTE_VECTOR_DIM = 1024
 
 NOTE_SCHEMA = pa.schema(
     [
         pa.field("note_id", pa.string()),
         pa.field("document_id", pa.string()),
         pa.field("content", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 384)),
+        pa.field("vector", pa.list_(pa.float32(), NOTE_VECTOR_DIM)),
     ]
 )
 
@@ -93,18 +94,34 @@ class LanceDBService:
         table.delete(f"document_id = '{document_id}'")
         logger.info("Deleted vectors for document %s from LanceDB", document_id)
 
-    def _get_note_table(self) -> Any:
+    def _get_or_create_note_table(self) -> Any:
         self._connect()
         existing = self._db.list_tables().tables
         if NOTE_TABLE_NAME in existing:
-            return self._db.open_table(NOTE_TABLE_NAME)
+            tbl = self._db.open_table(NOTE_TABLE_NAME)
+            # Inspect the vector field dimension; drop and recreate if mismatched
+            try:
+                vector_field = tbl.schema.field("vector")
+                actual_dim = vector_field.type.list_size
+                if actual_dim != NOTE_VECTOR_DIM:
+                    logger.warning(
+                        "note_vectors_v2 schema mismatch (found %d-dim) -- dropping and "
+                        "recreating with %d-dim",
+                        actual_dim,
+                        NOTE_VECTOR_DIM,
+                    )
+                    self._db.drop_table(NOTE_TABLE_NAME)
+                    return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
+            except Exception as exc:
+                logger.warning("Could not inspect note_vectors_v2 schema: %s", exc)
+            return tbl
         return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
 
     def upsert_note_vector(
         self, note_id: str, document_id: str | None, content: str, vector: list[float]
     ) -> None:
         """Upsert a single note embedding keyed on note_id."""
-        table = self._get_note_table()
+        table = self._get_or_create_note_table()
         table.merge_insert("note_id").when_matched_update_all().when_not_matched_insert_all().execute(
             [
                 {
@@ -120,7 +137,7 @@ class LanceDBService:
     def delete_note_vector(self, note_id: str) -> None:
         """Delete the vector for the given note_id."""
         try:
-            table = self._get_note_table()
+            table = self._get_or_create_note_table()
             table.delete(f"note_id = '{note_id}'")
             logger.debug("Deleted note vector note_id=%s", note_id)
         except Exception as exc:
