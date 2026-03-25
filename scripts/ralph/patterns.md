@@ -48,6 +48,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 - Circular imports: use lazy import inside the method body — `from app.runtime.chat_graph import get_chat_graph  # noqa: PLC0415`
 - Lazy import for cross-service calls: `from app.services.summarizer import get_summarization_service  # noqa: PLC0415` inside the method body
+- Cross-router lazy import for shared helpers: when two routers share a helper (e.g., `_sync_tag_index` in notes.py used by tags.py), lazy-import it inside the method body: `from app.routers.notes import _sync_tag_index  # noqa: PLC0415`. Avoids circular imports at module level between routers.
 - qa.py helpers (_split_response, _build_context, etc.) stay at module level — chat_graph.py imports them directly from app.services.qa
 
 ---
@@ -106,7 +107,8 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 - **Admin key header dependency**: capture `X-Admin-Key` with `Header(default=None)` parameter; validate with `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`. Allows unauthenticated access if `ADMIN_KEY` is not set.
 - **Fire-and-forget background task in router**: use `asyncio.create_task` to spawn the task; inside the task body, create a fresh AsyncSession with `async with get_session_factory()()`. Never reuse the request-scoped session (it closes after handler returns, leaving the task with a closed session).
-- **Dynamic path parameter route ordering**: when a router has both `GET /{dynamic_id}` and static GET routes with the same prefix (e.g., `/search`, `/flashcards`), the dynamic route MUST be registered AFTER all static routes. If placed before, `GET /flashcards` will match the dynamic pattern with dynamic_id="flashcards" and return 404. Safe position: immediately after the last static GET route.
+- **Dynamic path parameter route ordering**: ALL static-path routes (POST /merge, GET /search, GET /flashcards) MUST be registered BEFORE any /{param} route. If /{param} is registered first, GET /search matches with param="search" and returns 404. In tags.py: POST /tags/merge before GET|PUT|DELETE /tags/{tag_id}.
+- **Pydantic model_fields_set for nullable PATCH fields**: use `if "field_name" in req.model_fields_set: model.field = req.field` to distinguish "not supplied" from "explicitly set to null". The old pattern `if req.field is not None` silently ignores explicit null (e.g. clearing parent_tag). Apply this whenever a PUT/PATCH endpoint needs to clear a value back to null.
 
 ---
 
@@ -115,7 +117,8 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - List/table views must NOT use MarkdownRenderer inline — block-level elements (h1, ul) inside a td break layout. Use a stripMarkdown() utility to strip heading markers, bold, italic, blockquote, and backtick symbols for single-line text previews. Card and detail views should use the full renderer.
 - stripMarkdown() is a pure function in src/lib/utils.ts. It strips `#`, `**`, `__`, `*`, `_`, `>` markers from preview text without rendering HTML.
 - Vite dev server does NOT hot-reload tailwind.config.cjs changes. Restart `npm run dev` after any config change. `npm run build` always produces correct output.
-- **Vitest node environment + Zustand store**: when vitest environment is "node", do NOT import React components that transitively depend on Zustand stores (localStorage is read at module load). Solution: extract pure logic functions to a separate utility file with no React/store imports (e.g., `src/lib/collectionUtils.ts`), and test only from that utility. Component test files must import from the utility, not the component.
+- **Vitest node environment + Zustand store**: when vitest environment is "node", do NOT import React components that transitively depend on Zustand stores (localStorage is read at module load). Solution: extract pure logic functions to a separate utility file with no React/store imports (e.g., `src/lib/collectionUtils.ts`, `src/lib/tagUtils.ts`), and test only from that utility. Component test files must import from the utility, not the component.
+- **Hierarchical API response schema**: when a child record displays or initializes UI based on parent relationship, include the parent reference in the nested child response (e.g., `parent_tag: str | None` in TagTreeItem) even though it's redundant with tree structure. Without it, the UI cannot pre-select the current parent in a dropdown.
 - **HTML5 drag-and-drop**: add `draggable` attribute to draggable element, `onDragStart={(e) => e.dataTransfer.setData("text/plain", id)}` to set data. Drop target: `onDragOver={(e) => e.preventDefault()}` + `onDrop={(e) => e.dataTransfer.getData("text/plain")}`. No DnD library needed.
 
 ---
