@@ -9,6 +9,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     CanonicalTagModel,
     ChunkModel,
     ClipModel,
+    ClusterSuggestionModel,
     CodeSnippetModel,
     DocumentModel,
     EnrichmentJobModel,

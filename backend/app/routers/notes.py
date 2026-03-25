@@ -593,6 +593,120 @@ async def list_note_flashcards(
     return [NoteFlashcardItem.model_validate(c) for c in cards]
 
 
+# ---------------------------------------------------------------------------
+# Cluster endpoints (static paths must come before /{note_id} catch-all)
+# ---------------------------------------------------------------------------
+
+
+class ClusterNotePreview(BaseModel):
+    note_id: str
+    excerpt: str
+
+
+class ClusterSuggestionResponse(BaseModel):
+    id: str
+    suggested_name: str
+    note_count: int
+    confidence_score: float
+    status: str
+    created_at: datetime
+    previews: list[ClusterNotePreview]
+
+
+@router.post("/cluster", status_code=202)
+async def trigger_cluster(
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Fire-and-forget HDBSCAN clustering over note_vectors_v2.
+
+    Returns {queued: True, total_notes: int} or {cached: True, last_run: ISO str}
+    if a pending suggestion was created within the last hour.
+    """
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    svc = get_clustering_service()
+
+    # Check rate-limit synchronously before spawning task
+    last_run = await svc.get_pending_last_run(session)
+    if last_run is not None:
+        from datetime import timedelta  # noqa: PLC0415
+
+        now = datetime.now(UTC)
+        age = now - (last_run.replace(tzinfo=UTC) if last_run.tzinfo is None else last_run)
+        if age < timedelta(hours=1):
+            return {"cached": True, "last_run": last_run.isoformat()}
+
+    # Count total notes
+    total_notes = (
+        await session.execute(select(func.count(NoteModel.id)))
+    ).scalar_one()
+
+    # Spawn fire-and-forget task with its own session
+    async def _run_clustering() -> None:
+        try:
+            async with get_session_factory()() as new_session:
+                count = await get_clustering_service().cluster_notes(new_session)
+                logger.info("Background clustering finished: %d suggestions", count)
+        except Exception as exc:
+            logger.error("Background clustering task failed: %s", exc)
+
+    task = asyncio.create_task(_run_clustering())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return {"queued": True, "total_notes": total_notes}
+
+
+@router.get("/cluster/suggestions", response_model=list[ClusterSuggestionResponse])
+async def list_cluster_suggestions(
+    session: AsyncSession = Depends(get_db),
+) -> list[ClusterSuggestionResponse]:
+    """Return pending cluster suggestions sorted by confidence_score DESC with note previews."""
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    items = await get_clustering_service().get_pending_suggestions(session)
+    return [
+        ClusterSuggestionResponse(
+            id=item["id"],
+            suggested_name=item["suggested_name"],
+            note_count=item["note_count"],
+            confidence_score=item["confidence_score"],
+            status=item["status"],
+            created_at=item["created_at"],
+            previews=[ClusterNotePreview(**p) for p in item["previews"]],
+        )
+        for item in items
+    ]
+
+
+@router.post("/cluster/suggestions/{suggestion_id}/accept")
+async def accept_cluster_suggestion(
+    suggestion_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Accept a cluster suggestion: create NoteCollection + member rows."""
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    collection_id = await get_clustering_service().accept_suggestion(suggestion_id, session)
+    if collection_id is None:
+        raise HTTPException(status_code=404, detail="Cluster suggestion not found")
+    return {"collection_id": collection_id}
+
+
+@router.post("/cluster/suggestions/{suggestion_id}/reject")
+async def reject_cluster_suggestion(
+    suggestion_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Reject a cluster suggestion."""
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    found = await get_clustering_service().reject_suggestion(suggestion_id, session)
+    if not found:
+        raise HTTPException(status_code=404, detail="Cluster suggestion not found")
+    return {"ok": True}
+
+
 @router.get("/{note_id}", response_model=NoteResponse)
 async def get_note(
     note_id: str,

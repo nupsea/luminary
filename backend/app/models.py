@@ -667,6 +667,24 @@ class TagMergeSuggestionModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class ClusterSuggestionModel(Base):
+    """A cluster of semantically similar notes suggested as a collection.
+
+    note_ids: JSON list of note id strings.
+    confidence_score: mean pairwise cosine similarity of cluster members (0.0 - 1.0).
+    status: 'pending' | 'accepted' | 'rejected'
+    """
+
+    __tablename__ = "cluster_suggestions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    suggested_name: Mapped[str] = mapped_column(String, nullable=False)
+    note_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 

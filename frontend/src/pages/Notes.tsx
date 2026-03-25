@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookOpen, Check, FileText, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
+import { BookOpen, Check, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -186,6 +186,49 @@ async function createNoteFromClip(clip: Clip, docTitle: string): Promise<{ id: s
   })
   if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
   return res.json() as Promise<{ id: string }>
+}
+
+// ---------------------------------------------------------------------------
+// Cluster suggestion types + API helpers
+// ---------------------------------------------------------------------------
+
+interface ClusterNotePreview {
+  note_id: string
+  excerpt: string
+}
+
+interface ClusterSuggestion {
+  id: string
+  suggested_name: string
+  note_count: number
+  confidence_score: number
+  status: string
+  created_at: string
+  previews: ClusterNotePreview[]
+}
+
+async function fetchClusterSuggestions(): Promise<ClusterSuggestion[]> {
+  const res = await fetch(`${API_BASE}/notes/cluster/suggestions`)
+  if (!res.ok) throw new Error(`GET /notes/cluster/suggestions failed: ${res.status}`)
+  return res.json() as Promise<ClusterSuggestion[]>
+}
+
+async function postCluster(): Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }> {
+  const res = await fetch(`${API_BASE}/notes/cluster`, { method: "POST" })
+  if (!res.ok) throw new Error(`POST /notes/cluster failed: ${res.status}`)
+  return res.json() as Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }>
+}
+
+async function acceptSuggestion(id: string): Promise<{ collection_id: string }> {
+  const res = await fetch(`${API_BASE}/notes/cluster/suggestions/${id}/accept`, { method: "POST" })
+  if (!res.ok) throw new Error(`POST /notes/cluster/suggestions/${id}/accept failed: ${res.status}`)
+  return res.json() as Promise<{ collection_id: string }>
+}
+
+async function rejectSuggestion(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/notes/cluster/suggestions/${id}/reject`, { method: "POST" })
+  if (!res.ok) throw new Error(`POST /notes/cluster/suggestions/${id}/reject failed: ${res.status}`)
+  return res.json() as Promise<{ ok: boolean }>
 }
 
 async function fetchSuggestedTags(id: string): Promise<string[]> {
@@ -740,6 +783,7 @@ export default function NotesPage() {
   const [showGapDetect, setShowGapDetect] = useState(false)
   const [showCreateCollection, setShowCreateCollection] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
+  const [isClusterQueued, setIsClusterQueued] = useState(false)
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
@@ -794,6 +838,52 @@ export default function NotesPage() {
   })
 
   const isSearchMode = debouncedQuery.trim().length > 0
+
+  const {
+    data: clusterSuggestions = [],
+    isLoading: clusterSuggestionsLoading,
+    isError: clusterSuggestionsError,
+    refetch: refetchClusterSuggestions,
+  } = useQuery({
+    queryKey: ["clusterSuggestions"],
+    queryFn: fetchClusterSuggestions,
+    staleTime: 30_000,
+  })
+
+  async function handleAutoOrganize() {
+    setIsClusterQueued(true)
+    try {
+      await postCluster()
+      // Poll suggestions after a short delay to give clustering a head start
+      setTimeout(() => {
+        void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+        setIsClusterQueued(false)
+      }, 3000)
+    } catch {
+      toast.error("Failed to start auto-organize")
+      setIsClusterQueued(false)
+    }
+  }
+
+  async function handleAcceptSuggestion(id: string) {
+    try {
+      await acceptSuggestion(id)
+      void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+      void qc.invalidateQueries({ queryKey: ["collections"] })
+      toast.success("Collection created")
+    } catch {
+      toast.error("Failed to accept suggestion")
+    }
+  }
+
+  async function handleRejectSuggestion(id: string) {
+    try {
+      await rejectSuggestion(id)
+      void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+    } catch {
+      toast.error("Failed to reject suggestion")
+    }
+  }
 
   useEffect(() => {
     if (!notesLoading) {
@@ -1116,11 +1206,102 @@ export default function NotesPage() {
 
         {/* Tags section */}
         <div className="mt-3">
-          <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Tags
-          </p>
+          <div className="mb-1 flex items-center justify-between px-1">
+            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Tags
+            </p>
+          </div>
           <TagTree />
         </div>
+
+        {/* Suggested Collections section (visible only when suggestions exist or scan queued) */}
+        {(clusterSuggestions.length > 0 || isClusterQueued) && (
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between px-1">
+              <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Suggested Collections
+              </p>
+              <button
+                onClick={() => void handleAutoOrganize()}
+                disabled={isClusterQueued}
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50"
+                title="Auto-organize notes into collections"
+              >
+                {isClusterQueued ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+              </button>
+            </div>
+            {clusterSuggestionsLoading && (
+              <div className="space-y-1.5 px-1">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-12 animate-pulse rounded bg-accent/40" />
+                ))}
+              </div>
+            )}
+            {clusterSuggestionsError && (
+              <p className="px-3 text-xs text-amber-500">
+                Could not load suggestions.{" "}
+                <button onClick={() => void refetchClusterSuggestions()} className="underline">
+                  Retry
+                </button>
+              </p>
+            )}
+            {clusterSuggestions.map((s) => (
+              <div key={s.id} className="mb-1 rounded border border-border p-2 text-xs">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-medium truncate">{s.suggested_name}</span>
+                  <span className="shrink-0 text-muted-foreground">{s.note_count} notes</span>
+                </div>
+                {/* Confidence bar */}
+                <div className="my-1 h-1 rounded bg-border">
+                  <div
+                    className="h-1 rounded bg-primary"
+                    style={{ width: `${Math.round(s.confidence_score * 100)}%` }}
+                  />
+                </div>
+                {/* Note previews */}
+                <div className="mb-1.5 space-y-0.5">
+                  {s.previews.slice(0, 3).map((p) => (
+                    <p key={p.note_id} className="truncate text-muted-foreground italic">
+                      {p.excerpt}
+                    </p>
+                  ))}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => void handleAcceptSuggestion(s.id)}
+                    className="flex items-center gap-0.5 rounded bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20"
+                    title="Accept — create collection"
+                  >
+                    <Check size={10} />
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => void handleRejectSuggestion(s.id)}
+                    className="flex items-center gap-0.5 rounded px-2 py-0.5 text-muted-foreground hover:bg-accent"
+                    title="Reject suggestion"
+                  >
+                    <X size={10} />
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Auto-organize button (always visible even when no suggestions) */}
+        {clusterSuggestions.length === 0 && !isClusterQueued && (
+          <div className="mt-3">
+            <button
+              onClick={() => void handleAutoOrganize()}
+              className="flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              title="Auto-organize notes into suggested collections"
+            >
+              <Wand2 size={11} />
+              Auto-organize
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Right panel */}
