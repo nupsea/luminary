@@ -92,6 +92,22 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ---
 
+## LanceDB / Vectors
+
+- All LanceDB calls are synchronous. In async context: `await asyncio.to_thread(table.search(...).to_pandas)`
+- Vector dimension: 1024 (bge-m3). Any table with 384-dim is stale -- drop and recreate.
+- **LanceDB schema introspection**: use `tbl.schema.field("vector").type.list_size` to read the FixedSizeList dimension. Wrap in try/except — if the field is missing or the attribute doesn't exist, log a warning and proceed with safe default (assume 1024).
+- **LanceDB drop+recreate**: use `self._db.drop_table(TABLE_NAME)` via the connection object, NOT `tbl.drop()`. Then `self._db.create_table(TABLE_NAME, schema=NEW_SCHEMA)`. Use this when a table's schema (e.g. vector dimension) needs to change.
+
+---
+
+## FastAPI Patterns
+
+- **Admin key header dependency**: capture `X-Admin-Key` with `Header(default=None)` parameter; validate with `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`. Allows unauthenticated access if `ADMIN_KEY` is not set.
+- **Fire-and-forget background task in router**: use `asyncio.create_task` to spawn the task; inside the task body, create a fresh AsyncSession with `async with get_session_factory()()`. Never reuse the request-scoped session (it closes after handler returns, leaving the task with a closed session).
+
+---
+
 ## Frontend Rendering Consistency
 
 - List/table views must NOT use MarkdownRenderer inline — block-level elements (h1, ul) inside a td break layout. Use a stripMarkdown() utility to strip heading markers, bold, italic, blockquote, and backtick symbols for single-line text previews. Card and detail views should use the full renderer.
