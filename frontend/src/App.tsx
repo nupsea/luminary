@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, Activity, StickyNote } from "lucide-react"
+import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -18,13 +18,15 @@ import { SearchDialog } from "./components/SearchDialog"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
-// performance. Viz and Monitoring were already lazy — Chat, Learning, Notes, Study added in S84.
+// performance. Viz and Monitoring were already lazy -- Chat, Learning, Notes, Study added in S84.
+// S177: Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
 const Chat = lazy(() => import("./pages/Chat"))
 const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
 const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
-const Monitoring = lazy(() => import("./pages/Monitoring"))
+const Progress = lazy(() => import("./pages/Progress"))
+const Admin = lazy(() => import("./pages/Admin"))
 
 import { API_BASE } from "@/lib/config"
 
@@ -50,8 +52,8 @@ async function prefetchDueCards(): Promise<unknown> {
   return res.json()
 }
 
-async function prefetchMonitoringOverview(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/monitoring/overview`)
+async function prefetchProgressData(): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/study/due-count`)
   if (!res.ok) throw new Error("prefetch failed")
   return res.json()
 }
@@ -114,11 +116,11 @@ const NAV_ITEMS: NavItemDef[] = [
   },
   { to: "/notes", icon: StickyNote, label: "Notes" },
   {
-    to: "/monitoring",
-    icon: Activity,
-    label: "Monitoring",
-    prefetchKey: ["monitoring-overview"],
-    prefetchFn: prefetchMonitoringOverview,
+    to: "/progress",
+    icon: TrendingUp,
+    label: "Progress",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchProgressData,
   },
 ]
 
@@ -212,7 +214,20 @@ function Sidebar() {
             <Icon size={20} />
           </NavLink>
         ))}
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-2">
+          {/* Dev Tools link -- hidden from nav, accessible via this small icon at the bottom */}
+          <NavLink
+            to="/admin"
+            title="Dev Tools"
+            className={({ isActive }) =>
+              cn(
+                "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
+                isActive && "bg-accent text-sidebar-foreground",
+              )
+            }
+          >
+            <Wrench size={14} />
+          </NavLink>
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
         </div>
       </nav>
@@ -312,7 +327,11 @@ function AppShell() {
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
-          <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Monitoring /></Suspense>} />
+          <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
+          {/* /admin is NOT linked from the nav; accessible via the "Dev Tools" footer link */}
+          <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
+          {/* Legacy redirect: /monitoring -> /progress */}
+          <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
         </Routes>
       </main>
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />

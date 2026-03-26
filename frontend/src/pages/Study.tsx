@@ -1526,8 +1526,11 @@ function StrugglingPanel({ documentId }: StrugglingPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
-// GoalsPanel
+// GoalsPanel (exported so Progress tab can render it without Study tab re-implementing)
 // ---------------------------------------------------------------------------
+
+export { fetchGoals, createGoal, deleteGoalApi, fetchReadiness }
+export type { LearningGoal, ReadinessResult, AtRiskCard, DocListItem }
 
 function RetentionBadge({ pct }: { pct: number }) {
   const color =
@@ -1622,11 +1625,11 @@ function GoalRow({ goal, docTitle, onDelete, isDeleting }: GoalRowProps) {
   )
 }
 
-interface GoalsPanelProps {
+export interface GoalsPanelProps {
   docs: DocListItem[]
 }
 
-function GoalsPanel({ docs }: GoalsPanelProps) {
+export function GoalsPanel({ docs }: GoalsPanelProps) {
   const qc = useQueryClient()
   const [title, setTitle] = useState("")
   const [docId, setDocId] = useState("")
@@ -2427,9 +2430,6 @@ export default function Study() {
 
       {/* Struggling Cards panel */}
       <StrugglingPanel documentId={activeDocumentId} />
-
-      {/* Learning Goals panel */}
-      <GoalsPanel docs={docList} />
 
       {/* Progress dashboard (S23b) — Recharts loaded lazily via dynamic import */}
       <section className="flex flex-col gap-4">
