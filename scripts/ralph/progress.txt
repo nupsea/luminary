@@ -1961,3 +1961,13 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Hidden admin link pattern: a small dimmed-opacity NavLink with a small icon (Wrench size=14) below `mt-auto` in the Sidebar satisfies "not in main nav but findable" without a visible text label. Opacity: `text-sidebar-foreground/40` makes it visually distinct from the main nav items.
   - Flaky test_collection_health tests: pass in isolation and in the pre-change stash run (12 passed), but fail 3/12 in the full suite due to resource contention / test ordering. Pre-existing issue, not caused by S177 changes.
 ---
+
+## 2026-03-26T22:40:00Z - S178 - Study tab consolidation
+- Implemented: SmartGeneratePanel (single button with selectSmartMode heuristic, Advanced options disclosure wrapping original GeneratePanel); DeckStatusAccordion (merged DeckHealthPanel + HealthReportPanel, collapsed by default, header shows card count + mastered%); getDeckDisplayName applied in All Decks list; empty state updated; studyUtils.ts + studyUtils.test.ts pure utility functions.
+- Files changed: frontend/src/lib/studyUtils.ts (new), frontend/src/lib/studyUtils.test.ts (new), frontend/src/pages/Study.tsx (SmartGeneratePanel, DeckStatusAccordion, render changes), scripts/smoke/S178.sh (new)
+- **Learnings for future iterations:**
+  - studyUtils.ts uses object-param signature for getDeckDisplayName (vs positional args in exec plan) -- prefer object params for functions with 3+ args to avoid call-site confusion; update exec plan if it differs.
+  - test_collection_health tests are pre-existing flaky in full suite (resource contention); run in isolation (12/12 pass) to verify. Document this as a known pre-existing issue, not caused by story changes.
+  - IIFE pattern `{(() => { ... return items.map(...) })()}` for computing derived variables (decksPerDoc) inline in JSX without polluting component scope -- useful when a derived Map is only needed in one render block.
+  - DeckStatusAccordion must receive `cards` prop (computed in parent) to show X cards / Y% mastered in the header -- do not load cards again inside the accordion.
+---

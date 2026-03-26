@@ -159,6 +159,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 ## Frontend UI Components
 
 - **Segmented control inside dropdown**: a multi-option type selector (e.g., 5-option link types) fits cleanly at the top of an autocomplete dropdown with one row of small buttons. Use `onMouseDown` (not `onClick`) to prevent parent textarea blur. Active option gets indigo background highlight. This pattern eliminates an extra dialog step for type selection.
+- **Inline IIFE for computed render data**: when a render block needs a derived Map or variable (e.g., per-document deck count for display logic), wrap the JSX in `{(() => { const derived = ...; return items.map(...) })()}` instead of adding a component-scope const. Use sparingly for one-off derivations only needed in one JSX section. Improves code locality and avoids polluting component scope with intermediate computations.
 
 ---
 
@@ -170,6 +171,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Dialog close after save must be explicit**: auto-closing a dialog immediately after save prevents any post-save feedback (suggestions, status messages) from being visible. Always transition to a "Saved" state and let the user close with Done.
 - **AbortController on unmount**: in-flight fetch requests inside a dialog must be cancelled when the dialog closes (onOpenChange fires with open=false). Store the AbortController in a ref; call abort() in the cleanup. Prevents React "setState on unmounted component" warnings.
 - **Toast pattern for async browser downloads**: Call `const toastId = toast.loading("Preparing...")` before fetch. In the finally block (or on error/success), update the same toast with `toast.success("Downloaded", { id: toastId })` or `toast.warning(msg, { id: toastId })`. Pair with backend `X-Luminary-Warning` header: read `res.headers.get("x-luminary-warning")` and conditionally show warning toast.
+- **Accordion lazy-load with query gate**: when an accordion contains heavy sub-queries (e.g., Deck Health + Health Report panels), pass the parent's pre-loaded data (e.g., `cards`) and use TanStack Query `enabled: isOpen` gate on sub-queries. This defers expensive queries until the user opens the accordion and avoids double-fetching when the parent already has the data. Show a summary in the collapsed header (total items, percentage) from the parent data.
 
 ---
 

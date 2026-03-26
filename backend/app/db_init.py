@@ -305,4 +305,12 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
+        # S179: chunk_classification label for pre-generation classifier.
+        try:
+            await conn.execute(
+                text("ALTER TABLE flashcards ADD COLUMN chunk_classification TEXT")
+            )
+        except Exception:
+            pass  # Column already exists (idempotent)
+
     logger.info("Database tables and FTS5 index initialized")

@@ -130,6 +130,9 @@ class FlashcardModel(Base):
     source_content_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # S173: note_id FK for note-sourced cards; enables per-note coverage tracking
     note_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S179: chunk classifier label (concept/definition/example/analogy/narrative/transition);
+    # null for note/gap/context-sourced cards that bypass the classifier
+    chunk_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

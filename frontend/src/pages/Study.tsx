@@ -2390,228 +2390,228 @@ export default function Study() {
           <p className="text-sm text-muted-foreground">Select a document above to get started.</p>
         </div>
       ) : (
-      <>
-      {/* Sub-tab toggle */}
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
-        <button
-          onClick={() => setStudySubTab("flashcards")}
-          className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-            studySubTab === "flashcards"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Flashcards
-        </button>
-        <button
-          onClick={() => setStudySubTab("history")}
-          className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-            studySubTab === "history"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          History
-        </button>
-      </div>
-
-      {studySubTab === "history" ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold text-foreground">Session History</h2>
-          <SessionHistoryTab />
-        </section>
-      ) : (
-      <>
-      {/* S143: Section filter banner */}
-      {activeSectionFilter && (
-        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-          <span className="text-foreground">
-            Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
-          </span>
-          <button
-            onClick={() => setActiveSectionFilter(null)}
-            className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-            title="Clear section filter"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {/* Flashcards section */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
-
-        <SmartGeneratePanel
-          documentId={activeDocumentId}
-          sections={sections}
-          cards={cards}
-          onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
-          onRegenerate={handleRegenerate}
-          onGenerateFromGraph={(k) => {
-            setGenerateErrorKind(null)
-            generateFromGraphMutation.mutate(k)
-          }}
-          onGenerateCloze={(sectionId, count) => {
-            setGenerateErrorKind(null)
-            generateClozeMutation.mutate({ sectionId, count })
-          }}
-          isGenerating={
-            generateMutation.isPending ||
-            deleteAllMutation.isPending ||
-            generateFromGraphMutation.isPending
-          }
-          isClozeGenerating={generateClozeMutation.isPending}
-          preselectedSection={selectedGapSection}
-        />
-
-        {/* Inline generate error banners */}
-        {generateErrorKind === "ollama_offline" && (
-          <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <span className="flex-1">
-              Ollama is not running. To generate flashcards, run:{" "}
-              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
-            </span>
+        <>
+          {/* Sub-tab toggle */}
+          <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
             <button
-              onClick={() => void navigator.clipboard.writeText("ollama serve")}
-              className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-              title="Copy command"
+              onClick={() => setStudySubTab("flashcards")}
+              className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+                studySubTab === "flashcards"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
-              <Copy size={11} />
-              Copy
+              Flashcards
+            </button>
+            <button
+              onClick={() => setStudySubTab("history")}
+              className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+                studySubTab === "history"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              History
             </button>
           </div>
-        )}
-        {generateErrorKind === "server_error" && (
-          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            Flashcard generation failed. Please try again.
-          </div>
-        )}
 
-        {/* Filter bar — only shown when there are cards with type/level data */}
-        {cards.length > 0 && (
-          <FilterBar
-            filterType={filterType}
-            filterBloomMin={filterBloomMin}
-            filterBloomMax={filterBloomMax}
-            onTypeChange={setFilterType}
-            onBloomMinChange={setFilterBloomMin}
-            onBloomMaxChange={setFilterBloomMax}
-            onClear={() => { setFilterType(null); setFilterBloomMin(1); setFilterBloomMax(6) }}
-          />
-        )}
+          {studySubTab === "history" ? (
+            <section className="flex flex-col gap-4">
+              <h2 className="text-lg font-semibold text-foreground">Session History</h2>
+              <SessionHistoryTab />
+            </section>
+          ) : (
+            <>
+              {/* S143: Section filter banner */}
+              {activeSectionFilter && (
+                <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                  <span className="text-foreground">
+                    Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
+                  </span>
+                  <button
+                    onClick={() => setActiveSectionFilter(null)}
+                    className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                    title="Clear section filter"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+              {/* Flashcards section */}
+              <section className="flex flex-col gap-4">
+                <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
 
-        {cardsLoading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-            <Loader2 size={24} className="animate-spin" />
-            <span className="text-sm">Loading your cards...</span>
-          </div>
-        ) : cardsError ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            Failed to load flashcards. Please try refreshing.
-          </div>
-        ) : cards.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <p className="text-sm text-muted-foreground">
-              No flashcards yet -- click Smart Generate to create some
-            </p>
-          </div>
-        ) : (() => {
-          const filteredCards = cards.filter((c) => {
-            const typeMatch = filterType === null || c.flashcard_type === filterType
-            const bloomMatch =
-              c.bloom_level == null ||
-              (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
-            return typeMatch && bloomMatch
-          })
-          if (filteredCards.length === 0) {
-            return (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <p className="text-sm text-muted-foreground">
-                  No cards match the selected type/level filters. Try adjusting the filter.
-                </p>
-              </div>
-            )
-          }
-          return (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {filteredCards.map((card) => (
-                <FlashcardCard
-                  key={card.id}
-                  card={card}
-                  onUpdate={(id, data) => updateMutation.mutate({ id, data })}
-                  onDelete={(id) => deleteMutation.mutate(id)}
-                  isUpdating={updateMutation.isPending}
-                  isDeleting={deleteMutation.isPending}
+                <SmartGeneratePanel
+                  documentId={activeDocumentId}
+                  sections={sections}
+                  cards={cards}
+                  onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
+                  onRegenerate={handleRegenerate}
+                  onGenerateFromGraph={(k) => {
+                    setGenerateErrorKind(null)
+                    generateFromGraphMutation.mutate(k)
+                  }}
+                  onGenerateCloze={(sectionId, count) => {
+                    setGenerateErrorKind(null)
+                    generateClozeMutation.mutate({ sectionId, count })
+                  }}
+                  isGenerating={
+                    generateMutation.isPending ||
+                    deleteAllMutation.isPending ||
+                    generateFromGraphMutation.isPending
+                  }
+                  isClozeGenerating={generateClozeMutation.isPending}
+                  preselectedSection={selectedGapSection}
                 />
-              ))}
-            </div>
-          )
-        })()}
 
-        {/* Bottom bar */}
-        {cards.length > 0 && (
-          <div className="flex items-center gap-3 border-t border-border pt-4">
-            <span className="text-sm text-muted-foreground">
-              {(() => {
-                const filteredCount = cards.filter((c) => {
-                  const typeMatch = filterType === null || c.flashcard_type === filterType
-                  const bloomMatch =
-                    c.bloom_level == null ||
-                    (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
-                  return typeMatch && bloomMatch
-                }).length
-                const total = cards.length
-                return filteredCount === total
-                  ? `${total} card${total !== 1 ? "s" : ""}`
-                  : `${filteredCount} of ${total} card${total !== 1 ? "s" : ""}`
-              })()}
-            </span>
-            <div className="ml-auto flex gap-2">
-              <button
-                onClick={handleExportCsv}
-                className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <Download size={14} />
-                Export CSV
-              </button>
-              <button
-                onClick={() => setStudying(true)}
-                className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                <PlayCircle size={14} />
-                Start Studying
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+                {/* Inline generate error banners */}
+                {generateErrorKind === "ollama_offline" && (
+                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <span className="flex-1">
+                      Ollama is not running. To generate flashcards, run:{" "}
+                      <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
+                    </span>
+                    <button
+                      onClick={() => void navigator.clipboard.writeText("ollama serve")}
+                      className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                      title="Copy command"
+                    >
+                      <Copy size={11} />
+                      Copy
+                    </button>
+                  </div>
+                )}
+                {generateErrorKind === "server_error" && (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Flashcard generation failed. Please try again.
+                  </div>
+                )}
 
-      {/* Deck Status accordion (S178) -- merged Bloom audit + health report, collapsed by default */}
-      <DeckStatusAccordion documentId={activeDocumentId} cards={cards} />
+                {/* Filter bar — only shown when there are cards with type/level data */}
+                {cards.length > 0 && (
+                  <FilterBar
+                    filterType={filterType}
+                    filterBloomMin={filterBloomMin}
+                    filterBloomMax={filterBloomMax}
+                    onTypeChange={setFilterType}
+                    onBloomMinChange={setFilterBloomMin}
+                    onBloomMaxChange={setFilterBloomMax}
+                    onClear={() => { setFilterType(null); setFilterBloomMin(1); setFilterBloomMax(6) }}
+                  />
+                )}
 
-      {/* Weak Areas panel */}
-      <WeakAreasPanel
-        documentId={activeDocumentId}
-        onSelectSection={(heading) => {
-          setSelectedGapSection(heading)
-          // Scroll to top to reveal pre-scoped SmartGeneratePanel
-          window.scrollTo({ top: 0, behavior: "smooth" })
-        }}
-      />
+                {cardsLoading ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+                    <Loader2 size={24} className="animate-spin" />
+                    <span className="text-sm">Loading your cards...</span>
+                  </div>
+                ) : cardsError ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Failed to load flashcards. Please try refreshing.
+                  </div>
+                ) : cards.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      No flashcards yet -- click Smart Generate to create some
+                    </p>
+                  </div>
+                ) : (() => {
+                  const filteredCards = cards.filter((c) => {
+                    const typeMatch = filterType === null || c.flashcard_type === filterType
+                    const bloomMatch =
+                      c.bloom_level == null ||
+                      (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
+                    return typeMatch && bloomMatch
+                  })
+                  if (filteredCards.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          No cards match the selected type/level filters. Try adjusting the filter.
+                        </p>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {filteredCards.map((card) => (
+                        <FlashcardCard
+                          key={card.id}
+                          card={card}
+                          onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                          onDelete={(id) => deleteMutation.mutate(id)}
+                          isUpdating={updateMutation.isPending}
+                          isDeleting={deleteMutation.isPending}
+                        />
+                      ))}
+                    </div>
+                  )
+                })()}
 
-      {/* Struggling Cards panel */}
-      <StrugglingPanel documentId={activeDocumentId} />
+                {/* Bottom bar */}
+                {cards.length > 0 && (
+                  <div className="flex items-center gap-3 border-t border-border pt-4">
+                    <span className="text-sm text-muted-foreground">
+                      {(() => {
+                        const filteredCount = cards.filter((c) => {
+                          const typeMatch = filterType === null || c.flashcard_type === filterType
+                          const bloomMatch =
+                            c.bloom_level == null ||
+                            (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
+                          return typeMatch && bloomMatch
+                        }).length
+                        const total = cards.length
+                        return filteredCount === total
+                          ? `${total} card${total !== 1 ? "s" : ""}`
+                          : `${filteredCount} of ${total} card${total !== 1 ? "s" : ""}`
+                      })()}
+                    </span>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        onClick={handleExportCsv}
+                        className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <Download size={14} />
+                        Export CSV
+                      </button>
+                      <button
+                        onClick={() => setStudying(true)}
+                        className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                      >
+                        <PlayCircle size={14} />
+                        Start Studying
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
 
-      {/* Progress dashboard (S23b) — Recharts loaded lazily via dynamic import */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-foreground">Progress</h2>
-        <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>
-          <ProgressDashboard documentId={activeDocumentId} />
-        </Suspense>
-      </section>
-      </>
-      )}
-      </>
+              {/* Deck Status accordion (S178) -- merged Bloom audit + health report, collapsed by default */}
+              <DeckStatusAccordion documentId={activeDocumentId} cards={cards} />
+
+              {/* Weak Areas panel */}
+              <WeakAreasPanel
+                documentId={activeDocumentId}
+                onSelectSection={(heading) => {
+                  setSelectedGapSection(heading)
+                  // Scroll to top to reveal pre-scoped SmartGeneratePanel
+                  window.scrollTo({ top: 0, behavior: "smooth" })
+                }}
+              />
+
+              {/* Struggling Cards panel */}
+              <StrugglingPanel documentId={activeDocumentId} />
+
+              {/* Progress dashboard (S23b) — Recharts loaded lazily via dynamic import */}
+              <section className="flex flex-col gap-4">
+                <h2 className="text-lg font-semibold text-foreground">Progress</h2>
+                <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>
+                  <ProgressDashboard documentId={activeDocumentId} />
+                </Suspense>
+              </section>
+            </>
+          )}
+        </>
       )}
     </div>
   )

@@ -432,6 +432,192 @@ def _parse_cloze_llm_response(raw: str) -> list[dict]:
     return valid
 
 
+# ---------------------------------------------------------------------------
+# S179: Chunk classifier and genre-aware prompt helpers
+# ---------------------------------------------------------------------------
+
+_ANALOGY_PATTERNS = re.compile(
+    r"\b(like a|similar to|imagine|think of it as|is like|just as|as if|as though"
+    r"|analogous to|metaphor|by analogy)\b",
+    re.IGNORECASE,
+)
+_EXAMPLE_PATTERNS = re.compile(
+    r"\b(for example|for instance|e\.g\.|consider this|such as|to illustrate"
+    r"|as an example|as a case)\b",
+    re.IGNORECASE,
+)
+_DEFINITION_PATTERNS = re.compile(
+    r"(is defined as|refers to|means that|is the process of|is a term|"
+    r"can be defined|:\s*a\s+\w|:\s*the\s+\w)",
+    re.IGNORECASE,
+)
+_CONCEPT_PATTERNS = re.compile(
+    r"\b(therefore|as a result|the key idea|the principle|this means|the reason"
+    r"|this enables|this causes|the mechanism|the implication|the effect|"
+    r"crucially|fundamentally|essentially)\b",
+    re.IGNORECASE,
+)
+_TRANSITION_PATTERNS = re.compile(
+    r"\b(in the next|in the following|as we saw|moving on|in summary|"
+    r"to recap|we have seen|in this chapter)\b",
+    re.IGNORECASE,
+)
+
+_TECH_TITLE_KEYWORDS = re.compile(
+    r"\b(programming|systems|distributed|database|algorithm|machine learning"
+    r"|software|engineering|computer|kubernetes|docker|linux|network|security"
+    r"|data structures|operating system)\b",
+    re.IGNORECASE,
+)
+
+_CHUNK_CLASSIFICATION_LABELS = frozenset(
+    {"concept", "definition", "example", "analogy", "narrative", "transition"}
+)
+_ELIGIBLE_LABELS = frozenset({"concept", "definition"})
+
+
+def _classify_chunk(text: str) -> str:
+    """Classify a chunk of text into one of six categories.
+
+    Rules applied in order -- first match wins:
+      definition > concept > analogy > example > transition > narrative
+    """
+    if _DEFINITION_PATTERNS.search(text):
+        return "definition"
+    if _CONCEPT_PATTERNS.search(text):
+        return "concept"
+    if _ANALOGY_PATTERNS.search(text):
+        return "analogy"
+    if _EXAMPLE_PATTERNS.search(text):
+        return "example"
+    if len(text.strip()) < 80 or _TRANSITION_PATTERNS.search(text):
+        return "transition"
+    return "narrative"
+
+
+def _filter_chunks_by_classification(
+    chunks: list[ChunkModel],
+) -> list[tuple[ChunkModel, str]]:
+    """Return (chunk, label) pairs for chunks eligible for flashcard generation.
+
+    Eligible: concept or definition chunks, plus any immediately adjacent
+    example/analogy chunk that elaborates a concept/definition chunk.
+    """
+    if not chunks:
+        return []
+
+    labels = [_classify_chunk(c.text) for c in chunks]
+    eligible_indices: set[int] = set()
+
+    for i, label in enumerate(labels):
+        if label in _ELIGIBLE_LABELS:
+            eligible_indices.add(i)
+            # Adjacent elaborators
+            if i > 0 and labels[i - 1] in ("example", "analogy"):
+                eligible_indices.add(i - 1)
+            if i < len(chunks) - 1 and labels[i + 1] in ("example", "analogy"):
+                eligible_indices.add(i + 1)
+
+    return [(chunks[i], labels[i]) for i in sorted(eligible_indices)]
+
+
+def _infer_genre(doc: "DocumentModel | None") -> str:  # type: ignore[name-defined]
+    """Infer document genre for system prompt tuning."""
+    if doc is None:
+        return "narrative"
+    content_type = (doc.content_type or "").lower()
+    title = (doc.title or "").lower()
+    if content_type == "book":
+        if _TECH_TITLE_KEYWORDS.search(title):
+            return "technical"
+        return "non-fiction"
+    if content_type in ("pdf", "web"):
+        return "academic"
+    return "narrative"
+
+
+def _build_genre_system_prompt(genre: str) -> str:
+    """Build a genre-aware flashcard generation system prompt."""
+    genre_hint = (
+        f"This is a {genre} document. "
+        if genre != "narrative"
+        else ""
+    )
+    quality_rules = (
+        "QUALITY RULES for concept-focused questions:\n"
+        "- Do NOT write questions whose answer is a proper noun drawn from an analogy or "
+        "illustrative story used to explain a concept (e.g., do not ask 'What animal did the "
+        "author compare X to?').\n"
+        "- Questions must be answerable by someone who understands the underlying concept but "
+        "has NOT read the specific analogy or illustration.\n"
+        "- Prefer 'Explain X in your own words' and 'What is the practical implication of Y' "
+        "over 'According to the text, what does Z do'.\n"
+        "- Frame questions in terms of WHY or HOW, not WHAT was mentioned in an example.\n"
+    )
+    return (
+        genre_hint
+        + "You are a learning assistant creating flashcards for active recall. "
+        "Generate questions that test understanding of core concepts and principles. "
+        "Prefer questions that: (1) ask the learner to explain a concept in their own words, "
+        "(2) apply a concept to a new situation, "
+        "(3) distinguish between similar concepts, "
+        "or (4) evaluate a claim or argument. "
+        "AVOID: trivia questions about exact wording, hypothetical questions not grounded "
+        "in the content, questions whose answer is not in the text, yes/no questions. "
+        "CRITICAL -- questions must be fully self-contained. "
+        "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
+        "'in this book', 'in this document', or any similar reference to the source material. "
+        "A flashcard question must make complete sense on its own without seeing the original"
+        " text. "
+        + quality_rules
+        + "Output a JSON array starting with [ and ending with ]. "
+        "Write no explanation, preamble, or markdown fences."
+    )
+
+
+def _compute_cosine(v1: list[float], v2: list[float]) -> float:
+    """Cosine similarity for L2-normalised vectors (dot product suffices)."""
+    import numpy as np  # noqa: PLC0415
+
+    a = np.asarray(v1, dtype=np.float32)
+    b = np.asarray(v2, dtype=np.float32)
+    return float(np.dot(a, b))
+
+
+async def _dedup_check(question: str, deck: str, session: AsyncSession) -> bool:
+    """Return True if *question* is a near-duplicate of an existing card in *deck*.
+
+    Embeds the candidate question and compares against all existing questions in
+    the same deck. If any cosine similarity >= 0.85, the card is a duplicate.
+    """
+    from app.services.embedder import get_embedding_service  # noqa: PLC0415
+
+    # Fetch existing questions in the same deck
+    result = await session.execute(
+        select(FlashcardModel.question).where(FlashcardModel.deck == deck)
+    )
+    existing_questions = [row[0] for row in result.all()]
+    if not existing_questions:
+        return False
+
+    embedder = get_embedding_service()
+    all_texts = [question] + existing_questions
+    try:
+        all_vectors = await asyncio.to_thread(embedder.encode, all_texts)
+    except Exception:
+        logger.warning("Embedding dedup failed; skipping dedup check", exc_info=True)
+        return False
+
+    candidate_vec = all_vectors[0]
+    for existing_vec in all_vectors[1:]:
+        if _compute_cosine(candidate_vec, existing_vec) >= 0.85:
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+
+
 class FlashcardService:
     async def generate(
         self,
@@ -458,7 +644,12 @@ class FlashcardService:
         doc = doc_result.scalar_one_or_none()
         content_type = doc.content_type if doc else "unknown"
 
-        # When the caller supplies selected text, use it directly.
+        # S179: infer genre for genre-aware system prompt
+        genre = _infer_genre(doc)
+        system_prompt = _build_genre_system_prompt(genre)
+
+        # When the caller supplies selected text, use it directly (bypass classifier).
+        chunk_classification: str | None = None
         if context and context.strip():
             combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
             # Still need a chunk_id (NOT NULL) — grab the first chunk for the document.
@@ -474,7 +665,26 @@ class FlashcardService:
             if not chunks:
                 return []
 
-            combined_text, first_chunk_id = _build_text(chunks)
+            # S179: classify chunks and filter to concept/definition (+ adjacent elaborators)
+            classified = _filter_chunks_by_classification(chunks)
+            if classified:
+                eligible_chunks = [c for c, _ in classified]
+                chunk_classification = classified[0][1]  # dominant label of first chunk
+                logger.info(
+                    "flashcard.generate: %d/%d chunks eligible after classification (genre=%s)",
+                    len(eligible_chunks),
+                    len(chunks),
+                    genre,
+                )
+            else:
+                # Safety net: no chunks classified as concept/definition -- use all chunks
+                eligible_chunks = chunks
+                logger.info(
+                    "flashcard.generate: no concept/definition chunks found, using all %d chunks",
+                    len(chunks),
+                )
+
+            combined_text, first_chunk_id = _build_text(eligible_chunks)
             if not combined_text:
                 return []
 
@@ -501,7 +711,7 @@ class FlashcardService:
             if section_heading:
                 span.set_attribute("flashcard.section_heading", section_heading)
 
-            raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
+            raw = await llm.generate(prompt, system=system_prompt, stream=False)
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
@@ -514,6 +724,13 @@ class FlashcardService:
             answer = str(item.get("answer", "")).strip()
             source_excerpt = str(item.get("source_excerpt", "")).strip()
             if not question or not answer:
+                continue
+            # S179: embedding-based dedup -- skip near-duplicates (cosine >= 0.85)
+            if await _dedup_check(question, "default", session):
+                logger.info(
+                    "flashcard.generate: skipping near-duplicate question: %r",
+                    question[:80],
+                )
                 continue
             card = FlashcardModel(
                 id=str(uuid.uuid4()),
@@ -530,6 +747,7 @@ class FlashcardService:
                 reps=0,
                 lapses=0,
                 created_at=now,
+                chunk_classification=chunk_classification,
             )
             session.add(card)
             flashcards.append(card)
