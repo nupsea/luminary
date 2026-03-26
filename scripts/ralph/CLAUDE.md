@@ -47,6 +47,7 @@ You are an autonomous coding agent implementing Luminary stories.
 
 12. When all gates pass, smoke exits 0, and reviewer returns no Critical items:
     - Set `passes: true` for this story in the PRD
+    - Update `docs/ralph-run-flow.md`: in the story status table, change 'pending' to 'pass' for this story ID
     - Commit ALL changes: `feat: <STORY_ID> - <Story Title>`
     - Move `docs/exec-plans/active/<STORY_ID>.md` to `docs/exec-plans/completed/`
 
