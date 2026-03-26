@@ -27,6 +27,7 @@ import {
   Plus,
   Trash2,
   X,
+  Zap,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import {
@@ -66,6 +67,11 @@ async function fetchDocList(): Promise<DocListItem[]> {
 }
 
 import { API_BASE } from "@/lib/config"
+import {
+  computeMasteryPct,
+  getDeckDisplayName,
+  selectSmartMode,
+} from "@/lib/studyUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1125,6 +1131,42 @@ function WeakAreasPanel({ documentId, onSelectSection }: WeakAreasPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// DeckStatusAccordion (S178) -- merged DeckHealthPanel + HealthReportPanel
+// ---------------------------------------------------------------------------
+
+interface DeckStatusAccordionProps {
+  documentId: string
+  cards: Flashcard[]
+}
+
+function DeckStatusAccordion({ documentId, cards }: DeckStatusAccordionProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const totalCards = cards.length
+  const masteredPct = Math.round(computeMasteryPct(cards))
+
+  return (
+    <section className="flex flex-col gap-2 rounded-md border border-border bg-card p-4">
+      <button
+        className="flex items-center justify-between text-left"
+        onClick={() => setIsOpen((v) => !v)}
+      >
+        <span className="text-base font-semibold text-foreground">
+          Deck Status ({totalCards} card{totalCards !== 1 ? "s" : ""}, {masteredPct}% mastered)
+        </span>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+
+      {isOpen && (
+        <div className="flex flex-col gap-4 pt-2">
+          <DeckHealthPanel documentId={documentId} />
+          <HealthReportPanel documentId={documentId} />
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // GeneratePanel
 // ---------------------------------------------------------------------------
 
@@ -1442,6 +1484,123 @@ function GeneratePanel({
           </button>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SmartGeneratePanel (S178) -- single Smart Generate button with advanced options
+// ---------------------------------------------------------------------------
+
+const SMART_MODE_LABEL: Record<string, string> = {
+  basic: "basic cards",
+  feynman: "Feynman-style questions",
+  cloze: "cloze cards",
+}
+
+const SMART_MODE_HINT: Record<string, string> = {
+  basic: "Building foundations (< 30% mastered)",
+  feynman: "Deepening comprehension (30-70% mastered)",
+  cloze: "Retrieval practice (>= 70% mastered)",
+}
+
+interface SmartGeneratePanelProps {
+  documentId: string
+  sections: SectionItem[]
+  cards: Flashcard[]
+  onGenerate: (req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+    difficulty: "easy" | "medium" | "hard"
+  }) => void
+  onRegenerate: (req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+    difficulty: "easy" | "medium" | "hard"
+  }) => void
+  onGenerateFromGraph: (k: number) => void
+  onGenerateCloze: (sectionId: string, count: number) => void
+  isGenerating: boolean
+  isClozeGenerating: boolean
+  preselectedSection?: string | null
+}
+
+function SmartGeneratePanel({
+  documentId,
+  sections,
+  cards,
+  onGenerate,
+  onRegenerate,
+  onGenerateFromGraph,
+  onGenerateCloze,
+  isGenerating,
+  isClozeGenerating,
+  preselectedSection,
+}: SmartGeneratePanelProps) {
+  const masteryPct = computeMasteryPct(cards)
+  const smartMode = selectSmartMode(masteryPct)
+  const isAnyGenerating = isGenerating || isClozeGenerating
+
+  function handleSmartGenerate() {
+    if (smartMode === "feynman") {
+      onGenerateFromGraph(5)
+    } else if (smartMode === "cloze") {
+      const firstSection = sections[0]
+      if (firstSection) {
+        onGenerateCloze(firstSection.id, 5)
+      } else {
+        // no sections available -- fall back to basic
+        onGenerate({ scope: "full", section_heading: null, count: 10, difficulty: "medium" })
+      }
+    } else {
+      onGenerate({ scope: "full", section_heading: null, count: 10, difficulty: "medium" })
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
+      {/* Smart Generate button */}
+      <div className="flex flex-col gap-1.5">
+        <button
+          onClick={handleSmartGenerate}
+          disabled={isAnyGenerating}
+          className="flex w-fit items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {isAnyGenerating ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Zap size={14} />
+          )}
+          Smart Generate
+        </button>
+        <span className="text-xs text-muted-foreground">
+          {isAnyGenerating
+            ? `Generating ${SMART_MODE_LABEL[smartMode]}...`
+            : SMART_MODE_HINT[smartMode]}
+        </span>
+      </div>
+
+      {/* Advanced options disclosure */}
+      <details>
+        <summary className="cursor-pointer select-none text-sm text-muted-foreground hover:text-foreground">
+          Advanced options
+        </summary>
+        <div className="pt-3">
+          <GeneratePanel
+            documentId={documentId}
+            sections={sections}
+            onGenerate={onGenerate}
+            onRegenerate={onRegenerate}
+            onGenerateFromGraph={onGenerateFromGraph}
+            onGenerateCloze={onGenerateCloze}
+            isGenerating={isGenerating}
+            isClozeGenerating={isClozeGenerating}
+            preselectedSection={preselectedSection}
+          />
+        </div>
+      </details>
     </div>
   )
 }

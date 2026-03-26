@@ -120,37 +120,9 @@ async function fetchDocumentList(): Promise<DocumentItem[]> {
   return Array.isArray(data) ? data : (data.items ?? [])
 }
 
-async function createNote(payload: {
-  content: string
-  tags: string[]
-  document_id: string | null
-  source_document_ids?: string[]
-}): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
-
 async function deleteNote(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
   if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
-}
-
-async function patchNote(
-  id: string,
-  data: { content?: string; tags?: string[]; group_name?: string },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
-  return res.json() as Promise<Note>
 }
 
 async function fetchClips(documentId?: string): Promise<Clip[]> {
@@ -233,17 +205,6 @@ async function rejectSuggestion(id: string): Promise<{ ok: boolean }> {
   const res = await fetch(`${API_BASE}/notes/cluster/suggestions/${id}/reject`, { method: "POST" })
   if (!res.ok) throw new Error(`POST /notes/cluster/suggestions/${id}/reject failed: ${res.status}`)
   return res.json() as Promise<{ ok: boolean }>
-}
-
-async function fetchSuggestedTags(id: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
-    if (!res.ok) return []
-    const data = (await res.json()) as { tags: string[] }
-    return data.tags ?? []
-  } catch {
-    return []
-  }
 }
 
 interface NoteSearchItem {
@@ -538,150 +499,6 @@ function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navi
 }
 
 // ---------------------------------------------------------------------------
-// CreateNoteForm
-// ---------------------------------------------------------------------------
-
-interface CreateNoteFormProps {
-  documents: DocumentItem[]
-  onClose: () => void
-  onCreated: () => void
-  activeCollectionId?: string | null
-}
-
-function CreateNoteForm({ documents, onClose, onCreated, activeCollectionId }: CreateNoteFormProps) {
-  const [content, setContent] = useState("")
-  const [tagsRaw, setTagsRaw] = useState("")
-  const [docId, setDocId] = useState<string>("")
-  const [createTab, setCreateTab] = useState<"write" | "preview">("write")
-  const createTaRef = useRef<HTMLTextAreaElement>(null)
-  const qc = useQueryClient()
-
-  const adjustCreateHeight = useCallback(() => {
-    const ta = createTaRef.current
-    if (!ta) return
-    ta.style.height = "auto"
-    ta.style.height = `${ta.scrollHeight}px`
-  }, [])
-
-  const createMut = useMutation({
-    mutationFn: () =>
-      createNote({
-        content,
-        tags: tagsRaw
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
-        document_id: docId || null,
-      }),
-    onSuccess: (created: Note) => {
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-      // If we're inside a collection, add the new note to it immediately
-      if (activeCollectionId) {
-        void fetch(`${API_BASE}/collections/${activeCollectionId}/notes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ note_ids: [created.id] }),
-        }).then(() => {
-          void qc.invalidateQueries({ queryKey: ["notes"] })
-        })
-      }
-      onCreated()
-      onClose()
-      // Fire-and-forget: suggest tags and silently patch the new note
-      void fetchSuggestedTags(created.id).then(async (suggestions) => {
-        if (suggestions.length > 0) {
-          try {
-            await patchNote(created.id, { tags: suggestions })
-            void qc.invalidateQueries({ queryKey: ["notes"] })
-          } catch {
-            // Non-fatal -- note exists without tags
-          }
-        }
-      })
-    },
-  })
-
-  return (
-    <div className="mb-4 rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
-        <button
-          onClick={() => setCreateTab("write")}
-          className={`rounded px-2.5 py-1 font-medium transition-colors ${
-            createTab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Write
-        </button>
-        <button
-          onClick={() => setCreateTab("preview")}
-          className={`rounded px-2.5 py-1 font-medium transition-colors ${
-            createTab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Preview
-        </button>
-      </div>
-      {createTab === "write" ? (
-        <textarea
-          ref={createTaRef}
-          value={content}
-          onChange={(e) => { setContent(e.target.value); adjustCreateHeight() }}
-          placeholder="Write your note in Markdown..."
-          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      ) : (
-        <div className="min-h-[200px] rounded border border-border bg-background px-3 py-2">
-          {content ? (
-            <MarkdownRenderer>{content}</MarkdownRenderer>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
-          )}
-        </div>
-      )}
-      <input
-        type="text"
-        value={tagsRaw}
-        onChange={(e) => setTagsRaw(e.target.value)}
-        placeholder="Tags (comma-separated, optional)"
-        className="w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
-      <select
-        value={docId}
-        onChange={(e) => setDocId(e.target.value)}
-        className="w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      >
-        <option value="">No document</option>
-        {documents.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.title}
-          </option>
-        ))}
-      </select>
-      {createMut.isError && (
-        <p className="text-xs text-red-600">Failed to save note. Please try again.</p>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={() => createMut.mutate()}
-          disabled={!content.trim() || createMut.isPending}
-          className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Check size={11} />
-          Save
-        </button>
-        <button
-          onClick={onClose}
-          className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // NoteCard — card view; editing is delegated to NoteEditorDialog
 // ---------------------------------------------------------------------------
 
@@ -794,7 +611,7 @@ type FilterState =
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
-  const [showCreate, setShowCreate] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)
@@ -1088,7 +905,7 @@ export default function NotesPage() {
         <p className="text-base font-medium text-foreground">No notes yet</p>
         <p className="text-sm text-muted-foreground">Click + to create your first note.</p>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={() => setIsCreating(true)}
           className="flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
         >
           <Plus size={14} />
@@ -1387,7 +1204,7 @@ export default function NotesPage() {
                 Generate Flashcards
               </button>
               <button
-                onClick={() => setShowCreate((v) => !v)}
+                onClick={() => setIsCreating(true)}
                 className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
                 title="New note"
               >
@@ -1398,26 +1215,35 @@ export default function NotesPage() {
           )}
         </div>
 
-        {/* Create form — hidden in Reading Journal view */}
-        {showCreate && filter.type !== "journal" && (
-          <CreateNoteForm
-            documents={documents}
-            onClose={() => setShowCreate(false)}
-            onCreated={handleRefetch}
-            activeCollectionId={activeCollectionId}
-          />
-        )}
-
         {panelContent}
       </div>
 
-      {/* NoteReaderSheet — rendered once at page level */}
+      {/* NoteReaderSheet — rendered once at page level for both View and Create */}
       <NoteReaderSheet
         note={editingNote}
+        isNew={isCreating}
         documents={documents}
-        onClose={() => setEditingNote(null)}
-        onSaved={() => {
+        onClose={() => {
+          setEditingNote(null)
+          setIsCreating(false)
+        }}
+        onSaved={(savedNote) => {
           void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          
+          if (isCreating && activeCollectionId) {
+            // If we're inside a collection, add the new note to it immediately
+            void fetch(`${API_BASE}/collections/${activeCollectionId}/notes`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ note_ids: [savedNote.id] }),
+            }).then(() => {
+              void qc.invalidateQueries({ queryKey: ["notes"] })
+            })
+          }
+
+          setEditingNote(savedNote)
+          setIsCreating(false)
         }}
       />
 
