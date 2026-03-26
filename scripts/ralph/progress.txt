@@ -1971,3 +1971,24 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - IIFE pattern `{(() => { ... return items.map(...) })()}` for computing derived variables (decksPerDoc) inline in JSX without polluting component scope -- useful when a derived Map is only needed in one render block.
   - DeckStatusAccordion must receive `cards` prop (computed in parent) to show X cards / Y% mastered in the header -- do not load cards again inside the accordion.
 ---
+
+## 2026-03-26T13:00:00Z - S179 - Context-aware flashcard generation: chunk classification, genre-aware prompts
+- What was implemented:
+  - _classify_chunk() heuristic (regex-based, 6 categories: concept/definition/example/analogy/narrative/transition)
+  - _filter_chunks_by_classification() -- returns concept/definition chunks + adjacent elaborators
+  - _infer_genre() -- inspects content_type + title keywords (technical/academic/non-fiction/narrative)
+  - _build_genre_system_prompt() -- genre hint + quality rules (no analogy-sourced answers, why/how framing)
+  - _compute_cosine() + _dedup_check() -- embedding-based dedup using bge-small-en-v1.5 (384-dim, L2-normalised, dot product)
+  - FlashcardModel.chunk_classification nullable field + ALTER TABLE migration
+  - FlashcardResponse.chunk_classification added to Pydantic response schema
+  - FlashcardService.generate() wired with classifier, genre-aware prompt, dedup
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/flashcard.py, backend/app/routers/flashcards.py, backend/tests/test_flashcard_s179.py (new), scripts/smoke/S179.sh (new)
+- **Learnings for future iterations:**
+  - Definition patterns match before concept patterns -- check for "means that" (substrings of "This means that") in content before assuming a chunk is concept-only; order of classifier rules matters
+  - _fetch_chunks for content_type="book" skips first max(1, n//20) chunks to skip preface -- tests with only 1 chunk will return empty; always add 2+ chunks in book flashcard tests
+  - Lazy imports inside helper functions (e.g. _dedup_check) use source module as patch target: patch "app.services.embedder.get_embedding_service" not "app.services.flashcard.get_embedding_service"
+  - asyncio.to_thread in tests: patch "asyncio.to_thread" globally with AsyncMock(return_value=...) -- simpler than patching the embedder and avoids thread pool in tests
+  - Smoke on macOS: BSD head does not support "head -n -1"; use mktemp + curl -o $TMPFILE to capture response body separately from HTTP code
+  - Smoke HTTP code: POST /flashcards/generate returns 201 not 200; check for 200 or 201
+  - Reviewer Warning (deferred): _dedup_check hardcoded deck="default" -- valid today since generate() stores with ORM default="default"; will need update if generate() gains deck parameter
+---

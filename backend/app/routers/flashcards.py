@@ -137,6 +137,8 @@ class FlashcardResponse(BaseModel):
     section_id: str | None = None
     # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
     cloze_text: str | None = None
+    # S179: chunk classifier label; null for non-document-chunk cards
+    chunk_classification: str | None = None
 
     model_config = {"from_attributes": True}
 
