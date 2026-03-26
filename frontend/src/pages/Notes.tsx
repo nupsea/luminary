@@ -59,6 +59,8 @@ interface Note {
   tags: string[]
   group_name: string | null
   collection_ids: string[]
+  // S175: multi-document source linkage
+  source_document_ids: string[]
   created_at: string
   updated_at: string
 }
@@ -121,6 +123,7 @@ async function createNote(payload: {
   content: string
   tags: string[]
   document_id: string | null
+  source_document_ids?: string[]
 }): Promise<Note> {
   const res = await fetch(`${API_BASE}/notes`, {
     method: "POST",

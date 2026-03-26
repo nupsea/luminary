@@ -720,6 +720,26 @@ class NoteLinkModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class NoteSourceModel(Base):
+    """Pivot table: maps notes to source documents (many-to-many).
+
+    NoteModel.document_id (single nullable FK) is kept for backward compatibility.
+    New multi-document source linkage is stored here.
+    Composite PK (note_id, document_id) enforces uniqueness without a surrogate key.
+    note_id has FK+cascade; document_id is a plain string (matching NoteModel.document_id
+    pattern -- no FK to documents to avoid constraint failures when documents are deleted
+    asynchronously or in test scenarios).
+    """
+
+    __tablename__ = "note_sources"
+
+    note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True
+    )
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 

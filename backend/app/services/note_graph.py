@@ -38,14 +38,16 @@ class NoteGraphService:
         content: str,
         document_id: str | None,
         tags: list[str],
+        source_document_ids: list[str] | None = None,
     ) -> None:
         """Upsert Note node and all associated edges.
 
         Steps:
         1. Upsert Note node (id = note_id, preview = first 200 chars).
         2. If document_id provided and Document node exists: upsert DERIVED_FROM edge.
-        3. Run GLiNER on content; for each extracted entity found in Kuzu: upsert WRITTEN_ABOUT.
-        4. For each tag: if Entity with matching name exists: upsert TAG_IS_CONCEPT.
+        3. For each source_document_id in source_document_ids: upsert DERIVED_FROM edge (S175).
+        4. Run GLiNER on content; for each extracted entity found in Kuzu: upsert WRITTEN_ABOUT.
+        5. For each tag: if Entity with matching name exists: upsert TAG_IS_CONCEPT.
 
         This method is called as asyncio.create_task (fire-and-forget) from notes.py.
         Body wrapped in try/except so failures are logged but never propagate.
@@ -57,6 +59,7 @@ class NoteGraphService:
                 content,
                 document_id,
                 tags,
+                source_document_ids or [],
             )
         except Exception as exc:
             logger.warning("upsert_note_node failed (non-fatal): %s", exc, exc_info=True)
@@ -67,6 +70,7 @@ class NoteGraphService:
         content: str,
         document_id: str | None,
         tags: list[str],
+        source_document_ids: list[str] | None = None,
     ) -> None:
         from app.services.graph import get_graph_service  # noqa: PLC0415
 
@@ -79,7 +83,8 @@ class NoteGraphService:
 
         with gs._lock:
             self._upsert_note_node_locked(
-                gs._conn, note_id, content, document_id, tags, entities
+                gs._conn, note_id, content, document_id, tags, entities,
+                source_document_ids or [],
             )
 
     def _extract_entities(
@@ -107,6 +112,7 @@ class NoteGraphService:
         document_id: str | None,
         tags: list[str],
         entities: list[dict],
+        source_document_ids: list[str] | None = None,
     ) -> None:
         """Execute all Kuzu writes. Caller must hold gs._lock."""
         preview = content[:200]
@@ -134,7 +140,7 @@ class NoteGraphService:
                 },
             )
 
-        # 2. DERIVED_FROM edge
+        # 2. DERIVED_FROM edge for legacy document_id
         if document_id:
             doc_result = conn.execute(
                 "MATCH (d:Document {id: $did}) RETURN d.id",
@@ -152,6 +158,28 @@ class NoteGraphService:
                         "MATCH (n:Note {id: $nid}), (d:Document {id: $did})"
                         " CREATE (n)-[:DERIVED_FROM]->(d)",
                         {"nid": note_id, "did": document_id},
+                    )
+
+        # 2b. S175: DERIVED_FROM edges for each NoteSourceModel row
+        for src_doc_id in source_document_ids or []:
+            # Skip if same as legacy document_id (already handled above to avoid duplicate)
+            if src_doc_id == document_id:
+                continue
+            src_result = conn.execute(
+                "MATCH (d:Document {id: $did}) RETURN d.id",
+                {"did": src_doc_id},
+            )
+            if src_result.has_next():
+                src_edge = conn.execute(
+                    "MATCH (n:Note {id: $nid})-[:DERIVED_FROM]->(d:Document {id: $did})"
+                    " RETURN n.id",
+                    {"nid": note_id, "did": src_doc_id},
+                )
+                if not src_edge.has_next():
+                    conn.execute(
+                        "MATCH (n:Note {id: $nid}), (d:Document {id: $did})"
+                        " CREATE (n)-[:DERIVED_FROM]->(d)",
+                        {"nid": note_id, "did": src_doc_id},
                     )
 
         # 3. WRITTEN_ABOUT edges from pre-extracted entities

@@ -55,8 +55,16 @@ interface Note {
   tags: string[]
   group_name: string | null
   collection_ids: string[]
+  // S175: multi-document source linkage
+  source_document_ids: string[]
   created_at: string
   updated_at: string
+}
+
+interface DocumentItem {
+  id: string
+  title: string
+  status: string
 }
 
 interface NoteLinkItem {
@@ -78,7 +86,7 @@ interface NoteLinksResponse {
 
 async function patchNote(
   id: string,
-  data: { content?: string; tags?: string[]; group_name?: string },
+  data: { content?: string; tags?: string[]; group_name?: string; source_document_ids?: string[] },
 ): Promise<Note> {
   const res = await fetch(`${API_BASE}/notes/${id}`, {
     method: "PATCH",
@@ -87,6 +95,13 @@ async function patchNote(
   })
   if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
   return res.json() as Promise<Note>
+}
+
+async function fetchDocuments(): Promise<DocumentItem[]> {
+  const res = await fetch(`${API_BASE}/documents`)
+  if (!res.ok) return []
+  const docs = (await res.json()) as DocumentItem[]
+  return docs.filter((d) => d.status === "ready")
 }
 
 async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
@@ -181,6 +196,10 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(
     new Set(note?.collection_ids ?? []),
   )
+  // S175: source document IDs (multi-select)
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>(
+    note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []),
+  )
   // Link autocomplete state
   const [linkQuery, setLinkQuery] = useState<string | null>(null)
   const qc = useQueryClient()
@@ -195,6 +214,14 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     enabled: note !== null,
   })
   const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
+
+  // S175: documents list for source picker
+  const { data: documents, isLoading: docsLoading } = useQuery({
+    queryKey: ["documents-list"],
+    queryFn: fetchDocuments,
+    staleTime: 60_000,
+    enabled: note !== null,
+  })
 
   // Note links query (S171)
   const { data: noteLinks, isLoading: linksLoading } = useQuery({
@@ -231,6 +258,13 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
       setIsFetchingTags(false)
       setNoSuggestionsMsg(false)
       setCheckedCollectionIds(new Set(note.collection_ids ?? []))
+      setSelectedDocIds(
+        note.source_document_ids?.length > 0
+          ? note.source_document_ids
+          : note.document_id
+            ? [note.document_id]
+            : [],
+      )
       saveMut.reset()
     }
     // saveMut.reset is stable; note drives initialisation
@@ -251,7 +285,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   }
 
   const saveMut = useMutation({
-    mutationFn: () => patchNote(note!.id, { content, tags: editTags }),
+    mutationFn: () => patchNote(note!.id, { content, tags: editTags, source_document_ids: selectedDocIds }),
     onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       setSavedNote(updated)
@@ -406,6 +440,44 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                 }}
                 onUnsavedChange={() => setIsSaved(false)}
               />
+            </div>
+
+            {/* Source documents section (S175) */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Source documents</p>
+              {docsLoading ? (
+                <div className="flex flex-col gap-1">
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <Skeleton key={i} className="h-5 w-full rounded" />
+                  ))}
+                </div>
+              ) : (documents ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">Ingest a book to link notes to it</p>
+              ) : (
+                <div className="max-h-32 overflow-y-auto flex flex-col gap-0.5">
+                  {(documents ?? []).map((doc) => (
+                    <label
+                      key={doc.id}
+                      className="flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDocIds.includes(doc.id)}
+                        onChange={(e) => {
+                          setSelectedDocIds((prev) =>
+                            e.target.checked
+                              ? [...prev, doc.id]
+                              : prev.filter((id) => id !== doc.id),
+                          )
+                          setIsSaved(false)
+                        }}
+                        className="h-3 w-3 rounded border-border"
+                      />
+                      <span className="flex-1 truncate">{doc.title}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Collections section */}

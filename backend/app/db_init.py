@@ -26,6 +26,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     NoteCollectionModel,
     NoteLinkModel,
     NoteModel,
+    NoteSourceModel,
     NoteTagIndexModel,
     PredictionEventModel,
     QAHistoryModel,
@@ -73,6 +74,37 @@ USING fts5(
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
+        # S175: note_sources may have been created with an incorrect FK on document_id
+        # during an early implementation attempt. Detect and rebuild if needed.
+        # Uses SQLite table-rebuild idiom (no ALTER DROP CONSTRAINT support).
+        fk_rows = (
+            await conn.execute(text("PRAGMA foreign_key_list(note_sources)"))
+        ).fetchall()
+        if any(str(row[2]).lower() == "documents" for row in fk_rows):
+            # Old schema has FK on document_id -- rebuild without it
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS note_sources_rebuild_s175 ("
+                    "note_id TEXT NOT NULL,"
+                    " document_id TEXT NOT NULL,"
+                    " added_at TEXT NOT NULL,"
+                    " PRIMARY KEY (note_id, document_id),"
+                    " FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE"
+                    ")"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO note_sources_rebuild_s175"
+                    " SELECT note_id, document_id, added_at FROM note_sources"
+                )
+            )
+            await conn.execute(text("DROP TABLE note_sources"))
+            await conn.execute(
+                text(
+                    "ALTER TABLE note_sources_rebuild_s175 RENAME TO note_sources"
+                )
+            )
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(FTS5_DDL))
         await conn.execute(text(NOTES_FTS5_DDL))
@@ -258,5 +290,19 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 await conn.execute(text(ddl))
             except Exception:
                 pass  # Column already exists (idempotent)
+
+        # S175: note_sources pivot table for multi-document source linkage.
+        # Base.metadata.create_all above creates note_sources if absent.
+        # Migration: backfill from notes.document_id (idempotent via composite PK).
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO note_sources (note_id, document_id, added_at)
+                SELECT id, document_id, created_at
+                FROM notes
+                WHERE document_id IS NOT NULL
+                """
+            )
+        )
 
     logger.info("Database tables and FTS5 index initialized")

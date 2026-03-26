@@ -1929,3 +1929,13 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Toast pattern for async download: toast.loading() before fetch, update same toast ID to success/warning/error; pass warning header from backend as X-Luminary-Warning to drive warning toast on frontend
   - Running server must be restarted to pick up new router endpoints -- TestClient tests work fine with in-process lifespan but smoke scripts require the live server process
 ---
+
+## 2026-03-26T07:45:00Z - S175 - Multi-document notes: cross-book annotations with dual entity edge support
+- Implemented: NoteSourceModel pivot table (composite PK note_id+document_id, note_id FK cascade, no FK on document_id), db_init migration (schema rebuild guard + backfill INSERT OR IGNORE from notes.document_id), notes.py updates (_sync_note_sources helper, source_document_ids in NoteCreateRequest/NoteUpdateRequest/NoteResponse, OR-join in list_notes document_id filter, bulk-load in list_notes + get_note), note_graph.py upsert_note_node extended with source_document_ids param emitting DERIVED_FROM edges for each, NoteEditorDialog multi-select source docs section (checkbox list, stale/empty states), Notes.tsx Note interface + createNote payload updated
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/notes.py, backend/app/services/note_graph.py, frontend/src/components/NoteEditorDialog.tsx, frontend/src/pages/Notes.tsx, backend/tests/test_S175_multi_doc_notes.py (new, 9 tests), scripts/smoke/S175.sh (new), docs/exec-plans/completed/S175.md
+- **Learnings for future iterations:**
+  - NoteSourceModel.document_id must NOT have a FK to documents.id -- NoteModel.document_id doesn't have one either, and adding FK causes IntegrityError when tests or async delete flows create notes with non-existent doc_ids. Pattern: pivot tables linking to documents should use plain String for document_id, not ForeignKey("documents.id").
+  - SQLite table rebuild idiom: when a column's FK constraint must be removed, use PRAGMA foreign_key_list to detect old schema, then CREATE new_table, INSERT OR IGNORE SELECT * FROM old, DROP old, RENAME new -> old. Must run BEFORE Base.metadata.create_all.
+  - For new pivot tables in N-many stories, always verify that FK constraints match the pattern of NoteModel.document_id (no FK to documents) not NoteCollectionMemberModel (which has FK to notes).
+  - Smoke test for pivot tables: use fake but stable document_ids -- since document_id has no FK, the smoke can test the full API contract without needing a real ingested document.
+---

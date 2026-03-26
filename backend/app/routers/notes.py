@@ -16,7 +16,13 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
-from app.models import NoteCollectionMemberModel, NoteLinkModel, NoteModel, NoteTagIndexModel
+from app.models import (
+    NoteCollectionMemberModel,
+    NoteLinkModel,
+    NoteModel,
+    NoteSourceModel,
+    NoteTagIndexModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,8 @@ class NoteCreateRequest(BaseModel):
     content: str
     tags: list[str] = []
     group_name: str | None = None
+    # S175: multi-document source linkage; legacy document_id still accepted
+    source_document_ids: list[str] = []
 
 
 class NoteUpdateRequest(BaseModel):
@@ -45,6 +53,8 @@ class NoteUpdateRequest(BaseModel):
     group_name: str | None = None
     # section_id=None means "field not sent" (PATCH semantics — cannot clear via PATCH)
     section_id: str | None = None
+    # S175: None means "not supplied" (do not change); [] means "remove all sources"
+    source_document_ids: list[str] | None = None
 
 
 class NoteResponse(BaseModel):
@@ -56,6 +66,8 @@ class NoteResponse(BaseModel):
     tags: list[str]
     group_name: str | None
     collection_ids: list[str] = []
+    # S175: all source document IDs from NoteSourceModel pivot
+    source_document_ids: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -109,7 +121,11 @@ class NoteEntityItem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _to_response(note: NoteModel, collection_ids: list[str] | None = None) -> NoteResponse:
+def _to_response(
+    note: NoteModel,
+    collection_ids: list[str] | None = None,
+    source_document_ids: list[str] | None = None,
+) -> NoteResponse:
     return NoteResponse(
         id=note.id,
         document_id=note.document_id,
@@ -119,6 +135,7 @@ def _to_response(note: NoteModel, collection_ids: list[str] | None = None) -> No
         tags=note.tags or [],
         group_name=note.group_name,
         collection_ids=collection_ids or [],
+        source_document_ids=source_document_ids or [],
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -233,14 +250,55 @@ async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) 
         invalidate_tag_graph_cache()
 
 
+async def _sync_note_sources(
+    note_id: str, source_document_ids: list[str], session: AsyncSession
+) -> None:
+    """Sync NoteSourceModel rows for a note (S175).
+
+    Deletes rows not in new list; inserts new rows via INSERT OR IGNORE (idempotent).
+    """
+    if source_document_ids:
+        # Delete rows for document_ids no longer in the list
+        await session.execute(
+            delete(NoteSourceModel).where(
+                NoteSourceModel.note_id == note_id,
+                NoteSourceModel.document_id.not_in(source_document_ids),
+            )
+        )
+        # Insert new rows (INSERT OR IGNORE for composite PK dedup)
+        for doc_id in source_document_ids:
+            await session.execute(
+                text(
+                    "INSERT OR IGNORE INTO note_sources (note_id, document_id, added_at)"
+                    " VALUES (:note_id, :document_id, :added_at)"
+                ),
+                {
+                    "note_id": note_id,
+                    "document_id": doc_id,
+                    "added_at": datetime.now(UTC).isoformat(),
+                },
+            )
+    else:
+        # Empty list: remove all source rows for this note
+        await session.execute(
+            delete(NoteSourceModel).where(NoteSourceModel.note_id == note_id)
+        )
+
+
 async def _upsert_note_graph(
-    note_id: str, content: str, document_id: str | None, tags: list[str]
+    note_id: str,
+    content: str,
+    document_id: str | None,
+    tags: list[str],
+    source_document_ids: list[str] | None = None,
 ) -> None:
     """Fire-and-forget: upsert Note node and edges in Kuzu graph."""
     try:
         from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
-        await get_note_graph_service().upsert_note_node(note_id, content, document_id, tags)
+        await get_note_graph_service().upsert_note_node(
+            note_id, content, document_id, tags, source_document_ids or []
+        )
         logger.debug("Note graph upserted note_id=%s", note_id)
     except Exception as exc:
         logger.warning("_upsert_note_graph failed (non-fatal): %s", exc)
@@ -306,17 +364,21 @@ async def create_note(
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
     await _sync_tag_index(note.id, note.tags or [], session)
+    # S175: sync multi-document source pivot
+    await _sync_note_sources(note.id, req.source_document_ids, session)
     await session.commit()
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     graph_task = asyncio.create_task(
-        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [])
+        _upsert_note_graph(
+            note.id, note.content, note.document_id, note.tags or [], req.source_document_ids
+        )
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
     logger.info("Created note", extra={"note_id": note.id})
-    return _to_response(note)
+    return _to_response(note, source_document_ids=req.source_document_ids)
 
 
 @router.get("/search", response_model=NoteSearchResponse)
@@ -390,7 +452,17 @@ async def list_notes(
     )
 
     if document_id:
-        stmt = stmt.where(NoteModel.document_id == document_id)
+        # S175: match notes via legacy document_id OR via NoteSourceModel pivot
+        stmt = stmt.where(
+            or_(
+                NoteModel.document_id == document_id,
+                NoteModel.id.in_(
+                    select(NoteSourceModel.note_id).where(
+                        NoteSourceModel.document_id == document_id
+                    )
+                ),
+            )
+        )
     if group:
         stmt = stmt.where(NoteModel.group_name == group)
     if tag:
@@ -418,8 +490,9 @@ async def list_notes(
     result = await session.execute(stmt)
     notes = list(result.scalars().all())
 
-    # Bulk-load collection memberships for all returned notes in one query.
+    # Bulk-load collection memberships and source_document_ids in one query each.
     coll_map: dict[str, list[str]] = {}
+    src_map: dict[str, list[str]] = {}
     if notes:
         note_ids = [n.id for n in notes]
         member_rows = (
@@ -433,7 +506,22 @@ async def list_notes(
         for row in member_rows:
             coll_map.setdefault(row[0], []).append(row[1])
 
-    return [_to_response(n, coll_map.get(n.id, [])) for n in notes]
+        # S175: bulk-load source_document_ids from pivot
+        src_rows = (
+            await session.execute(
+                select(
+                    NoteSourceModel.note_id,
+                    NoteSourceModel.document_id,
+                ).where(NoteSourceModel.note_id.in_(note_ids))
+            )
+        ).all()
+        for row in src_rows:
+            src_map.setdefault(row[0], []).append(row[1])
+
+    return [
+        _to_response(n, coll_map.get(n.id, []), src_map.get(n.id, []))
+        for n in notes
+    ]
 
 
 async def _apply_note_update(
@@ -458,7 +546,16 @@ async def _apply_note_update(
     await _fts_update(note.id, note.content, note.document_id, session)
     if req.tags is not None:
         await _sync_tag_index(note.id, note.tags or [], session)
+    # S175: sync source document pivot only when field is explicitly supplied
+    if req.source_document_ids is not None:
+        await _sync_note_sources(note.id, req.source_document_ids, session)
     await session.commit()
+    # Fetch updated source_document_ids for response
+    src_rows = (
+        await session.execute(
+            select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note.id)
+        )
+    ).scalars().all()
     # Delete stale vector synchronously so hybrid search doesn't return the
     # old embedding while the background task re-embeds the new content.
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
@@ -468,12 +565,14 @@ async def _apply_note_update(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     graph_task = asyncio.create_task(
-        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [])
+        _upsert_note_graph(
+            note.id, note.content, note.document_id, note.tags or [], list(src_rows)
+        )
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
     logger.info("Updated note", extra={"note_id": note_id})
-    return _to_response(note)
+    return _to_response(note, source_document_ids=list(src_rows))
 
 
 @router.put("/{note_id}", response_model=NoteResponse)
@@ -1025,7 +1124,14 @@ async def get_note(
         )
     ).scalars().all()
 
-    return _to_response(note, list(member_rows))
+    # S175: fetch source_document_ids from pivot
+    src_rows = (
+        await session.execute(
+            select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note_id)
+        )
+    ).scalars().all()
+
+    return _to_response(note, list(member_rows), list(src_rows))
 
 
 class GapDetectRequest(BaseModel):
