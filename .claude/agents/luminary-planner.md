@@ -49,14 +49,14 @@ One paragraph: what this story changes and why.
 
 ## Step Sequence
 
-1. Read all files listed above before writing any code
+1. **Discovery:** Use `grep_search` and `read_file` with line ranges to identify only the relevant schemas, interfaces, and logic sections. Do NOT read large files in full.
 2. Add SQLAlchemy models (if schema changes)
 3. Add DDL to db_init.py (CREATE TABLE / CREATE INDEX with IF NOT EXISTS)
-4. Implement service layer
+4. Implement service layer (focus on one method at a time)
 5. Implement router (thin handlers -- validation in Pydantic, logic in service)
-6. Write pytest tests
-7. Run: cd backend && uv run ruff check . && uv run pytest
-8. Implement frontend components
+6. Write pytest tests (one test file per story)
+7. Run: cd backend && uv run ruff check . && uv run pytest (parallelize test runs if possible)
+8. Implement frontend components (reuse existing shadcn/ui components where possible)
 9. Write Vitest tests
 10. Run: cd frontend && npx tsc --noEmit
 11. Create smoke test

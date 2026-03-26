@@ -66,3 +66,14 @@ Tests passing is necessary but not sufficient. The smoke test verifies the backe
 
 **I-15. Use `uv` only -- never `pip` or `poetry`.**
 The lockfile is `uv.lock`. Adding packages: `uv add <package>`. Never run `pip install` directly.
+
+## Privacy & Local-First
+
+**I-16. Prioritize local LLM (Ollama) and local search (none/duckduckgo) by default.**
+Never introduce a new external API dependency (e.g., Tavily, OpenAI) without providing a local-first or privacy-preserving alternative.
+
+**I-17. Never log or transmit user content (notes, documents) to external telemetry.**
+Arize Phoenix and Langfuse must be configured for local use only. Telemetry is for performance metrics and trace structure, not for content mirroring.
+
+**I-18. Explicitly disable telemetry in third-party libraries (e.g., LiteLLM, LangChain).**
+Check and disable any "phone home" features in libraries that handle user prompts.

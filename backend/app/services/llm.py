@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Silence litellm's verbose success logging
 litellm.suppress_debug_info = True
+litellm.telemetry = False
 
 # ---------------------------------------------------------------------------
 # Langfuse — optional LLM call observability
