@@ -12,50 +12,48 @@ must follow. Do not skip steps.
 
 ```mermaid
 flowchart TD
-    A([Start: ralph invoked with PRD path]) --> B
+    A([Start]) --> B
 
-    B[/"Read PRD\nprd-vN.json"/] --> C
+    B[/Read PRD/] --> C
 
-    C{"Find first story\nwhere passes=false\nordered by priority"}
-    C -->|No stories remaining| Z([Done -- all stories pass])
-    C -->|Story SXXX found| D
+    C{Find first story\nwhere passes=false}
+    C -->|No stories remaining| Z([Done: all stories pass])
+    C -->|Story found| D
 
-    D[/"Read or create exec plan\ndocs/exec-plans/active/SXXX.md"/] --> E
+    D[/Read or create exec plan/] --> E
 
-    E["Explore codebase\nGlob + Grep + Read\nall relevant files"] --> F
+    E[Explore codebase\nGlob + Grep + Read] --> F
 
-    subgraph IMPLEMENT ["Implement"]
-        direction TB
-        F["Backend\nmodels.py + db_init.py migration\nservice layer\nrouter + API\npytest tests"]
-        F --> G["Frontend\ncomponents + hooks\nZustand store changes\nVitest tests"]
+    subgraph IMPLEMENT [Implement]
+        F[Backend\nmodels + service + router + tests]
+        F --> G[Frontend\ncomponents + store + tests]
     end
 
     G --> H
 
-    subgraph GATES ["Quality Gates (run in order)"]
-        direction TB
-        H["uv run ruff check .\nfrom backend/"] --> I
-        I["uv run pytest\nfrom backend/"] --> J
-        J["npx tsc --noEmit\nfrom frontend/"]
+    subgraph GATES [Quality Gates]
+        H[ruff check] --> I
+        I[pytest] --> J
+        J[tsc --noEmit]
     end
 
-    J --> K{"All gates\npass?"}
-    K -->|No -- fix then re-run gates| H
+    J --> K{All gates pass?}
+    K -->|No: fix and re-run| H
     K -->|Yes| L
 
-    L[/"Run smoke test\nscripts/smoke/SXXX.sh"/] --> M
+    L[/Run smoke test/] --> M
 
-    M{"Smoke exits 0?"}
-    M -->|No -- debug and fix| F
+    M{Smoke exits 0?}
+    M -->|No: fix| F
     M -->|Yes| N
 
-    N["Run luminary-reviewer agent\n.claude/agents/luminary-reviewer"] --> O
+    N[Run luminary-reviewer] --> O
 
-    O{"Critical items\nreturned?"}
-    O -->|Yes -- fix then re-run gates| H
+    O{Critical items?}
+    O -->|Yes: fix and re-run| H
     O -->|No| P
 
-    P["Set passes=true in PRD\nAppend entry to progress.txt\nMove exec plan to completed/"] --> C
+    P[Set passes=true\nUpdate flowchart status\nCommit + move exec plan] --> C
 ```
 
 ---
