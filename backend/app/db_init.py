@@ -151,6 +151,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE feynman_sessions ADD COLUMN key_points_json JSON",
             # Inline highlights: page_number for PDF annotations
             "ALTER TABLE annotations ADD COLUMN page_number INTEGER",
+            # S182: YouTube channel/uploader name and canonical YouTube URL
+            "ALTER TABLE documents ADD COLUMN channel_name TEXT",
+            "ALTER TABLE documents ADD COLUMN youtube_url TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

@@ -22,6 +22,7 @@ import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { EPUBViewer } from "./EPUBViewer"
 import { ReadView } from "./ReadView"
+import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -2172,10 +2173,14 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             </div>
           )}
 
-          {/* Read View — full document content as markdown */}
+          {/* Read View — full document content as markdown, or transcript for YouTube */}
           {leftTab === "read" && (
             <div className="flex-1 overflow-hidden">
-              <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} />
+              {isYouTube ? (
+                <YouTubeTranscriptView doc={doc} />
+              ) : (
+                <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} />
+              )}
             </div>
           )}
 

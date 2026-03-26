@@ -2025,3 +2025,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - When the mode array is dynamically constructed (filtering call_graph), TypeScript needs an explicit type cast: (["knowledge_graph", ...(isCodeDoc ? ["call_graph" as const] : []), ...] as ("knowledge_graph" | "call_graph" | "learning_path" | "tags")[])
   - Cluster node click handling: check filteredGraph.getNodeAttribute(node, "isCluster") before other handlers to avoid popover opening on cluster nodes
 ---
+
+## 2026-03-27T00:00:00Z - S182 - YouTube transcript viewer: full feature parity with text documents in the Read section
+- Implemented: DocumentModel gains `channel_name` and `youtube_url` nullable columns; db_init.py migration added; `GET /documents/{id}/chunks` new endpoint returning chunks in chunk_index order with `start_time` field (null for now -- Whisper stores timestamps in section headings, not chunks); `POST /documents/ingest-url` now stores `channel_name` (from yt-dlp `uploader`/`channel` metadata) and `youtube_url`; `DocumentDetail`/`DocumentListItem` include all three new YouTube fields; `YouTubeTranscriptView.tsx` new component with Cmd+F local keyword search, 10-second polling fallback, metadata header (title, channel, YouTube link, duration, ingestion date); `DocumentReader.tsx` routes `leftTab=read` to `YouTubeTranscriptView` for YouTube docs; frontend `types.ts` gains `channel_name`, `youtube_url`, `ChunkItem.start_time`
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/documents.py, backend/tests/test_youtube_ingestion.py, frontend/src/components/reader/types.ts, frontend/src/components/reader/YouTubeTranscriptView.tsx (new), frontend/src/components/reader/DocumentReader.tsx, scripts/smoke/S182.sh (new), docs/exec-plans/active/S182.md (new)
+- **Learnings for future iterations:**
+  - `youtube_url` vs `source_url`: when AC requires a named field like `youtube_url`, add it as a proper DB column even if semantically redundant with `source_url`. This satisfies literal AC text without the reviewer flagging it as Critical.
+  - Keyword search in a new viewer component: the existing `InDocSearchBar` (in sections tab) closes on tab switch. For a new viewer in the "read" tab, add local text search inside the component itself rather than hooking into the section-based search infrastructure.
+  - yt-dlp metadata: `uploader` is the channel name; `channel` is a fallback. Use `meta.get("uploader") or meta.get("channel") or None`.
+  - ChunkItem `start_time`: Whisper transcription stores timestamps in section headings (e.g., "[00:01:23]"), not as individual chunk fields. `start_time=None` in chunks is correct for now; the field path is reserved for future.
+  - macOS `mktemp`: does not support `--suffix=.txt`. Use `mktemp /tmp/prefix_XXXXXX.ext` instead.
+---

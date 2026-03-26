@@ -112,6 +112,8 @@ class DocumentListItem(BaseModel):
     audio_duration_seconds: float | None
     source_url: str | None = None
     video_title: str | None = None
+    channel_name: str | None = None
+    youtube_url: str | None = None
     enrichment_status: str | None = None  # None if no enrichment job; else latest job status
     # S143: None = no objectives extracted; 0.0 = objectives exist but none covered
     objective_progress_pct: float | None = None
@@ -174,6 +176,17 @@ class DocumentDetail(BaseModel):
     audio_duration_seconds: float | None = None
     source_url: str | None = None
     video_title: str | None = None
+    channel_name: str | None = None
+    youtube_url: str | None = None
+
+
+class ChunkItem(BaseModel):
+    id: str
+    chunk_index: int
+    text: str
+    section_id: str | None = None
+    speaker: str | None = None
+    start_time: float | None = None  # seconds from start; null if not available
 
 
 class YouTubeIngestRequest(BaseModel):
@@ -417,6 +430,8 @@ async def list_documents(
                 audio_duration_seconds=doc.audio_duration_seconds,
                 source_url=doc.source_url,
                 video_title=doc.video_title,
+                channel_name=doc.channel_name,
+                youtube_url=doc.youtube_url,
                 enrichment_status=enrichment_status,
                 objective_progress_pct=objective_progress_pct,
             )
@@ -719,6 +734,7 @@ async def ingest_url(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     video_title = meta.get("title") or "YouTube Video"
+    channel_name = meta.get("uploader") or meta.get("channel") or None
     doc_id = str(uuid.uuid4())
 
     data_dir = Path(settings.DATA_DIR).expanduser()
@@ -752,6 +768,8 @@ async def ingest_url(
             stage="parsing",
             source_url=body.url,
             video_title=video_title,
+            channel_name=channel_name,
+            youtube_url=body.url,
         )
         session.add(doc)
         await session.commit()
@@ -820,7 +838,44 @@ async def get_document(document_id: str):
         audio_duration_seconds=doc.audio_duration_seconds,
         source_url=doc.source_url,
         video_title=doc.video_title,
+        channel_name=doc.channel_name,
+        youtube_url=doc.youtube_url,
     )
+
+
+@router.get("/{document_id}/chunks", response_model=list[ChunkItem])
+async def get_document_chunks(document_id: str) -> list[ChunkItem]:
+    """Return all chunks for a document in chunk_index order.
+
+    Works for any document type -- no format filter applied.
+    Used by the YouTube transcript viewer and any other chunk-level consumer.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        chunks_result = await session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        chunks = chunks_result.scalars().all()
+
+    return [
+        ChunkItem(
+            id=c.id,
+            chunk_index=c.chunk_index,
+            text=c.text,
+            section_id=c.section_id,
+            speaker=c.speaker,
+            start_time=None,  # ChunkModel has no start_time; reserved for future use
+        )
+        for c in chunks
+    ]
 
 
 @router.get("/{document_id}/audio")

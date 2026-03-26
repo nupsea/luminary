@@ -26,6 +26,17 @@ export interface DocumentDetail {
   audio_duration_seconds: number | null
   source_url: string | null
   video_title: string | null
+  channel_name: string | null
+  youtube_url: string | null
+}
+
+export interface ChunkItem {
+  id: string
+  chunk_index: number
+  text: string
+  section_id: string | null
+  speaker: string | null
+  start_time: number | null
 }
 
 export interface AnnotationItem {
