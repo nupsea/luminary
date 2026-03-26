@@ -15,6 +15,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 ## Test Fixtures
 
 - DB isolation: `make_engine("sqlite+aiosqlite:///:memory:")` + `create_all_tables` + monkeypatch `db_module._engine` and `db_module._session_factory`
+- **Heuristic text classifier rule ordering**: When classifying text with regex patterns (e.g., chunk type detection), definition patterns must be checked before concept patterns. Phrases like "means that" appear in both "This means that..." (definition) and concept checks — check definitions first to prevent misclassification.
 - Mock LLM at graph level, not at litellm level: `patch("app.runtime.chat_graph.get_llm_service")`
 - Mock get_llm_service (not litellm.acompletion directly) when testing SummarizationService.pregenerate() — avoids tracing/telemetry complications
 - Lazy import patch location: patch at source module, not destination — e.g. `app.services.graph.get_graph_service` not `app.runtime.chat_graph.get_graph_service`. The lazy import (`from app.services.X import fn`) at call time fetches `fn` from `sys.modules['app.services.X']`, so patching the attribute on the source module is always correct regardless of where the call site lives.
@@ -36,6 +37,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Run tests: `uv run pytest` (from backend dir)
 - Run lint: `uv run ruff check .` (from backend dir)
 - **Force-add .gitignored story deliverables**: `docs/`, `scripts/ralph/`, and other execution/tracking files are in `.gitignore`. Use `git add -f <path>` when committing story changes to prd-v3.json, progress.txt, or docs/exec-plans/ files. Without `-f`, these files stay untracked and are not included in the commit.
+- **Smoke scripts on macOS**: BSD `head` does not support `head -n -1`. Capture HTTP response body separately from status code using `curl -o $TMPFILE -w "%{http_code}"` and then `cat $TMPFILE` to read body. Don't use `head -n -1` in smoke scripts.
 
 ---
 
@@ -114,6 +116,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 - All LanceDB calls are synchronous. In async context: `await asyncio.to_thread(table.search(...).to_pandas)`
 - Vector dimension: 1024 (bge-m3). Any table with 384-dim is stale -- drop and recreate.
+- **Book chunk fetching skips preface**: `_fetch_chunks(content_type="book")` skips the first `max(1, n//20)` chunks to avoid Gutenberg metadata. Tests with only 1 candidate chunk will return empty. Always provide 2+ chunks when testing flashcard generation with content_type="book".
 - **LanceDB schema introspection**: use `tbl.schema.field("vector").type.list_size` to read the FixedSizeList dimension. Wrap in try/except — if the field is missing or the attribute doesn't exist, log a warning and proceed with safe default (assume 1024).
 - **LanceDB drop+recreate**: use `self._db.drop_table(TABLE_NAME)` via the connection object, NOT `tbl.drop()`. Then `self._db.create_table(TABLE_NAME, schema=NEW_SCHEMA)`. Use this when a table's schema (e.g. vector dimension) needs to change.
 
@@ -121,6 +124,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ## FastAPI Patterns
 
+- **HTTP 201 Created for resource generation endpoints**: POST /flashcards/generate returns 201 Created, not 200 OK. Smoke scripts must check for `200` or `201` when testing generation endpoints.
 - **Admin key header dependency**: capture `X-Admin-Key` with `Header(default=None)` parameter; validate with `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`. Allows unauthenticated access if `ADMIN_KEY` is not set.
 - **Fire-and-forget background task in router**: use `asyncio.create_task` to spawn the task; inside the task body, create a fresh AsyncSession with `async with get_session_factory()()`. Never reuse the request-scoped session (it closes after handler returns, leaving the task with a closed session).
 - **Dynamic path parameter route ordering**: ALL static-path routes (POST /merge, GET /search, GET /flashcards, GET /decks, GET /preview) MUST be registered BEFORE any /{param} route. Add a comment block above the route group: `# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI from matching the literal segment "decks" as a document_id wildcard.` If /{param} is registered first, GET /search matches with param="search" and returns 404. In tags.py: POST /tags/merge before GET|PUT|DELETE /tags/{tag_id}.
