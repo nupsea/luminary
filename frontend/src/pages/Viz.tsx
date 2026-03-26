@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Graph from "graphology"
 import forceAtlas2 from "graphology-layout-forceatlas2"
-import { Maximize2, Minus, Network, Plus } from "lucide-react"
+import { ChevronDown, ChevronRight, Maximize2, Minus, Network, Plus } from "lucide-react"
 import { Component, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import Sigma from "sigma"
@@ -11,6 +11,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import NodeHexagonProgram from "@/lib/sigma-hexagon"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
+import { useVizStore } from "../vizStore"
+import {
+  ALL_ENTITY_TYPES,
+  isCodeDocument,
+  shouldShowClusterView,
+  buildClusterNodes,
+} from "@/lib/vizUtils"
+import type { EntityType, ClusterNodeDef } from "@/lib/vizUtils"
 
 // ---------------------------------------------------------------------------
 // Learning path types (S117)
@@ -100,30 +108,6 @@ async function fetchTagGraph(): Promise<TagGraphData> {
   return res.json() as Promise<TagGraphData>
 }
 
-const ALL_ENTITY_TYPES = [
-  "PERSON",
-  "ORGANIZATION",
-  "PLACE",
-  "CONCEPT",
-  "EVENT",
-  "TECHNOLOGY",
-  "DATE",
-  // Tech-specific types (S135)
-  "LIBRARY",
-  "DESIGN_PATTERN",
-  "ALGORITHM",
-  "DATA_STRUCTURE",
-  "PROTOCOL",
-  "API_ENDPOINT",
-  // Diagram-derived types (S136) -- rendered as hexagons for COMPONENT
-  "COMPONENT",
-  "ACTOR",
-  "ENTITY_DM",
-  "STEP",
-] as const
-
-type EntityType = (typeof ALL_ENTITY_TYPES)[number]
-
 // Diagram-derived node types that use the hexagon renderer (S136)
 const DIAGRAM_NODE_TYPES: ReadonlySet<string> = new Set(["COMPONENT", "ACTOR", "ENTITY_DM", "STEP"])
 
@@ -192,6 +176,7 @@ interface SelectedNodeInfo {
 interface DocListItem {
   id: string
   title: string
+  format?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +415,102 @@ function buildLearningPathGraph(data: LearningPathData): Graph {
 }
 
 // ---------------------------------------------------------------------------
+// Cluster graph builder (S181)
+// Builds a Graphology graph where non-expanded entity types are collapsed into
+// single cluster nodes.  Expanded types and note nodes render as individuals.
+// ---------------------------------------------------------------------------
+
+function buildClusterGraphology(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  clusterDefs: ClusterNodeDef[],
+  expandedTypes: Set<string>,
+): Graph {
+  const g = new Graph({ type: "mixed" })
+
+  // Map from individual node ID -> clusterId for non-expanded entity nodes
+  const nodeToCluster = new Map<string, string>()
+  for (const node of nodes) {
+    if (node.type === "note") continue
+    if (!expandedTypes.has(node.type)) {
+      nodeToCluster.set(node.id, `cluster:${node.type}`)
+    }
+  }
+
+  // Add cluster nodes
+  const maxCount = Math.max(...clusterDefs.map((c) => c.count), 1)
+  for (const cluster of clusterDefs) {
+    g.addNode(cluster.clusterId, {
+      label: cluster.label,
+      entityType: "cluster",
+      clusterEntityType: cluster.entityType,
+      frequency: cluster.count,
+      isCluster: true,
+      source_image_id: "",
+      x: Math.random() * 200 - 100,
+      y: Math.random() * 200 - 100,
+      size: 12 + (cluster.count / maxCount) * 28,
+      color: TYPE_COLORS[cluster.entityType as EntityType] ?? DEFAULT_COLOR,
+    })
+  }
+
+  // Add individual nodes for expanded types + note nodes
+  const individualNodes = nodes.filter((n) => expandedTypes.has(n.type) || n.type === "note")
+  const entityFreqs = individualNodes.filter((n) => n.type !== "note").map((n) => n.size)
+  const minFreq = Math.min(...entityFreqs, 1)
+  const maxFreq = Math.max(...entityFreqs, 1)
+  const scaleSize = (freq: number) =>
+    maxFreq === minFreq ? 10 : 4 + ((freq - minFreq) / (maxFreq - minFreq)) * 16
+
+  for (const node of individualNodes) {
+    if (node.type === "note") {
+      const linkCount = node.outgoing_link_count ?? 1
+      const nid = node.note_id ?? node.id
+      g.addNode(node.id, {
+        ...noteNodeAttrs(node.label, nid, linkCount),
+        frequency: linkCount,
+        source_image_id: "",
+        isCluster: false,
+        x: Math.random() * 200 - 100,
+        y: Math.random() * 200 - 100,
+      })
+    } else {
+      g.addNode(node.id, {
+        label: node.label,
+        entityType: node.type,
+        frequency: node.size,
+        source_image_id: node.source_image_id ?? "",
+        isCluster: false,
+        x: Math.random() * 200 - 100,
+        y: Math.random() * 200 - 100,
+        size: scaleSize(node.size),
+        color: TYPE_COLORS[node.type as EntityType] ?? DEFAULT_COLOR,
+      })
+    }
+  }
+
+  // Add edges: map individual node IDs to cluster IDs where applicable
+  for (const [idx, edge] of edges.entries()) {
+    const srcId = nodeToCluster.get(edge.source) ?? edge.source
+    const tgtId = nodeToCluster.get(edge.target) ?? edge.target
+    if (!g.hasNode(srcId) || !g.hasNode(tgtId) || srcId === tgtId) continue
+    if (!g.hasEdge(srcId, tgtId) && !g.hasEdge(tgtId, srcId)) {
+      g.addUndirectedEdge(srcId, tgtId, {
+        key: `ce-${idx}`,
+        weight: edge.weight ?? 1,
+        color: "#e2e8f0",
+      })
+    }
+  }
+
+  if (g.order > 0) {
+    forceAtlas2.assign(g, { iterations: 80, settings: forceAtlas2.inferSettings(g) })
+  }
+
+  return g
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -445,7 +526,8 @@ export default function Viz() {
   // The div that sigma renders into
   const canvasRef = useRef<HTMLDivElement>(null)
 
-  const [activeTypes, setActiveTypes] = useState<Set<EntityType>>(new Set(ALL_ENTITY_TYPES))
+  // Entity type filter state from vizStore (persisted to localStorage) (S181)
+  const { activeEntityTypes: activeTypes, toggleEntityType, selectAllEntityTypes, deselectAllEntityTypes } = useVizStore()
   const [search, setSearch] = useState("")
   const [scope, setScope] = useState<"document" | "all">("document")
   const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path" | "tags">("knowledge_graph")
@@ -464,6 +546,12 @@ export default function Viz() {
   // Learning path state (S117)
   const [learningPathStart, setLearningPathStart] = useState("")
   const [lpInputDraft, setLpInputDraft] = useState("")
+  // View Options collapsible panel state (S181)
+  const [viewOptionsOpen, setViewOptionsOpen] = useState(false)
+  // Cluster view toggle (S181): when enabled and entity count > 200, collapse into type clusters
+  const [clusterViewEnabled, setClusterViewEnabled] = useState(false)
+  // Set of entity types that have been expanded out of cluster view by clicking a cluster node
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set())
 
   // Document list for the picker
   const { data: docList } = useQuery({
@@ -471,6 +559,10 @@ export default function Viz() {
     queryFn: fetchDocList,
     staleTime: 30_000,
   })
+
+  // Detect whether selected document is a code document (S181)
+  const selectedDoc = docList?.find((d) => d.id === activeDocumentId)
+  const isCodeDoc = isCodeDocument(selectedDoc?.format ?? "")
 
   const noDocSelected = scope === "document" && !activeDocumentId
 
@@ -514,6 +606,13 @@ export default function Viz() {
     enabled: viewMode === "tags",
   })
 
+  // Reset call_graph mode when the selected document is no longer a code document (S181)
+  useEffect(() => {
+    if (viewMode === "call_graph" && !isCodeDoc) {
+      setViewMode("knowledge_graph")
+    }
+  }, [isCodeDoc, viewMode])
+
   useEffect(() => {
     if (!isLoading && data) {
       logger.info("[Viz] loaded", {
@@ -549,8 +648,13 @@ export default function Viz() {
         (showPrerequisites || e.relation !== "PREREQUISITE_OF") &&
         (showCrossBook || e.relation !== "SAME_CONCEPT"),
     )
+    // Cluster view (S181): when enabled and non-note entity count > 200
+    if (shouldShowClusterView(visibleNodes, clusterViewEnabled)) {
+      const clusterDefs = buildClusterNodes(visibleNodes, expandedClusters)
+      return buildClusterGraphology(visibleNodes, visibleEdges, clusterDefs, expandedClusters)
+    }
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook, showNotes])
+  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook, showNotes, clusterViewEnabled, expandedClusters])
 
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
@@ -580,10 +684,24 @@ export default function Viz() {
       },
     })
 
-    // Node click → popover or note panel (S172)
+    // Node click → popover or note panel (S172) or cluster expand (S181)
     s.on("clickNode", (payload: SigmaNodeEventPayload) => {
       const { node, event } = payload
       const entityType = filteredGraph.getNodeAttribute(node, "entityType") as string
+
+      // Cluster nodes (S181): toggle expansion
+      const isCluster = filteredGraph.getNodeAttribute(node, "isCluster") as boolean | undefined
+      if (isCluster) {
+        const clusterEntityType = filteredGraph.getNodeAttribute(node, "clusterEntityType") as string
+        setExpandedClusters((prev) => {
+          const next = new Set(prev)
+          if (next.has(clusterEntityType)) next.delete(clusterEntityType)
+          else next.add(clusterEntityType)
+          return next
+        })
+        event.preventSigmaDefault()
+        return
+      }
 
       // Note nodes open NotePreviewPanel; entity nodes open the entity popover
       if (entityType === "note") {
@@ -696,15 +814,6 @@ export default function Viz() {
     )
   }
 
-  const toggleType = (type: EntityType) => {
-    setActiveTypes((prev) => {
-      const next = new Set(prev)
-      if (next.has(type)) next.delete(type)
-      else next.add(type)
-      return next
-    })
-  }
-
   // ---------------------------------------------------------------------------
   // Render helpers
   // ---------------------------------------------------------------------------
@@ -783,13 +892,20 @@ export default function Viz() {
             </div>
           )}
 
-          {/* View toggle */}
+          {/* View toggle (S181: call_graph only shown for code documents) */}
           <div>
             <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               View
             </p>
             <div className="flex flex-col rounded-md border border-border overflow-hidden text-xs">
-              {(["knowledge_graph", "call_graph", "learning_path", "tags"] as const).map((v) => (
+              {(
+                [
+                  "knowledge_graph",
+                  ...(isCodeDoc ? (["call_graph"] as const) : []),
+                  "learning_path",
+                  "tags",
+                ] as ("knowledge_graph" | "call_graph" | "learning_path" | "tags")[]
+              ).map((v) => (
                 <button
                   key={v}
                   onClick={() => {
@@ -812,9 +928,6 @@ export default function Viz() {
                 </button>
               ))}
             </div>
-            {viewMode === "call_graph" && (
-              <p className="mt-1 text-xs text-muted-foreground">Code documents only</p>
-            )}
             {viewMode === "learning_path" && (
               <p className="mt-1 text-xs text-muted-foreground">Orange arrows = PREREQUISITE_OF</p>
             )}
@@ -873,7 +986,7 @@ export default function Viz() {
             </div>
           </div>}
 
-          {/* Search, layers, entity filter -- hidden for Tags mode */}
+          {/* Search, View Options (collapsible) -- hidden for Tags mode (S181) */}
           {viewMode !== "tags" && (
             <>
               <div>
@@ -889,86 +1002,127 @@ export default function Viz() {
                 />
               </div>
 
-              {/* Layer toggles (S136, S139) */}
+              {/* View Options collapsible panel (S181) */}
               <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Layers
-                </p>
-                <div className="space-y-1.5">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={showDiagramNodes}
-                      onChange={() => setShowDiagramNodes((v) => !v)}
-                      className="accent-primary"
-                    />
-                    <span className="text-xs text-foreground">Diagrams</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={showPrerequisites}
-                      onChange={() => setShowPrerequisites((v) => !v)}
-                      className="accent-primary"
-                    />
-                    <span
-                      className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: PREREQ_EDGE_COLOR }}
-                    />
-                    <span className="text-xs text-foreground">Prerequisites</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={showCrossBook}
-                      onChange={() => setShowCrossBook((v) => !v)}
-                      className="accent-primary"
-                    />
-                    <span
-                      className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: SAME_CONCEPT_COLOR }}
-                    />
-                    <span className="text-xs text-foreground">Cross-book</span>
-                  </label>
-                  {/* Notes layer toggle (S172) */}
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={showNotes}
-                      onChange={() => setShowNotes((v) => !v)}
-                      className="accent-primary"
-                    />
-                    <span
-                      className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0"
-                      style={{ backgroundColor: NOTE_NODE_COLOR }}
-                    />
-                    <span className="text-xs text-foreground">Notes</span>
-                  </label>
-                </div>
-              </div>
+                <button
+                  onClick={() => setViewOptionsOpen((v) => !v)}
+                  className="flex w-full items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
+                >
+                  <span>View Options</span>
+                  {viewOptionsOpen
+                    ? <ChevronDown size={12} />
+                    : <ChevronRight size={12} />
+                  }
+                </button>
 
-              {/* Entity type filter */}
-              <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Entity types
-                </p>
-                <div className="space-y-1.5">
-                  {ALL_ENTITY_TYPES.map((type) => (
-                    <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={activeTypes.has(type)}
-                        onChange={() => toggleType(type)}
-                        className="accent-primary"
-                      />
-                      <span
-                        className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: TYPE_COLORS[type] }}
-                      />
-                      <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
-                    </label>
-                  ))}
-                </div>
+                {viewOptionsOpen && (
+                  <div className="mt-2 space-y-3">
+                    {/* Layers subsection */}
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">Layers</p>
+                      <div className="space-y-1.5">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showDiagramNodes}
+                            onChange={() => setShowDiagramNodes((v) => !v)}
+                            className="accent-primary"
+                          />
+                          <span className="text-xs text-foreground">Diagrams</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showPrerequisites}
+                            onChange={() => setShowPrerequisites((v) => !v)}
+                            className="accent-primary"
+                          />
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: PREREQ_EDGE_COLOR }}
+                          />
+                          <span className="text-xs text-foreground">Prerequisites</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showCrossBook}
+                            onChange={() => setShowCrossBook((v) => !v)}
+                            className="accent-primary"
+                          />
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: SAME_CONCEPT_COLOR }}
+                          />
+                          <span className="text-xs text-foreground">Cross-book</span>
+                        </label>
+                        {/* Notes layer toggle (S172) */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showNotes}
+                            onChange={() => setShowNotes((v) => !v)}
+                            className="accent-primary"
+                          />
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0"
+                            style={{ backgroundColor: NOTE_NODE_COLOR }}
+                          />
+                          <span className="text-xs text-foreground">Notes</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Entity Types subsection with Select All / Deselect All (S181) */}
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">Entity types</p>
+                      <div className="flex gap-1 mb-2">
+                        <button
+                          onClick={selectAllEntityTypes}
+                          className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          onClick={deselectAllEntityTypes}
+                          className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {ALL_ENTITY_TYPES.map((type) => (
+                          <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={activeTypes.has(type)}
+                              onChange={() => toggleEntityType(type)}
+                              className="accent-primary"
+                            />
+                            <span
+                              className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: TYPE_COLORS[type] }}
+                            />
+                            <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Cluster view toggle (S181) */}
+                    <div>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={clusterViewEnabled}
+                          onChange={() => setClusterViewEnabled((v) => !v)}
+                          className="accent-primary"
+                        />
+                        <span className="text-xs text-foreground">Cluster view (&gt;200 nodes)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -1068,10 +1222,12 @@ export default function Viz() {
           {showAllHidden && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
               <Network size={40} className="text-muted-foreground/40" />
-              <p className="text-base font-semibold text-foreground">All entity types hidden</p>
+              <p className="text-base font-semibold text-foreground">
+                Select at least one entity type to show the graph
+              </p>
               <p className="text-sm text-muted-foreground max-w-xs">
-                {entityNodeCount} {entityNodeCount === 1 ? "entity" : "entities"} found —
-                enable at least one entity type in the filter to see the graph.
+                {entityNodeCount} {entityNodeCount === 1 ? "entity" : "entities"} found.
+                Open View Options and enable at least one entity type.
               </p>
             </div>
           )}
