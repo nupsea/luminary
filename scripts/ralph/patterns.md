@@ -131,6 +131,15 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Hierarchical API response schema**: when a child record displays or initializes UI based on parent relationship, include the parent reference in the nested child response (e.g., `parent_tag: str | None` in TagTreeItem) even though it's redundant with tree structure. Without it, the UI cannot pre-select the current parent in a dropdown.
 - **HTML5 drag-and-drop**: add `draggable` attribute to draggable element, `onDragStart={(e) => e.dataTransfer.setData("text/plain", id)}` to set data. Drop target: `onDragOver={(e) => e.preventDefault()}` + `onDrop={(e) => e.dataTransfer.getData("text/plain")}`. No DnD library needed.
 - **New UI mode guards in existing tabs**: when adding a fundamentally different viewMode (e.g., "tags" to Viz.tsx without document scope), guard ALL document-specific UI controls, state booleans, and queries with `viewMode !== "new_mode"` checks. Easy to miss: showEmpty/showAllHidden/isLoading/isError in state overlays. List all guarded items in a comment to catch inconsistencies.
+- **Inline chip rendering in MarkdownRenderer**: preprocess custom marker syntax like `[[id|text]]` into backtick-wrapped sentinel tokens (e.g., `` `[note:id|text]` ``) before passing to ReactMarkdown. Intercept via `components.code` handler with regex match on the sentinel prefix, then render as styled spans. No new rehype/remark packages needed.
+- **Optional validNoteIds for chip validation styling**: when a MarkdownRenderer needs to distinguish valid vs broken link references, add `validNoteIds?: Set<string>` prop. Critical: pass `noteLinks !== undefined ? new Set(noteLinks.map(l => l.id)) : undefined` (NOT `?? []`) — using falsy coalescing treats unloaded state as empty-and-valid, causing all chips to flash as muted-red/broken during initial render before data arrives.
+- **Callback signature design for choice dialogs**: when a child component returns typed user choices (e.g., link type selection), include all relevant data in the callback signature from the start. Retrofitting a new parameter later requires updating all parent call sites. Design callbacks with their final intended shape up front.
+
+---
+
+## Frontend UI Components
+
+- **Segmented control inside dropdown**: a multi-option type selector (e.g., 5-option link types) fits cleanly at the top of an autocomplete dropdown with one row of small buttons. Use `onMouseDown` (not `onClick`) to prevent parent textarea blur. Active option gets indigo background highlight. This pattern eliminates an extra dialog step for type selection.
 
 ---
 

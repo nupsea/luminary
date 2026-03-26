@@ -79,6 +79,9 @@ class VizErrorBoundary extends Component<{ children: ReactNode }, { error: strin
 import { API_BASE } from "@/lib/config"
 import TagGraph from "@/components/TagGraph"
 import type { TagNodeData, TagEdgeData } from "@/components/TagGraph"
+import NodeSquareProgram from "@/lib/sigma-square"
+import NotePreviewPanel from "@/components/NotePreviewPanel"
+import { NOTE_NODE_COLOR, noteNodeAttrs } from "@/lib/noteGraphUtils"
 const SIDEBAR_W = 240
 
 // ---------------------------------------------------------------------------
@@ -159,6 +162,8 @@ interface GraphNode {
   type: string
   size: number
   source_image_id?: string  // set for diagram-derived nodes (S136)
+  note_id?: string           // set for Note nodes (S172)
+  outgoing_link_count?: number  // set for Note nodes (S172)
 }
 
 interface GraphEdge {
@@ -198,11 +203,12 @@ async function fetchGraphData(
   scope: "document" | "all",
   viewMode: "knowledge_graph" | "call_graph",
   showCrossBook: boolean = false,
+  includeNotes: boolean = false,
 ): Promise<GraphData> {
   const url =
     scope === "document" && documentId
-      ? `${API_BASE}/graph/${documentId}?type=${viewMode}`
-      : `${API_BASE}/graph?doc_ids=&include_same_concept=${showCrossBook}`
+      ? `${API_BASE}/graph/${documentId}?type=${viewMode}&include_notes=${includeNotes}`
+      : `${API_BASE}/graph?doc_ids=&include_same_concept=${showCrossBook}&include_notes=${includeNotes}`
   const res = await fetch(url)
   if (!res.ok) throw new Error("Failed to fetch graph data")
   return res.json() as Promise<GraphData>
@@ -238,16 +244,36 @@ const PREREQ_EDGE_COLOR = "#a855f7"  // purple-500
 const SAME_CONCEPT_COLOR = "#94a3b8"         // slate-400 -- no contradiction
 const SAME_CONCEPT_CONTRADICTION_COLOR = "#ef4444"  // red-500 -- contradiction detected
 
+// Note node edge colors (S172)
+const WRITTEN_ABOUT_EDGE_COLOR = "#94a3b8"  // slate-400 -- thin grey lines
+const LINKS_TO_EDGE_COLOR = "#6366f1"       // indigo-500 -- note-to-note
+// NOTE_NODE_COLOR imported from noteGraphUtils
+
 function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   // Use mixed graph to support both undirected (CO_OCCURS) and directed (PREREQUISITE_OF) edges
   const g = new Graph({ type: "mixed" })
-  const frequencies = nodes.map((n) => n.size)
+  // Only include non-note nodes in frequency scaling (note size is set by outgoing_link_count)
+  const entityNodes = nodes.filter((n) => n.type !== "note")
+  const frequencies = entityNodes.map((n) => n.size)
   const minFreq = Math.min(...frequencies, 1)
   const maxFreq = Math.max(...frequencies, 1)
   const scaleSize = (freq: number) =>
     maxFreq === minFreq ? 10 : 4 + ((freq - minFreq) / (maxFreq - minFreq)) * 16
 
   nodes.forEach((node) => {
+    // Note nodes (S172): square renderer, indigo color, size from outgoing_link_count
+    if (node.type === "note") {
+      const linkCount = node.outgoing_link_count ?? 1
+      const nid = node.note_id ?? node.id
+      g.addNode(node.id, {
+        ...noteNodeAttrs(node.label, nid, linkCount),
+        frequency: linkCount,
+        source_image_id: "",
+        x: Math.random() * 200 - 100,
+        y: Math.random() * 200 - 100,
+      })
+      return
+    }
     const attrs: Record<string, unknown> = {
       label: node.label,
       entityType: node.type,
@@ -270,10 +296,12 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
       if (!g.hasEdge(edge.source, edge.target)) {
         const isPrereq = edge.relation === "PREREQUISITE_OF"
         const isSameConcept = edge.relation === "SAME_CONCEPT"
+        const isWrittenAbout =
+          edge.relation === "WRITTEN_ABOUT" || edge.relation === "TAG_IS_CONCEPT"
+        const isLinksTo = edge.relation === "LINKS_TO"
 
         if (isSameConcept) {
           // SAME_CONCEPT: undirected, low weight, gray or red based on contradiction (S141)
-          // Sigma does not natively support dashed edges; use low weight + distinct color.
           const edgeColor = edge.contradiction
             ? SAME_CONCEPT_CONTRADICTION_COLOR
             : SAME_CONCEPT_COLOR
@@ -282,6 +310,31 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
             weight: edge.weight ?? 0.5,
             color: edgeColor,
             relation: "SAME_CONCEPT",
+            size: 0.5,
+          })
+          return
+        }
+
+        if (isWrittenAbout) {
+          // Note -> Entity: thin grey undirected line (S172)
+          g.addUndirectedEdge(edge.source, edge.target, {
+            key: `e-${idx}`,
+            weight: edge.weight ?? 0.5,
+            color: WRITTEN_ABOUT_EDGE_COLOR,
+            relation: edge.relation,
+            size: 0.5,
+          })
+          return
+        }
+
+        if (isLinksTo) {
+          // Note -> Note: indigo undirected line (S172)
+          // Sigma does not natively support dashed edges; use distinct color.
+          g.addUndirectedEdge(edge.source, edge.target, {
+            key: `e-${idx}`,
+            weight: edge.weight ?? 0.5,
+            color: LINKS_TO_EDGE_COLOR,
+            relation: "LINKS_TO",
             size: 0.5,
           })
           return
@@ -404,6 +457,10 @@ export default function Viz() {
   const [showPrerequisites, setShowPrerequisites] = useState(true)
   // Cross-book layer toggle: show/hide SAME_CONCEPT edges (S141) -- default off (noisy)
   const [showCrossBook, setShowCrossBook] = useState(false)
+  // Notes layer toggle: show/hide Note nodes (S172) -- default off
+  const [showNotes, setShowNotes] = useState(false)
+  // Selected note node ID for NotePreviewPanel (S172)
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   // Learning path state (S117)
   const [learningPathStart, setLearningPathStart] = useState("")
   const [lpInputDraft, setLpInputDraft] = useState("")
@@ -417,10 +474,16 @@ export default function Viz() {
 
   const noDocSelected = scope === "document" && !activeDocumentId
 
-  const queryKey = ["graph", scope, activeDocumentId, viewMode, showCrossBook]
+  const queryKey = ["graph", scope, activeDocumentId, viewMode, showCrossBook, showNotes]
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey,
-    queryFn: () => fetchGraphData(activeDocumentId, scope, viewMode as "knowledge_graph" | "call_graph", showCrossBook),
+    queryFn: () => fetchGraphData(
+      activeDocumentId,
+      scope,
+      viewMode as "knowledge_graph" | "call_graph",
+      showCrossBook,
+      showNotes,
+    ),
     staleTime: 30_000,
     enabled: !noDocSelected && viewMode !== "learning_path" && viewMode !== "tags",
   })
@@ -470,6 +533,8 @@ export default function Viz() {
     }
     if (!data) return null
     const visibleNodes = data.nodes.filter((n) => {
+      // Note nodes (S172): controlled by showNotes toggle, independent of entity type filter
+      if (n.type === "note") return showNotes
       if (DIAGRAM_NODE_TYPES.has(n.type)) {
         // Diagram nodes are hidden when showDiagramNodes=false OR type not in activeTypes
         return showDiagramNodes && activeTypes.has(n.type as EntityType)
@@ -485,7 +550,7 @@ export default function Viz() {
         (showCrossBook || e.relation !== "SAME_CONCEPT"),
     )
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook])
+  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook, showNotes])
 
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
@@ -505,26 +570,40 @@ export default function Viz() {
       defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
       labelSize: 12,
       labelWeight: "normal",
-      // Register hexagon node program for COMPONENT nodes (S136).
+      // Register hexagon (S136) and square (S172) node programs.
       // Nodes without a type attribute use sigma's default renderer (NodePointProgram).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sigma generic variance
       nodeProgramClasses: {
         hexagon: NodeHexagonProgram as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sigma generic variance
+        square: NodeSquareProgram as any,
       },
     })
 
-    // Node click → popover
+    // Node click → popover or note panel (S172)
     s.on("clickNode", (payload: SigmaNodeEventPayload) => {
       const { node, event } = payload
+      const entityType = filteredGraph.getNodeAttribute(node, "entityType") as string
+
+      // Note nodes open NotePreviewPanel; entity nodes open the entity popover
+      if (entityType === "note") {
+        const noteId = (filteredGraph.getNodeAttribute(node, "note_id") as string | undefined) ?? node
+        setSelectedNode(null)
+        setSelectedNoteId(noteId)
+        event.preventSigmaDefault()
+        return
+      }
+
       const pos = s.graphToViewport({
         x: filteredGraph.getNodeAttribute(node, "x") as number,
         y: filteredGraph.getNodeAttribute(node, "y") as number,
       })
       const rect = el.getBoundingClientRect()
+      setSelectedNoteId(null)
       setSelectedNode({
         id: node,
         label: filteredGraph.getNodeAttribute(node, "label") as string,
-        type: filteredGraph.getNodeAttribute(node, "entityType") as string,
+        type: entityType,
         frequency: filteredGraph.getNodeAttribute(node, "frequency") as number,
         screenX: rect.left + pos.x,
         screenY: rect.top + pos.y,
@@ -541,8 +620,11 @@ export default function Viz() {
     })
     s.on("leaveEdge", () => setEdgeTooltip(null))
 
-    // Click blank area → deselect node
-    s.on("clickStage", () => setSelectedNode(null))
+    // Click blank area → deselect node/note panel
+    s.on("clickStage", () => {
+      setSelectedNode(null)
+      setSelectedNoteId(null)
+    })
 
     sigmaRef.current = s
 
@@ -633,11 +715,13 @@ export default function Viz() {
     (!data || data.nodes.length === 0) &&
     viewMode !== "learning_path" &&
     viewMode !== "tags"
+  // showAllHidden: only considers entity/diagram nodes; note nodes (S172) are separate
+  const entityNodeCount = data ? data.nodes.filter((n) => n.type !== "note").length : 0
   const showAllHidden =
     filteredGraph !== null &&
     filteredGraph.order === 0 &&
     !!data &&
-    data.nodes.length > 0 &&
+    entityNodeCount > 0 &&
     viewMode !== "learning_path" &&
     viewMode !== "tags"
 
@@ -846,6 +930,20 @@ export default function Viz() {
                     />
                     <span className="text-xs text-foreground">Cross-book</span>
                   </label>
+                  {/* Notes layer toggle (S172) */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showNotes}
+                      onChange={() => setShowNotes((v) => !v)}
+                      className="accent-primary"
+                    />
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0"
+                      style={{ backgroundColor: NOTE_NODE_COLOR }}
+                    />
+                    <span className="text-xs text-foreground">Notes</span>
+                  </label>
                 </div>
               </div>
 
@@ -972,7 +1070,7 @@ export default function Viz() {
               <Network size={40} className="text-muted-foreground/40" />
               <p className="text-base font-semibold text-foreground">All entity types hidden</p>
               <p className="text-sm text-muted-foreground max-w-xs">
-                {data!.nodes.length} {data!.nodes.length === 1 ? "entity" : "entities"} found —
+                {entityNodeCount} {entityNodeCount === 1 ? "entity" : "entities"} found —
                 enable at least one entity type in the filter to see the graph.
               </p>
             </div>
@@ -1024,6 +1122,14 @@ export default function Viz() {
                 <Maximize2 size={14} />
               </button>
             </div>
+          )}
+
+          {/* Note node preview panel (S172) -- right-side panel */}
+          {selectedNoteId && (
+            <NotePreviewPanel
+              noteId={selectedNoteId}
+              onClose={() => setSelectedNoteId(null)}
+            />
           )}
 
           {/* Node click popover */}

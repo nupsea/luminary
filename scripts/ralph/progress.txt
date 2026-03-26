@@ -1897,3 +1897,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - LinkAutocomplete onSelect signature should include linkType from the start; retroactively adding it to the callback requires updating all parent call sites.
   - 5-option segmented control fits cleanly at top of the autocomplete dropdown without adding a second interaction step.
 ---
+
+## 2026-03-26 - S172 - Note nodes in Viz Knowledge and Learning Path graph modes
+- Implemented: `_get_note_nodes_for_entities()` helper in KuzuService; `include_notes: bool = False` param on `get_graph_for_document` and `get_graph_for_documents`; `include_notes` query param on both graph router endpoints; NodeSquareProgram (sigma-square.ts) for square WebGL rendering; NotePreviewPanel.tsx (right-side panel); Notes layer toggle in Viz.tsx sidebar; note node click routing to NotePreviewPanel (vs entity popover); pure utility noteGraphUtils.ts (testable in node env); 11 Vitest tests + 5 pytest tests + S172 smoke test
+- Files changed: backend/app/services/graph.py, backend/app/routers/graph.py, backend/tests/test_graph.py, frontend/src/lib/sigma-square.ts (new), frontend/src/components/NotePreviewPanel.tsx (new), frontend/src/lib/noteGraphUtils.ts (new), frontend/src/lib/noteGraphUtils.test.ts (new), frontend/src/pages/Viz.tsx, scripts/smoke/S172.sh (new), docs/exec-plans/completed/S172.md, scripts/ralph/prd-v3.json
+- **Learnings for future iterations:**
+  - Kuzu does not support `type(r)` function in RETURN clause (RuntimeError: function TYPE does not exist). Use separate queries per edge type (WRITTEN_ABOUT, TAG_IS_CONCEPT) and hardcode the rel_type string in Python.
+  - For Vitest "node" environment tests that need to verify DOM event dispatch: extract `buildNoteNavigateDetail(noteId)` as a pure function returning the event detail object; test that, not `window.dispatchEvent`. The DOM dispatch is untestable in node env.
+  - When adding note nodes to Sigma graph: use `while result.has_next(): row = result.get_next()` pattern (not DISTINCT in multi-query approach to avoid Kuzu function issues).
+  - The `showAllHidden` state check in Viz.tsx must exclude note nodes (type='note') from the entity count since notes are controlled by a separate toggle -- otherwise toggling Notes off with entity nodes visible incorrectly shows the "All entity types hidden" overlay.
+  - `noteNodeAttrs` pure utility pattern: extract node attribute building (color, type, size) to a testable utility to create a single source of truth used by both buildGraph and tests.
+---
