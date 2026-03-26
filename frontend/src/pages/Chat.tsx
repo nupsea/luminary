@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, Globe, Loader2, Send, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, Info, Loader2, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -11,9 +11,11 @@ import { QuizQuestionCard } from "@/components/QuizQuestionCard"
 import { TeachBackResultCard } from "@/components/TeachBackResultCard"
 import type { TeachBackCardData } from "@/components/TeachBackResultCard"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
+import { buildModelOptions, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
 
@@ -201,7 +203,7 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 // S158: per-message transparency panel with collapsible "How I Answered" section
 function TransparencyPanel({ transparency }: { transparency: TransparencyInfo }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(TRANSPARENCY_DEFAULT_OPEN)
   const badgeClass =
     TRANSPARENCY_BADGE_CLASS[transparency.confidence_level] ??
     TRANSPARENCY_BADGE_CLASS["low"]
@@ -214,17 +216,13 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
         >
           {transparency.confidence_level} confidence
         </span>
-        {transparency.confidence_level === "low" && (
-          <span className="text-xs italic text-muted-foreground">
-            This answer has low confidence -- verify in the source document
-          </span>
-        )}
         <button
           onClick={() => setOpen((v) => !v)}
-          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          className="text-muted-foreground hover:text-foreground transition-colors"
           aria-expanded={open}
+          title={open ? "Hide retrieval details" : "How I answered"}
         >
-          {open ? "Hide" : "How I answered"}
+          <Info size={13} />
         </button>
       </div>
       {open && (
@@ -393,14 +391,6 @@ function ConfusionBanner({
   )
 }
 
-function buildModelOptions(settings: LLMSettings | undefined): string[] {
-  if (!settings) return []
-  // Cloud mode: backend handles routing via get_effective_routing(); no model selector needed.
-  if (settings.processing_mode === "cloud") return []
-  const opts = settings.available_local_models
-  return opts.length > 0 ? opts : (settings.active_model ? [settings.active_model] : [])
-}
-
 export default function Chat() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
@@ -421,6 +411,7 @@ export default function Chat() {
   const [webEnabled, setWebEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const mountTime = useRef(Date.now())
@@ -730,22 +721,6 @@ export default function Chat() {
     <div className="flex h-full flex-col">
       {/* Header controls */}
       <div className="flex items-center gap-4 border-b border-border px-6 py-3">
-        {/* Scope selector */}
-        <div className="flex items-center rounded-md border border-border">
-          <button
-            onClick={() => { if (scope !== "single") { setScope("single"); clearConversation() } }}
-            className={`rounded-l-md px-3 py-1.5 text-xs font-medium transition-colors ${scope === "single" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"}`}
-          >
-            This document
-          </button>
-          <button
-            onClick={() => { if (scope !== "all") { setScope("all"); clearConversation() } }}
-            className={`rounded-r-md px-3 py-1.5 text-xs font-medium transition-colors ${scope === "all" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"}`}
-          >
-            All my content
-          </button>
-        </div>
-
         {/* Document picker — only visible in "This document" scope */}
         {scope === "single" && (
           <select
@@ -760,6 +735,11 @@ export default function Chat() {
           </select>
         )}
 
+        {/* Web call counter -- shown when web is enabled and conversation is active */}
+        {webEnabled && messages.length > 0 && (
+          <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
+        )}
+
         {/* Clear conversation button — only shown when there are messages */}
         {messages.length > 0 && !isStreaming && (
           <button
@@ -772,50 +752,35 @@ export default function Chat() {
           </button>
         )}
 
-        {/* Model selector */}
-        {llmLoading ? (
-          <Skeleton className="h-8 w-36" />
-        ) : modelOptions.length > 0 ? (
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            {modelOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        ) : null}
-
-        {/* Web search toggle (S142) */}
-        <div
-          title={
-            webSearchSettings?.enabled
-              ? "Toggle web augmentation (adds current web results to low-confidence answers)"
-              : "Configure a web search provider in Settings to enable web search"
-          }
+        {/* Settings gear icon — opens ChatSettingsDrawer */}
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className={`${messages.length > 0 && !isStreaming ? "" : "ml-auto"} rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors`}
+          title="Chat settings"
         >
-          <button
-            disabled={!webSearchSettings?.enabled}
-            onClick={() => setWebEnabled((prev) => !prev)}
-            className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors ${
-              webEnabled
-                ? "border-blue-300 bg-blue-50 text-blue-700"
-                : "border-border text-muted-foreground hover:bg-accent"
-            } disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            <Globe size={12} />
-            Web
-          </button>
-        </div>
-
-        {/* Web call counter -- shown when web is enabled and conversation is active */}
-        {webEnabled && messages.length > 0 && (
-          <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
-        )}
+          <Settings size={15} />
+        </button>
       </div>
+
+      {/* Chat settings drawer — model selector, web toggle, scope */}
+      <ChatSettingsDrawer
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        model={model}
+        onModelChange={setModel}
+        modelOptions={modelOptions}
+        llmLoading={llmLoading}
+        webEnabled={webEnabled}
+        onWebToggle={() => setWebEnabled((prev) => !prev)}
+        webSearchSettings={webSearchSettings}
+        scope={scope}
+        onScopeChange={(newScope) => {
+          if (newScope !== scope) {
+            setScope(newScope)
+            clearConversation()
+          }
+        }}
+      />
 
       {/* LLM settings unavailable warning */}
       {llmError && (

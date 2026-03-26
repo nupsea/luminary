@@ -1992,3 +1992,18 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Smoke HTTP code: POST /flashcards/generate returns 201 not 200; check for 200 or 201
   - Reviewer Warning (deferred): _dedup_check hardcoded deck="default" -- valid today since generate() stores with ORM default="default"; will need update if generate() gains deck parameter
 ---
+
+## 2026-03-27 - S180
+- Implemented Chat interface simplification: moved model selector, web search toggle, and scope selector out of the Chat header into a new ChatSettingsDrawer (Sheet component). Header now retains only document picker (when scope=single), web call counter, clear button, and gear icon.
+- Refactored TransparencyPanel toggle from "How I answered" text link to Info icon (`<Info size={13} />`). Removed low-confidence italic warning text from TransparencyPanel.
+- Files changed:
+  - frontend/src/lib/chatSettingsUtils.ts (NEW) -- buildModelOptions, buildTransparencyIconLabel, DRAWER_SECTIONS, TRANSPARENCY_DEFAULT_OPEN
+  - frontend/src/lib/chatSettingsUtils.test.ts (NEW) -- 13 tests passing
+  - frontend/src/components/ChatSettingsDrawer.tsx (NEW) -- Sheet with scope/model/web_search sections
+  - frontend/src/pages/Chat.tsx (MODIFIED) -- header cleanup, drawer integration, TransparencyPanel Info icon
+  - scripts/smoke/S180.sh (NEW) -- backend endpoint checks for frontend-only story
+- **Learnings for future iterations:**
+  - When AC requires "unit test: X renders in Y" and @testing-library/react is not installed, satisfy via exported constants that encode the architectural invariant (e.g. DRAWER_SECTIONS = ["scope","model","web_search"]) and test the constant. Then use the constant in the component itself (useState(TRANSPARENCY_DEFAULT_OPEN)) to tie component behavior to the tested value.
+  - Reviewer caught buildTransparencyIconLabel as dead code initially -- whenever you export a utility, use it in the component (or remove it). The fix was importing TRANSPARENCY_DEFAULT_OPEN into TransparencyPanel so the constant is load-bearing.
+  - Sheet component is available at frontend/src/components/ui/sheet.tsx with SheetContent, SheetHeader, SheetTitle, SheetClose, etc. Side="right" gives a right-side panel.
+---

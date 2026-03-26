@@ -113,7 +113,7 @@ Each story SXXX produces or modifies these artifacts:
 | S177 | Progress tab: Monitoring renamed, dev metrics at /admin, GoalsPanel moved | pass |
 | S178 | Study tab: Smart Generate, merged health panels, fix 'default' deck label | pass |
 | S179 | Context-aware flashcard generation: chunk classification, genre-aware prompts | pass |
-| S180 | Chat simplification: settings drawer, collapsed transparency panel | pending |
+| S180 | Chat simplification: settings drawer, collapsed transparency panel | pass |
 | S181 | Viz overhaul: View Options panel, Select All entity types, hide Call Graph | pending |
 | S182 | YouTube transcript viewer: full Read section parity | pending |
 | S183 | Learning tab: slim stats bar, document list as primary focus | pending |
