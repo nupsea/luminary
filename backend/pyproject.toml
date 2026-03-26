@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.132.0",
     "faster-whisper>=1.2.1",
     "fsrs>=6.3.0",
+    "genanki>=0.13.1",
     "gliner>=0.2.25",
     "httpx>=0.28.1",
     "keyring>=25.7.0",

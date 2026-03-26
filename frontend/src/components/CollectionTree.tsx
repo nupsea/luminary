@@ -14,8 +14,9 @@
  * States: loading (3 skeleton lines), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Pencil, Settings, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Download, Pencil, Settings, Trash2 } from "lucide-react"
 import { useRef, useState } from "react"
+import { toast } from "sonner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -96,6 +97,8 @@ function CollectionTreeItemRow({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportLoading, setExportLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const qc = useQueryClient()
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
@@ -141,6 +144,44 @@ function CollectionTreeItemRow({
     setRenameValue(item.name)
     setRenaming(true)
     setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  async function handleExport(format: "markdown" | "anki") {
+    setExportMenuOpen(false)
+    setExportLoading(true)
+    const toastId = toast.loading(
+      format === "markdown" ? "Preparing Markdown vault..." : "Preparing Anki deck..."
+    )
+    try {
+      const url = `${API_BASE}/collections/${item.id}/export?format=${format}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+      const blob = await res.blob()
+      const disposition = res.headers.get("content-disposition") ?? ""
+      const match = /filename=([^\s;]+)/.exec(disposition)
+      const filename = match ? match[1] : format === "markdown" ? "vault.zip" : "deck.apkg"
+      const a = document.createElement("a")
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(a.href)
+      // Check for no-flashcards warning from backend
+      const warning = res.headers.get("x-luminary-warning")
+      if (warning) {
+        toast.warning(warning, { id: toastId })
+      } else {
+        toast.success(
+          format === "markdown" ? "Markdown vault downloaded" : "Anki deck downloaded",
+          { id: toastId }
+        )
+      }
+    } catch (err) {
+      toast.error(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`, {
+        id: toastId,
+      })
+    } finally {
+      setExportLoading(false)
+    }
   }
 
   const hasChildren = item.children.length > 0
@@ -237,6 +278,48 @@ function CollectionTreeItemRow({
             >
               <Settings size={11} />
             </button>
+            {/* Export submenu trigger */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setExportMenuOpen((v) => !v)
+                }}
+                disabled={exportLoading}
+                className="rounded p-0.5 hover:bg-accent hover:text-foreground disabled:opacity-50"
+                title="Export"
+              >
+                <Download size={11} />
+              </button>
+              {exportMenuOpen && (
+                <div
+                  className="absolute right-0 top-full mt-0.5 z-50 min-w-[140px] rounded border border-border bg-popover py-1 shadow-md"
+                  onMouseLeave={() => setExportMenuOpen(false)}
+                >
+                  <button
+                    type="button"
+                    className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleExport("markdown")
+                    }}
+                  >
+                    Markdown Vault (.zip)
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleExport("anki")
+                    }}
+                  >
+                    Anki Deck (.apkg)
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={(e) => {

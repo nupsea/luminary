@@ -11,10 +11,12 @@ Routes:
 """
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import NoteCollectionMemberModel, NoteCollectionModel
 from app.services.collection_health import get_collection_health_service
+from app.services.export_service import get_export_service
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +337,66 @@ async def add_notes_to_collection(
     await session.commit()
     logger.info("Added %d notes to collection id=%s", added, collection_id)
     return {"added": added, "collection_id": collection_id}
+
+
+# NOTE: These export and health routes are registered BEFORE /{collection_id}/notes/{note_id}
+# to avoid ambiguity. The /export and /health path segments are not note_id wildcards.
+@router.get("/{collection_id}/export")
+async def export_collection(
+    collection_id: str,
+    format: str = "markdown",
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export a collection as a Markdown vault zip or Anki .apkg file.
+
+    ?format=markdown  -- returns .zip with one .md per note and YAML frontmatter
+    ?format=anki      -- returns .apkg (genanki) with flashcards in this collection's deck
+    """
+    if format not in ("markdown", "anki"):
+        raise HTTPException(status_code=422, detail="format must be 'markdown' or 'anki'")
+
+    svc = get_export_service()
+
+    try:
+        if format == "markdown":
+            data = await svc.export_collection_markdown(collection_id, session)
+            col = (
+                await session.execute(
+                    select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                )
+            ).scalar_one_or_none()
+            slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
+            slug = re.sub(r"[^\w-]", "", slug)[:40] or "vault"
+            filename = f"{slug}-vault.zip"
+            return Response(
+                content=data,
+                media_type="application/zip",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        else:
+            data, card_count = await svc.export_collection_anki(collection_id, session)
+            col = (
+                await session.execute(
+                    select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                )
+            ).scalar_one_or_none()
+            slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
+            slug = re.sub(r"[^\w-]", "", slug)[:40] or "deck"
+            filename = f"{slug}.apkg"
+            headers: dict[str, str] = {
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+            if card_count == 0:
+                headers["X-Luminary-Warning"] = (
+                    "No flashcards found for this collection -- generate some first"
+                )
+            return Response(
+                content=data,
+                media_type="application/octet-stream",
+                headers=headers,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # NOTE: These health routes are registered BEFORE /{collection_id}/notes/{note_id} to avoid
