@@ -2007,3 +2007,21 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Reviewer caught buildTransparencyIconLabel as dead code initially -- whenever you export a utility, use it in the component (or remove it). The fix was importing TRANSPARENCY_DEFAULT_OPEN into TransparencyPanel so the constant is load-bearing.
   - Sheet component is available at frontend/src/components/ui/sheet.tsx with SheetContent, SheetHeader, SheetTitle, SheetClose, etc. Side="right" gives a right-side panel.
 ---
+
+## 2026-03-27T08:30:00Z - S181 - Viz tab overhaul: collapsible View Options panel, select-all entity types, hide Call Graph
+- What was implemented:
+  - `frontend/src/lib/vizUtils.ts`: pure helpers exported from Viz -- ALL_ENTITY_TYPES, EntityType, isCodeDocument(), shouldShowClusterView(), buildClusterNodes(), ClusterNodeDef interface
+  - `frontend/src/lib/vizUtils.test.ts`: 18 Vitest node tests for vizUtils pure functions
+  - `frontend/src/vizStore.ts`: dedicated Zustand store (useVizStore) for Viz entity type filter, with manual localStorage persistence via `luminary:vizActiveTypes` key
+  - `frontend/src/vizStore.test.ts`: 7 Vitest tests for selectAllEntityTypes/deselectAllEntityTypes/toggleEntityType using vi.stubGlobal("localStorage", ...) mock
+  - `frontend/src/pages/Viz.tsx`: (1) DocListItem extended with format?:string; (2) isCodeDoc computed via isCodeDocument(selectedDoc?.format); (3) call_graph removed from mode list unless isCodeDoc, useEffect resets to knowledge_graph when isCodeDoc becomes false; (4) local activeTypes useState replaced with useVizStore; (5) Layers + Entity Types sections moved into collapsible "View Options" panel (viewOptionsOpen state, default false); (6) "Select All" + "Deselect All" buttons added; (7) cluster view toggle + buildClusterGraphology() function; (8) showAllHidden text updated to "Select at least one entity type to show the graph"; (9) cluster node click expands that entity type
+  - `scripts/smoke/S181.sh`: 3-check smoke (GET /documents, GET /graph, GET /tags/graph)
+- Files changed: frontend/src/lib/vizUtils.ts, frontend/src/lib/vizUtils.test.ts, frontend/src/vizStore.ts, frontend/src/vizStore.test.ts, frontend/src/pages/Viz.tsx, scripts/smoke/S181.sh, scripts/ralph/prd-v3.json, docs/ralph-run-flow.md, docs/exec-plans/active/S181.md
+- **Learnings for future iterations:**
+  - Vitest node environment has no localStorage -- use vi.stubGlobal("localStorage", mock) BEFORE importing the module that reads localStorage at module load (dynamic import with await import() after vi.stubGlobal)
+  - vizUtils.ts pattern: extract ALL_ENTITY_TYPES, EntityType, and pure logic out of large page components into a separate lib file -- enables Vitest node env testing without Sigma/DOM/Graphology
+  - Separate Zustand store per tab (vizStore.ts alongside store.ts) is cleaner than adding all state to AppStore; manual localStorage pattern (load on init, persist in each action) works fine without zustand/middleware persist
+  - macOS head -n -1 is not supported; use sed '$d' to strip the last line in shell scripts
+  - When the mode array is dynamically constructed (filtering call_graph), TypeScript needs an explicit type cast: (["knowledge_graph", ...(isCodeDoc ? ["call_graph" as const] : []), ...] as ("knowledge_graph" | "call_graph" | "learning_path" | "tags")[])
+  - Cluster node click handling: check filteredGraph.getNodeAttribute(node, "isCluster") before other handlers to avoid popover opening on cluster nodes
+---
