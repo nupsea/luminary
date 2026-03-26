@@ -12,7 +12,8 @@
       "Performance contracts are explicit. The 1024-dim vector schema must match the embedding model (bge-m3). Tag index queries must pass p95 < 100ms at 1,000 notes. Every new async path follows the established asyncio.create_task fire-and-forget pattern with explicit error logging.",
       "Cross-tab navigation is event-driven. Clicking a tag node in the Viz tab fires a 'luminary:navigate' DOM event; App.tsx routes to Notes tab with the tag pre-applied. No URL hacks, no shared global state beyond Zustand store.",
       "Every new service method and every new API endpoint must have at least one pytest test. No exceptions (inherited from v2 philosophy).",
-      "Phase 2 seed (post Phase 1): note-to-note bidirectional links (S171), notes visible in Knowledge graph (S172), collection health reports (S173), export to Obsidian vault and Anki (S174), multi-document notes (S175). Phase 2 begins only after all Phase 1 stories pass and docs/v3-phase1-completion.md validation checklist is fully checked."
+      "Phase 2 seed (post Phase 1): note-to-note bidirectional links (S171), notes visible in Knowledge graph (S172), collection health reports (S173), export to Obsidian vault and Anki (S174), multi-document notes (S175). Phase 2 begins only after all Phase 1 stories pass and docs/v3-phase1-completion.md validation checklist is fully checked.",
+      "Phase 3 (UX Polish and Learner Focus, S176-S183): ruthlessly separates the learner layer from the diagnostic/admin layer. Notes get a reader-first layout with clickable tag navigation (S176). Monitoring becomes a Progress tab with all dev metrics hidden at /admin (S177). Study tab declutters with Smart Generate and merged health panels (S178). Flashcard generation becomes context-aware and best-practices-driven (S179). Chat settings move to a drawer with collapsed transparency panels (S180). Viz gets a collapsible View Options panel, select-all entity controls, and hides Call Graph for non-code documents (S181). YouTube transcripts gain full Read section parity (S182). Learning tab LibraryOverview slims to a single stats bar with document list as primary focus (S183)."
     ]
   },
   "architecture": {
@@ -447,6 +448,177 @@
         "Unit test: migration correctly backfills NoteSourceModel from notes.document_id",
         "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
         "scripts/smoke/S175.sh exits 0"
+      ]
+    },
+    {
+      "id": "S176",
+      "title": "Notes reader-first layout: widen content area, strategic actions, clickable tag navigation",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 16,
+      "featureRef": "F-NOTES-V3",
+      "passes": false,
+      "description": "CONTEXT: The current NoteEditorDialog and note viewer devote most vertical space to action buttons, tag inputs, and metadata fields. The note content itself is squeezed into a small scrollable area. This is backwards: a learner's primary action is to READ their note, not to manage it. This story redesigns the Notes tab note-viewing experience to put reading first. LAYOUT REDESIGN: When a note is opened (click row or 'Open' button), it opens in a full-width reader panel (or a Sheet/Drawer from the right) that occupies 70%+ of the available width. The full note content is displayed in a clean, readable typography block with no competing UI elements. A slim floating action bar (Edit, Tag, Link, Delete) appears at the bottom-right corner of the reader, visible but not dominant. Tag chips appear below the content with adequate spacing -- each chip is clickable and fires a 'luminary:navigate' DOM event routed to the Notes tab with that tag pre-applied as a filter, showing all notes with the same tag. The note title appears prominently at the top. Source document link (if any) is a small subtitle line below the title, clickable to navigate to the Learning tab and open that document. EDIT MODE: Clicking the Edit action button in-place transforms the reader panel into an edit mode (same layout, content area becomes a textarea, floating bar swaps to Save/Cancel). Tag management and collection assignment appear as expandable sections below the content in edit mode only. CLICKABLE TAGS: Each tag chip rendered anywhere in the Notes tab (list view, reader view, detail view) must be an anchor that dispatches luminary:navigate with { tab: 'notes', filter: { tag: tagPath } }. App.tsx must handle this and apply the tag filter in the Notes Zustand store. STATES: Loading note: content skeleton. No content: 'Start writing...'. Tag click with no matching notes: 'No other notes tagged with X'. TESTS: Unit test: tag click dispatches luminary:navigate with correct detail. Unit test: App.tsx luminary:navigate handler sets notes tag filter in Zustand store. Smoke: open a note, verify content fills the panel; click a tag, verify Notes list filters to that tag.",
+      "acceptanceCriteria": [
+        "Note open/view renders in a full-width panel or Sheet/Drawer occupying 70%+ of available width with readable typography",
+        "Note content area is the dominant visual element; action buttons (Edit, Tag, Link, Delete) appear as a floating bar at the bottom-right corner, not stacked alongside content",
+        "Tag chips below content are clickable and dispatch luminary:navigate { tab: 'notes', filter: { tag: tagPath } }",
+        "App.tsx luminary:navigate handler applies the tag filter in Notes Zustand store, filtering the note list to that tag",
+        "Source document subtitle (if set) is clickable and navigates to the Learning tab opening that document",
+        "Edit mode: clicking Edit transforms the reader in-place -- content area becomes editable textarea, tag/collection management appear as expandable sections below the content",
+        "Save/Cancel in edit mode returns to reader view without closing the panel",
+        "Loading state: content skeleton. Empty content: 'Start writing...' placeholder. Tag click with no matches: 'No other notes tagged with X'",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S176.sh exits 0"
+      ]
+    },
+    {
+      "id": "S177",
+      "title": "Progress tab: replace Monitoring with learner-centric view, move dev metrics to admin route",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 17,
+      "featureRef": "F-MONITORING",
+      "passes": false,
+      "description": "CONTEXT: The Monitoring tab currently mixes two incompatible audiences: a learner who wants to know how they are progressing, and a developer who needs RAG pipeline health metrics. RAG quality metrics (HR@5, MRR, Faithfulness), Phoenix/Langfuse traces, and eval run logs have zero learning value for a student. They occupy significant screen real estate and create confusion. This story renames the Monitoring tab to 'Progress', strips all developer-centric panels from it, and moves them to a hidden /admin route accessible only via URL. The Progress tab becomes the learner's personal mastery dashboard. RENAME: Navigation tab 'Monitoring' -> 'Progress'. Tab component file renamed from Monitoring.tsx to Progress.tsx. LEARNER CONTENT (stays in Progress tab): Study activity chart (cards reviewed per day, streak), Overall mastery score across all decks, Cards due today vs mastered counts, Notes created over time chart, Documents ingested count, Time invested estimate. GOALS PANEL: GoalsPanel (currently in Study tab, S169) moves to Progress tab. Goals belong to the progress/mastery view, not the study workflow. Study tab no longer renders GoalsPanel. DEVELOPER CONTENT (moved to /admin route, not linked from nav): RagQualityPanel (HR@5, MRR, Faithfulness scores), PhoenixTracesPanel, LangfusePanel, EvalRunsPanel. Create a new AdminPage component rendered only at route /admin (not in the tab nav). Add a small hidden 'Dev Tools' link at the very bottom of the app footer (e.g. 'v3 | Dev') that navigates to /admin. BACKEND: No new endpoints required. GET /monitoring/* endpoints remain. The admin route simply re-uses existing API calls. STATES: Progress tab empty state (no study history): 'Start studying to see your progress here'. /admin route: no auth required (local app), just a plain page with all existing monitoring panels. TESTS: Unit test: GoalsPanel renders in Progress tab, not in Study tab. Unit test: /admin route renders RagQualityPanel. Smoke: GET /monitoring/rag-quality still returns 200 (endpoint unchanged).",
+      "acceptanceCriteria": [
+        "Navigation tab renamed from 'Monitoring' to 'Progress'; Monitoring.tsx refactored to Progress.tsx",
+        "Progress tab contains: study activity chart, overall mastery score, cards due/mastered counts, notes-over-time chart, documents count, GoalsPanel",
+        "GoalsPanel removed from Study tab and rendered in Progress tab",
+        "RAG quality metrics (HR@5, MRR, Faithfulness), Phoenix traces, Langfuse panels, and eval runs removed from Progress tab",
+        "New /admin route (AdminPage component) renders all removed developer panels (RagQualityPanel, PhoenixTracesPanel, LangfusePanel, EvalRunsPanel)",
+        "/admin route is NOT linked from the main navigation tabs",
+        "Small 'Dev Tools' link in app footer (or similar hidden entry point) navigates to /admin",
+        "Empty state in Progress tab when no study history: 'Start studying to see your progress here'",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S177.sh exits 0"
+      ]
+    },
+    {
+      "id": "S178",
+      "title": "Study tab consolidation: merge health panels, Smart Generate button, fix default deck label",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 18,
+      "featureRef": "F-STUDY",
+      "passes": false,
+      "description": "CONTEXT: The Study tab is overloaded with four distinct panels (deck management, flashcard generation with 3 modes, DeckHealthPanel with Bloom's taxonomy audit, HealthReportPanel with orphaned/mastered metrics). The three generation modes with manual overrides create decision fatigue for learners. The 'default' label within 'All decks' has no semantic meaning to a user. This story consolidates the Study tab into a clean, focused learning workflow. SMART GENERATE: Replace the three generation mode buttons (basic, Feynman, cloze) plus manual overrides with a single 'Smart Generate' button. The button auto-selects the best generation mode using the following heuristic: if the source document has < 30% mastered cards, use basic mode; if mastery >= 30% and < 70%, use Feynman (deeper comprehension); if mastery >= 70%, use cloze (retrieval practice). The chosen mode is shown as a small subtitle under the button ('Generating Feynman-style questions...'). A 'Advanced options' disclosure triangle below the button reveals the original mode selector and override controls for power users. HEALTH PANELS: DeckHealthPanel (Bloom's taxonomy audit) and HealthReportPanel (orphaned/mastered metrics) are merged into a single 'Deck Status' accordion section, collapsed by default. Expand to see combined audit data. Neither panel is visible by default when the Study tab loads. DECK LABEL: The 'default' deck name shown in 'All decks' is confusing when it is the only deck. Fix: if a deck's name is 'default' and it is the only deck for a document, display it as the document title instead (e.g. 'The Time Machine'). This is a display-only alias; the underlying deck name in the DB remains 'default' for backward compat. GOALS PANEL: GoalsPanel removed from Study tab (moved to S177 Progress tab). STATES: Smart Generate loading: 'Analyzing your mastery level...' then 'Generating X-style questions...'. No cards in deck: 'No flashcards yet -- click Smart Generate to create some'. Deck Status accordion collapsed label: 'Deck Status (X cards, Y% mastered)'. TESTS: Unit test: smart generate mode selector picks correct mode based on mastery thresholds. Unit test: deck display name aliases 'default' to document title when it is the only deck. Unit test: Deck Status accordion is collapsed by default.",
+      "acceptanceCriteria": [
+        "Three generation mode buttons replaced with single 'Smart Generate' button that auto-selects mode based on mastery thresholds (< 30% basic, 30-70% Feynman, >= 70% cloze)",
+        "Chosen generation mode displayed as subtitle under the Smart Generate button during generation",
+        "'Advanced options' disclosure reveals original mode selector and override controls for power users",
+        "DeckHealthPanel and HealthReportPanel merged into a single 'Deck Status' accordion section, collapsed by default",
+        "Deck Status accordion header shows summary: 'Deck Status (X cards, Y% mastered)'",
+        "GoalsPanel removed from Study tab (handled by S177)",
+        "Deck named 'default' that is the only deck for a document displays the document title as its display name (DB value unchanged)",
+        "Empty state when no cards: 'No flashcards yet -- click Smart Generate to create some'",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S178.sh exits 0"
+      ]
+    },
+    {
+      "id": "S179",
+      "title": "Context-aware flashcard generation: best-practices for non-fiction and technical books",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 19,
+      "featureRef": "F-FLASHCARDS",
+      "passes": false,
+      "description": "CONTEXT: The current flashcard generator picks arbitrary text snippets and generates Q&A from them without verifying that the snippet contains a testable concept. This produces cards like 'What are the natural predators of wild boars?' when the document is a technology book that used wild boars as a passing analogy. The generator lacks the ability to distinguish between a core concept and an illustrative digression. This story rewrites the flashcard generation prompt and selection logic to follow evidence-based best practices. PRE-GENERATION FILTER: Before generating a question from a chunk, classify the chunk as 'concept', 'definition', 'example', 'analogy', 'narrative', or 'transition'. Only chunks classified as 'concept' or 'definition' are eligible for flashcard generation. 'example', 'analogy', and 'narrative' chunks are skipped unless they directly elaborate a concept chunk (adjacent in the section). PROMPT REDESIGN: System prompt for the LLM flashcard generator must include: (a) document genre hint (technical, narrative, academic -- inferred from document metadata or title keywords); (b) explicit instruction to generate questions that test understanding of a core idea, NOT surface recall of an illustrative example; (c) instruction to frame questions in terms of the concept being explained, with the answer explaining WHY or HOW, not just WHAT was mentioned. QUESTION QUALITY RULES (enforced in the system prompt): No questions whose answer is a proper noun from an analogy or story used to explain a concept. Questions must be answerable by someone who has NOT read the specific analogy but understands the underlying concept. Prefer 'Explain X in your own words' and 'What is the practical implication of Y' over 'According to the text, what does Z do'. DEDUPLICATION: If a generated Q&A pair has cosine similarity >= 0.85 with an existing card in the same deck (compare question embeddings), skip it. This extends the source_content_hash dedup from S174. BACKEND: Modify FlashcardService (or the relevant generation service) to add chunk classification step (single LLM call or heuristic keyword approach for performance), update the generation prompt with genre-aware instructions and quality rules, add embedding-based dedup check. New field: FlashcardModel.chunk_classification (nullable str) to record why a chunk was or was not selected. TESTS: Unit test: analogy-only chunks are skipped. Unit test: concept chunks produce questions framed around the concept, not the analogy. Unit test: near-duplicate card is skipped by embedding dedup. Integration test with DDIA-style tech text: generated cards mention 'replication', 'consistency', 'distributed systems' -- not 'wild boars'.",
+      "acceptanceCriteria": [
+        "Pre-generation chunk classifier labels each candidate chunk as concept, definition, example, analogy, narrative, or transition",
+        "Only concept and definition chunks (or example/analogy chunks directly adjacent to a concept chunk) are submitted to the flashcard LLM",
+        "Flashcard generation system prompt includes document genre hint and explicit quality rules: no analogy-sourced proper-noun answers, questions test understanding not surface recall",
+        "FlashcardModel.chunk_classification field (nullable str) stored in DB, records classification decision",
+        "Embedding-based dedup: generated Q&A pairs with cosine similarity >= 0.85 to an existing card in the same deck are silently skipped",
+        "Unit test: chunk containing only an analogy (e.g. wild boar paragraph) is classified as 'analogy' and skipped",
+        "Unit test: concept chunk produces a question framed around the concept with a 'why/how' answer",
+        "Unit test: near-duplicate (>= 0.85 cosine) card is not inserted",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S179.sh exits 0"
+      ]
+    },
+    {
+      "id": "S180",
+      "title": "Chat interface simplification: settings drawer for model/web toggle, collapsible transparency panel",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 20,
+      "featureRef": "F-CHAT",
+      "passes": false,
+      "description": "CONTEXT: The Chat tab header currently surfaces the LLM model selector and web search toggle prominently in the chat header area, consuming vertical space that belongs to the conversation. The 'How I answered' transparency panel (RAG sources, confidence, graph context) is always expanded, adding visual noise to every message. Confusion/low-confidence banners appear frequently and interrupt the reading flow. Most learners never change the model mid-conversation; these controls belong in a settings surface. CHAT SETTINGS DRAWER: Add a settings icon (gear icon) in the top-right corner of the Chat header. Clicking it opens a right-side Drawer (Sheet component) titled 'Chat Settings'. The drawer contains: LLM model selector (currently in header), web search toggle (currently in header), scope selector (if present), any other advanced parameters. After applying settings in the drawer, the drawer closes and settings take effect on the next message. HEADER CLEANUP: Remove model selector and web search toggle from the main chat header. The header retains only: document/book context chips (if any), the new settings gear icon, and the clear conversation button. TRANSPARENCY PANEL: The 'How I answered' section on each assistant message is collapsed by default, showing only a small 'i' (info) icon button. Clicking the icon expands the panel inline for that message. The expanded state is per-message and does not persist on page reload. For new messages, the panel starts collapsed. CONFUSION BANNERS: If a confusion/low-confidence banner is shown for a message, it should appear as a compact inline badge (e.g. 'Low confidence') next to the message timestamp, not as a full-width warning block. Full-width banners are reserved for critical errors (LLM unavailable, network error). STATES: Settings drawer loading model list: skeleton. Transparency panel collapsed: shows just the 'i' icon. Expanded: shows full sources/context panel as before. TESTS: Unit test: model selector and web toggle render inside ChatSettingsDrawer, not in chat header. Unit test: transparency panel is collapsed by default; clicking 'i' expands it. Unit test: low-confidence response shows compact badge, not full-width banner.",
+      "acceptanceCriteria": [
+        "Chat header no longer contains model selector or web search toggle -- these move to a ChatSettingsDrawer (Sheet component) opened via gear icon in top-right corner",
+        "Chat header retains: document context chips (if any), settings gear icon, clear conversation button",
+        "'How I answered' transparency panel is collapsed by default on each assistant message, showing only a small 'i' info icon button",
+        "Clicking the 'i' icon expands the transparency panel inline for that message only; other messages unaffected",
+        "Low-confidence/confusion responses show a compact inline badge ('Low confidence') next to the message, not a full-width warning block",
+        "Full-width banners reserved for critical errors: LLM unavailable, network errors",
+        "ChatSettingsDrawer contains: model selector, web search toggle, scope selector, and any advanced chat parameters",
+        "Unit test: model selector renders in drawer, not in header. Unit test: transparency panel collapsed by default",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S180.sh exits 0"
+      ]
+    },
+    {
+      "id": "S181",
+      "title": "Viz tab overhaul: collapsible View Options panel, select-all entity types, hide Call Graph",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 21,
+      "featureRef": "F-VIZ",
+      "passes": false,
+      "description": "CONTEXT: The Viz tab exposes too many layer toggles as persistent buttons (Diagrams, Prerequisites, etc.), making the interface cluttered. The Call Graph mode is developer-centric and irrelevant for most learners. Entity type toggles (PERSON, ORGANIZATION, PLACE, CONCEPT, etc.) have no select-all or deselect-all control. The graph defaults to showing all entities from all documents, which can overwhelm a learner with thousands of nodes. This story redesigns the Viz tab controls for learner focus. CALL GRAPH: Move 'Call Graph' mode out of the top-level mode selector. It should only appear if the currently selected document contains code files. Auto-detect code documents by checking if document metadata includes file extensions (.py, .js, .ts, .go, etc.) or document type is 'code'. If no code document is selected, Call Graph does not appear in the mode list. If a code document IS selected, it appears as a secondary option within the Knowledge Graph settings panel. LAYER TOGGLES: All persistent layer toggle buttons (Diagrams, Prerequisites, and any others) are removed from the main toolbar. They are consolidated into a 'View Options' panel that is: (a) a collapsible sidebar section or (b) a dropdown panel triggered by a 'View Options' button. The View Options panel groups controls logically: Layers section (toggles for each layer type), Entity Types section (checkboxes for each GLiNER entity type with a 'Select All' / 'Deselect All' header). SELECT-ALL CONTROLS: Entity type filter section has two buttons: 'Select All' (checks all entity type checkboxes) and 'Deselect All' (unchecks all). Individual checkboxes remain. The current selection state persists in Zustand (vizStore). HIGH-LEVEL VIEW: When showing more than 200 nodes, offer a 'Cluster view' toggle in View Options. Cluster view groups nodes by entity type and document, collapsing individual entity nodes into cluster circles sized by count. Clicking a cluster circle expands it. This gives a navigable high-level overview before drilling down. STATES: View Options panel: closed by default, opens on click. Empty graph after deselect all: 'Select at least one entity type to show the graph'. Cluster view with no clusters: falls back to standard node view. TESTS: Unit test: Call Graph mode not rendered when no code document selected. Unit test: Select All sets all entity type filters to true in vizStore. Unit test: Deselect All sets all entity type filters to false. Unit test: cluster view triggered when node count > 200.",
+      "acceptanceCriteria": [
+        "Call Graph mode removed from top-level mode selector; only shown if selected document is a code document (file extension detection)",
+        "All layer toggle buttons (Diagrams, Prerequisites, etc.) removed from main toolbar and consolidated into a 'View Options' collapsible panel",
+        "View Options panel contains a Layers section and an Entity Types section",
+        "Entity Types section has 'Select All' and 'Deselect All' buttons plus individual checkboxes for each GLiNER entity type (PERSON, ORGANIZATION, PLACE, CONCEPT, EVENT, TECHNOLOGY, DATE)",
+        "Entity type filter state persists in vizStore (Zustand)",
+        "View Options panel is closed by default; opens on button click",
+        "Cluster view toggle in View Options: when enabled and node count > 200, nodes grouped into type/document cluster circles sized by count; clicking a cluster expands it",
+        "Empty graph state when all entity types deselected: 'Select at least one entity type to show the graph'",
+        "Unit test: Select All / Deselect All correctly updates vizStore. Unit test: Call Graph hidden when no code document present",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S181.sh exits 0"
+      ]
+    },
+    {
+      "id": "S182",
+      "title": "YouTube transcript viewer: full feature parity with text documents in the Read section",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 22,
+      "featureRef": "F-INGESTION",
+      "passes": false,
+      "description": "CONTEXT: YouTube videos are ingested and their transcripts are stored in the document chunks table. However, the Read section (document reader) shows no content for YouTube documents -- users see an empty or 'No content' panel. A learner who ingests a lecture video expects to be able to read the transcript, search it, and take notes on it, just like any other document. This story adds transcript display to the Read tab and ensures full feature parity. TRANSCRIPT DISPLAY: When a YouTube document is opened in the Read section (Learning tab -> document list -> Read tab), the transcript is displayed as a sequence of chunked paragraphs with timestamps (if available). The transcript chunks are fetched from GET /documents/{id}/chunks (existing endpoint). Each chunk is rendered with its text and optionally its start_time (if stored in chunk metadata). Chunks are displayed in sequence order (chunk_index or unit_index). FEATURE PARITY: All existing Read tab features must work for YouTube documents: keyword search (highlights matching chunks), section navigation (uses heading or time-based sections), 'Take a Note' action (pre-fills NoteEditorDialog with the selected chunk as source content), 'Ask about this' button (sends chunk text to Chat with document context). If a feature relies on document file type checks, remove those guards and make the feature generic over all document types that have chunks. METADATA DISPLAY: Show video metadata at the top of the reader: video title, channel name, video URL (as a link), duration (if stored), ingestion date. FALLBACK: If no transcript chunks exist for the video (ingestion failed or in progress), show: 'Transcript is being processed. Check back shortly.' with a spinner that refreshes every 10 seconds. BACKEND: No new endpoints required. GET /documents/{id}/chunks must return chunks for YouTube documents (verify no document-type filter blocks this). GET /documents/{id} must return youtube_url and channel_name fields if stored. If these fields are not in DocumentModel, add them as nullable columns. TESTS: Unit test: GET /documents/{id}/chunks returns chunks for a document with source_type='youtube'. Unit test: DocumentModel includes youtube_url and channel_name nullable fields. Frontend smoke: open a YouTube document in Read tab, verify transcript paragraphs render.",
+      "acceptanceCriteria": [
+        "YouTube documents opened in Read section display transcript as chunked paragraphs in sequence order",
+        "Timestamp or time-based markers shown alongside chunks if available in chunk metadata",
+        "Video metadata displayed at top of reader: title, channel name, video URL (clickable link), duration, ingestion date",
+        "DocumentModel includes nullable youtube_url and channel_name fields; db_init.py updated; GET /documents/{id} returns these fields",
+        "GET /documents/{id}/chunks returns chunks for YouTube documents with no document-type filter blocking it",
+        "Keyword search works for YouTube transcripts (highlights matching chunks)",
+        "'Take a Note' action pre-fills NoteEditorDialog with selected chunk as source content",
+        "'Ask about this' button sends chunk text to Chat with document context",
+        "Fallback state when no chunks available: 'Transcript is being processed. Check back shortly.' with 10-second polling refresh",
+        "Unit test: GET /documents/{id}/chunks returns YouTube chunks. Unit test: DocumentModel has youtube_url and channel_name",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S182.sh exits 0"
+      ]
+    },
+    {
+      "id": "S183",
+      "title": "Learning tab: slim LibraryOverview into sidebar widget, document list as primary focus",
+      "phase": "V3 Phase 3 - UX Polish and Learner Focus",
+      "priority": 23,
+      "featureRef": "F-LEARNING",
+      "passes": false,
+      "description": "CONTEXT: The Learning tab currently renders LibraryOverview as a large block at the top of the page, showing aggregate stats (total documents, total notes, average mastery, etc.). This pushes the document list -- the primary navigation surface for a learner -- below the fold on smaller screens. A learner opening the app wants to immediately see their books and jump into reading, not scroll past a stats dashboard. This story slims down LibraryOverview and makes the document list the focal point. LAYOUT CHANGE: LibraryOverview shrinks to a compact horizontal stats bar (single row of 4-5 stat pills: 'X books', 'Y notes', 'Z% avg mastery', 'N cards due'). This bar sits above the document list but takes only one line of height. It is not a large card. The stat pills are clickable: 'N cards due' navigates to the Study tab; 'Y notes' navigates to the Notes tab; 'X% avg mastery' navigates to the Progress tab (S177). DOCUMENT LIST AS PRIMARY: The document list (LibraryDocumentList or equivalent) starts at the top of the visible area immediately below the slim stats bar and the search/filter controls. No large cards, hero sections, or summary panels above it. If a 'pinned' or 'currently reading' feature is desired, it is a single small highlighted row at the top of the list, not a separate panel. RECENTLY ACTIVE: A 'Continue reading' row at the very top of the list shows the most recently viewed document (last opened_at or last chunk read). This is a single highlighted document row, not a separate section. SEARCH AND FILTER: The search bar and sort/filter controls remain in their current position (above the list). No change to their behavior. STATES: Empty library (no documents): 'No books yet -- ingest a PDF or YouTube video to get started' with an ingest CTA button. One document: 'Continue reading' row shows it. TESTS: Unit test: LibraryOverview compact stats bar renders 4-5 stat pills in a single row. Unit test: 'N cards due' pill click dispatches luminary:navigate to Study tab. Unit test: 'Continue reading' row shows most recently viewed document.",
+      "acceptanceCriteria": [
+        "LibraryOverview rendered as a compact single-row horizontal stats bar with 4-5 stat pills (books, notes, avg mastery, cards due)",
+        "Stats bar height is one line -- no large cards, hero sections, or multi-row panels",
+        "Each stat pill is clickable: 'cards due' -> Study tab, 'notes' -> Notes tab, 'avg mastery' -> Progress tab (S177)",
+        "Document list starts immediately below the stats bar and search/filter controls; no competing panels above it",
+        "'Continue reading' highlighted row at top of document list shows the most recently viewed document (by last opened_at)",
+        "Empty library state: 'No books yet -- ingest a PDF or YouTube video to get started' with ingest CTA",
+        "Unit test: stats bar renders in single row with correct pill labels. Unit test: stat pill click dispatches correct luminary:navigate event",
+        "Unit test: most recently viewed document appears at top of list",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S183.sh exits 0"
       ]
     }
   ],

@@ -544,9 +544,10 @@ interface CreateNoteFormProps {
   documents: DocumentItem[]
   onClose: () => void
   onCreated: () => void
+  activeCollectionId?: string | null
 }
 
-function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) {
+function CreateNoteForm({ documents, onClose, onCreated, activeCollectionId }: CreateNoteFormProps) {
   const [content, setContent] = useState("")
   const [tagsRaw, setTagsRaw] = useState("")
   const [docId, setDocId] = useState<string>("")
@@ -574,6 +575,16 @@ function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) 
     onSuccess: (created: Note) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+      // If we're inside a collection, add the new note to it immediately
+      if (activeCollectionId) {
+        void fetch(`${API_BASE}/collections/${activeCollectionId}/notes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note_ids: [created.id] }),
+        }).then(() => {
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+        })
+      }
       onCreated()
       onClose()
       // Fire-and-forget: suggest tags and silently patch the new note
@@ -1373,6 +1384,7 @@ export default function NotesPage() {
             documents={documents}
             onClose={() => setShowCreate(false)}
             onCreated={handleRefetch}
+            activeCollectionId={activeCollectionId}
           />
         )}
 

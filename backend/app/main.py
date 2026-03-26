@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import logging.config
+import os
 import shutil
+import signal
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -61,10 +64,38 @@ def configure_logging(log_level: str = "INFO") -> None:
 logger = logging.getLogger(__name__)
 
 
+def _release_kuzu_lock(kuzu_path: Path) -> None:
+    """Kill any other processes holding an open file handle on the Kuzu database file."""
+    if not kuzu_path.exists():
+        return
+    try:
+        result = subprocess.run(
+            ["lsof", "-t", str(kuzu_path)],
+            capture_output=True,
+            text=True,
+        )
+        pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
+        current_pid = os.getpid()
+        for pid in pids:
+            if pid == current_pid:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                logger.warning("Released Kuzu lock by terminating stale process", extra={"pid": pid})
+            except ProcessLookupError:
+                pass
+    except Exception:
+        logger.warning("Could not check/release Kuzu lock -- proceeding anyway")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
+
+    # Release any stale Kuzu lock before initialising the graph service
+    kuzu_path = Path(settings.DATA_DIR).expanduser() / "graph.kuzu"
+    _release_kuzu_lock(kuzu_path)
 
     # Initial DB setup
     engine = get_engine()
