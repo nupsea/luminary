@@ -1918,3 +1918,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Review button for cross-tab navigation: dispatch luminary:navigate with { tab: "notes" } per I-11; button only renders when count > 0 (UX: nothing to review otherwise)
   - Route ordering: /health and /health/archive-stale safe to append after existing parameterized routes because the path segments "health" don't conflict with /{note_id} in a different path prefix
 ---
+
+## 2026-03-26T03:40:00Z - S174 - Export collections as Obsidian Markdown vault and Anki deck
+- What was implemented: ExportService (export_collection_markdown, export_collection_anki) in export_service.py; GET /collections/{id}/export?format=markdown|anki endpoint added to collections.py; CollectionTree.tsx Export submenu with loading/success/warning toasts; genanki added via uv add; 16 unit+integration tests in test_export.py; smoke S174.sh
+- Files changed: backend/app/services/export_service.py (new), backend/app/routers/collections.py, backend/pyproject.toml (genanki), frontend/src/components/CollectionTree.tsx, backend/tests/test_export.py (new), scripts/smoke/S174.sh (new)
+- **Learnings for future iterations:**
+  - genanki .apkg format is a zip internally -- "unit test: anki bytes are valid zip" is a clean lightweight assertion without needing a full genanki import
+  - Route ordering: /{collection_id}/export is a 2-segment path so it doesn't conflict with the /{collection_id} get route regardless of order, but still follow the convention of registering static paths first for clarity
+  - Lazy `import re` inside method body was flagged by reviewer -- move stdlib imports to module top-level, lazy import only for circular-import-risk cases
+  - Toast pattern for async download: toast.loading() before fetch, update same toast ID to success/warning/error; pass warning header from backend as X-Luminary-Warning to drive warning toast on frontend
+  - Running server must be restarted to pick up new router endpoints -- TestClient tests work fine with in-process lifespan but smoke scripts require the live server process
+---

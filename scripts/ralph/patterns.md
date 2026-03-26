@@ -26,6 +26,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **asyncio.to_thread mocking**: use `AsyncMock(return_value=expected_value)`, NOT `MagicMock(side_effect=lambda fn, *args: coroutine_obj)`. The MagicMock returns the coroutine object itself (unwraped), so `result = await asyncio.to_thread(...)` sees a coroutine object as the value, not the awaited result. AsyncMock's `__call__` returns an awaitable that correctly resolves to `return_value`.
 - **HDBSCAN unit test mocking**: HDBSCAN with small synthetic datasets (6-10 vectors) rarely produces clusters due to density requirements. Instead of brittle fixture engineering, mock the HDBSCAN class: `patch("sklearn.cluster.HDBSCAN", return_value=mock_instance)` where `mock_instance.fit_predict.return_value = np.array([0, 0, 0, -1, -1, -1])`. This ensures deterministic test behavior.
 - **sklearn.cluster lazy import patching**: When HDBSCAN is lazily imported inside `asyncio.to_thread` (e.g., `from sklearn.cluster import HDBSCAN`), patch it at `sklearn.cluster.HDBSCAN` — Python resolves the name in `sys.modules['sklearn.cluster']` at import time, so the lambda capturing it will receive the patched version.
+- **genanki .apkg format validation**: genanki .apkg files are internally zip archives. To test anki exports without full genanki parsing: `import zipfile; zipfile.ZipFile(bytes_data).namelist()` raises on invalid zip. This is a lightweight assertion for format validation in tests.
 
 ---
 
@@ -55,6 +56,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Lazy import for cross-service calls: `from app.services.summarizer import get_summarization_service  # noqa: PLC0415` inside the method body
 - Cross-router lazy import for shared helpers: when two routers share a helper (e.g., `_sync_tag_index` in notes.py used by tags.py), lazy-import it inside the method body: `from app.routers.notes import _sync_tag_index  # noqa: PLC0415`. Avoids circular imports at module level between routers.
 - qa.py helpers (_split_response, _build_context, etc.) stay at module level — chat_graph.py imports them directly from app.services.qa
+- **Stdlib imports always top-level**: `re`, `zipfile`, `hashlib`, `json`, `datetime`, etc. are never circular risks. Import at module top-level only. The lazy-import pattern (noqa: PLC0415) is only for third-party or app modules that create circular-import risk.
 - **Six-layer rule: services must not import from routers**: Routers are the API layer; services are the business logic layer. If a service needs to call a router-layer side effect (e.g. `_sync_tag_index`), move the side-effectful work to the router endpoint. The service returns validated/prepared data; the router endpoint executes the side effects. This preserves layering: Types → Config → Repo → Service → Runtime → API.
 
 ---
@@ -120,6 +122,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Dynamic path parameter route ordering**: ALL static-path routes (POST /merge, GET /search, GET /flashcards, GET /decks, GET /preview) MUST be registered BEFORE any /{param} route. Add a comment block above the route group: `# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI from matching the literal segment "decks" as a document_id wildcard.` If /{param} is registered first, GET /search matches with param="search" and returns 404. In tags.py: POST /tags/merge before GET|PUT|DELETE /tags/{tag_id}.
 - **Pydantic model_fields_set for nullable PATCH fields**: use `if "field_name" in req.model_fields_set: model.field = req.field` to distinguish "not supplied" from "explicitly set to null". The old pattern `if req.field is not None` silently ignores explicit null (e.g. clearing parent_tag). Apply this whenever a PUT/PATCH endpoint needs to clear a value back to null.
 - **POST endpoint with multiple response types**: when a POST endpoint can return two different response shapes (e.g. list vs dict), remove `response_model` from the decorator and annotate the handler's return type as a union (e.g. `-> list[Item] | dict[str, Any]`). FastAPI will accept either shape without validation errors.
+- **Backend warning header pattern**: when a successful operation has a notable condition (e.g. empty result), set the `X-Luminary-Warning` response header instead of returning an error. Use `response.headers["X-Luminary-Warning"] = "message"`. Frontend reads `res.headers.get("x-luminary-warning")` and surfaces as `toast.warning(msg)`.
 
 ---
 
@@ -153,6 +156,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Silent Ollama fallback looks identical to a broken feature**: when a best-effort LLM call returns [] because Ollama is offline, the UI must show explicit feedback ("No suggestions available" or "Ollama offline"). Auto-closing with no message is indistinguishable from the feature never running.
 - **Dialog close after save must be explicit**: auto-closing a dialog immediately after save prevents any post-save feedback (suggestions, status messages) from being visible. Always transition to a "Saved" state and let the user close with Done.
 - **AbortController on unmount**: in-flight fetch requests inside a dialog must be cancelled when the dialog closes (onOpenChange fires with open=false). Store the AbortController in a ref; call abort() in the cleanup. Prevents React "setState on unmounted component" warnings.
+- **Toast pattern for async browser downloads**: Call `const toastId = toast.loading("Preparing...")` before fetch. In the finally block (or on error/success), update the same toast with `toast.success("Downloaded", { id: toastId })` or `toast.warning(msg, { id: toastId })`. Pair with backend `X-Luminary-Warning` header: read `res.headers.get("x-luminary-warning")` and conditionally show warning toast.
 
 ---
 
