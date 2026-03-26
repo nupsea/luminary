@@ -234,13 +234,24 @@ function AppShell() {
   // S118: review reminder notifications
   useReviewNotification()
 
-  // S167: cross-tab navigation from tag graph node click
+  // S167/S176: cross-tab navigation from tag graph node click or tag chip click
   useEffect(() => {
     function onLuminaryNavigate(e: Event) {
-      const detail = (e as CustomEvent<{ tab: string; tagFilter?: string }>).detail
+      const detail = (e as CustomEvent<{
+        tab: string
+        tagFilter?: string
+        filter?: { tag?: string }
+        documentId?: string
+      }>).detail
       if (detail.tab === "notes") {
-        setActiveTag(detail.tagFilter ?? null)
+        // Support both legacy shape (detail.tagFilter) and new shape (detail.filter.tag)
+        const tagPath = detail.filter?.tag ?? detail.tagFilter ?? null
+        setActiveTag(tagPath)
         navigate("/notes")
+      } else if (detail.tab === "learning") {
+        // S176: source document subtitle click from NoteReaderSheet
+        const target = detail.documentId ? `/?doc=${detail.documentId}` : "/"
+        navigate(target)
       }
     }
     window.addEventListener("luminary:navigate", onLuminaryNavigate)

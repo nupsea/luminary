@@ -1939,3 +1939,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - For new pivot tables in N-many stories, always verify that FK constraints match the pattern of NoteModel.document_id (no FK to documents) not NoteCollectionMemberModel (which has FK to notes).
   - Smoke test for pivot tables: use fake but stable document_ids -- since document_id has no FK, the smoke can test the full API contract without needing a real ingested document.
 ---
+
+## 2026-03-26T20:30:00Z - S176 - Notes reader-first layout: widen content area, strategic actions, clickable tag navigation
+- Implemented: NoteReaderSheet.tsx (Sheet-based reader, 75vw width, floating action bar at bottom-right, read/edit mode, clickable tag chips); noteNavigateUtils.ts + test (buildTagNavigateDetail pure util + dispatchTagNavigate); App.tsx updated luminary:navigate handler for both old (tagFilter) and new (filter.tag) shapes, plus new tab:'learning' branch for source document navigation; Notes.tsx updated to use NoteReaderSheet, tag chips made clickable in card/list/search views, empty-with-activeTag state shows 'No other notes tagged with X'; smoke S176.sh; fixed pre-existing ruff errors in main.py (PLW1510 + E501).
+- Files changed: frontend/src/components/NoteReaderSheet.tsx (new), frontend/src/lib/noteNavigateUtils.ts (new), frontend/src/lib/noteNavigateUtils.test.ts (new), frontend/src/pages/Notes.tsx (modified), frontend/src/App.tsx (modified), scripts/smoke/S176.sh (new), backend/app/main.py (pre-existing ruff fixes), docs/ralph-run-flow.md (S176 status -> pass)
+- **Learnings for future iterations:**
+  - Sheet width override with tailwind-merge: `w-[75vw] max-w-4xl sm:max-w-4xl` overrides the variant's `w-3/4 sm:max-w-sm` because twMerge resolves width conflicts; no `!important` needed.
+  - Sheet floating action bar: use `absolute bottom-6 right-6` inside SheetContent (which is `position: fixed`); absolute children are positioned relative to the fixed ancestor.
+  - App.tsx luminary:navigate handler must handle ALL tabs dispatched by child components; missing a `tab: 'learning'` branch causes silent no-ops that are easy to miss but block AC.
+  - Pre-existing ruff errors (PLW1510 subprocess.run without check=, E501 line too long) were in main.py from commit 6d4e276 -- fixed as part of this story to unblock literal gate condition.
+  - noteNavigateUtils split pattern (buildTagNavigateDetail pure + dispatchTagNavigate side-effectful): vitest tests pass in node env for the pure function; dispatcher is untested per established pattern.
+---

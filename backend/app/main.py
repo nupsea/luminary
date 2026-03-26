@@ -73,6 +73,7 @@ def _release_kuzu_lock(kuzu_path: Path) -> None:
             ["lsof", "-t", str(kuzu_path)],
             capture_output=True,
             text=True,
+            check=False,
         )
         pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
         current_pid = os.getpid()
@@ -81,7 +82,9 @@ def _release_kuzu_lock(kuzu_path: Path) -> None:
                 continue
             try:
                 os.kill(pid, signal.SIGTERM)
-                logger.warning("Released Kuzu lock by terminating stale process", extra={"pid": pid})
+                logger.warning(
+                    "Released Kuzu lock by terminating stale process", extra={"pid": pid}
+                )
             except ProcessLookupError:
                 pass
     except Exception:

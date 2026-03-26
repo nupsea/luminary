@@ -28,7 +28,7 @@ import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { NoteEditorDialog } from "@/components/NoteEditorDialog"
+import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/table"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
+import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
@@ -761,16 +762,18 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
           {note.tags.map((t) => {
             const parts = t.split("/")
             return (
-              <span
+              <button
                 key={t}
-                className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs"
+                onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
+                className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                title={`Filter by tag: ${t}`}
               >
                 <Tag size={9} className="text-muted-foreground" />
                 <span className="text-primary">{parts[0]}</span>
                 {parts.length > 1 && (
                   <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
                 )}
-              </span>
+              </button>
             )
           })}
         </div>
@@ -997,16 +1000,18 @@ export default function NotesPage() {
                   {result.tags.map((t) => {
                     const parts = t.split("/")
                     return (
-                      <span
+                      <button
                         key={t}
-                        className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs"
+                        onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
+                        className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                        title={`Filter by tag: ${t}`}
                       >
                         <Tag size={9} className="text-muted-foreground" />
                         <span className="text-primary">{parts[0]}</span>
                         {parts.length > 1 && (
                           <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
                         )}
-                      </span>
+                      </button>
                     )
                   })}
                   <span className="ml-auto text-xs text-muted-foreground">
@@ -1067,7 +1072,17 @@ export default function NotesPage() {
       </div>
     )
   } else if (noteList.length === 0) {
-    panelContent = (
+    panelContent = activeTag ? (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <Tag size={32} className="text-muted-foreground/50" />
+        <p className="text-base font-medium text-foreground">
+          No other notes tagged with {activeTag}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Notes tagged with this tag will appear here.
+        </p>
+      </div>
+    ) : (
       <div className="flex flex-col items-center gap-3 py-20 text-center">
         <Network size={32} className="text-muted-foreground/50" />
         <p className="text-base font-medium text-foreground">No notes yet</p>
@@ -1115,12 +1130,17 @@ export default function NotesPage() {
                     {note.tags.map((t) => {
                       const parts = t.split("/")
                       return (
-                        <span key={t} className="whitespace-nowrap">
+                        <button
+                          key={t}
+                          onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
+                          className="whitespace-nowrap hover:underline"
+                          title={`Filter by tag: ${t}`}
+                        >
                           <span className="text-primary">{parts[0]}</span>
                           {parts.length > 1 && (
                             <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
                           )}
-                        </span>
+                        </button>
                       )
                     })}
                   </span>
@@ -1391,13 +1411,13 @@ export default function NotesPage() {
         {panelContent}
       </div>
 
-      {/* NoteEditorDialog — rendered once at page level */}
-      <NoteEditorDialog
+      {/* NoteReaderSheet — rendered once at page level */}
+      <NoteReaderSheet
         note={editingNote}
+        documents={documents}
         onClose={() => setEditingNote(null)}
         onSaved={() => {
           void qc.invalidateQueries({ queryKey: ["notes"] })
-          setEditingNote(null)
         }}
       />
 

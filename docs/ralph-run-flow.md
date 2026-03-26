@@ -103,5 +103,19 @@ Each story SXXX produces or modifies these artifacts:
 | Version | PRD | Branch | Stories |
 |---|---|---|---|
 | v2 | `scripts/ralph/prd-v2.json` | `ralph/luminary-v2` | S75-S160 (all pass) |
-| v3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S161-S170 (Phase 1) |
-```
+| v3 Phase 1 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S161-S170 (all pass) -- Note organization: collections, hierarchical tags, graph nodes, performance |
+| v3 Phase 2 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S171-S175 (all pass) -- Note intelligence: bidirectional links, Viz integration, health reports, Obsidian/Anki export, multi-doc notes |
+| v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (in progress) -- UX polish and learner focus |
+
+## V3 Phase 3 Story Status
+
+| Story | Title | Status |
+|---|---|---|
+| S176 | Notes reader-first layout: wider content, floating actions, clickable tags | pass |
+| S177 | Progress tab: Monitoring renamed, dev metrics at /admin, GoalsPanel moved | pending |
+| S178 | Study tab: Smart Generate, merged health panels, fix 'default' deck label | pending |
+| S179 | Context-aware flashcard generation: chunk classification, genre-aware prompts | pending |
+| S180 | Chat simplification: settings drawer, collapsed transparency panel | pending |
+| S181 | Viz overhaul: View Options panel, Select All entity types, hide Call Graph | pending |
+| S182 | YouTube transcript viewer: full Read section parity | pending |
+| S183 | Learning tab: slim stats bar, document list as primary focus | pending |
