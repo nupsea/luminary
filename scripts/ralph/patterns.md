@@ -147,6 +147,15 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ---
 
+## Frontend Navigation and Routing
+
+- **Rename + preserve nav tab**: To rename a tab, change the `NAV_ITEMS` entry (to, icon, label) and update the lazy import. Add the old route as an alias by pointing it to the new component in Routes. No backend changes needed.
+- **Hidden admin link pattern**: A small muted NavLink with a tiny icon (e.g., `Wrench size={14}`, `text-sidebar-foreground/40` opacity) below `mt-auto` in the Sidebar satisfies "accessible but not in main nav". Distinguishes from main nav items visually without a text label.
+- **Global study mastery proxy from existing endpoints**: Derive "overall mastery score" from `GET /study/sessions` (no doc_id required) -- compute `avg(accuracy_pct)` across recent sessions. `SessionListResponse.items[].accuracy_pct` is 0-100. Avoids adding a new global stats endpoint.
+- **Component export pattern for cross-page reuse**: When a large component (GoalsPanel) and its dependencies need to move from Page A to Page B but the code stays in Page A, add `export function GoalsPanel` and `export { fetchGoals, ... }` + `export type { ... }` to Page A, then import in Page B. Avoids duplicating code.
+
+---
+
 ## Frontend UI Components
 
 - **Segmented control inside dropdown**: a multi-option type selector (e.g., 5-option link types) fits cleanly at the top of an autocomplete dropdown with one row of small buttons. Use `onMouseDown` (not `onClick`) to prevent parent textarea blur. Active option gets indigo background highlight. This pattern eliminates an extra dialog step for type selection.

@@ -1950,3 +1950,14 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Pre-existing ruff errors (PLW1510 subprocess.run without check=, E501 line too long) were in main.py from commit 6d4e276 -- fixed as part of this story to unblock literal gate condition.
   - noteNavigateUtils split pattern (buildTagNavigateDetail pure + dispatchTagNavigate side-effectful): vitest tests pass in node env for the pure function; dispatcher is untested per established pattern.
 ---
+
+## 2026-03-26 - S177 - Progress tab: replace Monitoring with learner-centric view, move dev metrics to admin route
+- Implemented: Progress.tsx (new learner-centric page with mastery score, due today, streak, activity chart, notes-over-time chart, GoalsPanel); Admin.tsx (copy of Monitoring with dev panels, renamed export to Admin, title "Dev Tools"); removed GoalsPanel from Study tab; added /progress nav route; kept /monitoring as backward-compat alias; added wrench icon "Dev Tools" NavLink at bottom of sidebar pointing to /admin.
+- Files changed: frontend/src/pages/Progress.tsx (new), frontend/src/pages/Admin.tsx (new, derived from Monitoring.tsx), frontend/src/pages/Study.tsx (GoalsPanel + helpers exported; GoalsPanel removed from rendered output), frontend/src/App.tsx (Monitoring -> Progress nav; lazy imports updated; /admin route; dev tools NavLink), docs/ralph-run-flow.md (S177 pending -> pass), scripts/ralph/prd-v3.json (S177 passes=true), scripts/smoke/S177.sh (new), docs/exec-plans/completed/S177.md
+- **Learnings for future iterations:**
+  - GoalsPanel export pattern: add `export function GoalsPanel` and `export { fetchGoals, createGoal, ... }` + `export type { LearningGoal, ... }` to the source file and import in the consuming page. No separate file needed since the component stays in Study.tsx.
+  - "Overall mastery score" from existing endpoints: derive from average `accuracy_pct` across `GET /study/sessions` (no doc_id required). SessionListResponse.items[].accuracy_pct is 0-100 per session. This avoids needing a global stats endpoint.
+  - Removing a nav tab: change `NAV_ITEMS` entry (icon, label, to), update lazy imports, update Routes. The old route can remain as a compat alias by pointing to the new component. No backend changes needed.
+  - Hidden admin link pattern: a small dimmed-opacity NavLink with a small icon (Wrench size=14) below `mt-auto` in the Sidebar satisfies "not in main nav but findable" without a visible text label. Opacity: `text-sidebar-foreground/40` makes it visually distinct from the main nav items.
+  - Flaky test_collection_health tests: pass in isolation and in the pre-change stash run (12 passed), but fail 3/12 in the full suite due to resource contention / test ordering. Pre-existing issue, not caused by S177 changes.
+---
