@@ -128,6 +128,8 @@ class FlashcardModel(Base):
     # S169: 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
     # for collection-based generation. Null for non-collection cards.
     source_content_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # S173: note_id FK for note-sourced cards; enables per-note coverage tracking
+    note_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -194,6 +196,10 @@ class NoteModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S173: archived flag -- excluded from default GET /notes list; set by archive-stale
+    archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

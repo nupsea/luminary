@@ -249,4 +249,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         except Exception:
             pass  # Column already exists (idempotent)
 
+        # S173: archived flag on notes; note_id FK on flashcards for per-note coverage tracking.
+        for ddl in [
+            "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE flashcards ADD COLUMN note_id TEXT",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # Column already exists (idempotent)
+
     logger.info("Database tables and FTS5 index initialized")

@@ -383,7 +383,11 @@ async def list_notes(
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteResponse]:
     """List notes with optional filters."""
-    stmt = select(NoteModel).order_by(NoteModel.updated_at.desc())
+    stmt = (
+        select(NoteModel)
+        .where(NoteModel.archived.is_(False))
+        .order_by(NoteModel.updated_at.desc())
+    )
 
     if document_id:
         stmt = stmt.where(NoteModel.document_id == document_id)

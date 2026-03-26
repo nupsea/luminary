@@ -50,6 +50,8 @@ interface GenerateFlashcardsDialogProps {
   open: boolean
   onClose: () => void
   availableTags: string[]
+  /** S173: when provided, pre-selects these note IDs and switches to 'notes' mode on open */
+  initialNoteIds?: string[]
 }
 
 async function fetchNoteStubs(): Promise<NoteStub[]> {
@@ -133,6 +135,7 @@ export function GenerateFlashcardsDialog({
   open,
   onClose,
   availableTags,
+  initialNoteIds,
 }: GenerateFlashcardsDialogProps) {
   const [mode, setMode] = useState<"tag" | "notes" | "collection">("tag")
   const [selectedTag, setSelectedTag] = useState<string>("")
@@ -148,12 +151,16 @@ export function GenerateFlashcardsDialog({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  // Fetch notes when dialog opens
+  // Fetch notes when dialog opens; pre-select initialNoteIds when provided
   useEffect(() => {
     if (open) {
       void fetchNoteStubs().then(setAvailableNotes)
+      if (initialNoteIds && initialNoteIds.length > 0) {
+        setMode("notes")
+        setSelectedNoteIds(initialNoteIds)
+      }
     }
-  }, [open])
+  }, [open, initialNoteIds])
 
   const { data: collectionTree } = useQuery({
     queryKey: ["collections-tree"],

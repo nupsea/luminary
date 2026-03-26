@@ -730,6 +730,7 @@ class FlashcardService:
                     source="note",
                     deck=deck_name,
                     source_content_hash=content_hash,
+                    note_id=note_id,
                     question=question,
                     answer=answer,
                     source_excerpt=source_excerpt,

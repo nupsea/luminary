@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import NoteCollectionMemberModel, NoteCollectionModel
+from app.services.collection_health import get_collection_health_service
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +334,37 @@ async def add_notes_to_collection(
     await session.commit()
     logger.info("Added %d notes to collection id=%s", added, collection_id)
     return {"added": added, "collection_id": collection_id}
+
+
+# NOTE: These health routes are registered BEFORE /{collection_id}/notes/{note_id} to avoid
+# any ambiguity. The /health path segment is not a note_id wildcard.
+@router.get("/{collection_id}/health")
+async def get_collection_health(
+    collection_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return CollectionHealthReport for the given collection (S173)."""
+    try:
+        report = await get_collection_health_service().analyze(collection_id, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return dict(report)
+
+
+@router.post("/{collection_id}/health/archive-stale")
+async def archive_stale_notes(
+    collection_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Set archived=True for all stale notes in this collection (S173).
+
+    Returns {archived: int}.
+    """
+    try:
+        archived = await get_collection_health_service().archive_stale(collection_id, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"archived": archived}
 
 
 @router.delete("/{collection_id}/notes/{note_id}", status_code=204)

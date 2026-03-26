@@ -14,7 +14,7 @@
  * States: loading (3 skeleton lines), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Pencil, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Pencil, Settings, Trash2 } from "lucide-react"
 import { useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -30,6 +30,7 @@ import { API_BASE } from "@/lib/config"
 import { useAppStore } from "@/store"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
+import { CollectionHealthPanel } from "@/components/CollectionHealthPanel"
 
 // Re-export for consumers that only need the type.
 export type { CollectionTreeItem }
@@ -94,6 +95,7 @@ function CollectionTreeItemRow({
   const [renameValue, setRenameValue] = useState(item.name)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [healthOpen, setHealthOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const qc = useQueryClient()
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
@@ -228,6 +230,17 @@ function CollectionTreeItemRow({
               type="button"
               onClick={(e) => {
                 e.stopPropagation()
+                setHealthOpen(true)
+              }}
+              className="rounded p-0.5 hover:bg-accent hover:text-foreground"
+              title="Collection Health"
+            >
+              <Settings size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
                 startRename()
               }}
               className="rounded p-0.5 hover:bg-accent hover:text-foreground"
@@ -249,6 +262,13 @@ function CollectionTreeItemRow({
           </div>
         )}
       </div>
+
+      {/* Collection health panel */}
+      <CollectionHealthPanel
+        open={healthOpen}
+        collectionId={item.id}
+        onClose={() => setHealthOpen(false)}
+      />
 
       {/* Delete confirm dialog */}
       <Dialog open={confirmDelete} onOpenChange={(open) => !open && setConfirmDelete(false)}>
