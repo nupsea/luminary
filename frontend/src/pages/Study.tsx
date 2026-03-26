@@ -2332,14 +2332,27 @@ export default function Study() {
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-foreground">All Decks</h2>
           <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card">
-            {deckList.map((deck) => (
+            {(() => {
+              // S178: compute per-document deck count for getDeckDisplayName alias
+              const decksPerDoc = new Map<string, number>()
+              deckList.forEach((d) => {
+                if (d.document_id) decksPerDoc.set(d.document_id, (decksPerDoc.get(d.document_id) ?? 0) + 1)
+              })
+              return deckList.map((deck) => (
               <div key={deck.deck} className="flex items-center gap-3 px-4 py-2.5">
                 {deck.source_type === "collection" ? (
                   <Folder size={16} className="shrink-0 text-indigo-500" />
                 ) : (
                   <BookOpen size={16} className="shrink-0 text-slate-500" />
                 )}
-                <span className="flex-1 text-sm font-medium text-foreground truncate">{deck.deck}</span>
+                <span className="flex-1 text-sm font-medium text-foreground truncate">
+                  {getDeckDisplayName({
+                    deckName: deck.deck,
+                    documentId: deck.document_id,
+                    docTitle: docList.find((d) => d.id === deck.document_id)?.title,
+                    isOnlyDeckForDocument: (decksPerDoc.get(deck.document_id ?? "") ?? 0) === 1,
+                  })}
+                </span>
                 <span className="text-xs text-muted-foreground">{deck.card_count} cards</span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -2351,7 +2364,8 @@ export default function Study() {
                   {deck.source_type}
                 </span>
               </div>
-            ))}
+            ))
+            })()}
           </div>
         </section>
       )}
@@ -2427,9 +2441,10 @@ export default function Study() {
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
 
-        <GeneratePanel
+        <SmartGeneratePanel
           documentId={activeDocumentId}
           sections={sections}
+          cards={cards}
           onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
           onRegenerate={handleRegenerate}
           onGenerateFromGraph={(k) => {
@@ -2497,7 +2512,7 @@ export default function Study() {
         ) : cards.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-sm text-muted-foreground">
-              No flashcards yet. Generate some above.
+              No flashcards yet -- click Smart Generate to create some
             </p>
           </div>
         ) : (() => {
@@ -2571,18 +2586,15 @@ export default function Study() {
         )}
       </section>
 
-      {/* Deck Health panel (S153) -- Bloom's taxonomy coverage audit */}
-      <DeckHealthPanel documentId={activeDocumentId} />
-
-      {/* Health Report panel (S160) -- orphaned/mastered/stale/uncovered/hotspot */}
-      <HealthReportPanel documentId={activeDocumentId} />
+      {/* Deck Status accordion (S178) -- merged Bloom audit + health report, collapsed by default */}
+      <DeckStatusAccordion documentId={activeDocumentId} cards={cards} />
 
       {/* Weak Areas panel */}
       <WeakAreasPanel
         documentId={activeDocumentId}
         onSelectSection={(heading) => {
           setSelectedGapSection(heading)
-          // Scroll to top to reveal pre-scoped GeneratePanel
+          // Scroll to top to reveal pre-scoped SmartGeneratePanel
           window.scrollTo({ top: 0, behavior: "smooth" })
         }}
       />
