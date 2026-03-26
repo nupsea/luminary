@@ -1887,3 +1887,13 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - When POST endpoint can return two different response types (list vs dict), drop the response_model from the decorator and return the appropriate type from the handler
   - Smoke script: use python3 URL encoding for collection IDs in query strings: `python3 -c "import urllib.parse; print(urllib.parse.quote('$COLL_ID'))"`
 ---
+
+## 2026-03-26T12:27:00Z - S171 - Note-to-note bidirectional links: explicit Zettelkasten-style connections
+- Implemented: NoteLinkModel (already present in models.py), LINKS_TO REL TABLE in Kuzu graph.py, upsert_links_to_edge/delete_links_to_edge in note_graph.py, 4 new endpoints in notes.py router (GET /autocomplete, POST /{id}/links, DELETE /{id}/links/{target_id}, GET /{id}/links), LinkAutocomplete component with 5-option link type segmented control, noteLinkUtils.ts pure utility functions, MarkdownRenderer chip rendering for [[id|text]] markers, NoteEditorDialog Links section (outgoing chips + incoming backlinks), smoke script S171.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/graph.py, backend/app/services/note_graph.py, backend/app/routers/notes.py, backend/tests/test_note_links.py (new), frontend/src/lib/noteLinkUtils.ts (new), frontend/src/lib/noteLinkUtils.test.ts (new), frontend/src/components/LinkAutocomplete.tsx (new), frontend/src/components/NoteEditorDialog.tsx, frontend/src/components/MarkdownRenderer.tsx, scripts/smoke/S171.sh (new)
+- **Learnings for future iterations:**
+  - MarkdownRenderer chip rendering: preprocess [[id|text]] -> `[note:id|text]` inline code tokens; use ReactMarkdown components.code handler to intercept and render as styled spans. No new packages needed.
+  - Pass `validNoteIds` as optional Set<string> to MarkdownRenderer. Use `noteLinks !== undefined ? new Set(...) : undefined` (NOT `?? []`) to avoid treating unloaded state as empty-and-valid, which causes all chips to flash as broken on initial render.
+  - LinkAutocomplete onSelect signature should include linkType from the start; retroactively adding it to the callback requires updating all parent call sites.
+  - 5-option segmented control fits cleanly at top of the autocomplete dropdown without adding a second interaction step.
+---

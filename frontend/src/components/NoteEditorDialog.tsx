@@ -373,7 +373,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
               {linkQuery !== null && (
                 <LinkAutocomplete
                   query={linkQuery}
-                  onSelect={(id, preview) => {
+                  onSelect={(id, preview, selectedLinkType) => {
                     if (!textareaRef.current) return
                     const { newValue, newCursorPos } = insertLinkAtTrigger(
                       content,
@@ -385,7 +385,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                     setLinkQuery(null)
                     // Also create the structured link row (fire-and-forget, ignore 409)
                     if (note?.id) {
-                      createLinkMut.mutate({ targetId: id, linkType: "see-also" })
+                      createLinkMut.mutate({ targetId: id, linkType: selectedLinkType })
                     }
                     // Restore cursor position
                     setTimeout(() => {
@@ -502,7 +502,15 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             </div>
             <div className="flex-1 overflow-auto px-4 py-3 text-sm">
               {content ? (
-                <MarkdownRenderer>{content}</MarkdownRenderer>
+                <MarkdownRenderer
+                  validNoteIds={
+                    noteLinks !== undefined
+                      ? new Set(noteLinks.outgoing.map((l) => l.note_id))
+                      : undefined
+                  }
+                >
+                  {content}
+                </MarkdownRenderer>
               ) : (
                 <p className="text-muted-foreground">Nothing to preview yet.</p>
               )}
