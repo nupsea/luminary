@@ -1908,3 +1908,13 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - The `showAllHidden` state check in Viz.tsx must exclude note nodes (type='note') from the entity count since notes are controlled by a separate toggle -- otherwise toggling Notes off with entity nodes visible incorrectly shows the "All entity types hidden" overlay.
   - `noteNodeAttrs` pure utility pattern: extract node attribute building (color, type, size) to a testable utility to create a single source of truth used by both buildGraph and tests.
 ---
+
+## 2026-03-26T03:15:00Z - S173 - Collection health report
+- Implemented: NoteModel.archived field (ALTER TABLE migration); FlashcardModel.note_id FK for per-note coverage; CollectionHealthService (cohesion_score via LanceDB asyncio.to_thread, orphaned_notes, uncovered_notes, stale_notes, hotspot_tags); GET /collections/{id}/health; POST /collections/{id}/health/archive-stale; archived filter in list_notes(); flashcard.py now sets note_id on collection-sourced cards; CollectionHealthPanel.tsx (Sheet with all 4 sections, gear icon in CollectionTree); GenerateFlashcardsDialog.tsx initialNoteIds prop; Review button dispatches luminary:navigate per I-11
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/collections.py, backend/app/routers/notes.py, backend/app/services/flashcard.py, backend/app/services/collection_health.py (new), backend/tests/test_collection_health.py (new), frontend/src/components/CollectionTree.tsx, frontend/src/components/CollectionHealthPanel.tsx (new), frontend/src/components/GenerateFlashcardsDialog.tsx, scripts/smoke/S173.sh (new)
+- **Learnings for future iterations:**
+  - SQL insert in tests: include all NOT NULL columns (is_user_edited was missing, caused IntegrityError)
+  - uncovered_notes query uses FlashcardModel.note_id FK (added in this story) for per-note coverage, not source_content_hash; update generate_from_collection to set note_id when creating cards
+  - Review button for cross-tab navigation: dispatch luminary:navigate with { tab: "notes" } per I-11; button only renders when count > 0 (UX: nothing to review otherwise)
+  - Route ordering: /health and /health/archive-stale safe to append after existing parameterized routes because the path segments "health" don't conflict with /{note_id} in a different path prefix
+---
