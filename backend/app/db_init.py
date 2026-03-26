@@ -24,6 +24,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     MisconceptionModel,
     NoteCollectionMemberModel,
     NoteCollectionModel,
+    NoteLinkModel,
     NoteModel,
     NoteTagIndexModel,
     PredictionEventModel,

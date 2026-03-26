@@ -23,10 +23,11 @@
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Loader2, Tag } from "lucide-react"
+import { Link, Loader2, Tag } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
+import { LinkAutocomplete } from "@/components/LinkAutocomplete"
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { API_BASE } from "@/lib/config"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
+import { detectLinkTrigger, insertLinkAtTrigger } from "@/lib/noteLinkUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,6 +57,19 @@ interface Note {
   collection_ids: string[]
   created_at: string
   updated_at: string
+}
+
+interface NoteLinkItem {
+  id: string
+  note_id: string
+  preview: string
+  link_type: string
+  created_at: string
+}
+
+interface NoteLinksResponse {
+  outgoing: NoteLinkItem[]
+  incoming: NoteLinkItem[]
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +126,39 @@ async function removeNoteFromCollection(collectionId: string, noteId: string): P
     throw new Error(`DELETE /collections/${collectionId}/notes/${noteId} failed`)
 }
 
+async function fetchNoteLinks(noteId: string): Promise<NoteLinksResponse> {
+  const res = await fetch(`${API_BASE}/notes/${noteId}/links`)
+  if (!res.ok) return { outgoing: [], incoming: [] }
+  return res.json() as Promise<NoteLinksResponse>
+}
+
+async function createNoteLink(
+  noteId: string,
+  targetNoteId: string,
+  linkType: string,
+): Promise<NoteLinkItem> {
+  const res = await fetch(`${API_BASE}/notes/${noteId}/links`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target_note_id: targetNoteId, link_type: linkType }),
+  })
+  if (!res.ok) throw new Error(`POST /notes/${noteId}/links failed: ${res.status}`)
+  return res.json() as Promise<NoteLinkItem>
+}
+
+async function deleteNoteLink(
+  noteId: string,
+  targetNoteId: string,
+  linkType: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok && res.status !== 204)
+    throw new Error(`DELETE /notes/${noteId}/links/${targetNoteId} failed`)
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -133,6 +181,8 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(
     new Set(note?.collection_ids ?? []),
   )
+  // Link autocomplete state
+  const [linkQuery, setLinkQuery] = useState<string | null>(null)
   const qc = useQueryClient()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -145,6 +195,30 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     enabled: note !== null,
   })
   const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
+
+  // Note links query (S171)
+  const { data: noteLinks, isLoading: linksLoading } = useQuery({
+    queryKey: ["note-links", note?.id],
+    queryFn: () => fetchNoteLinks(note!.id),
+    staleTime: 10_000,
+    enabled: note !== null,
+  })
+
+  const deleteLinkMut = useMutation({
+    mutationFn: ({ targetId, linkType }: { targetId: string; linkType: string }) =>
+      deleteNoteLink(note!.id, targetId, linkType),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["note-links", note?.id] })
+    },
+  })
+
+  const createLinkMut = useMutation({
+    mutationFn: ({ targetId, linkType }: { targetId: string; linkType: string }) =>
+      createNoteLink(note!.id, targetId, linkType),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["note-links", note?.id] })
+    },
+  })
 
   // Re-initialise state when note changes (new note selected)
   useEffect(() => {
@@ -172,6 +246,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
 
   function handleClose() {
     abortRef.current?.abort()
+    setLinkQuery(null)
     onClose()
   }
 
@@ -278,16 +353,50 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             <div className="shrink-0 border-b border-border px-4 py-2">
               <span className="text-xs font-medium text-muted-foreground">Write</span>
             </div>
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={(e) => {
-                setContent(e.target.value)
-                setIsSaved(false)
-              }}
-              className="flex-1 resize-none bg-background px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-              placeholder="Write your note in Markdown..."
-            />
+            <div className="relative flex-1 min-h-0">
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={(e) => {
+                  setContent(e.target.value)
+                  setIsSaved(false)
+                  const query = detectLinkTrigger(e.target.value, e.target.selectionStart)
+                  setLinkQuery(query)
+                }}
+                onBlur={() => {
+                  // Delay so onMouseDown on LinkAutocomplete item fires first
+                  setTimeout(() => setLinkQuery(null), 200)
+                }}
+                className="h-full w-full resize-none bg-background px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                placeholder="Write your note in Markdown... Type [[ to link a note"
+              />
+              {linkQuery !== null && (
+                <LinkAutocomplete
+                  query={linkQuery}
+                  onSelect={(id, preview) => {
+                    if (!textareaRef.current) return
+                    const { newValue, newCursorPos } = insertLinkAtTrigger(
+                      content,
+                      textareaRef.current.selectionStart,
+                      id,
+                      preview,
+                    )
+                    setContent(newValue)
+                    setLinkQuery(null)
+                    // Also create the structured link row (fire-and-forget, ignore 409)
+                    if (note?.id) {
+                      createLinkMut.mutate({ targetId: id, linkType: "see-also" })
+                    }
+                    // Restore cursor position
+                    setTimeout(() => {
+                      textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos)
+                      textareaRef.current?.focus()
+                    }, 0)
+                  }}
+                  onClose={() => setLinkQuery(null)}
+                />
+              )}
+            </div>
             {/* Editable tags section below write pane */}
             <div className="shrink-0 border-t border-border px-4 py-2">
               <TagAutocomplete
@@ -335,6 +444,52 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                       <span className="flex-1 truncate">{col.name}</span>
                     </label>
                   ))}
+                </div>
+              )}
+            </div>
+            {/* Links section (S171) */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <p className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                <Link size={11} />
+                Links
+              </p>
+              {linksLoading ? (
+                <Skeleton className="h-4 w-24 rounded" />
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {(noteLinks?.outgoing ?? []).length === 0 &&
+                    (noteLinks?.incoming ?? []).length === 0 && (
+                      <p className="text-xs text-muted-foreground">No links yet. Type [[ to link.</p>
+                    )}
+                  {(noteLinks?.outgoing ?? []).length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-muted-foreground">Outgoing</span>
+                      {noteLinks!.outgoing.map((link) => (
+                        <div key={link.id} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs bg-indigo-50 border border-indigo-200">
+                          <span className="rounded-full bg-indigo-200 px-1 text-[10px] text-indigo-700">{link.link_type}</span>
+                          <span className="flex-1 truncate text-foreground">{link.preview}</span>
+                          <button
+                            onClick={() => deleteLinkMut.mutate({ targetId: link.note_id, linkType: link.link_type })}
+                            className="text-muted-foreground hover:text-destructive"
+                            title="Remove link"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(noteLinks?.incoming ?? []).length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-muted-foreground">Backlinks</span>
+                      {noteLinks!.incoming.map((link) => (
+                        <div key={link.id} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs bg-muted border border-border">
+                          <span className="rounded-full bg-muted-foreground/20 px-1 text-[10px] text-muted-foreground">{link.link_type}</span>
+                          <span className="flex-1 truncate text-foreground">{link.preview}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -16,7 +16,7 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
-from app.models import NoteCollectionMemberModel, NoteModel, NoteTagIndexModel
+from app.models import NoteCollectionMemberModel, NoteLinkModel, NoteModel, NoteTagIndexModel
 
 logger = logging.getLogger(__name__)
 
@@ -776,6 +776,225 @@ async def reject_cluster_suggestion(
     if not found:
         raise HTTPException(status_code=404, detail="Cluster suggestion not found")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# S171: Note links and autocomplete
+# NOTE: GET /notes/autocomplete is a static path and MUST be registered before
+# the /{note_id} catch-all to prevent FastAPI from matching "autocomplete" as a
+# note ID.
+# ---------------------------------------------------------------------------
+
+
+class NoteLinkCreateRequest(BaseModel):
+    target_note_id: str
+    link_type: str = "see-also"
+
+
+class NoteLinkItem(BaseModel):
+    id: str
+    note_id: str
+    preview: str
+    link_type: str
+    created_at: datetime
+
+
+class NoteLinksResponse(BaseModel):
+    outgoing: list[NoteLinkItem]
+    incoming: list[NoteLinkItem]
+
+
+class NoteAutocompleteItem(BaseModel):
+    id: str
+    preview: str
+
+
+@router.get("/autocomplete", response_model=list[NoteAutocompleteItem])
+async def autocomplete_notes(
+    q: str = Query(default="", max_length=200),
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteAutocompleteItem]:
+    """Return up to 8 notes whose content starts with q (case-insensitive). (S171)
+
+    Registered BEFORE /{note_id} to prevent FastAPI from matching "autocomplete"
+    as a note ID wildcard.
+    """
+    if not q.strip():
+        result = await session.execute(
+            select(NoteModel.id, NoteModel.content)
+            .order_by(NoteModel.updated_at.desc())
+            .limit(8)
+        )
+    else:
+        result = await session.execute(
+            select(NoteModel.id, NoteModel.content)
+            .where(NoteModel.content.ilike(f"{q}%"))
+            .order_by(NoteModel.updated_at.desc())
+            .limit(8)
+        )
+    return [
+        NoteAutocompleteItem(id=row[0], preview=row[1][:100])
+        for row in result.all()
+    ]
+
+
+@router.post("/{note_id}/links", response_model=NoteLinkItem, status_code=201)
+async def create_note_link(
+    note_id: str,
+    req: NoteLinkCreateRequest,
+    session: AsyncSession = Depends(get_db),
+) -> NoteLinkItem:
+    """Create a typed link from note_id to req.target_note_id. (S171)
+
+    Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
+    Returns 409 if the (source, target, link_type) triple already exists.
+    """
+    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+    # Validate source and target exist
+    source = (
+        await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+    ).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source note not found")
+
+    target = (
+        await session.execute(
+            select(NoteModel).where(NoteModel.id == req.target_note_id)
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Target note not found")
+
+    # Check uniqueness
+    existing = (
+        await session.execute(
+            select(NoteLinkModel).where(
+                NoteLinkModel.source_note_id == note_id,
+                NoteLinkModel.target_note_id == req.target_note_id,
+                NoteLinkModel.link_type == req.link_type,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Link already exists")
+
+    link = NoteLinkModel(
+        id=str(uuid.uuid4()),
+        source_note_id=note_id,
+        target_note_id=req.target_note_id,
+        link_type=req.link_type,
+        created_at=datetime.now(UTC),
+    )
+    session.add(link)
+    await session.commit()
+    await session.refresh(link)
+
+    # Fire-and-forget Kuzu edge upsert
+    task = asyncio.create_task(
+        get_note_graph_service().upsert_links_to_edge(
+            note_id, req.target_note_id, req.link_type
+        )
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return NoteLinkItem(
+        id=link.id,
+        note_id=req.target_note_id,
+        preview=target.content[:100],
+        link_type=link.link_type,
+        created_at=link.created_at,
+    )
+
+
+@router.delete("/{note_id}/links/{target_note_id}", status_code=204)
+async def delete_note_link(
+    note_id: str,
+    target_note_id: str,
+    link_type: str = Query(default="see-also"),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a typed link from note_id to target_note_id. (S171)
+
+    Fires an async Kuzu edge delete. Returns 404 if link not found.
+    """
+    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+    link = (
+        await session.execute(
+            select(NoteLinkModel).where(
+                NoteLinkModel.source_note_id == note_id,
+                NoteLinkModel.target_note_id == target_note_id,
+                NoteLinkModel.link_type == link_type,
+            )
+        )
+    ).scalar_one_or_none()
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    await session.delete(link)
+    await session.commit()
+
+    task = asyncio.create_task(
+        get_note_graph_service().delete_links_to_edge(note_id, target_note_id, link_type)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+@router.get("/{note_id}/links", response_model=NoteLinksResponse)
+async def get_note_links(
+    note_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> NoteLinksResponse:
+    """Return outgoing and incoming links for a note. (S171)
+
+    Outgoing: links WHERE source_note_id = note_id
+    Incoming: links WHERE target_note_id = note_id (backlinks)
+    Each item includes a 100-char preview from the linked note's content.
+    """
+    # Outgoing links
+    out_rows = (
+        await session.execute(
+            select(NoteLinkModel, NoteModel.content)
+            .join(NoteModel, NoteLinkModel.target_note_id == NoteModel.id)
+            .where(NoteLinkModel.source_note_id == note_id)
+            .order_by(NoteLinkModel.created_at.desc())
+        )
+    ).all()
+
+    # Incoming links (backlinks)
+    in_rows = (
+        await session.execute(
+            select(NoteLinkModel, NoteModel.content)
+            .join(NoteModel, NoteLinkModel.source_note_id == NoteModel.id)
+            .where(NoteLinkModel.target_note_id == note_id)
+            .order_by(NoteLinkModel.created_at.desc())
+        )
+    ).all()
+
+    outgoing = [
+        NoteLinkItem(
+            id=row[0].id,
+            note_id=row[0].target_note_id,
+            preview=row[1][:100],
+            link_type=row[0].link_type,
+            created_at=row[0].created_at,
+        )
+        for row in out_rows
+    ]
+    incoming = [
+        NoteLinkItem(
+            id=row[0].id,
+            note_id=row[0].source_note_id,
+            preview=row[1][:100],
+            link_type=row[0].link_type,
+            created_at=row[0].created_at,
+        )
+        for row in in_rows
+    ]
+    return NoteLinksResponse(outgoing=outgoing, incoming=incoming)
 
 
 @router.get("/{note_id}", response_model=NoteResponse)

@@ -224,6 +224,76 @@ class NoteGraphService:
                 )
 
     # ------------------------------------------------------------------
+    # LINKS_TO edges (S171)
+    # ------------------------------------------------------------------
+
+    async def upsert_links_to_edge(
+        self, source_id: str, target_id: str, link_type: str
+    ) -> None:
+        """Upsert a LINKS_TO(link_type) edge between two Note nodes in Kuzu.
+
+        Fire-and-forget safe: errors are logged and suppressed.
+        """
+        try:
+            await asyncio.to_thread(
+                self._upsert_links_to_sync, source_id, target_id, link_type
+            )
+        except Exception as exc:
+            logger.warning("upsert_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
+
+    def _upsert_links_to_sync(
+        self, source_id: str, target_id: str, link_type: str
+    ) -> None:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        gs = get_graph_service()
+        with gs._lock:
+            # Check both Note nodes exist
+            for nid in (source_id, target_id):
+                r = gs._conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": nid})
+                if not r.has_next():
+                    return  # Node not yet in Kuzu -- silently skip
+
+            # Upsert: check if edge already exists with same link_type
+            existing = gs._conn.execute(
+                "MATCH (s:Note {id: $sid})-[r:LINKS_TO]->(t:Note {id: $tid})"
+                " WHERE r.link_type = $lt RETURN r.link_type",
+                {"sid": source_id, "tid": target_id, "lt": link_type},
+            )
+            if not existing.has_next():
+                gs._conn.execute(
+                    "MATCH (s:Note {id: $sid}), (t:Note {id: $tid})"
+                    " CREATE (s)-[:LINKS_TO {link_type: $lt}]->(t)",
+                    {"sid": source_id, "tid": target_id, "lt": link_type},
+                )
+
+    async def delete_links_to_edge(
+        self, source_id: str, target_id: str, link_type: str
+    ) -> None:
+        """Delete a LINKS_TO edge from Kuzu. Fire-and-forget safe."""
+        try:
+            await asyncio.to_thread(
+                self._delete_links_to_sync, source_id, target_id, link_type
+            )
+        except Exception as exc:
+            logger.warning(
+                "delete_links_to_edge failed (non-fatal): %s", exc, exc_info=True
+            )
+
+    def _delete_links_to_sync(
+        self, source_id: str, target_id: str, link_type: str
+    ) -> None:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        gs = get_graph_service()
+        with gs._lock:
+            gs._conn.execute(
+                "MATCH (s:Note {id: $sid})-[r:LINKS_TO]->(t:Note {id: $tid})"
+                " WHERE r.link_type = $lt DELETE r",
+                {"sid": source_id, "tid": target_id, "lt": link_type},
+            )
+
+    # ------------------------------------------------------------------
     # Delete
     # ------------------------------------------------------------------
 

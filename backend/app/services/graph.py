@@ -134,6 +134,9 @@ class KuzuService:
             "FROM Note TO Entity, tag STRING)",
             "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM("
             "FROM Note TO Document)",
+            # Zettelkasten links (S171) -- explicit typed note-to-note connections
+            "CREATE REL TABLE IF NOT EXISTS LINKS_TO("
+            "FROM Note TO Note, link_type STRING)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)

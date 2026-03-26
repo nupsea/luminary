@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -685,6 +685,32 @@ class ClusterSuggestionModel(Base):
     note_ids: Mapped[list] = mapped_column(JSON, nullable=False)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class NoteLinkModel(Base):
+    """Explicit note-to-note Zettelkasten-style link (S171).
+
+    Each row represents a directed typed connection from source_note_id to target_note_id.
+    Bidirectionality is achieved by querying both directions in GET /notes/{id}/links.
+    FK cascades ensure rows are removed when either note is deleted.
+    UniqueConstraint prevents duplicate (source, target, link_type) triples.
+    """
+
+    __tablename__ = "note_links"
+    __table_args__ = (
+        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_note_link"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    source_note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # elaborates | contradicts | see-also | supports | questions
+    link_type: Mapped[str] = mapped_column(String(20), nullable=False, default="see-also")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
