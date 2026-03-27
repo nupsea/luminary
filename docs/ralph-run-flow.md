@@ -103,7 +103,8 @@ Each story SXXX produces or modifies these artifacts:
 | v2 | `scripts/ralph/prd-v2.json` | `ralph/luminary-v2` | S75-S160 (all pass) |
 | v3 Phase 1 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S161-S170 (all pass) -- Note organization: collections, hierarchical tags, graph nodes, performance |
 | v3 Phase 2 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S171-S175 (all pass) -- Note intelligence: bidirectional links, Viz integration, health reports, Obsidian/Anki export, multi-doc notes |
-| v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (in progress) -- UX polish and learner focus |
+| v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (all pass) -- UX polish and learner focus |
+| v3 Phase 4 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S184-S190 (pending) -- Learner experience refinement |
 
 ## V3 Phase 3 Story Status
 
@@ -117,3 +118,15 @@ Each story SXXX produces or modifies these artifacts:
 | S181 | Viz overhaul: View Options panel, Select All entity types, hide Call Graph | pass |
 | S182 | YouTube transcript viewer: full Read section parity | pass |
 | S183 | Learning tab: slim stats bar, document list as primary focus | pass |
+
+## V3 Phase 4 Story Status
+
+| Story | Title | Status |
+|---|---|---|
+| S184 | Flashcard search and unified browse replaces deck-first navigation | pending |
+| S185 | Simplified Study tab: single generate button with adaptive defaults | pending |
+| S186 | Chat: inline document scope selector replaces settings drawer scope | pending |
+| S187 | Chat: document-aware contextual recommendations | pending |
+| S188 | Flashcard generation: context-rich questions with source grounding | pending |
+| S189 | Auto-organize: guided plan with confirmation workflow | pending |
+| S190 | Tag search: type-ahead search in Notes sidebar | pending |

@@ -49,7 +49,7 @@ One paragraph: what this story changes and why.
 
 ## Step Sequence
 
-1. **Discovery:** Use `grep_search` and `read_file` with line ranges to identify only the relevant schemas, interfaces, and logic sections. Do NOT read large files in full.
+1. **Discovery:** Use `Grep` and `Read` (with offset/limit for large files) to identify relevant schemas, interfaces, and logic. Always read every file you will modify.
 2. Add SQLAlchemy models (if schema changes)
 3. Add DDL to db_init.py (CREATE TABLE / CREATE INDEX with IF NOT EXISTS)
 4. Implement service layer (focus on one method at a time)
@@ -85,3 +85,6 @@ One paragraph: what this story changes and why.
 - If the plan already exists at `docs/exec-plans/active/<STORY_ID>.md`, read it and update rather than overwrite.
 - Keep the plan realistic -- only list files you have actually read and confirmed need changes.
 - The AC Coverage Map is mandatory. Every AC must have a row.
+- Read `scripts/ralph/patterns.md` and `.claude/rules/common/invariants.md` before writing the plan. Flag which invariants are relevant to this story in the Cross-Story Risk section.
+- For each file in "Files to Touch", note the specific function/class/line range that needs modification -- not just the filename.
+- If the story touches async code, explicitly note which invariants (I-1, I-2, I-3) apply and how they will be satisfied.

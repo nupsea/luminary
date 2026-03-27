@@ -13,8 +13,11 @@ You are reviewing a just-completed story implementation in the Luminary codebase
 You will be told which story was implemented (e.g. "S161"). Read:
 1. The story spec from `scripts/ralph/prd-v3.json` (id, description, acceptanceCriteria)
 2. `scripts/ralph/patterns.md` -- the accumulated codebase patterns
-3. `docs/design-docs/story-authoring.md` -- the story quality checklist
-4. `git diff HEAD~1` -- everything that changed in the implementation commit
+3. `.claude/rules/common/invariants.md` -- the 18 hard invariants
+4. `docs/exec-plans/active/<STORY_ID>.md` or `docs/exec-plans/completed/<STORY_ID>.md` -- the execution plan
+5. `git diff HEAD~1` -- everything that changed in the implementation commit
+
+Read the FULL diff. Do not skim. Every changed line must be checked against the invariants and patterns.
 
 ## What to Check
 
@@ -37,6 +40,10 @@ You will be told which story was implemented (e.g. "S161"). Read:
 - [ ] `progress.txt` entry includes a Learnings section with non-obvious discoveries
 - [ ] No TODO/FIXME comments left in committed code
 - [ ] No `any` type casts in TypeScript beyond genuinely unknown types
+- [ ] No dead code, unused imports, or leftover debug prints introduced by the implementation
+- [ ] Execution plan at `docs/exec-plans/active/<STORY_ID>.md` matches what was actually implemented -- flag significant deviations
+- [ ] New service methods follow existing naming conventions in their module (check neighbor functions)
+- [ ] Error messages in new endpoints are user-facing quality (not raw tracebacks or generic "error")
 
 ## Output Format
 

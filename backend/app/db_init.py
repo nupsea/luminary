@@ -316,4 +316,63 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         except Exception:
             pass  # Column already exists (idempotent)
 
+        # S183-fix: flashcards.document_id must be nullable for note-sourced cards.
+        # Old databases have NOT NULL on this column. Use table-rebuild idiom since
+        # SQLite does not support ALTER COLUMN to drop a NOT NULL constraint.
+        col_rows = (
+            await conn.execute(text("PRAGMA table_info(flashcards)"))
+        ).fetchall()
+        doc_id_col = next((r for r in col_rows if r[1] == "document_id"), None)
+        if doc_id_col is not None and doc_id_col[3] == 1:  # notnull == 1 means NOT NULL
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS flashcards_rebuild ("
+                    "id TEXT PRIMARY KEY,"
+                    " document_id TEXT,"
+                    " chunk_id TEXT,"
+                    " source TEXT NOT NULL DEFAULT 'document',"
+                    " deck TEXT NOT NULL DEFAULT 'default',"
+                    " question TEXT NOT NULL,"
+                    " answer TEXT NOT NULL,"
+                    " source_excerpt TEXT NOT NULL,"
+                    " difficulty TEXT NOT NULL DEFAULT 'medium',"
+                    " is_user_edited INTEGER,"
+                    " fsrs_stability REAL,"
+                    " fsrs_difficulty REAL,"
+                    " due_date DATETIME,"
+                    " fsrs_state TEXT,"
+                    " reps INTEGER,"
+                    " lapses INTEGER,"
+                    " last_review DATETIME,"
+                    " flashcard_type TEXT,"
+                    " bloom_level INTEGER,"
+                    " cloze_text TEXT,"
+                    " source_content_hash TEXT,"
+                    " note_id TEXT,"
+                    " chunk_classification TEXT,"
+                    " created_at DATETIME"
+                    ")"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO flashcards_rebuild"
+                    " (id, document_id, chunk_id, source, deck, question, answer,"
+                    "  source_excerpt, difficulty, is_user_edited, fsrs_stability,"
+                    "  fsrs_difficulty, due_date, fsrs_state, reps, lapses, last_review,"
+                    "  flashcard_type, bloom_level, cloze_text, source_content_hash,"
+                    "  note_id, chunk_classification, created_at)"
+                    " SELECT id, document_id, chunk_id, source, deck, question, answer,"
+                    "  source_excerpt, difficulty, is_user_edited, fsrs_stability,"
+                    "  fsrs_difficulty, due_date, fsrs_state, reps, lapses, last_review,"
+                    "  flashcard_type, bloom_level, cloze_text, source_content_hash,"
+                    "  note_id, chunk_classification, created_at"
+                    " FROM flashcards"
+                )
+            )
+            await conn.execute(text("DROP TABLE flashcards"))
+            await conn.execute(
+                text("ALTER TABLE flashcards_rebuild RENAME TO flashcards")
+            )
+
     logger.info("Database tables and FTS5 index initialized")

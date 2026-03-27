@@ -22,12 +22,17 @@ You are an autonomous coding agent implementing Luminary stories.
 6. Read or create the execution plan at `docs/exec-plans/active/<STORY_ID>.md`.
    If it does not exist, invoke the `luminary-planner` agent to create it.
 
-7. Explore the codebase -- read every file you will modify before writing any code.
-   Skipping exploration causes regressions.
+7. Explore the codebase -- **read every file you will modify** before writing any code.
+   Use `Read` with offset/limit for large files. Use `Grep` to locate relevant sections.
+   Use `Glob` to find files by pattern. Never use Bash for file search or content grep.
+   Skipping exploration causes regressions. This step is NOT optional.
 
 8. Implement the story:
    - Backend: models.py, db_init.py, service layer, router, pytest tests
    - Frontend: components, hooks, Zustand store additions, Vitest tests
+   - Before editing any file, verify you have read it in this session. If not, read it now.
+   - Follow patterns from patterns.md. Check invariants.md for relevant constraints.
+   - Keep changes minimal -- do not refactor surrounding code unless the AC requires it.
 
 9. Run quality gates IN ORDER -- fix failures before proceeding:
    a. `cd backend && uv run ruff check .`

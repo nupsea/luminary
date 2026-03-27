@@ -13,7 +13,8 @@
       "Cross-tab navigation is event-driven. Clicking a tag node in the Viz tab fires a 'luminary:navigate' DOM event; App.tsx routes to Notes tab with the tag pre-applied. No URL hacks, no shared global state beyond Zustand store.",
       "Every new service method and every new API endpoint must have at least one pytest test. No exceptions (inherited from v2 philosophy).",
       "Phase 2 seed (post Phase 1): note-to-note bidirectional links (S171), notes visible in Knowledge graph (S172), collection health reports (S173), export to Obsidian vault and Anki (S174), multi-document notes (S175). Phase 2 gate cleared 2026-03-26: docs/v3-phase1-completion.md fully checked, all S161-S170 pass=true.",
-      "Phase 3 (UX Polish and Learner Focus, S176-S183): ruthlessly separates the learner layer from the diagnostic/admin layer. Notes get a reader-first layout with clickable tag navigation (S176). Monitoring becomes a Progress tab with all dev metrics hidden at /admin (S177). Study tab declutters with Smart Generate and merged health panels (S178). Flashcard generation becomes context-aware and best-practices-driven (S179). Chat settings move to a drawer with collapsed transparency panels (S180). Viz gets a collapsible View Options panel, select-all entity controls, and hides Call Graph for non-code documents (S181). YouTube transcripts gain full Read section parity (S182). Learning tab LibraryOverview slims to a single stats bar with document list as primary focus (S183)."
+      "Phase 3 (UX Polish and Learner Focus, S176-S183): ruthlessly separates the learner layer from the diagnostic/admin layer. Notes get a reader-first layout with clickable tag navigation (S176). Monitoring becomes a Progress tab with all dev metrics hidden at /admin (S177). Study tab declutters with Smart Generate and merged health panels (S178). Flashcard generation becomes context-aware and best-practices-driven (S179). Chat settings move to a drawer with collapsed transparency panels (S180). Viz gets a collapsible View Options panel, select-all entity controls, and hides Call Graph for non-code documents (S181). YouTube transcripts gain full Read section parity (S182). Learning tab LibraryOverview slims to a single stats bar with document list as primary focus (S183).",
+      "Phase 4 (Learner Experience Refinement, S184-S190): eliminates friction in the three highest-touch surfaces -- Study, Chat, and Notes. Flashcard navigation drops the deck concept in favour of a unified search-and-filter browser (S184). Study tab collapses to two CTAs with an Insights accordion (S185). Chat brings document scope back inline and removes confusion-signal noise (S186-S187). Flashcard generation gets deeper context and Bloom L3+ bias (S188). Auto-organize shows a holistic plan instead of individual suggestion cards (S189). Tag tree gains type-ahead search (S190)."
     ]
   },
   "architecture": {
@@ -619,6 +620,165 @@
         "Unit test: most recently viewed document appears at top of list",
         "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
         "scripts/smoke/S183.sh exits 0"
+      ]
+    },
+    {
+      "id": "S184",
+      "title": "Flashcard search and unified browse replaces deck-first navigation",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 24,
+      "featureRef": "F-STUDY",
+      "passes": false,
+      "description": "CONTEXT: The Study tab currently requires users to pick a document and then browse its deck. There is no way to search 'all flashcards about recursion' or 'all cards from my CS notes collection.' The deck concept (just a string field -- default, gaps, feynman, graph, collection names) adds cognitive overhead without real value. USER JOURNEY: User opens Study tab -> sees a search bar and filter chips at the top -> types a keyword or selects filters (document, collection, tag, bloom level, FSRS state, type) -> paginated card grid updates in real time -> user picks cards to study or generate more. CROSS-STORY IMPACT: S185 depends on this (search/filter is the primary content area). S169 deck list UI is replaced. IMPLEMENTATION NOTES: Backend: add GET /flashcards/search endpoint with query, document_id, collection_id, tag, bloom_level_min, bloom_level_max, fsrs_state, flashcard_type as optional query params. Create flashcards_fts FTS5 virtual table on question+answer columns in db_init.py. Keep FTS in sync via triggers or explicit insert/delete in FlashcardService. Frontend: replace DeckItem list in Study.tsx with search bar + filter chip row + paginated card grid. TanStack Query with 300ms debounced search input. Remove deck name from all UI surfaces; keep deck field in FlashcardModel for backward compat.",
+      "acceptanceCriteria": [
+        "GET /flashcards/search endpoint accepts query (FTS), document_id, collection_id, tag, bloom_level_min, bloom_level_max, fsrs_state, flashcard_type as optional filters; returns paginated FlashcardResponse list",
+        "flashcards_fts FTS5 virtual table created in db_init.py on question and answer columns; kept in sync on insert/update/delete",
+        "Frontend Study tab replaces deck list with search bar + filter chip row (document, collection, tag, bloom level, state, type)",
+        "Typing in search bar debounces 300ms then queries GET /flashcards/search; results render as paginated card grid",
+        "Each filter chip shows active value and has a clear (x) button; multiple filters combine with AND",
+        "Deck name is not shown anywhere in the UI; existing deck field preserved in model but hidden",
+        "Empty state: 'No flashcards match your filters' with suggestion to generate cards",
+        "Unit test: GET /flashcards/search with query param returns matching cards via FTS5",
+        "Unit test: GET /flashcards/search with bloom_level_min=3 returns only L3+ cards",
+        "Unit test: flashcards_fts table is populated on card creation",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S184.sh exits 0"
+      ]
+    },
+    {
+      "id": "S185",
+      "title": "Simplified Study tab: single generate button with adaptive defaults",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 25,
+      "featureRef": "F-STUDY",
+      "passes": false,
+      "description": "CONTEXT: The Study tab currently has too many panels competing for attention -- GeneratePanel with 3 sub-tabs (Basic, Graph, Cloze), SmartGeneratePanel, DeckHealthPanel, HealthReportPanel, StrugglingPanel, and GoalsPanel. A learner opening the Study tab faces a dashboard, not a study session. USER JOURNEY: User opens Study tab -> sees card list (S184 search/filter) as the primary area -> two CTAs at top: 'Start Studying' and 'Generate Cards' -> clicking Generate runs adaptive SmartGenerate logic -> chevron disclosure expands power-user options inline -> scrolling below the card list reveals a collapsed 'Insights' accordion with health, bloom audit, and struggling cards. CROSS-STORY IMPACT: Depends on S184 (search/filter is the primary content). GoalsPanel moves to Progress tab (S177). IMPLEMENTATION NOTES: Remove GeneratePanel sub-tabs (Basic, Graph, Cloze) and standalone SmartGeneratePanel. Single 'Generate Cards' button calls SmartGenerate logic (adaptive mode based on mastery %). Disclosure chevron expands inline: scope, difficulty, mode selectors. Merge DeckHealthPanel, HealthReportPanel, StrugglingPanel into one 'Insights' Accordion component -- collapsed by default. Move GoalsPanel to Progress tab (S177).",
+      "acceptanceCriteria": [
+        "Single 'Generate Cards' button replaces GeneratePanel sub-tabs; clicking it runs SmartGenerate logic (adaptive mode based on mastery percentage)",
+        "Disclosure chevron on Generate button expands inline options: scope (full/section), difficulty, mode (basic/graph/cloze/technical) -- collapsed by default",
+        "Health report, Bloom audit, and struggling cards merged into one collapsible 'Insights' accordion section below the card list; collapsed by default",
+        "GoalsPanel removed from Study tab; GoalsPanel rendered in Progress tab (S177) instead",
+        "'Start Studying' button prominent at top of Study tab alongside 'Generate Cards'",
+        "Study tab loads with card list (S184 search/filter) as the primary visible content area",
+        "No more than 2 CTAs visible above the fold (Study and Generate)",
+        "Unit test: Generate button triggers SmartGenerate mutation with correct adaptive parameters",
+        "Unit test: Insights accordion renders health, bloom audit, and struggling sections when expanded",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S185.sh exits 0"
+      ]
+    },
+    {
+      "id": "S186",
+      "title": "Chat: inline document scope selector replaces settings drawer scope",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 26,
+      "featureRef": "F-CHAT",
+      "passes": false,
+      "description": "CONTEXT: Chat scope (single document vs all documents) was moved to a ChatSettingsDrawer behind a gear icon. This means 2 clicks to change what document the user is asking about -- the most common chat operation. USER JOURNEY: User opens Chat tab -> sees a compact document combobox in the header showing 'All documents' with a globe icon -> clicks it -> searchable dropdown lists documents sorted by most recently viewed -> selects a document -> header shows truncated title, scope set to single -> user asks questions scoped to that document -> clicks 'x' to clear back to all documents. CROSS-STORY IMPACT: S187 depends on this (contextual recommendations need inline scope). S180 ChatSettingsDrawer modified (scope removed, model+web retained). S147 chatPreload still works. IMPLEMENTATION NOTES: Add Combobox component to Chat header (use shadcn/ui Combobox or Popover+Command). Fetch documents from GET /documents?sort=newest. Remove scope toggle from ChatSettingsDrawer.tsx. Do NOT clear conversation when changing document within single scope -- insert a subtle divider 'Scope changed to [title]' in the message list. Clear conversation only when switching between single<->all. Preserve chatPreload pre-selection from S147.",
+      "acceptanceCriteria": [
+        "Compact document combobox in Chat header; default shows 'All documents' with globe icon",
+        "Clicking combobox opens searchable dropdown of documents sorted by most recently viewed (opened_at desc)",
+        "Selecting a document sets scope to single and shows truncated document title in header",
+        "'x' clear button on selected document reverts to 'All documents' (scope=all)",
+        "Scope toggle removed from ChatSettingsDrawer; drawer retains model selector and web search toggle only",
+        "Changing document within single scope does NOT clear conversation; a subtle divider 'Scope changed to [title]' appears in the message list",
+        "Switching between single and all scope clears conversation (existing behavior preserved)",
+        "chatPreload from 'Ask in Chat' (S147) still pre-selects the document in the new combobox",
+        "Unit test: selecting document sets scope to single and updates header display",
+        "Unit test: chatPreload sets combobox to preloaded document",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S186.sh exits 0"
+      ]
+    },
+    {
+      "id": "S187",
+      "title": "Chat: document-aware contextual recommendations",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 27,
+      "featureRef": "F-CHAT",
+      "passes": false,
+      "description": "CONTEXT: Chat suggestions are currently static ('What are the main themes?', 'Summarize the key findings') regardless of document type. Confusion signal nudge banners ('You have asked about homer 4 times. Add it to flashcards?') are noise rather than value. When a document is selected, suggestions should be specific to that document's content and type. USER JOURNEY: User selects 'The Odyssey' in Chat scope (S186) -> sees 4 suggestion pills like 'What motivates Ulysses to return home?', 'Compare the hospitality customs across islands' -> switches to a technical doc -> pills change to 'Explain the tradeoff between X and Y', 'How does the API handle Z?' -> clears to all-scope -> sees cross-document suggestions like 'Compare how [entity] appears across your documents'. CROSS-STORY IMPACT: Depends on S186 (inline scope). Removes ConfusionSignals component (S180). Removes EXAMPLE_QUESTIONS static fallback. IMPLEMENTATION NOTES: Backend: new GET /chat/suggestions?document_id={id} endpoint in chat_meta.py. Pure template logic -- no LLM call. Reads document type from DocumentModel, top entities from Kuzu via get_graph_service().get_entities_by_type_for_document(), section headings from SectionModel. Templates per doc type: book (character+theme), technical (concept+tradeoff), youtube (argument+evidence). All-scope: cross-document entity overlap from Kuzu. Frontend: replace ChatSuggestions, ExploreConnectionsChips, and ConfusionSignals with a single SuggestionPills component driven by GET /chat/suggestions. Remove GET /chat/confusion-signals calls.",
+      "acceptanceCriteria": [
+        "GET /chat/suggestions?document_id={id} returns 4 contextual suggestion strings based on document type, sections, and top entities",
+        "When document_id is null (all scope), suggestions use cross-document entity data from knowledge graph",
+        "Book documents produce character-motivation and thematic questions using actual entity names from Kuzu",
+        "Technical documents produce concept-comparison and tradeoff questions using actual entity names",
+        "YouTube documents produce argument and evidence questions referencing extracted topics",
+        "Suggestion pills in Chat refresh when selected document changes; no stale suggestions shown",
+        "ConfusionSignals component and GET /chat/confusion-signals endpoint removed from Chat page",
+        "EXAMPLE_QUESTIONS static fallback removed; replaced by contextual suggestions in all cases (empty library gets onboarding suggestions instead)",
+        "Unit test: GET /chat/suggestions with a book document_id returns suggestions containing entity names from that document",
+        "Unit test: GET /chat/suggestions with document_id=null returns cross-document suggestions",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S187.sh exits 0"
+      ]
+    },
+    {
+      "id": "S188",
+      "title": "Flashcard generation: context-rich questions with source grounding",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 28,
+      "featureRef": "F-STUDY",
+      "passes": false,
+      "description": "CONTEXT: Generated flashcard questions are often surface-level ('What is X?') and lack the context needed for real understanding. Answers do not reference where in the material the concept appears. The LLM prompt currently receives a 10K char text sample but no section heading, chapter context, or entity context. USER JOURNEY: User generates flashcards for a book -> cards now ask 'Why does Ulysses resist the Sirens in Chapter XII?' instead of 'What are the Sirens?' -> answer includes 'In Book XII, Ulysses...' with section reference -> card displays 'Book XII - The Sirens' as a subtle source label. CROSS-STORY IMPACT: S184 search benefits from richer question text. S179 chunk classification preserved. None broken. IMPLEMENTATION NOTES: Refactor FlashcardService.generate() prompt construction. When building the text sample, include section.heading and parent chapter heading. For books: query Kuzu for top 5 entities (PERSON, PLACE types) and inject into system prompt. For technical docs: detect code blocks in chunks and include them. Update LLM system prompt: 'Generate questions at Bloom L3+ (application, analysis, synthesis). Answers must cite the section or chapter.' Add section_heading to FlashcardResponse schema. Populate it via chunk -> section join when creating FlashcardModel rows. Frontend: display section_heading as muted text above question in FlashcardCard.",
+      "acceptanceCriteria": [
+        "FlashcardService.generate() prompt includes section heading and parent chapter/part heading alongside chunk text",
+        "LLM system prompt instructs answers to cite the section or chapter where the concept appears",
+        "Default question distribution targets >= 50% Bloom L3+ (application, analysis, synthesis, evaluation) -- verified by checking bloom_level on generated cards",
+        "For book documents, prompt includes top 5 entity names (from Kuzu) as context; questions reference characters and places by name",
+        "For technical documents, prompt includes code block excerpts from chunks when available",
+        "FlashcardResponse includes section_heading field (nullable string); populated from chunk -> section join on card creation",
+        "Frontend FlashcardCard displays section_heading as a subtle label above the question when present",
+        "Unit test: generate() for a book document produces cards where >= 50% have bloom_level >= 3",
+        "Unit test: FlashcardResponse includes section_heading field populated from section data",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S188.sh exits 0"
+      ]
+    },
+    {
+      "id": "S189",
+      "title": "Auto-organize: guided plan with confirmation workflow",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 29,
+      "featureRef": "F-NOTES",
+      "passes": false,
+      "description": "CONTEXT: Auto-organize runs HDBSCAN and shows individual suggestion cards one at a time. The user sees 'Suggestion 1: Notes Cluster (3 notes, 82% confidence)' and must accept or reject each individually. There is no holistic view of how all notes would be reorganized. USER JOURNEY: User clicks auto-organize wand -> clustering runs in background -> when complete, a full-page Organization Plan dialog opens -> header says 'Found 6 groups in 47 notes' -> each group shown as a card with editable name, note list with excerpts, confidence bar, include/exclude checkbox -> user renames a group, unchecks one, drags a note to another group -> clicks 'Apply Plan' -> all checked groups created as collections in one transaction -> dialog closes, Notes sidebar refreshes. CROSS-STORY IMPACT: S166 clustering service preserved. Existing individual accept/reject endpoints kept for backward compat. IMPLEMENTATION NOTES: Frontend: new OrganizationPlanDialog component. Fetch suggestions from GET /notes/cluster/suggestions, render as plan. Editable name via inline input. Drag notes between groups via dnd-kit or native drag. 'Apply Plan' calls new POST /notes/cluster/suggestions/batch-accept with [{suggestion_id, name_override}]. 'Dismiss' calls existing reject endpoint for each suggestion. Backend: add batch-accept endpoint in collections router. Single transaction: create NoteCollectionModel + NoteCollectionMemberModel rows for each accepted suggestion. Return list of created collection IDs.",
+      "acceptanceCriteria": [
+        "After POST /notes/cluster completes, frontend shows a full-page Organization Plan dialog (not individual cards)",
+        "Dialog header shows 'Found N groups in M notes' with average confidence score",
+        "Each group displayed as a card with: editable name field, note list with excerpts, confidence bar, include/exclude checkbox",
+        "User can drag notes between groups within the plan dialog",
+        "'Apply Plan' button sends POST /notes/cluster/suggestions/batch-accept with list of {suggestion_id, name_override} objects",
+        "POST /notes/cluster/suggestions/batch-accept creates all collections and memberships in a single database transaction; returns list of created collection IDs",
+        "'Dismiss' button closes dialog and marks all suggestions as rejected via existing reject endpoint",
+        "If no clusters found (all notes too dissimilar), dialog shows 'Your notes are already well-organized -- no grouping suggestions' message",
+        "Unit test: POST /notes/cluster/suggestions/batch-accept creates N collections with correct memberships",
+        "Unit test: batch-accept with name_override uses the override instead of the suggested name",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S189.sh exits 0"
+      ]
+    },
+    {
+      "id": "S190",
+      "title": "Tag search: type-ahead search in Notes sidebar",
+      "phase": "V3 Phase 4 - Learner Experience Refinement",
+      "priority": 30,
+      "featureRef": "F-NOTES",
+      "passes": false,
+      "description": "CONTEXT: Tags in the Notes sidebar can only be browsed by expanding the tree and clicked to filter. There is no way to type a tag name and find it, especially problematic when the tag tree grows large with deep hierarchies. USER JOURNEY: User sees a 'Search tags...' input at the top of the TagTree sidebar -> types 'genetics' -> tree filters to show 'science / biology / genetics' with parents dimmed and 'genetics' highlighted bold -> presses Enter -> tag applied as note filter -> clears search -> full tree restored. CROSS-STORY IMPACT: None -- standalone frontend change. IMPLEMENTATION NOTES: Frontend-only change to TagTree.tsx. Add a controlled input at top. On change (debounced 150ms), filter the /tags/tree data client-side: keep tags where display_name or full slug includes query (case-insensitive). For each match, include parent chain with dimmed styling. Highlight matching substring with <mark> or bold span. Enter/click applies filterByTag from existing store. Clear restores full tree. No new API endpoints needed.",
+      "acceptanceCriteria": [
+        "Search input rendered at the top of TagTree sidebar with placeholder 'Search tags...'",
+        "Typing filters the tag tree to show only tags matching the query (case-insensitive substring match on display_name or full slug)",
+        "Matching tags show their parent chain for context; parent tags are dimmed, matching tag is bold",
+        "Matching substring within the tag name is highlighted (bold or background color)",
+        "Pressing Enter or clicking a filtered tag applies it as the active tag filter (existing filterByTag behavior)",
+        "Clearing search input (backspace to empty or x button) restores the full unfiltered tag tree",
+        "Debounce of 150ms on search input to avoid excessive re-renders",
+        "Empty result: 'No tags matching [query]' message shown in tree area",
+        "Unit test: TagTree search input filters tags by substring match",
+        "Unit test: parent chain shown for deeply nested matching tags",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
+        "scripts/smoke/S190.sh exits 0"
       ]
     }
   ],
