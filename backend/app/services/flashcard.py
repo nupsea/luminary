@@ -722,10 +722,28 @@ async def _dedup_check(question: str, deck: str, session: AsyncSession) -> bool:
 
 
 async def _sync_flashcard_fts(card: FlashcardModel, session: AsyncSession) -> None:
-    """Insert or replace a flashcard's question+answer into the FTS5 index."""
+    """Insert or update a flashcard's question+answer in the FTS5 index.
+
+    FTS5 UNINDEXED columns don't support OR REPLACE semantics.
+    Delete any existing row first (via shadow table rowid lookup per I-4),
+    then insert the new row.
+    """
+    # Delete existing row if any (idempotent)
+    row = (
+        await session.execute(
+            text("SELECT rowid FROM flashcards_fts_content WHERE c2 = :fid"),
+            {"fid": card.id},
+        )
+    ).first()
+    if row:
+        await session.execute(
+            text("DELETE FROM flashcards_fts WHERE rowid = :rid"),
+            {"rid": row[0]},
+        )
+    # Insert fresh row
     await session.execute(
         text(
-            "INSERT OR REPLACE INTO flashcards_fts(flashcard_id, question, answer) "
+            "INSERT INTO flashcards_fts(flashcard_id, question, answer) "
             "VALUES (:fid, :q, :a)"
         ),
         {"fid": card.id, "q": card.question, "a": card.answer},

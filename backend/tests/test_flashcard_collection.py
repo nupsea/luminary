@@ -181,13 +181,21 @@ async def test_generate_from_collection_processes_changed_content(test_db):
 
     import json as _json
 
+    # Two-pass LLM flow: 1st call = concept extraction, 2nd call = card generation
+    fake_concepts = {
+        "domain": "Python",
+        "concepts": [{"concept": "Python basics", "type": "concept"}],
+    }
     fake_cards = [{"question": "New Q?", "answer": "New A.", "source_excerpt": "ex"}]
     llm_patch = "app.services.llm.LLMService.generate"
 
     async with test_db() as session:
         svc = FlashcardService()
         with patch(llm_patch, new_callable=AsyncMock) as mock_gen:
-            mock_gen.return_value = _json.dumps(fake_cards)
+            mock_gen.side_effect = [
+                _json.dumps(fake_concepts),
+                _json.dumps(fake_cards),
+            ]
             result = await svc.generate_from_collection(
                 collection_id=coll_id,
                 count_per_note=3,

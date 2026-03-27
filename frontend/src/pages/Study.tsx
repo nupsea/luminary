@@ -176,6 +176,12 @@ interface DeckHealthReport {
   hotspot_sections: HealthSection[]
 }
 
+// S184: Collection type for filter dropdown
+interface CollectionItem {
+  id: string
+  name: string
+}
+
 // S184: Search response type
 interface FlashcardSearchResponse {
   items: Flashcard[]
@@ -243,6 +249,13 @@ async function fetchFlashcardSearch(filters: FlashcardSearchFilters): Promise<Fl
   const res = await fetch(`${API_BASE}/flashcards/search${query ? `?${query}` : ""}`)
   if (!res.ok) return { items: [], total: 0, page: 1, page_size: 20 }
   return res.json() as Promise<FlashcardSearchResponse>
+}
+
+async function fetchCollections(): Promise<CollectionItem[]> {
+  const res = await fetch(`${API_BASE}/collections/tree`)
+  if (!res.ok) return []
+  const tree = await res.json() as { id: string; name: string }[]
+  return tree.map((c) => ({ id: c.id, name: c.name }))
 }
 
 async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
@@ -2094,6 +2107,13 @@ export default function Study() {
   const cards = searchResult?.items ?? []
   const totalCards = searchResult?.total ?? 0
 
+  // S184: Collections list for filter dropdown
+  const { data: collectionList = [] } = useQuery<CollectionItem[]>({
+    queryKey: ["collections-list"],
+    queryFn: fetchCollections,
+    staleTime: 60_000,
+  })
+
   useEffect(() => {
     if (!cardsLoading && activeDocumentId) {
       const elapsed = Date.now() - mountTime.current
@@ -2316,7 +2336,7 @@ export default function Study() {
           )}
           {filterCollectionId && (
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Collection
+              Collection: {collectionList.find((c) => c.id === filterCollectionId)?.name ?? filterCollectionId}
               <button onClick={() => setFilterCollectionId(null)} className="hover:text-primary/70"><X size={12} /></button>
             </span>
           )}
@@ -2343,6 +2363,23 @@ export default function Study() {
 
       {/* S184: Quick filter row */}
       <div className="flex flex-wrap gap-2">
+        <select
+          value={filterCollectionId ?? ""}
+          onChange={(e) => setFilterCollectionId(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          <option value="">Any collection</option>
+          {collectionList.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Filter by tag..."
+          value={filterTag ?? ""}
+          onChange={(e) => setFilterTag(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground w-32"
+        />
         <select
           value={filterFsrsState ?? ""}
           onChange={(e) => setFilterFsrsState(e.target.value || null)}

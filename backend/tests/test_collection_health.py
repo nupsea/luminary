@@ -173,7 +173,7 @@ def test_covered_note_absent_from_uncovered(client):
             )
             await session.commit()
 
-    asyncio.get_event_loop().run_until_complete(_insert_card())
+    asyncio.run(_insert_card())
 
     resp = client.get(f"/collections/{coll['id']}/health")
     assert resp.status_code == 200
@@ -204,7 +204,7 @@ def test_stale_note_appears_in_report(client):
             )
             await session.commit()
 
-    asyncio.get_event_loop().run_until_complete(_age_note())
+    asyncio.run(_age_note())
 
     resp = client.get(f"/collections/{coll['id']}/health")
     assert resp.status_code == 200
@@ -252,7 +252,7 @@ def test_archive_stale_sets_archived_and_excludes_from_list(client):
             )
             await session.commit()
 
-    asyncio.get_event_loop().run_until_complete(_age())
+    asyncio.run(_age())
 
     # Archive stale notes
     resp = client.post(f"/collections/{coll['id']}/health/archive-stale")

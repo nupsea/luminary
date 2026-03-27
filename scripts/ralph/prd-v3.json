@@ -628,7 +628,7 @@
       "phase": "V3 Phase 4 - Learner Experience Refinement",
       "priority": 24,
       "featureRef": "F-STUDY",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: The Study tab currently requires users to pick a document and then browse its deck. There is no way to search 'all flashcards about recursion' or 'all cards from my CS notes collection.' The deck concept (just a string field -- default, gaps, feynman, graph, collection names) adds cognitive overhead without real value. USER JOURNEY: User opens Study tab -> sees a search bar and filter chips at the top -> types a keyword or selects filters (document, collection, tag, bloom level, FSRS state, type) -> paginated card grid updates in real time -> user picks cards to study or generate more. CROSS-STORY IMPACT: S185 depends on this (search/filter is the primary content area). S169 deck list UI is replaced. IMPLEMENTATION NOTES: Backend: add GET /flashcards/search endpoint with query, document_id, collection_id, tag, bloom_level_min, bloom_level_max, fsrs_state, flashcard_type as optional query params. Create flashcards_fts FTS5 virtual table on question+answer columns in db_init.py. Keep FTS in sync via triggers or explicit insert/delete in FlashcardService. Frontend: replace DeckItem list in Study.tsx with search bar + filter chip row + paginated card grid. TanStack Query with 300ms debounced search input. Remove deck name from all UI surfaces; keep deck field in FlashcardModel for backward compat.",
       "acceptanceCriteria": [
         "GET /flashcards/search endpoint accepts query (FTS), document_id, collection_id, tag, bloom_level_min, bloom_level_max, fsrs_state, flashcard_type as optional filters; returns paginated FlashcardResponse list",

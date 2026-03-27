@@ -123,7 +123,7 @@ Each story SXXX produces or modifies these artifacts:
 
 | Story | Title | Status |
 |---|---|---|
-| S184 | Flashcard search and unified browse replaces deck-first navigation | pending |
+| S184 | Flashcard search and unified browse replaces deck-first navigation | pass |
 | S185 | Simplified Study tab: single generate button with adaptive defaults | pending |
 | S186 | Chat: inline document scope selector replaces settings drawer scope | pending |
 | S187 | Chat: document-aware contextual recommendations | pending |

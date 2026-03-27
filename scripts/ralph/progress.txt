@@ -2051,3 +2051,28 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - LibraryOverview SSE component used useRef guard to prevent double-generate; removing it simplifies the component significantly.
   - luminary:navigate handler in App.tsx only handled "notes" and "learning" tabs; adding "study" and "progress" completes the cross-tab navigation pattern for all main tabs.
 ---
+
+## 2026-03-27T00:00:00Z - S184
+- What was implemented:
+  - GET /flashcards/search endpoint with FTS5 query + structured filters (document_id, collection_id, tag, bloom_level_min/max, fsrs_state, flashcard_type); paginated response
+  - flashcards_fts FTS5 virtual table (question, answer, flashcard_id UNINDEXED) in db_init.py
+  - _sync_flashcard_fts helper (delete+insert pattern per I-4) called after every card creation; _delete_flashcard_fts on card deletion
+  - FlashcardService.search() with AND-combined filters, count subquery, pagination
+  - Frontend Study.tsx: search bar with 300ms debounce, filter chip row with clear buttons, collection dropdown, tag text input, FSRS state/type/bloom level dropdowns, paginated card grid, loading/error/empty states
+  - studyUtils.ts: buildSearchParams, FSRS_STATE_LABELS, BLOOM_LEVEL_LABELS, FlashcardSearchFilters
+  - studyUtils.test.ts: 4 test suites covering buildSearchParams, constants
+  - test_flashcard_search.py: 5 tests (FTS query, bloom_level_min filter, FTS population, no-params, fsrs_state)
+  - scripts/smoke/S184.sh: 6 assertions (health, search no params, query, bloom, fsrs_state, flashcard_type)
+  - Fixed pre-existing broken tests: test_flashcard_collection.py, test_notes_flashcards.py (two-pass LLM mock), test_flashcards.py (prompt assertion), test_collection_health.py (asyncio.run vs deprecated get_event_loop)
+- Files changed:
+  - backend/app/db_init.py, backend/app/services/flashcard.py, backend/app/routers/flashcards.py
+  - backend/tests/test_flashcard_search.py, backend/tests/test_flashcard_collection.py, backend/tests/test_notes_flashcards.py, backend/tests/test_flashcards.py, backend/tests/test_collection_health.py
+  - frontend/src/pages/Study.tsx, frontend/src/lib/studyUtils.ts, frontend/src/lib/studyUtils.test.ts
+  - scripts/smoke/S184.sh, scripts/ralph/prd-v3.json, docs/ralph-run-flow.md, docs/exec-plans/completed/S184.md
+- **Learnings for future iterations:**
+  - FTS5 INSERT OR REPLACE does NOT replace by UNINDEXED column -- must delete-then-insert using shadow table rowid lookup (c2 = flashcard_id for the third column)
+  - Pre-existing test failures from two-pass concept extraction: when FlashcardService.generate_from_notes/generate_from_collection makes 2 LLM calls (concept extraction + card generation), mock must use side_effect=[concept_resp, card_resp], not return_value
+  - asyncio.get_event_loop().run_until_complete() is deprecated in Python 3.10+ and fails in full test suite runs -- use asyncio.run() instead
+  - Test prompt assertions must track the actual constant content -- FLASHCARD_SYSTEM was rewritten in S179 and old assertions became stale
+  - Reviewer caught missing UI controls for filter state: having state + chip clear but no setter control means the filter is unusable
+---
