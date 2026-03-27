@@ -2036,3 +2036,18 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - ChunkItem `start_time`: Whisper transcription stores timestamps in section headings (e.g., "[00:01:23]"), not as individual chunk fields. `start_time=None` in chunks is correct for now; the field path is reserved for future.
   - macOS `mktemp`: does not support `--suffix=.txt`. Use `mktemp /tmp/prefix_XXXXXX.ext` instead.
 ---
+
+## 2026-03-27 - S183
+- Replaced large LibraryOverview SSE streaming panel with compact single-row LibraryStatsBar (4 stat pills)
+- Stats bar fetches: GET /documents (books count), GET /notes (notes count), GET /study/due-count (cards due), GET /study/sessions (avg mastery)
+- Each pill navigates via luminary:navigate event; updated App.tsx to handle "study" and "progress" tab navigation
+- Replaced multi-item "Recently accessed" section with single "Continue reading" highlighted row using recentItems[0]
+- Updated EmptyState message to "No books yet -- ingest a PDF or YouTube video to get started"
+- Added frontend/src/lib/learningUtils.ts with pure utility functions (buildStatPillNavigateDetail, computeAvgMastery, getMostRecentDocument)
+- Added frontend/src/lib/learningUtils.test.ts with 16 unit tests (all pass)
+- Files changed: frontend/src/pages/Learning.tsx, frontend/src/App.tsx, frontend/src/lib/learningUtils.ts, frontend/src/lib/learningUtils.test.ts, scripts/smoke/S183.sh
+- **Learnings for future iterations:**
+  - The full pytest suite had a flaky test ordering failure in test_collection_health.py when run after ML-heavy tests. The test passes in isolation. This is a pre-existing issue unrelated to this story.
+  - LibraryOverview SSE component used useRef guard to prevent double-generate; removing it simplifies the component significantly.
+  - luminary:navigate handler in App.tsx only handled "notes" and "learning" tabs; adding "study" and "progress" completes the cross-tab navigation pattern for all main tabs.
+---
