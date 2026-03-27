@@ -28,7 +28,6 @@ import { SortSelect } from "@/components/library/SortSelect"
 import { UploadDialog } from "@/components/library/UploadDialog"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { DocumentCard } from "@/components/library/DocumentCard"
-import { DocumentRow } from "@/components/library/DocumentRow"
 import type {
   ContentType,
   DocumentListItem,

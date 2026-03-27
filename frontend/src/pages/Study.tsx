@@ -108,17 +108,6 @@ interface SectionItem {
   section_order: number
 }
 
-interface EntityPair {
-  name_a: string
-  name_b: string
-  relation_label: string
-  confidence: number
-}
-
-interface EntityPairsResponse {
-  pairs: EntityPair[]
-}
-
 interface DocumentSections {
   sections: SectionItem[]
 }
@@ -331,14 +320,6 @@ class GenerateError extends Error {
     super(message)
     this.status = status
   }
-}
-
-async function fetchEntityPairs(documentId: string): Promise<EntityPairsResponse> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/entity-pairs?document_id=${encodeURIComponent(documentId)}`
-  )
-  if (!res.ok) return { pairs: [] }
-  return res.json() as Promise<EntityPairsResponse>
 }
 
 async function generateFromGraph(req: {
@@ -1854,8 +1835,6 @@ export default function Study() {
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const queryClient = useQueryClient()
   const [studying, setStudying] = useState(false)
-  // Track section pre-selected by clicking a gap item
-  const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
   const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
   const [studySubTab, setStudySubTab] = useState<"flashcards" | "history">("flashcards")
   const [filterType, setFilterType] = useState<string | null>(null)
@@ -2050,27 +2029,6 @@ export default function Study() {
     },
     onError: () => toast.error("Failed to clear flashcards"),
   })
-
-  async function handleRegenerate(req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) {
-    if (!activeDocumentId) return
-    const confirmed = window.confirm(
-      "This will delete all current flashcards for this document and generate new ones. Continue?"
-    )
-    if (!confirmed) return
-
-    setGenerateErrorKind(null)
-    try {
-      await deleteAllMutation.mutateAsync()
-      await generateMutation.mutateAsync(req)
-    } catch (err) {
-      logger.error("Regenerate failed", { err })
-    }
-  }
 
   function handleExportCsv() {
     if (!activeDocumentId) return
@@ -2360,12 +2318,11 @@ export default function Study() {
             <section className="flex flex-col gap-4">
               <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
 
-              <SmartGeneratePanel
+              <GenerateButton
                   documentId={activeDocumentId}
                   sections={sections}
                   cards={cards}
                   onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
-                  onRegenerate={handleRegenerate}
                   onGenerateFromGraph={(k) => {
                     setGenerateErrorKind(null)
                     generateFromGraphMutation.mutate(k)
@@ -2380,7 +2337,6 @@ export default function Study() {
                     generateFromGraphMutation.isPending
                   }
                   isClozeGenerating={generateClozeMutation.isPending}
-                  preselectedSection={selectedGapSection}
                 />
 
                 {/* Inline generate error banners */}
@@ -2492,14 +2448,13 @@ export default function Study() {
           {/* Document-specific panels (only when a document is active) */}
           {activeDocumentId && (
             <>
-              {/* Deck Status accordion (S178) */}
-              <DeckStatusAccordion documentId={activeDocumentId} cards={cards} />
+              {/* Deck Status accordion (S178/S185 merged) */}
+              <InsightsAccordion documentId={activeDocumentId} cards={cards} />
 
               {/* Weak Areas panel */}
               <WeakAreasPanel
                 documentId={activeDocumentId}
-                onSelectSection={(heading) => {
-                  setSelectedGapSection(heading)
+                onSelectSection={(_heading) => {
                   window.scrollTo({ top: 0, behavior: "smooth" })
                 }}
               />

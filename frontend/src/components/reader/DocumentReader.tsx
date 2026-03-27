@@ -15,8 +15,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { SelectionActionBar } from "./SelectionActionBar"
 import type { SourceRef } from "./SelectionActionBar"
 import { NoteCreationDialog } from "./NoteCreationDialog"
-import type { NoteCreationResult } from "./NoteCreationDialog"
-import { NoteEditorDialog } from "@/components/NoteEditorDialog"
+import { NoteEditorDialog, type Note } from "@/components/NoteEditorDialog"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
@@ -1498,7 +1497,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [selectionNoteText, setSelectionNoteText] = useState("")
   const [selectionNoteSourceRef, setSelectionNoteSourceRef] = useState<SourceRef | null>(null)
   const [selectionNoteHeading, setSelectionNoteHeading] = useState<string | undefined>(undefined)
-  const [editingCreatedNote, setEditingCreatedNote] = useState<NoteCreationResult | null>(null)
+  const [editingCreatedNote, setEditingCreatedNote] = useState<Note | null>(null)
   const [selectionFlashcardOpen, setSelectionFlashcardOpen] = useState(false)
   const [selectionFlashcardText, setSelectionFlashcardText] = useState("")
   const [selectionFlashcardSourceRef, setSelectionFlashcardSourceRef] = useState<SourceRef | null>(null)
@@ -2459,7 +2458,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
         sourceRef={selectionNoteSourceRef}
         sectionHeading={selectionNoteHeading}
         onClose={() => setSelectionNoteOpen(false)}
-        onSaved={(note) => {
+        onSaved={(note: Note) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
           setEditingCreatedNote(note)
         }}
