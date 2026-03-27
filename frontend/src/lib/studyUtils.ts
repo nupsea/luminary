@@ -79,6 +79,46 @@ export interface FlashcardSearchFilters {
   page_size?: number
 }
 
+// ---------------------------------------------------------------------------
+// S185: Insights accordion sections and adaptive generate params
+// ---------------------------------------------------------------------------
+
+/** Load-bearing constant: InsightsAccordion uses this to enumerate its sections. */
+export const INSIGHTS_SECTIONS = ["health_report", "bloom_audit", "struggling"] as const
+
+export type InsightsSection = (typeof INSIGHTS_SECTIONS)[number]
+
+export interface SmartGenerateParams {
+  document_id: string
+  scope: "full" | "section"
+  section_heading: string | null
+  count: number
+  difficulty: "easy" | "medium" | "hard"
+  smart_mode: SmartMode
+}
+
+/**
+ * Build the payload for adaptive flashcard generation.
+ * The smart_mode is chosen based on mastery percentage:
+ *   < 30%  -> basic
+ *   30-69% -> feynman
+ *   >= 70% -> cloze
+ */
+export function buildSmartGenerateParams(
+  masteryPct: number,
+  documentId: string,
+): SmartGenerateParams {
+  const smart_mode = selectSmartMode(masteryPct)
+  return {
+    document_id: documentId,
+    scope: "full",
+    section_heading: null,
+    count: 10,
+    difficulty: "medium",
+    smart_mode,
+  }
+}
+
 export function buildSearchParams(filters: FlashcardSearchFilters): URLSearchParams {
   const params = new URLSearchParams()
   if (filters.query) params.set("query", filters.query)

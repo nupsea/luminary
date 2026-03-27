@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 import {
   BLOOM_LEVEL_LABELS,
   FSRS_STATE_LABELS,
+  INSIGHTS_SECTIONS,
   buildSearchParams,
+  buildSmartGenerateParams,
   computeMasteryPct,
   getDeckDisplayName,
   selectSmartMode,
@@ -145,6 +147,53 @@ describe("getDeckDisplayName", () => {
         isOnlyDeckForDocument: true,
       }),
     ).toBe("default")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S185: buildSmartGenerateParams (AC8)
+// ---------------------------------------------------------------------------
+
+describe("buildSmartGenerateParams", () => {
+  it("returns basic smart_mode when mastery < 30%", () => {
+    const params = buildSmartGenerateParams(15, "doc-1")
+    expect(params.smart_mode).toBe("basic")
+    expect(params.document_id).toBe("doc-1")
+    expect(params.scope).toBe("full")
+    expect(params.section_heading).toBeNull()
+    expect(params.count).toBe(10)
+    expect(params.difficulty).toBe("medium")
+  })
+
+  it("returns feynman smart_mode when mastery is 30-69%", () => {
+    const params = buildSmartGenerateParams(50, "doc-2")
+    expect(params.smart_mode).toBe("feynman")
+  })
+
+  it("returns cloze smart_mode when mastery >= 70%", () => {
+    const params = buildSmartGenerateParams(85, "doc-3")
+    expect(params.smart_mode).toBe("cloze")
+  })
+
+  it("returns basic at 0% mastery", () => {
+    expect(buildSmartGenerateParams(0, "doc-x").smart_mode).toBe("basic")
+  })
+
+  it("returns cloze at 100% mastery", () => {
+    expect(buildSmartGenerateParams(100, "doc-x").smart_mode).toBe("cloze")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S185: INSIGHTS_SECTIONS (AC9)
+// ---------------------------------------------------------------------------
+
+describe("INSIGHTS_SECTIONS", () => {
+  it("has exactly 3 sections: health_report, bloom_audit, struggling", () => {
+    expect(INSIGHTS_SECTIONS).toHaveLength(3)
+    expect(INSIGHTS_SECTIONS).toContain("health_report")
+    expect(INSIGHTS_SECTIONS).toContain("bloom_audit")
+    expect(INSIGHTS_SECTIONS).toContain("struggling")
   })
 })
 

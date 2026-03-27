@@ -69,7 +69,9 @@ import { API_BASE } from "@/lib/config"
 import {
   BLOOM_LEVEL_LABELS,
   FSRS_STATE_LABELS,
+  INSIGHTS_SECTIONS,
   buildSearchParams,
+  buildSmartGenerateParams,
   computeMasteryPct,
   selectSmartMode,
 } from "@/lib/studyUtils"
@@ -1046,15 +1048,16 @@ function WeakAreasPanel({ documentId, onSelectSection }: WeakAreasPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
-// DeckStatusAccordion (S178) -- merged DeckHealthPanel + HealthReportPanel
+// InsightsAccordion (S185) -- merged DeckHealthPanel + HealthReportPanel + StrugglingPanel
+// Uses INSIGHTS_SECTIONS constant for section enumeration (load-bearing for tests).
 // ---------------------------------------------------------------------------
 
-interface DeckStatusAccordionProps {
+interface InsightsAccordionProps {
   documentId: string
   cards: Flashcard[]
 }
 
-function DeckStatusAccordion({ documentId, cards }: DeckStatusAccordionProps) {
+function InsightsAccordion({ documentId, cards }: InsightsAccordionProps) {
   const [isOpen, setIsOpen] = useState(false)
   const totalCards = cards.length
   const masteredPct = Math.round(computeMasteryPct(cards))
@@ -1066,15 +1069,23 @@ function DeckStatusAccordion({ documentId, cards }: DeckStatusAccordionProps) {
         onClick={() => setIsOpen((v) => !v)}
       >
         <span className="text-base font-semibold text-foreground">
-          Deck Status ({totalCards} card{totalCards !== 1 ? "s" : ""}, {masteredPct}% mastered)
+          Insights ({totalCards} card{totalCards !== 1 ? "s" : ""}, {masteredPct}% mastered)
         </span>
         {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
 
       {isOpen && (
         <div className="flex flex-col gap-4 pt-2">
-          <DeckHealthPanel documentId={documentId} />
-          <HealthReportPanel documentId={documentId} />
+          {/* Sections driven by INSIGHTS_SECTIONS constant */}
+          {INSIGHTS_SECTIONS.includes("health_report") && (
+            <HealthReportPanel documentId={documentId} />
+          )}
+          {INSIGHTS_SECTIONS.includes("bloom_audit") && (
+            <DeckHealthPanel documentId={documentId} />
+          )}
+          {INSIGHTS_SECTIONS.includes("struggling") && (
+            <StrugglingPanel documentId={documentId} />
+          )}
         </div>
       )}
     </section>
@@ -1082,31 +1093,9 @@ function DeckStatusAccordion({ documentId, cards }: DeckStatusAccordionProps) {
 }
 
 // ---------------------------------------------------------------------------
-// GeneratePanel
+// GenerateButton (S185) -- single Generate Cards button with chevron disclosure
+// Replaces GeneratePanel + SmartGeneratePanel. Uses buildSmartGenerateParams.
 // ---------------------------------------------------------------------------
-
-interface GeneratePanelProps {
-  documentId: string
-  sections: SectionItem[]
-  onGenerate: (req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) => void
-  onRegenerate: (req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) => void
-  onGenerateFromGraph: (k: number) => void
-  // S154: cloze generation (section-scoped)
-  onGenerateCloze: (sectionId: string, count: number) => void
-  isGenerating: boolean
-  isClozeGenerating: boolean
-  preselectedSection?: string | null
-}
 
 const COUNT_OPTIONS = [5, 10, 20, 50]
 const DIFFICULTY_OPTIONS = [
@@ -1115,311 +1104,20 @@ const DIFFICULTY_OPTIONS = [
   { value: "hard", label: "Hard" },
 ]
 
-const PAIRS_K_OPTIONS = [3, 5, 10]
-
-function GeneratePanel({
-  documentId,
-  sections,
-  onGenerate,
-  onRegenerate,
-  onGenerateFromGraph,
-  onGenerateCloze,
-  isGenerating,
-  isClozeGenerating,
-  preselectedSection,
-}: GeneratePanelProps) {
-  const [mode, setMode] = useState<"text" | "entities" | "cloze">("text")
-  const [count, setCount] = useState(10)
-  const [scope, setScope] = useState<"full" | "section">("full")
-  const [sectionHeading, setSectionHeading] = useState<string | null>(null)
-  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
-  const [pairsK, setPairsK] = useState(5)
-  // S154: cloze tab state
-  const [clozeSectionId, setClozeSectionId] = useState<string | null>(null)
-  const [clozeCount, setClozeCount] = useState(5)
-
-  // Sync scope/heading when a gap section is clicked from outside
-  useEffect(() => {
-    if (preselectedSection != null) {
-      setScope("section")
-      setSectionHeading(preselectedSection)
-    }
-  }, [preselectedSection])
-
-  const {
-    data: pairsData,
-    isLoading: pairsLoading,
-    isError: pairsError,
-  } = useQuery<EntityPairsResponse>({
-    queryKey: ["entity-pairs", documentId],
-    queryFn: () => fetchEntityPairs(documentId),
-    enabled: mode === "entities",
-    staleTime: 60_000,
-  })
-  const entityPairs = pairsData?.pairs ?? []
-
-  return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
-      {/* Mode toggle */}
-      <div className="flex gap-0 rounded-md border border-border bg-background w-fit">
-        <button
-          onClick={() => setMode("text")}
-          className={`px-3 py-1.5 text-sm font-medium rounded-l-md transition-colors ${
-            mode === "text"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          From Text
-        </button>
-        <button
-          onClick={() => setMode("entities")}
-          className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-            mode === "entities"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          From Entities
-        </button>
-        <button
-          onClick={() => setMode("cloze")}
-          className={`px-3 py-1.5 text-sm font-medium rounded-r-md transition-colors ${
-            mode === "cloze"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Cloze
-        </button>
-      </div>
-
-      {mode === "text" ? (
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Count */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Count</label>
-            <select
-              value={count}
-              onChange={(e) => setCount(Number(e.target.value))}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {COUNT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n} cards
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Difficulty */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {DIFFICULTY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Scope */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Scope</label>
-            <select
-              value={scope}
-              onChange={(e) => {
-                const v = e.target.value as "full" | "section"
-                setScope(v)
-                if (v === "full") setSectionHeading(null)
-              }}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="full">Full document</option>
-              <option value="section">By section</option>
-            </select>
-          </div>
-
-          {/* Section picker */}
-          {scope === "section" && sections.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Section</label>
-              <select
-                value={sectionHeading ?? ""}
-                onChange={(e) => setSectionHeading(e.target.value || null)}
-                className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">Select section...</option>
-                {sections.map((s) => (
-                  <option key={s.id} value={s.heading}>
-                    {s.heading}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => onGenerate({ scope, section_heading: sectionHeading, count, difficulty })}
-              disabled={isGenerating || (scope === "section" && !sectionHeading)}
-              className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isGenerating && <Loader2 size={14} className="animate-spin" />}
-              Generate
-            </button>
-            <button
-              onClick={() => onRegenerate({ scope, section_heading: sectionHeading, count, difficulty })}
-              disabled={isGenerating || (scope === "section" && !sectionHeading)}
-              className="flex items-center gap-2 rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              title="Delete all current cards and generate new ones"
-            >
-              Regenerate
-            </button>
-          </div>
-        </div>
-      ) : mode === "entities" ? (
-        <div className="flex flex-col gap-4">
-          {/* Top pairs count */}
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Top pairs</label>
-              <select
-                value={pairsK}
-                onChange={(e) => setPairsK(Number(e.target.value))}
-                className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                {PAIRS_K_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    {n} pairs
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              onClick={() => onGenerateFromGraph(pairsK)}
-              disabled={isGenerating}
-              className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isGenerating && <Loader2 size={14} className="animate-spin" />}
-              Generate from Entities
-            </button>
-          </div>
-
-          {/* Entity pairs preview */}
-          <div className="flex flex-col gap-2">
-            <span className="text-xs font-medium text-muted-foreground">Entity pair preview</span>
-            {pairsLoading ? (
-              <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
-                <Loader2 size={14} className="animate-spin" />
-                Loading entity pairs...
-              </div>
-            ) : pairsError ? (
-              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                Could not load entity pairs.
-              </div>
-            ) : entityPairs.length === 0 ? (
-              <div className="rounded border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-                No entity relationships found for this document. Try ingesting the document first.
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {entityPairs.map((pair, i) => (
-                  <li
-                    key={i}
-                    className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium text-foreground">{pair.name_a}</span>
-                    <span className="text-muted-foreground">--</span>
-                    <span className="italic text-muted-foreground">{pair.relation_label}</span>
-                    <span className="text-muted-foreground">--</span>
-                    <span className="font-medium text-foreground">{pair.name_b}</span>
-                    <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
-                      {Math.round(pair.confidence * 100)}%
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      ) : mode === "cloze" ? (
-        /* S154: Cloze (fill-in-the-blank) generation tab */
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Section picker — required for cloze (endpoint is section-scoped) */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">
-              Section <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={clozeSectionId ?? ""}
-              onChange={(e) => setClozeSectionId(e.target.value || null)}
-              className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">Select a section...</option>
-              {sections.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.heading}
-                </option>
-              ))}
-            </select>
-            {!clozeSectionId && (
-              <span className="text-xs text-muted-foreground">Select a section to generate cloze cards.</span>
-            )}
-          </div>
-
-          {/* Count */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Count</label>
-            <select
-              value={clozeCount}
-              onChange={(e) => setClozeCount(Number(e.target.value))}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {COUNT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n} cards
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            onClick={() => clozeSectionId && onGenerateCloze(clozeSectionId, clozeCount)}
-            disabled={isClozeGenerating || !clozeSectionId}
-            className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {isClozeGenerating && <Loader2 size={14} className="animate-spin" />}
-            Generate Cloze Cards
-          </button>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// SmartGeneratePanel (S178) -- single Smart Generate button with advanced options
-// ---------------------------------------------------------------------------
-
 const SMART_MODE_LABEL: Record<string, string> = {
   basic: "basic cards",
   feynman: "Feynman-style questions",
   cloze: "cloze cards",
 }
 
-const SMART_MODE_HINT: Record<string, string> = {
-  basic: "Building foundations (< 30% mastered)",
-  feynman: "Deepening comprehension (30-70% mastered)",
-  cloze: "Retrieval practice (>= 70% mastered)",
-}
+const GENERATE_MODE_OPTIONS = [
+  { value: "basic", label: "Basic" },
+  { value: "graph", label: "Graph (entities)" },
+  { value: "cloze", label: "Cloze" },
+  { value: "technical", label: "Technical" },
+]
 
-interface SmartGeneratePanelProps {
+interface GenerateButtonProps {
   documentId: string
   sections: SectionItem[]
   cards: Flashcard[]
@@ -1429,93 +1127,219 @@ interface SmartGeneratePanelProps {
     count: number
     difficulty: "easy" | "medium" | "hard"
   }) => void
-  onRegenerate: (req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) => void
   onGenerateFromGraph: (k: number) => void
   onGenerateCloze: (sectionId: string, count: number) => void
   isGenerating: boolean
   isClozeGenerating: boolean
-  preselectedSection?: string | null
 }
 
-function SmartGeneratePanel({
+function GenerateButton({
   documentId,
   sections,
   cards,
   onGenerate,
-  onRegenerate,
   onGenerateFromGraph,
   onGenerateCloze,
   isGenerating,
   isClozeGenerating,
-  preselectedSection,
-}: SmartGeneratePanelProps) {
+}: GenerateButtonProps) {
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [scope, setScope] = useState<"full" | "section">("full")
+  const [sectionHeading, setSectionHeading] = useState<string | null>(null)
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
+  const [mode, setMode] = useState<"basic" | "graph" | "cloze" | "technical">("basic")
+  const [count, setCount] = useState(10)
+  const [clozeSectionId, setClozeSectionId] = useState<string | null>(null)
+
   const masteryPct = computeMasteryPct(cards)
-  const smartMode = selectSmartMode(masteryPct)
   const isAnyGenerating = isGenerating || isClozeGenerating
 
   function handleSmartGenerate() {
-    if (smartMode === "feynman") {
+    const params = buildSmartGenerateParams(masteryPct, documentId)
+    if (params.smart_mode === "feynman") {
       onGenerateFromGraph(5)
-    } else if (smartMode === "cloze") {
+    } else if (params.smart_mode === "cloze") {
       const firstSection = sections[0]
       if (firstSection) {
         onGenerateCloze(firstSection.id, 5)
       } else {
-        // no sections available -- fall back to basic
         onGenerate({ scope: "full", section_heading: null, count: 10, difficulty: "medium" })
       }
     } else {
-      onGenerate({ scope: "full", section_heading: null, count: 10, difficulty: "medium" })
+      onGenerate({
+        scope: params.scope,
+        section_heading: params.section_heading,
+        count: params.count,
+        difficulty: params.difficulty,
+      })
+    }
+  }
+
+  function handleAdvancedGenerate() {
+    if (mode === "graph" || mode === "technical") {
+      onGenerateFromGraph(5)
+    } else if (mode === "cloze") {
+      if (clozeSectionId) {
+        onGenerateCloze(clozeSectionId, count)
+      }
+    } else {
+      onGenerate({ scope, section_heading: sectionHeading, count, difficulty })
     }
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
-      {/* Smart Generate button */}
-      <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1">
         <button
           onClick={handleSmartGenerate}
-          disabled={isAnyGenerating}
-          className="flex w-fit items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          disabled={isAnyGenerating || !documentId}
+          className="flex items-center gap-2 rounded-l bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {isAnyGenerating ? (
             <Loader2 size={14} className="animate-spin" />
           ) : (
             <Zap size={14} />
           )}
-          Smart Generate
+          Generate Cards
         </button>
-        <span className="text-xs text-muted-foreground">
-          {isAnyGenerating
-            ? `Generating ${SMART_MODE_LABEL[smartMode]}...`
-            : SMART_MODE_HINT[smartMode]}
-        </span>
+        <button
+          onClick={() => setOptionsOpen((v) => !v)}
+          disabled={!documentId}
+          className="flex items-center rounded-r border-l border-primary-foreground/20 bg-primary px-2 py-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          aria-label="Toggle generate options"
+        >
+          {optionsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
       </div>
+      {!isAnyGenerating && (
+        <span className="text-xs text-muted-foreground">
+          Adaptive: {SMART_MODE_LABEL[selectSmartMode(masteryPct)] ?? "basic cards"}
+        </span>
+      )}
+      {isAnyGenerating && (
+        <span className="text-xs text-muted-foreground">
+          Generating {SMART_MODE_LABEL[selectSmartMode(masteryPct)]}...
+        </span>
+      )}
 
-      {/* Advanced options disclosure */}
-      <details>
-        <summary className="cursor-pointer select-none text-sm text-muted-foreground hover:text-foreground">
-          Advanced options
-        </summary>
-        <div className="pt-3">
-          <GeneratePanel
-            documentId={documentId}
-            sections={sections}
-            onGenerate={onGenerate}
-            onRegenerate={onRegenerate}
-            onGenerateFromGraph={onGenerateFromGraph}
-            onGenerateCloze={onGenerateCloze}
-            isGenerating={isGenerating}
-            isClozeGenerating={isClozeGenerating}
-            preselectedSection={preselectedSection}
-          />
+      {/* Disclosure panel: advanced options */}
+      {optionsOpen && (
+        <div className="flex flex-col gap-3 rounded-md border border-border bg-muted/30 p-3 mt-1">
+          <div className="flex flex-wrap items-end gap-3">
+            {/* Mode */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Mode</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
+                className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {GENERATE_MODE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Scope (only for basic mode) */}
+            {mode === "basic" && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Scope</label>
+                <select
+                  value={scope}
+                  onChange={(e) => {
+                    const v = e.target.value as "full" | "section"
+                    setScope(v)
+                    if (v === "full") setSectionHeading(null)
+                  }}
+                  className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="full">Full document</option>
+                  <option value="section">By section</option>
+                </select>
+              </div>
+            )}
+
+            {/* Section picker for basic + section scope */}
+            {mode === "basic" && scope === "section" && sections.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Section</label>
+                <select
+                  value={sectionHeading ?? ""}
+                  onChange={(e) => setSectionHeading(e.target.value || null)}
+                  className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Select section...</option>
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.heading}>{s.heading}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Section picker for cloze mode (required) */}
+            {mode === "cloze" && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Section <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={clozeSectionId ?? ""}
+                  onChange={(e) => setClozeSectionId(e.target.value || null)}
+                  className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Select a section...</option>
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.id}>{s.heading}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Difficulty (basic mode only) */}
+            {mode === "basic" && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
+                <select
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
+                  className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {DIFFICULTY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Count */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Count</label>
+              <select
+                value={count}
+                onChange={(e) => setCount(Number(e.target.value))}
+                className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {COUNT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n} cards</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={handleAdvancedGenerate}
+              disabled={
+                isAnyGenerating ||
+                (mode === "basic" && scope === "section" && !sectionHeading) ||
+                (mode === "cloze" && !clozeSectionId)
+              }
+              className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isAnyGenerating && <Loader2 size={14} className="animate-spin" />}
+              Generate
+            </button>
+          </div>
         </div>
-      </details>
+      )}
     </div>
   )
 }
@@ -2271,6 +2095,63 @@ export default function Study() {
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-6">
+      {/* S185: Top CTA row -- Start Studying + Generate Cards (max 2 CTAs above the fold) */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setStudying(true)}
+          disabled={cards.length === 0}
+          className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          <PlayCircle size={14} />
+          Start Studying
+        </button>
+        {activeDocumentId && (
+          <GenerateButton
+            documentId={activeDocumentId}
+            sections={sections}
+            cards={cards}
+            onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
+            onGenerateFromGraph={(k) => {
+              setGenerateErrorKind(null)
+              generateFromGraphMutation.mutate(k)
+            }}
+            onGenerateCloze={(sectionId, count) => {
+              setGenerateErrorKind(null)
+              generateClozeMutation.mutate({ sectionId, count })
+            }}
+            isGenerating={
+              generateMutation.isPending ||
+              deleteAllMutation.isPending ||
+              generateFromGraphMutation.isPending
+            }
+            isClozeGenerating={generateClozeMutation.isPending}
+          />
+        )}
+      </div>
+
+      {/* Inline generate error banners */}
+      {generateErrorKind === "ollama_offline" && (
+        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="flex-1">
+            Ollama is not running. To generate flashcards, run:{" "}
+            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
+          </span>
+          <button
+            onClick={() => void navigator.clipboard.writeText("ollama serve")}
+            className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+            title="Copy command"
+          >
+            <Copy size={11} />
+            Copy
+          </button>
+        </div>
+      )}
+      {generateErrorKind === "server_error" && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Flashcard generation failed. Please try again.
+        </div>
+      )}
+
       {/* S184: Search bar */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
