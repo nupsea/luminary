@@ -267,6 +267,12 @@ function AppShell() {
         // S176: source document subtitle click from NoteReaderSheet
         const target = detail.documentId ? `/?doc=${detail.documentId}` : "/"
         navigate(target)
+      } else if (detail.tab === "study") {
+        // S183: cards due pill click from LibraryStatsBar
+        navigate("/study")
+      } else if (detail.tab === "progress") {
+        // S183: avg mastery pill click from LibraryStatsBar
+        navigate("/progress")
       }
     }
     window.addEventListener("luminary:navigate", onLuminaryNavigate)

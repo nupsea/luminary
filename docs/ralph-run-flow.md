@@ -116,4 +116,4 @@ Each story SXXX produces or modifies these artifacts:
 | S180 | Chat simplification: settings drawer, collapsed transparency panel | pass |
 | S181 | Viz overhaul: View Options panel, Select All entity types, hide Call Graph | pass |
 | S182 | YouTube transcript viewer: full Read section parity | pass |
-| S183 | Learning tab: slim stats bar, document list as primary focus | pending |
+| S183 | Learning tab: slim stats bar, document list as primary focus | pass |
