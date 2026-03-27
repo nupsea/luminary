@@ -20,7 +20,6 @@ import {
   ChevronUp,
   Copy,
   Download,
-  Folder,
   Loader2,
   Pencil,
   PlayCircle,
@@ -68,10 +67,13 @@ async function fetchDocList(): Promise<DocListItem[]> {
 
 import { API_BASE } from "@/lib/config"
 import {
+  BLOOM_LEVEL_LABELS,
+  FSRS_STATE_LABELS,
+  buildSearchParams,
   computeMasteryPct,
-  getDeckDisplayName,
   selectSmartMode,
 } from "@/lib/studyUtils"
+import type { FlashcardSearchFilters } from "@/lib/studyUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,13 +176,12 @@ interface DeckHealthReport {
   hotspot_sections: HealthSection[]
 }
 
-// S169: Deck list type
-interface DeckItem {
-  deck: string
-  source_type: "document" | "collection" | "note"
-  card_count: number
-  document_id: string | null
-  collection_id: string | null
+// S184: Search response type
+interface FlashcardSearchResponse {
+  items: Flashcard[]
+  total: number
+  page: number
+  page_size: number
 }
 
 // S153: Bloom's taxonomy coverage audit types
@@ -236,24 +237,12 @@ interface SessionCardDetail {
 // API
 // ---------------------------------------------------------------------------
 
-async function fetchFlashcards(
-  documentId: string,
-  sectionId?: string | null,
-  bloomLevelMin?: number | null,
-): Promise<Flashcard[]> {
-  const params = new URLSearchParams()
-  if (sectionId) params.set("section_id", sectionId)
-  if (bloomLevelMin != null) params.set("bloom_level_min", String(bloomLevelMin))
+async function fetchFlashcardSearch(filters: FlashcardSearchFilters): Promise<FlashcardSearchResponse> {
+  const params = buildSearchParams(filters)
   const query = params.toString()
-  const res = await fetch(`${API_BASE}/flashcards/${documentId}${query ? `?${query}` : ""}`)
-  if (!res.ok) return []
-  return res.json() as Promise<Flashcard[]>
-}
-
-async function fetchDecks(): Promise<DeckItem[]> {
-  const res = await fetch(`${API_BASE}/flashcards/decks`)
-  if (!res.ok) return []
-  return res.json() as Promise<DeckItem[]>
+  const res = await fetch(`${API_BASE}/flashcards/search${query ? `?${query}` : ""}`)
+  if (!res.ok) return { items: [], total: 0, page: 1, page_size: 20 }
+  return res.json() as Promise<FlashcardSearchResponse>
 }
 
 async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
@@ -618,93 +607,6 @@ function FlashcardCard({
 }
 
 // ---------------------------------------------------------------------------
-// FilterBar
-// ---------------------------------------------------------------------------
-
-const FLASHCARD_TYPE_OPTIONS = [
-  "(All)",
-  "cloze",  // S154: fill-in-the-blank
-  "definition",
-  "syntax_recall",
-  "concept_explanation",
-  "analogy",
-  "code_completion",
-  "api_signature",
-  "trace",
-  "pattern_recognition",
-  "design_decision",
-  "complexity",
-  "implementation",
-]
-
-interface FilterBarProps {
-  filterType: string | null
-  filterBloomMin: number
-  filterBloomMax: number
-  onTypeChange: (v: string | null) => void
-  onBloomMinChange: (v: number) => void
-  onBloomMaxChange: (v: number) => void
-  onClear: () => void
-}
-
-function FilterBar({
-  filterType,
-  filterBloomMin,
-  filterBloomMax,
-  onTypeChange,
-  onBloomMinChange,
-  onBloomMaxChange,
-  onClear,
-}: FilterBarProps) {
-  const hasFilter = filterType !== null || filterBloomMin !== 1 || filterBloomMax !== 6
-  return (
-    <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/20 p-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Type</label>
-        <select
-          value={filterType ?? "(All)"}
-          onChange={(e) => onTypeChange(e.target.value === "(All)" ? null : e.target.value)}
-          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          {FLASHCARD_TYPE_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>{opt === "(All)" ? "All types" : opt.replace(/_/g, " ")}</option>
-          ))}
-        </select>
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Bloom level (min)</label>
-        <input
-          type="number"
-          min={1}
-          max={6}
-          value={filterBloomMin}
-          onChange={(e) => onBloomMinChange(Math.min(Number(e.target.value), filterBloomMax))}
-          className="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Bloom level (max)</label>
-        <input
-          type="number"
-          min={1}
-          max={6}
-          value={filterBloomMax}
-          onChange={(e) => onBloomMaxChange(Math.max(Number(e.target.value), filterBloomMin))}
-          className="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-      {hasFilter && (
-        <button
-          onClick={onClear}
-          className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          Clear filters
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // DeckHealthPanel (S153) -- Bloom's taxonomy coverage audit
 // ---------------------------------------------------------------------------
@@ -898,7 +800,7 @@ function HealthReportPanel({ documentId }: HealthReportPanelProps) {
     mutationFn: () => archiveMastered(documentId),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["health", documentId] })
-      qc.invalidateQueries({ queryKey: ["flashcards", documentId] })
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(`Archived ${data.archived} mastered cards`)
     },
     onError: () => {
@@ -2137,12 +2039,25 @@ export default function Study() {
     staleTime: 30_000,
   })
 
-  // S169: All decks list
-  const { data: deckList = [] } = useQuery<DeckItem[]>({
-    queryKey: ["flashcard-decks"],
-    queryFn: fetchDecks,
-    staleTime: 60_000,
-  })
+  // S184: search state
+  const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
+  const [filterDocId, setFilterDocId] = useState<string | null>(null)
+  const [filterCollectionId, setFilterCollectionId] = useState<string | null>(null)
+  const [filterTag, setFilterTag] = useState<string | null>(null)
+  const [filterFsrsState, setFilterFsrsState] = useState<string | null>(null)
+  const [searchPage, setSearchPage] = useState(1)
+
+  // S184: 300ms debounce for search query
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Reset page when any filter changes
+  useEffect(() => {
+    setSearchPage(1)
+  }, [debouncedQuery, filterDocId, filterCollectionId, filterTag, filterBloomMin, filterBloomMax, filterFsrsState, filterType])
 
   useEffect(() => {
     logger.info("[Study] mounted")
@@ -2159,16 +2074,25 @@ export default function Study() {
     setStudySectionFilter(null)
   }, [studySectionFilter, setStudySectionFilter])
 
-  // Flashcard list — include section/bloom filters when set (S143)
-  const { data: cards = [], isLoading: cardsLoading, isError: cardsError } = useQuery<Flashcard[]>({
-    queryKey: ["flashcards", activeDocumentId, activeSectionFilter?.sectionId, activeSectionFilter?.bloomLevelMin],
-    queryFn: () => fetchFlashcards(
-      activeDocumentId!,
-      activeSectionFilter?.sectionId,
-      activeSectionFilter?.bloomLevelMin,
-    ),
-    enabled: !!activeDocumentId,
+  // S184: Unified flashcard search query
+  const searchFilters: FlashcardSearchFilters = {
+    query: debouncedQuery || undefined,
+    document_id: filterDocId ?? activeDocumentId ?? undefined,
+    collection_id: filterCollectionId ?? undefined,
+    tag: filterTag ?? undefined,
+    bloom_level_min: filterBloomMin > 1 ? filterBloomMin : undefined,
+    bloom_level_max: filterBloomMax < 6 ? filterBloomMax : undefined,
+    fsrs_state: filterFsrsState ?? undefined,
+    flashcard_type: filterType ?? undefined,
+    page: searchPage,
+    page_size: 20,
+  }
+  const { data: searchResult, isLoading: cardsLoading, isError: cardsError } = useQuery<FlashcardSearchResponse>({
+    queryKey: ["flashcards-search", debouncedQuery, filterDocId, activeDocumentId, filterCollectionId, filterTag, filterBloomMin, filterBloomMax, filterFsrsState, filterType, searchPage],
+    queryFn: () => fetchFlashcardSearch(searchFilters),
   })
+  const cards = searchResult?.items ?? []
+  const totalCards = searchResult?.total ?? 0
 
   useEffect(() => {
     if (!cardsLoading && activeDocumentId) {
@@ -2192,7 +2116,7 @@ export default function Study() {
       generateFromGraph({ document_id: activeDocumentId!, k }),
     onSuccess: (newCards) => {
       setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(
         `Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""} from entity pairs`
       )
@@ -2221,7 +2145,7 @@ export default function Study() {
       }),
     onSuccess: (newCards) => {
       setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(`Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""}`)
     },
     onError: (err: unknown) => {
@@ -2240,7 +2164,7 @@ export default function Study() {
       generateClozeFlashcards(sectionId, count),
     onSuccess: (newCards) => {
       setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(`Generated ${newCards.length} cloze card${newCards.length !== 1 ? "s" : ""}`)
     },
     onError: (err: unknown) => {
@@ -2258,7 +2182,7 @@ export default function Study() {
     mutationFn: ({ id, data }: { id: string; data: { question?: string; answer?: string } }) =>
       updateFlashcard(id, data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success("Flashcard updated")
     },
     onError: () => toast.error("Failed to update flashcard"),
@@ -2268,7 +2192,7 @@ export default function Study() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteFlashcard(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success("Flashcard deleted")
     },
     onError: () => toast.error("Failed to delete flashcard"),
@@ -2278,7 +2202,7 @@ export default function Study() {
   const deleteAllMutation = useMutation({
     mutationFn: () => deleteAllFlashcards(activeDocumentId!),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
     },
     onError: () => toast.error("Failed to clear flashcards"),
   })
@@ -2316,7 +2240,7 @@ export default function Study() {
         documentId={activeDocumentId}
         onExit={() => {
           setStudying(false)
-          void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+          void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
           if (activeDocumentId) {
             void queryClient.invalidateQueries({ queryKey: ["section-heatmap", activeDocumentId] })
           }
@@ -2327,121 +2251,198 @@ export default function Study() {
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-6">
-      {/* S169: All Decks panel */}
-      {deckList.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-foreground">All Decks</h2>
-          <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card">
-            {(() => {
-              // S178: compute per-document deck count for getDeckDisplayName alias
-              const decksPerDoc = new Map<string, number>()
-              deckList.forEach((d) => {
-                if (d.document_id) decksPerDoc.set(d.document_id, (decksPerDoc.get(d.document_id) ?? 0) + 1)
-              })
-              return deckList.map((deck) => (
-              <div key={deck.deck} className="flex items-center gap-3 px-4 py-2.5">
-                {deck.source_type === "collection" ? (
-                  <Folder size={16} className="shrink-0 text-indigo-500" />
-                ) : (
-                  <BookOpen size={16} className="shrink-0 text-slate-500" />
-                )}
-                <span className="flex-1 text-sm font-medium text-foreground truncate">
-                  {getDeckDisplayName({
-                    deckName: deck.deck,
-                    documentId: deck.document_id,
-                    docTitle: docList.find((d) => d.id === deck.document_id)?.title,
-                    isOnlyDeckForDocument: (decksPerDoc.get(deck.document_id ?? "") ?? 0) === 1,
-                  })}
-                </span>
-                <span className="text-xs text-muted-foreground">{deck.card_count} cards</span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    deck.source_type === "collection"
-                      ? "bg-indigo-100 text-indigo-700"
-                      : "bg-slate-100 text-slate-600"
-                  }`}
-                >
-                  {deck.source_type}
-                </span>
-              </div>
-            ))
-            })()}
-          </div>
-        </section>
-      )}
-
-      {/* Document selector */}
+      {/* S184: Search bar */}
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-muted-foreground shrink-0">Document</label>
+        <div className="relative flex-1 max-w-md">
+          <input
+            type="text"
+            placeholder="Search flashcards..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-md border border-border bg-background pl-3 pr-8 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        {/* Document filter dropdown */}
         <select
-          value={activeDocumentId ?? ""}
-          onChange={(e) => setActiveDocument(e.target.value || null)}
-          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-xs"
+          value={filterDocId ?? activeDocumentId ?? ""}
+          onChange={(e) => {
+            const v = e.target.value || null
+            setFilterDocId(v)
+            setActiveDocument(v)
+          }}
+          className="rounded-md border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-xs"
         >
-          <option value="">Select a document…</option>
+          <option value="">All documents</option>
           {docList.map((doc) => (
             <option key={doc.id} value={doc.id}>{doc.title}</option>
           ))}
         </select>
       </div>
 
-      {!activeDocumentId ? (
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">Select a document above to get started.</p>
+      {/* S184: Active filter chips */}
+      {(filterDocId || filterCollectionId || filterTag || filterFsrsState || filterType || filterBloomMin > 1 || filterBloomMax < 6) && (
+        <div className="flex flex-wrap gap-2">
+          {filterDocId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Doc: {docList.find((d) => d.id === filterDocId)?.title ?? filterDocId}
+              <button onClick={() => { setFilterDocId(null); setActiveDocument(null) }} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterFsrsState && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              State: {FSRS_STATE_LABELS[filterFsrsState] ?? filterFsrsState}
+              <button onClick={() => setFilterFsrsState(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterType && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Type: {filterType}
+              <button onClick={() => setFilterType(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterTag && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Tag: {filterTag}
+              <button onClick={() => setFilterTag(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterCollectionId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Collection
+              <button onClick={() => setFilterCollectionId(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {(filterBloomMin > 1 || filterBloomMax < 6) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Bloom: {BLOOM_LEVEL_LABELS[filterBloomMin] ?? filterBloomMin} - {BLOOM_LEVEL_LABELS[filterBloomMax] ?? filterBloomMax}
+              <button onClick={() => { setFilterBloomMin(1); setFilterBloomMax(6) }} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setFilterDocId(null); setActiveDocument(null)
+              setFilterCollectionId(null); setFilterTag(null)
+              setFilterFsrsState(null); setFilterType(null)
+              setFilterBloomMin(1); setFilterBloomMax(6)
+              setSearchQuery("")
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            Clear all
+          </button>
         </div>
+      )}
+
+      {/* S184: Quick filter row */}
+      <div className="flex flex-wrap gap-2">
+        <select
+          value={filterFsrsState ?? ""}
+          onChange={(e) => setFilterFsrsState(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          <option value="">Any state</option>
+          {Object.entries(FSRS_STATE_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+        <select
+          value={filterType ?? ""}
+          onChange={(e) => setFilterType(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          <option value="">Any type</option>
+          <option value="definition">Definition</option>
+          <option value="concept">Concept</option>
+          <option value="application">Application</option>
+          <option value="analysis">Analysis</option>
+          <option value="evaluation">Evaluation</option>
+          <option value="cloze">Cloze</option>
+          <option value="trace">Trace</option>
+          <option value="concept_explanation">Concept explanation</option>
+        </select>
+        <select
+          value={filterBloomMin}
+          onChange={(e) => setFilterBloomMin(Number(e.target.value))}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          {Object.entries(BLOOM_LEVEL_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>Min: {v}</option>
+          ))}
+        </select>
+        <select
+          value={filterBloomMax}
+          onChange={(e) => setFilterBloomMax(Number(e.target.value))}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          {Object.entries(BLOOM_LEVEL_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>Max: {v}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Sub-tab toggle (only when a document is active) */}
+      {activeDocumentId && (
+        <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
+          <button
+            onClick={() => setStudySubTab("flashcards")}
+            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+              studySubTab === "flashcards"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Flashcards
+          </button>
+          <button
+            onClick={() => setStudySubTab("history")}
+            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+              studySubTab === "history"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            History
+          </button>
+        </div>
+      )}
+
+      {activeDocumentId && studySubTab === "history" ? (
+        <section className="flex flex-col gap-4">
+          <h2 className="text-lg font-semibold text-foreground">Session History</h2>
+          <SessionHistoryTab />
+        </section>
       ) : (
         <>
-          {/* Sub-tab toggle */}
-          <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
-            <button
-              onClick={() => setStudySubTab("flashcards")}
-              className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-                studySubTab === "flashcards"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Flashcards
-            </button>
-            <button
-              onClick={() => setStudySubTab("history")}
-              className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-                studySubTab === "history"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              History
-            </button>
-          </div>
+          {/* S143: Section filter banner */}
+          {activeSectionFilter && (
+            <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+              <span className="text-foreground">
+                Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
+              </span>
+              <button
+                onClick={() => setActiveSectionFilter(null)}
+                className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                title="Clear section filter"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
 
-          {studySubTab === "history" ? (
+          {/* SmartGenerate panel -- only when document is active */}
+          {activeDocumentId && (
             <section className="flex flex-col gap-4">
-              <h2 className="text-lg font-semibold text-foreground">Session History</h2>
-              <SessionHistoryTab />
-            </section>
-          ) : (
-            <>
-              {/* S143: Section filter banner */}
-              {activeSectionFilter && (
-                <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-                  <span className="text-foreground">
-                    Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
-                  </span>
-                  <button
-                    onClick={() => setActiveSectionFilter(null)}
-                    className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-                    title="Clear section filter"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-              {/* Flashcards section */}
-              <section className="flex flex-col gap-4">
-                <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
+              <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
 
-                <SmartGeneratePanel
+              <SmartGeneratePanel
                   documentId={activeDocumentId}
                   sections={sections}
                   cards={cards}
@@ -2486,20 +2487,11 @@ export default function Study() {
                     Flashcard generation failed. Please try again.
                   </div>
                 )}
+              </section>
+          )}
 
-                {/* Filter bar — only shown when there are cards with type/level data */}
-                {cards.length > 0 && (
-                  <FilterBar
-                    filterType={filterType}
-                    filterBloomMin={filterBloomMin}
-                    filterBloomMax={filterBloomMax}
-                    onTypeChange={setFilterType}
-                    onBloomMinChange={setFilterBloomMin}
-                    onBloomMaxChange={setFilterBloomMax}
-                    onClear={() => { setFilterType(null); setFilterBloomMin(1); setFilterBloomMax(6) }}
-                  />
-                )}
-
+          {/* S184: Card grid -- always visible (search is global) */}
+          <section className="flex flex-col gap-4">
                 {cardsLoading ? (
                   <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
                     <Loader2 size={24} className="animate-spin" />
@@ -2512,68 +2504,61 @@ export default function Study() {
                 ) : cards.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <p className="text-sm text-muted-foreground">
-                      No flashcards yet -- click Smart Generate to create some
+                      No flashcards match your filters.
+                      {activeDocumentId && " Try generating cards with Smart Generate above."}
+                      {!activeDocumentId && " Select a document or adjust your search to find cards."}
                     </p>
                   </div>
-                ) : (() => {
-                  const filteredCards = cards.filter((c) => {
-                    const typeMatch = filterType === null || c.flashcard_type === filterType
-                    const bloomMatch =
-                      c.bloom_level == null ||
-                      (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
-                    return typeMatch && bloomMatch
-                  })
-                  if (filteredCards.length === 0) {
-                    return (
-                      <div className="flex flex-col items-center justify-center py-12 text-center">
-                        <p className="text-sm text-muted-foreground">
-                          No cards match the selected type/level filters. Try adjusting the filter.
-                        </p>
-                      </div>
-                    )
-                  }
-                  return (
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      {filteredCards.map((card) => (
-                        <FlashcardCard
-                          key={card.id}
-                          card={card}
-                          onUpdate={(id, data) => updateMutation.mutate({ id, data })}
-                          onDelete={(id) => deleteMutation.mutate(id)}
-                          isUpdating={updateMutation.isPending}
-                          isDeleting={deleteMutation.isPending}
-                        />
-                      ))}
-                    </div>
-                  )
-                })()}
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {cards.map((card) => (
+                      <FlashcardCard
+                        key={card.id}
+                        card={card}
+                        onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                        onDelete={(id) => deleteMutation.mutate(id)}
+                        isUpdating={updateMutation.isPending}
+                        isDeleting={deleteMutation.isPending}
+                      />
+                    ))}
+                  </div>
+                )}
 
                 {/* Bottom bar */}
                 {cards.length > 0 && (
                   <div className="flex items-center gap-3 border-t border-border pt-4">
                     <span className="text-sm text-muted-foreground">
-                      {(() => {
-                        const filteredCount = cards.filter((c) => {
-                          const typeMatch = filterType === null || c.flashcard_type === filterType
-                          const bloomMatch =
-                            c.bloom_level == null ||
-                            (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
-                          return typeMatch && bloomMatch
-                        }).length
-                        const total = cards.length
-                        return filteredCount === total
-                          ? `${total} card${total !== 1 ? "s" : ""}`
-                          : `${filteredCount} of ${total} card${total !== 1 ? "s" : ""}`
-                      })()}
+                      {totalCards} card{totalCards !== 1 ? "s" : ""} total
+                      {totalCards > 20 && ` (page ${searchPage} of ${Math.ceil(totalCards / 20)})`}
                     </span>
+                    {totalCards > 20 && (
+                      <div className="flex gap-1">
+                        <button
+                          disabled={searchPage <= 1}
+                          onClick={() => setSearchPage((p) => Math.max(1, p - 1))}
+                          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+                        >
+                          Prev
+                        </button>
+                        <button
+                          disabled={searchPage >= Math.ceil(totalCards / 20)}
+                          onClick={() => setSearchPage((p) => p + 1)}
+                          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
                     <div className="ml-auto flex gap-2">
-                      <button
-                        onClick={handleExportCsv}
-                        className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <Download size={14} />
-                        Export CSV
-                      </button>
+                      {activeDocumentId && (
+                        <button
+                          onClick={handleExportCsv}
+                          className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          <Download size={14} />
+                          Export CSV
+                        </button>
+                      )}
                       <button
                         onClick={() => setStudying(true)}
                         className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
@@ -2584,9 +2569,12 @@ export default function Study() {
                     </div>
                   </div>
                 )}
-              </section>
+          </section>
 
-              {/* Deck Status accordion (S178) -- merged Bloom audit + health report, collapsed by default */}
+          {/* Document-specific panels (only when a document is active) */}
+          {activeDocumentId && (
+            <>
+              {/* Deck Status accordion (S178) */}
               <DeckStatusAccordion documentId={activeDocumentId} cards={cards} />
 
               {/* Weak Areas panel */}
@@ -2594,7 +2582,6 @@ export default function Study() {
                 documentId={activeDocumentId}
                 onSelectSection={(heading) => {
                   setSelectedGapSection(heading)
-                  // Scroll to top to reveal pre-scoped SmartGeneratePanel
                   window.scrollTo({ top: 0, behavior: "smooth" })
                 }}
               />
@@ -2602,7 +2589,7 @@ export default function Study() {
               {/* Struggling Cards panel */}
               <StrugglingPanel documentId={activeDocumentId} />
 
-              {/* Progress dashboard (S23b) — Recharts loaded lazily via dynamic import */}
+              {/* Progress dashboard (S23b) */}
               <section className="flex flex-col gap-4">
                 <h2 className="text-lg font-semibold text-foreground">Progress</h2>
                 <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>

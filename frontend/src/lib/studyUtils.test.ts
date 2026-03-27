@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
+  BLOOM_LEVEL_LABELS,
+  FSRS_STATE_LABELS,
+  buildSearchParams,
   computeMasteryPct,
   getDeckDisplayName,
   selectSmartMode,
@@ -142,5 +145,59 @@ describe("getDeckDisplayName", () => {
         isOnlyDeckForDocument: true,
       }),
     ).toBe("default")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S184: buildSearchParams
+// ---------------------------------------------------------------------------
+
+describe("buildSearchParams", () => {
+  it("returns empty params when no filters are set", () => {
+    const params = buildSearchParams({})
+    expect(params.toString()).toBe("")
+  })
+
+  it("sets query param", () => {
+    const params = buildSearchParams({ query: "recursion" })
+    expect(params.get("query")).toBe("recursion")
+  })
+
+  it("sets multiple filters", () => {
+    const params = buildSearchParams({
+      query: "test",
+      document_id: "doc-1",
+      bloom_level_min: 3,
+      fsrs_state: "new",
+      page: 2,
+    })
+    expect(params.get("query")).toBe("test")
+    expect(params.get("document_id")).toBe("doc-1")
+    expect(params.get("bloom_level_min")).toBe("3")
+    expect(params.get("fsrs_state")).toBe("new")
+    expect(params.get("page")).toBe("2")
+  })
+
+  it("omits undefined and null-ish values", () => {
+    const params = buildSearchParams({ query: "", document_id: undefined })
+    expect(params.toString()).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S184: Constants
+// ---------------------------------------------------------------------------
+
+describe("FSRS_STATE_LABELS", () => {
+  it("has entries for all four FSRS states", () => {
+    expect(Object.keys(FSRS_STATE_LABELS)).toEqual(
+      expect.arrayContaining(["new", "learning", "review", "relearning"]),
+    )
+  })
+})
+
+describe("BLOOM_LEVEL_LABELS", () => {
+  it("has entries for levels 1-6", () => {
+    expect(Object.keys(BLOOM_LEVEL_LABELS).map(Number).sort()).toEqual([1, 2, 3, 4, 5, 6])
   })
 })

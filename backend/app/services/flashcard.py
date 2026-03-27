@@ -717,9 +717,117 @@ async def _dedup_check(question: str, deck: str, session: AsyncSession) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# S184: FTS5 sync helpers for flashcards_fts
+# ---------------------------------------------------------------------------
+
+
+async def _sync_flashcard_fts(card: FlashcardModel, session: AsyncSession) -> None:
+    """Insert or replace a flashcard's question+answer into the FTS5 index."""
+    await session.execute(
+        text(
+            "INSERT OR REPLACE INTO flashcards_fts(flashcard_id, question, answer) "
+            "VALUES (:fid, :q, :a)"
+        ),
+        {"fid": card.id, "q": card.question, "a": card.answer},
+    )
+
+
+async def _delete_flashcard_fts(card_id: str, session: AsyncSession) -> None:
+    """Delete a flashcard from the FTS5 index using shadow table rowid lookup (I-4 safe)."""
+    row = (
+        await session.execute(
+            text("SELECT rowid FROM flashcards_fts_content WHERE c2 = :fid"),
+            {"fid": card_id},
+        )
+    ).first()
+    if row:
+        await session.execute(
+            text("DELETE FROM flashcards_fts WHERE rowid = :rid"),
+            {"rid": row[0]},
+        )
 
 
 class FlashcardService:
+    async def search(
+        self,
+        session: AsyncSession,
+        query: str | None = None,
+        document_id: str | None = None,
+        collection_id: str | None = None,
+        tag: str | None = None,
+        bloom_level_min: int | None = None,
+        bloom_level_max: int | None = None,
+        fsrs_state: str | None = None,
+        flashcard_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[FlashcardModel], int]:
+        """Search flashcards with optional FTS query and structured filters (S184).
+
+        All filters combine with AND. Returns (cards, total_count).
+        """
+        from sqlalchemy import or_  # noqa: PLC0415
+
+        from app.models import NoteCollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
+
+        stmt = select(FlashcardModel)
+
+        if query and query.strip():
+            fts_sub = (
+                select(text("flashcard_id"))
+                .select_from(text("flashcards_fts"))
+                .where(text("flashcards_fts MATCH :q"))
+            )
+            stmt = stmt.where(FlashcardModel.id.in_(fts_sub)).params(q=query.strip())
+
+        if document_id:
+            stmt = stmt.where(FlashcardModel.document_id == document_id)
+
+        if collection_id:
+            member_sub = select(NoteCollectionMemberModel.note_id).where(
+                NoteCollectionMemberModel.collection_id == collection_id
+            )
+            stmt = stmt.where(FlashcardModel.note_id.in_(member_sub))
+
+        if tag:
+            tag_sub = select(NoteTagIndexModel.note_id).where(
+                or_(
+                    NoteTagIndexModel.tag_full == tag,
+                    NoteTagIndexModel.tag_full.like(tag + "/%"),
+                )
+            )
+            stmt = stmt.where(FlashcardModel.note_id.in_(tag_sub))
+
+        if bloom_level_min is not None:
+            stmt = stmt.where(
+                FlashcardModel.bloom_level.is_not(None),
+                FlashcardModel.bloom_level >= bloom_level_min,
+            )
+
+        if bloom_level_max is not None:
+            stmt = stmt.where(
+                FlashcardModel.bloom_level.is_not(None),
+                FlashcardModel.bloom_level <= bloom_level_max,
+            )
+
+        if fsrs_state:
+            stmt = stmt.where(FlashcardModel.fsrs_state == fsrs_state)
+
+        if flashcard_type:
+            stmt = stmt.where(FlashcardModel.flashcard_type == flashcard_type)
+
+        # Count total matches
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await session.execute(count_stmt)).scalar_one()
+
+        # Paginate
+        stmt = stmt.order_by(FlashcardModel.created_at.desc())
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await session.execute(stmt)
+        cards = list(result.scalars().all())
+
+        return cards, total
+
     async def generate(
         self,
         document_id: str,
@@ -851,6 +959,7 @@ class FlashcardService:
                 chunk_classification=chunk_classification,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:
@@ -967,6 +1076,7 @@ class FlashcardService:
                 created_at=now,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:
@@ -1097,6 +1207,7 @@ class FlashcardService:
                     created_at=now,
                 )
                 session.add(card)
+                await _sync_flashcard_fts(card, session)
                 created += 1
 
             await session.commit()
@@ -1163,6 +1274,7 @@ class FlashcardService:
         ids: list[str] = []
         for card in cards:
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             ids.append(card.id)
         if cards:
             await session.commit()
@@ -1234,6 +1346,7 @@ class FlashcardService:
         ids: list[str] = []
         for card in cards:
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             ids.append(card.id)
         if cards:
             await session.commit()
@@ -1351,6 +1464,7 @@ class FlashcardService:
 
         for card in all_cards:
             session.add(card)
+            await _sync_flashcard_fts(card, session)
         if all_cards:
             await session.commit()
             for card in all_cards:
@@ -1464,6 +1578,7 @@ class FlashcardService:
                 bloom_level=bloom_level,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:
@@ -1565,6 +1680,7 @@ class FlashcardService:
                 cloze_text=cloze_text,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:

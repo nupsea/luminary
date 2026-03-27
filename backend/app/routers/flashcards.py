@@ -4,6 +4,7 @@ Routes:
   POST /flashcards/generate                              — LLM-generate cards for a document
   POST /flashcards/from-gaps                             — one LLM flashcard per gap string (S97)
   POST /flashcards/cloze/{section_id}                   — generate cloze deletion cards (S154)
+  GET  /flashcards/search                               — unified search with FTS + filters (S184)
   GET  /flashcards/audit/{document_id}                  — Bloom's coverage report (S153)
   POST /flashcards/audit/{document_id}/fill             — fill Bloom's gaps (S153)
   GET  /flashcards/health/{document_id}                 — deck health report (S160)
@@ -16,8 +17,8 @@ Routes:
   POST /flashcards/{card_id}/review         — FSRS review with rating
   GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel (S155)
 
-NOTE: The /audit/{document_id}, /cloze/{section_id}, and /health/{document_id} routes must be
-registered BEFORE /{document_id} to prevent FastAPI from matching literal segments as document_id.
+NOTE: The /search, /audit, /cloze, /health routes must be registered BEFORE /{document_id}
+to prevent FastAPI from matching literal segments as document_id.
 """
 
 import asyncio
@@ -45,7 +46,12 @@ from app.models import (
     SectionModel,
 )
 from app.services.deck_health import DeckHealthService, get_deck_health_service
-from app.services.flashcard import FlashcardService, get_flashcard_service
+from app.services.flashcard import (
+    FlashcardService,
+    _delete_flashcard_fts,
+    _sync_flashcard_fts,
+    get_flashcard_service,
+)
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 
@@ -235,8 +241,63 @@ def _to_response(
 
 
 # ---------------------------------------------------------------------------
+# S184: Search response model
+# ---------------------------------------------------------------------------
+
+
+class FlashcardSearchResponse(BaseModel):
+    items: list[FlashcardResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+# NOTE: /search is registered BEFORE /{document_id} to prevent FastAPI from
+# matching the literal segment "search" as a document_id wildcard.
+
+
+@router.get("/search", response_model=FlashcardSearchResponse)
+async def search_flashcards(
+    query: str | None = Query(default=None),
+    document_id: str | None = Query(default=None),
+    collection_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    bloom_level_min: int | None = Query(default=None),
+    bloom_level_max: int | None = Query(default=None),
+    fsrs_state: str | None = Query(default=None),
+    flashcard_type: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> FlashcardSearchResponse:
+    """Search flashcards with optional FTS query and structured filters (S184).
+
+    All filters combine with AND. Returns paginated FlashcardResponse list.
+    """
+    cards, total = await service.search(
+        session=session,
+        query=query,
+        document_id=document_id,
+        collection_id=collection_id,
+        tag=tag,
+        bloom_level_min=bloom_level_min,
+        bloom_level_max=bloom_level_max,
+        fsrs_state=fsrs_state,
+        flashcard_type=flashcard_type,
+        page=page,
+        page_size=page_size,
+    )
+    return FlashcardSearchResponse(
+        items=[_to_response(c) for c in cards],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post("/generate", response_model=list[FlashcardResponse], status_code=201)
@@ -451,6 +512,8 @@ async def create_trace_flashcard(
         bloom_level=None,
     )
     session.add(card)
+    # S184: sync FTS index for trace flashcards
+    await _sync_flashcard_fts(card, session)
     await session.commit()
     await session.refresh(card)
     logger.info("Created trace flashcard", extra={"card_id": card.id})
@@ -776,6 +839,8 @@ async def update_flashcard(
         card.answer = req.answer
     card.is_user_edited = True
 
+    # S184: keep FTS index in sync on question/answer edits
+    await _sync_flashcard_fts(card, session)
     await session.commit()
     await session.refresh(card)
     logger.info("Updated flashcard", extra={"card_id": card_id})
@@ -795,6 +860,8 @@ async def delete_flashcard(
     if card is None:
         raise HTTPException(status_code=404, detail="Flashcard not found")
 
+    # S184: remove from FTS index before deleting
+    await _delete_flashcard_fts(card_id, session)
     await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
     await session.commit()
     logger.info("Deleted flashcard", extra={"card_id": card_id})

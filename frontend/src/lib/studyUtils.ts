@@ -45,3 +45,51 @@ export function getDeckDisplayName(params: {
   if (!documentId || !isOnlyDeckForDocument) return deckName
   return docTitle ?? deckName
 }
+
+// ---------------------------------------------------------------------------
+// S184: Flashcard search constants and helpers
+// ---------------------------------------------------------------------------
+
+export const FSRS_STATE_LABELS: Record<string, string> = {
+  new: "New",
+  learning: "Learning",
+  review: "Review",
+  relearning: "Relearning",
+}
+
+export const BLOOM_LEVEL_LABELS: Record<number, string> = {
+  1: "Remember",
+  2: "Understand",
+  3: "Apply",
+  4: "Analyze",
+  5: "Evaluate",
+  6: "Create",
+}
+
+export interface FlashcardSearchFilters {
+  query?: string
+  document_id?: string
+  collection_id?: string
+  tag?: string
+  bloom_level_min?: number
+  bloom_level_max?: number
+  fsrs_state?: string
+  flashcard_type?: string
+  page?: number
+  page_size?: number
+}
+
+export function buildSearchParams(filters: FlashcardSearchFilters): URLSearchParams {
+  const params = new URLSearchParams()
+  if (filters.query) params.set("query", filters.query)
+  if (filters.document_id) params.set("document_id", filters.document_id)
+  if (filters.collection_id) params.set("collection_id", filters.collection_id)
+  if (filters.tag) params.set("tag", filters.tag)
+  if (filters.bloom_level_min != null) params.set("bloom_level_min", String(filters.bloom_level_min))
+  if (filters.bloom_level_max != null) params.set("bloom_level_max", String(filters.bloom_level_max))
+  if (filters.fsrs_state) params.set("fsrs_state", filters.fsrs_state)
+  if (filters.flashcard_type) params.set("flashcard_type", filters.flashcard_type)
+  if (filters.page != null) params.set("page", String(filters.page))
+  if (filters.page_size != null) params.set("page_size", String(filters.page_size))
+  return params
+}

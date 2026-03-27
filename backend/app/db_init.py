@@ -71,6 +71,15 @@ USING fts5(
 )
 """
 
+FLASHCARDS_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS flashcards_fts
+USING fts5(
+    question,
+    answer,
+    flashcard_id UNINDEXED
+)
+"""
+
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
@@ -109,6 +118,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.execute(text(FTS5_DDL))
         await conn.execute(text(NOTES_FTS5_DDL))
         await conn.execute(text(IMAGES_FTS5_DDL))
+        await conn.execute(text(FLASHCARDS_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
         # Additive migrations — safe to run on existing databases.
