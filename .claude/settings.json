@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$TOOL_INPUT\" in *pip\\ install*|*pip3\\ install*|*poetry\\ *) echo 'BLOCK: Use uv, not pip or poetry (invariant I-15). Run: uv add <package>' >&2; exit 1;; esac",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=\"$TOOL_INPUT_FILE_PATH\"; case \"$FILE\" in *.py) cd /Users/sethurama/DEV/LM/learning-mate/backend && uv run ruff check --fix \"$FILE\" 2>&1 | head -20;; esac; exit 0",
+            "timeout": 15000
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=\"$TOOL_INPUT_FILE_PATH\"; case \"$FILE\" in *.py) cd /Users/sethurama/DEV/LM/learning-mate/backend && uv run ruff check --fix \"$FILE\" 2>&1 | head -20;; esac; exit 0",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -46,8 +46,8 @@ uv.lock
 
 # Internal harness, agents, and project metadata (not for public repo)
 # These directories remain on disk for local development and the Ralph harness.
-.claude/
-scripts/ralph/
-docs/
-prd.json
-evals/scores_history.jsonl
+# .claude/
+# scripts/ralph/
+# docs/
+# prd.json
+# evals/scores_history.jsonl

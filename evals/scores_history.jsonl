@@ -1,0 +1,16 @@
+{"timestamp": "2026-03-12T05:32:27.064126+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": true}
+{"timestamp": "2026-03-12T13:14:15.990427+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": true}
+{"timestamp": "2026-03-12T14:16:58.342770+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.02857142857142857, "mrr": 0.007619047619047619, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-12T14:37:51.529040+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.12857142857142856, "mrr": 0.06476190476190476, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-13T06:50:47.484605+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.12857142857142856, "mrr": 0.06476190476190476, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-13T13:27:30.574771+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.1, "mrr": 0.054047619047619046, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-13T14:31:07.449853+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.5, "mrr": 0.4444444444444444, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-13T14:31:38.224355+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.5, "mrr": 0.4444444444444444, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-13T14:37:51.098682+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.5, "mrr": 0.4444444444444444, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-14T01:33:40.120793+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-14T01:34:12.658011+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-14T01:38:45.860490+00:00", "dataset": "book", "model": "no-llm", "hr5": 0.18571428571428572, "mrr": 0.11785714285714285, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-14T01:43:49.128796+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-14T01:45:08.418703+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-14T02:13:58.023730+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.6666666666666666, "mrr": 0.4444444444444444, "faithfulness": null, "passed": false}
+{"timestamp": "2026-03-16T09:53:49.567867+00:00", "dataset": "alice_in_wonderland", "model": "no-llm", "hr5": 0.0, "mrr": 0.0, "faithfulness": null, "passed": false}
