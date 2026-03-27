@@ -357,7 +357,7 @@ async def merge_tags(
                         seen.add(replacement)
                         new_tags.append(replacement)
 
-                note.tags = new_tags
+                note.tags = list(new_tags)
                 session.add(note)
                 await _sync_tag_index(note.id, new_tags, session)
         except Exception:
@@ -377,6 +377,7 @@ async def merge_tags(
         )
 
         await session.commit()
+        session.expire_all()
     except Exception:
         await session.rollback()
         raise HTTPException(
@@ -550,7 +551,7 @@ async def accept_normalization_suggestion(
                     if replacement not in seen:
                         seen.add(replacement)
                         new_tags.append(replacement)
-                note.tags = new_tags
+                note.tags = list(new_tags)
                 session.add(note)
                 await _sync_tag_index(note.id, new_tags, session)
             affected_notes = len(notes)
@@ -569,6 +570,7 @@ async def accept_normalization_suggestion(
         suggestion.status = "accepted"
         session.add(suggestion)
         await session.commit()
+        session.expire_all()
     except Exception:
         await session.rollback()
         raise HTTPException(
