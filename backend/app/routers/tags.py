@@ -339,11 +339,17 @@ async def merge_tags(
         # No notes to update -- still create alias and delete source
         pass
     else:
+        # Ensure we are not using stale objects
+        session.expire_all()
         # Load notes
         notes_result = await session.execute(
             select(NoteModel).where(NoteModel.id.in_(note_ids))
         )
         notes = list(notes_result.scalars().all())
+        logger.info(
+            "Found %d notes for merge %r -> %r: %r",
+            len(notes), source_id, target_id, note_ids
+        )
 
         try:
             for note in notes:
@@ -357,13 +363,18 @@ async def merge_tags(
                         seen.add(replacement)
                         new_tags.append(replacement)
 
+                logger.debug("Updating note %s: %r -> %r", note.id, current_tags, new_tags)
                 note.tags = list(new_tags)
+                from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+                flag_modified(note, "tags")
                 session.add(note)
+                await session.flush()  # Ensure dirty state is captured
                 await _sync_tag_index(note.id, new_tags, session)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Merge failed during note updates")
             await session.rollback()
             raise HTTPException(
-                status_code=500, detail="Merge failed during note updates -- rolled back"
+                status_code=500, detail=f"Merge failed during note updates: {exc}"
             )
 
     try:
@@ -552,6 +563,8 @@ async def accept_normalization_suggestion(
                         seen.add(replacement)
                         new_tags.append(replacement)
                 note.tags = list(new_tags)
+                from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+                flag_modified(note, "tags")
                 session.add(note)
                 await _sync_tag_index(note.id, new_tags, session)
             affected_notes = len(notes)
