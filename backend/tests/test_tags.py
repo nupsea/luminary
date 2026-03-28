@@ -4,7 +4,6 @@ import asyncio
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -176,32 +175,30 @@ async def test_patch_tags_replaces_not_appends(test_db):
 # ===========================================================================
 
 
-@pytest.fixture()
-def notes_client():
-    with TestClient(app) as c:
-        yield c
-
-
 # ---------------------------------------------------------------------------
 # NoteTagIndexModel population on note create
 # ---------------------------------------------------------------------------
 
 
-def test_s162_create_note_populates_tag_index(notes_client):
+async def test_s162_create_note_populates_tag_index():
     """Note with hierarchical tags creates NoteTagIndexModel rows; prefix filter works."""
-    resp = notes_client.post(
-        "/notes",
-        json={"content": "Python and Go notes", "tags": ["programming/python", "programming/go"]},
-    )
-    assert resp.status_code == 201
-    note_id = resp.json()["id"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/notes",
+            json={
+                "content": "Python and Go notes",
+                "tags": ["programming/python", "programming/go"]
+            },
+        )
+        assert resp.status_code == 201
+        note_id = resp.json()["id"]
 
-    # Both child tags must appear in exact filter
-    py_resp = notes_client.get("/notes?tag=programming/python")
-    assert any(n["id"] == note_id for n in py_resp.json())
+        # Both child tags must appear in exact filter
+        py_resp = await client.get("/notes?tag=programming/python")
+        assert any(n["id"] == note_id for n in py_resp.json())
 
-    go_resp = notes_client.get("/notes?tag=programming/go")
-    assert any(n["id"] == note_id for n in go_resp.json())
+        go_resp = await client.get("/notes?tag=programming/go")
+        assert any(n["id"] == note_id for n in go_resp.json())
 
 
 # ---------------------------------------------------------------------------
@@ -209,29 +206,30 @@ def test_s162_create_note_populates_tag_index(notes_client):
 # ---------------------------------------------------------------------------
 
 
-def test_s162_parent_tag_filter_returns_children(notes_client):
+async def test_s162_parent_tag_filter_returns_children():
     """GET /notes?tag=programming returns notes tagged 'programming/python' and 'programming/go'."""
     unique = uuid.uuid4().hex[:8]
-    note_python = notes_client.post(
-        "/notes",
-        json={"content": f"Python note {unique}", "tags": [f"prog{unique}/python"]},
-    ).json()
-    note_go = notes_client.post(
-        "/notes",
-        json={"content": f"Go note {unique}", "tags": [f"prog{unique}/go"]},
-    ).json()
-    unrelated = notes_client.post(
-        "/notes",
-        json={"content": f"Unrelated {unique}", "tags": [f"biology{unique}"]},
-    ).json()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        note_python = (await client.post(
+            "/notes",
+            json={"content": f"Python note {unique}", "tags": [f"prog{unique}/python"]},
+        )).json()
+        note_go = (await client.post(
+            "/notes",
+            json={"content": f"Go note {unique}", "tags": [f"prog{unique}/go"]},
+        )).json()
+        unrelated = (await client.post(
+            "/notes",
+            json={"content": f"Unrelated {unique}", "tags": [f"biology{unique}"]},
+        )).json()
 
-    resp = notes_client.get(f"/notes?tag=prog{unique}")
-    assert resp.status_code == 200
-    result_ids = {n["id"] for n in resp.json()}
+        resp = await client.get(f"/notes?tag=prog{unique}")
+        assert resp.status_code == 200
+        result_ids = {n["id"] for n in resp.json()}
 
-    assert note_python["id"] in result_ids
-    assert note_go["id"] in result_ids
-    assert unrelated["id"] not in result_ids
+        assert note_python["id"] in result_ids
+        assert note_go["id"] in result_ids
+        assert unrelated["id"] not in result_ids
 
 
 # ---------------------------------------------------------------------------
@@ -239,34 +237,35 @@ def test_s162_parent_tag_filter_returns_children(notes_client):
 # ---------------------------------------------------------------------------
 
 
-def test_s162_delete_note_removes_tag_rows_and_decrements_count(notes_client):
+async def test_s162_delete_note_removes_tag_rows_and_decrements_count():
     """Deleting a note removes its NoteTagIndexModel rows; canonical tag note_count goes to 0."""
     unique_tag = f"del-tag-{uuid.uuid4().hex[:8]}"
-    resp = notes_client.post(
-        "/notes",
-        json={"content": "Note to delete", "tags": [unique_tag]},
-    )
-    assert resp.status_code == 201
-    note_id = resp.json()["id"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/notes",
+            json={"content": "Note to delete", "tags": [unique_tag]},
+        )
+        assert resp.status_code == 201
+        note_id = resp.json()["id"]
 
-    # Canonical tag should exist with count=1
-    ac_resp = notes_client.get(f"/tags/autocomplete?q={unique_tag}")
-    matching = [t for t in ac_resp.json() if t["id"] == unique_tag]
-    assert len(matching) == 1
-    assert matching[0]["note_count"] == 1
+        # Canonical tag should exist with count=1
+        ac_resp = await client.get(f"/tags/autocomplete?q={unique_tag}")
+        matching = [t for t in ac_resp.json() if t["id"] == unique_tag]
+        assert len(matching) == 1
+        assert matching[0]["note_count"] == 1
 
-    # Delete the note
-    assert notes_client.delete(f"/notes/{note_id}").status_code == 204
+        # Delete the note
+        assert (await client.delete(f"/notes/{note_id}")).status_code == 204
 
-    # Count decremented to 0
-    ac_resp2 = notes_client.get(f"/tags/autocomplete?q={unique_tag}")
-    matching2 = [t for t in ac_resp2.json() if t["id"] == unique_tag]
-    if matching2:
-        assert matching2[0]["note_count"] == 0
+        # Count decremented to 0
+        ac_resp2 = await client.get(f"/tags/autocomplete?q={unique_tag}")
+        matching2 = [t for t in ac_resp2.json() if t["id"] == unique_tag]
+        if matching2:
+            assert matching2[0]["note_count"] == 0
 
-    # Note no longer in tag filter
-    filter_resp = notes_client.get(f"/notes?tag={unique_tag}")
-    assert all(n["id"] != note_id for n in filter_resp.json())
+        # Note no longer in tag filter
+        filter_resp = await client.get(f"/notes?tag={unique_tag}")
+        assert all(n["id"] != note_id for n in filter_resp.json())
 
 
 # ---------------------------------------------------------------------------
@@ -274,27 +273,32 @@ def test_s162_delete_note_removes_tag_rows_and_decrements_count(notes_client):
 # ---------------------------------------------------------------------------
 
 
-def test_s162_autocomplete_prefix_matches(notes_client):
+async def test_s162_autocomplete_prefix_matches():
     """Autocomplete returns tags matching the prefix query."""
     unique = uuid.uuid4().hex[:6]
-    notes_client.post("/notes", json={"content": "Note A", "tags": [f"auto{unique}"]})
-    notes_client.post("/notes", json={"content": "Note B", "tags": [f"auto{unique}/child"]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/notes", json={"content": "Note A", "tags": [f"auto{unique}"]})
+        await client.post("/notes", json={"content": "Note B", "tags": [f"auto{unique}/child"]})
 
-    resp = notes_client.get(f"/tags/autocomplete?q=auto{unique}")
-    assert resp.status_code == 200
-    ids = {t["id"] for t in resp.json()}
-    assert f"auto{unique}" in ids or f"auto{unique}/child" in ids
+        resp = await client.get(f"/tags/autocomplete?q=auto{unique}")
+        assert resp.status_code == 200
+        ids = {t["id"] for t in resp.json()}
+        assert f"auto{unique}" in ids or f"auto{unique}/child" in ids
 
 
-def test_s162_autocomplete_limit_10(notes_client):
+async def test_s162_autocomplete_limit_10():
     """Autocomplete returns at most 10 results."""
     unique = uuid.uuid4().hex[:4]
-    for i in range(15):
-        notes_client.post("/notes", json={"content": f"Bulk {i}", "tags": [f"bulk{unique}{i:02d}"]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for i in range(15):
+            await client.post(
+                "/notes",
+                json={"content": f"Bulk {i}", "tags": [f"bulk{unique}{i:02d}"]}
+            )
 
-    resp = notes_client.get(f"/tags/autocomplete?q=bulk{unique}")
-    assert resp.status_code == 200
-    assert len(resp.json()) <= 10
+        resp = await client.get(f"/tags/autocomplete?q=bulk{unique}")
+        assert resp.status_code == 200
+        assert len(resp.json()) <= 10
 
 
 # ---------------------------------------------------------------------------
@@ -302,40 +306,42 @@ def test_s162_autocomplete_limit_10(notes_client):
 # ---------------------------------------------------------------------------
 
 
-def test_s162_tag_tree_nests_children(notes_client):
+async def test_s162_tag_tree_nests_children():
     """GET /tags/tree nests children under parents with correct structure."""
     unique = uuid.uuid4().hex[:6]
     parent_tag = f"{unique}root"
     child_tag = f"{unique}root/{unique}sub"
 
-    notes_client.post("/notes", json={"content": "Root note", "tags": [parent_tag]})
-    notes_client.post("/notes", json={"content": "Child note", "tags": [child_tag]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/notes", json={"content": "Root note", "tags": [parent_tag]})
+        await client.post("/notes", json={"content": "Child note", "tags": [child_tag]})
 
-    resp = notes_client.get("/tags/tree")
-    assert resp.status_code == 200
-    tree = resp.json()
+        resp = await client.get("/tags/tree")
+        assert resp.status_code == 200
+        tree = resp.json()
 
-    parent_node = next((t for t in tree if t["id"] == parent_tag), None)
-    assert parent_node is not None, f"Parent tag '{parent_tag}' not found in tree"
-    child_ids = [c["id"] for c in parent_node["children"]]
-    assert child_tag in child_ids
+        parent_node = next((t for t in tree if t["id"] == parent_tag), None)
+        assert parent_node is not None, f"Parent tag '{parent_tag}' not found in tree"
+        child_ids = [c["id"] for c in parent_node["children"]]
+        assert child_tag in child_ids
 
 
-def test_s162_tag_tree_inclusive_count(notes_client):
+async def test_s162_tag_tree_inclusive_count():
     """Parent node note_count includes own notes plus descendant notes."""
     unique = uuid.uuid4().hex[:6]
     parent_tag = f"{unique}inc"
     child_tag = f"{unique}inc/{unique}child"
 
-    notes_client.post("/notes", json={"content": "Parent note", "tags": [parent_tag]})
-    notes_client.post("/notes", json={"content": "Child 1", "tags": [child_tag]})
-    notes_client.post("/notes", json={"content": "Child 2", "tags": [child_tag]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/notes", json={"content": "Parent note", "tags": [parent_tag]})
+        await client.post("/notes", json={"content": "Child 1", "tags": [child_tag]})
+        await client.post("/notes", json={"content": "Child 2", "tags": [child_tag]})
 
-    resp = notes_client.get("/tags/tree")
-    tree = resp.json()
-    parent_node = next((t for t in tree if t["id"] == parent_tag), None)
-    assert parent_node is not None
-    assert parent_node["note_count"] == 3  # 1 direct + 2 children
+        resp = await client.get("/tags/tree")
+        tree = resp.json()
+        parent_node = next((t for t in tree if t["id"] == parent_tag), None)
+        assert parent_node is not None
+        assert parent_node["note_count"] == 3  # 1 direct + 2 children
 
 
 # ---------------------------------------------------------------------------
@@ -343,25 +349,27 @@ def test_s162_tag_tree_inclusive_count(notes_client):
 # ---------------------------------------------------------------------------
 
 
-def test_s162_delete_tag_409_when_notes_exist(notes_client):
+async def test_s162_delete_tag_409_when_notes_exist():
     """DELETE /tags/{id} returns 409 when tag note_count > 0."""
     unique_tag = f"protected-{uuid.uuid4().hex[:8]}"
-    notes_client.post("/notes", json={"content": "Note", "tags": [unique_tag]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/notes", json={"content": "Note", "tags": [unique_tag]})
 
-    resp = notes_client.delete(f"/tags/{unique_tag}")
-    assert resp.status_code == 409
+        resp = await client.delete(f"/tags/{unique_tag}")
+        assert resp.status_code == 409
 
 
-def test_s162_delete_tag_204_when_empty(notes_client):
+async def test_s162_delete_tag_204_when_empty():
     """DELETE /tags/{id} succeeds (204) when tag has no notes."""
     unique_tag = f"empty-tag-{uuid.uuid4().hex[:8]}"
-    create_resp = notes_client.post(
-        "/tags",
-        json={"id": unique_tag, "display_name": "Empty"},
-    )
-    assert create_resp.status_code == 201
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_resp = await client.post(
+            "/tags",
+            json={"id": unique_tag, "display_name": "Empty"},
+        )
+        assert create_resp.status_code == 201
 
-    assert notes_client.delete(f"/tags/{unique_tag}").status_code == 204
+        assert (await client.delete(f"/tags/{unique_tag}")).status_code == 204
 
 
 # ---------------------------------------------------------------------------
