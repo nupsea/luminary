@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip index:*)",
+      "Bash(pip3 install:*)",
+      "Bash(npm audit:*)",
+      "Bash(npm install:*)",
+      "Bash(curl -s \"https://pypi.org/pypi/onnxruntime/json\")",
+      "Bash(curl -s \"https://pypi.org/pypi/faster-whisper/json\")",
+      "Bash(python3 -c \":*)",
+      "Bash(curl -s \"https://pypi.org/pypi/ctranslate2/json\")",
+      "Bash(curl -s \"https://pypi.org/pypi/kuzu/json\")",
+      "Bash(uv lock:*)"
+    ]
+  }
+}

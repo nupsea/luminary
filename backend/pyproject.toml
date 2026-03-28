@@ -33,6 +33,7 @@ dependencies = [
     "opentelemetry-sdk>=1.39.1",
     "optimum[onnxruntime]>=2.1.0",
     "pydantic-settings>=2.13.1",
+    "pillow>=11.0.0",
     "pymupdf>=1.27.1",
     "python-docx>=1.2.0",
     "python-json-logger>=4.0.0",
