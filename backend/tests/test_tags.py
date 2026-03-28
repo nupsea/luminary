@@ -401,87 +401,86 @@ async def test_s162_concurrent_creates_note_count_accurate(test_db):
 
 
 @pytest.mark.flaky(retries=3)
-def test_s165_merge_replaces_source_tag_in_notes(notes_client):
+async def test_s165_merge_replaces_source_tag_in_notes():
     """POST /tags/merge replaces source tag with target in all affected notes."""
     src_tag = f"old-tag-{id(object()):x}"
     tgt_tag = f"new-tag-{id(object()):x}"
 
-    # Create two notes with src_tag
-    n1 = notes_client.post("/notes", json={"content": "Note 1", "tags": [src_tag]})
-    n2 = notes_client.post("/notes", json={"content": "Note 2", "tags": [src_tag, tgt_tag]})
-    assert n1.status_code == 201
-    assert n2.status_code == 201
-    n1_id = n1.json()["id"]
-    n2_id = n2.json()["id"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Create two notes with src_tag
+        n1 = await client.post("/notes", json={"content": "Note 1", "tags": [src_tag]})
+        n2 = await client.post("/notes", json={"content": "Note 2", "tags": [src_tag, tgt_tag]})
+        assert n1.status_code == 201
+        assert n2.status_code == 201
+        n1_id = n1.json()["id"]
+        n2_id = n2.json()["id"]
 
-    # Create target canonical tag (source is auto-created by note POST)
-    notes_client.post("/tags", json={"id": tgt_tag, "display_name": "new-tag"})
+        # Create target canonical tag (source is auto-created by note POST)
+        await client.post("/tags", json={"id": tgt_tag, "display_name": "new-tag"})
 
-    resp = notes_client.post(
-        "/tags/merge",
-        json={"source_tag_id": src_tag, "target_tag_id": tgt_tag},
-    )
-    assert resp.status_code == 200
+        resp = await client.post(
+            "/tags/merge",
+            json={"source_tag_id": src_tag, "target_tag_id": tgt_tag},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["affected_notes"] == 2
 
-    # Small delay for CI stability
-    import time
-    time.sleep(0.5)
-
-    data = resp.json()
-    assert data["affected_notes"] == 2
-
-    # Verify source tag is gone from both notes
-    g1 = notes_client.get(f"/notes/{n1_id}")
-    g2 = notes_client.get(f"/notes/{n2_id}")
-    assert g1.status_code == 200
-    assert g2.status_code == 200
-    assert src_tag not in g1.json()["tags"]
-    assert tgt_tag in g1.json()["tags"]
-    # n2 had both tags; after merge it should have target only (deduplicated)
-    assert src_tag not in g2.json()["tags"]
-    assert g2.json()["tags"].count(tgt_tag) == 1
+        # Verify source tag is gone from both notes
+        g1 = await client.get(f"/notes/{n1_id}")
+        g2 = await client.get(f"/notes/{n2_id}")
+        assert g1.status_code == 200
+        assert g2.status_code == 200
+        assert src_tag not in g1.json()["tags"]
+        assert tgt_tag in g1.json()["tags"]
+        # n2 had both tags; after merge it should have target only (deduplicated)
+        assert src_tag not in g2.json()["tags"]
+        assert g2.json()["tags"].count(tgt_tag) == 1
 
 
-def test_s165_merge_creates_alias_and_deletes_source(notes_client):
+async def test_s165_merge_creates_alias_and_deletes_source():
     """POST /tags/merge creates TagAliasModel row and removes source CanonicalTagModel."""
     src_tag = f"source-alias-{id(object()):x}"
     tgt_tag = f"target-alias-{id(object()):x}"
 
-    notes_client.post("/notes", json={"content": "Note", "tags": [src_tag]})
-    notes_client.post("/tags", json={"id": tgt_tag, "display_name": "target-alias"})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/notes", json={"content": "Note", "tags": [src_tag]})
+        await client.post("/tags", json={"id": tgt_tag, "display_name": "target-alias"})
 
-    resp = notes_client.post(
-        "/tags/merge",
-        json={"source_tag_id": src_tag, "target_tag_id": tgt_tag},
-    )
-    assert resp.status_code == 200
+        resp = await client.post(
+            "/tags/merge",
+            json={"source_tag_id": src_tag, "target_tag_id": tgt_tag},
+        )
+        assert resp.status_code == 200
 
-    # Source tag must no longer exist in canonical list
-    list_resp = notes_client.get("/tags")
-    tag_ids = [t["id"] for t in list_resp.json()]
-    assert src_tag not in tag_ids
-    assert tgt_tag in tag_ids
+        # Source tag must no longer exist in canonical list
+        list_resp = await client.get("/tags")
+        tag_ids = [t["id"] for t in list_resp.json()]
+        assert src_tag not in tag_ids
+        assert tgt_tag in tag_ids
 
 
-def test_s165_merge_404_unknown_source(notes_client):
+async def test_s165_merge_404_unknown_source():
     """POST /tags/merge returns 404 when source tag does not exist."""
     tgt_tag = f"target-{id(object()):x}"
-    notes_client.post("/tags", json={"id": tgt_tag, "display_name": "target"})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/tags", json={"id": tgt_tag, "display_name": "target"})
 
-    resp = notes_client.post(
-        "/tags/merge",
-        json={"source_tag_id": "no-such-tag-xyz", "target_tag_id": tgt_tag},
-    )
-    assert resp.status_code == 404
+        resp = await client.post(
+            "/tags/merge",
+            json={"source_tag_id": "no-such-tag-xyz", "target_tag_id": tgt_tag},
+        )
+        assert resp.status_code == 404
 
 
-def test_s165_merge_422_same_source_and_target(notes_client):
+async def test_s165_merge_422_same_source_and_target():
     """POST /tags/merge returns 422 when source == target."""
     tag = f"self-merge-{id(object()):x}"
-    notes_client.post("/notes", json={"content": "Note", "tags": [tag]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/notes", json={"content": "Note", "tags": [tag]})
 
-    resp = notes_client.post(
-        "/tags/merge",
-        json={"source_tag_id": tag, "target_tag_id": tag},
-    )
-    assert resp.status_code == 422
+        resp = await client.post(
+            "/tags/merge",
+            json={"source_tag_id": tag, "target_tag_id": tag},
+        )
+        assert resp.status_code == 422
