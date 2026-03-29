@@ -29,7 +29,10 @@
       "Bash(curl -s https://pypi.org/pypi/lancedb/json)",
       "Bash(ls /Users/adan/AI/repos/luminary/backend/Dockerfile*)",
       "Bash(ls /Users/adan/AI/repos/luminary/Dockerfile*)",
-      "Bash(grep -B5 -A30 \"backend\\\\|luminary\" /Users/adan/AI/repos/luminary/docker-compose*.yml)"
+      "Bash(grep -B5 -A30 \"backend\\\\|luminary\" /Users/adan/AI/repos/luminary/docker-compose*.yml)",
+      "Bash(uvx ruff:*)",
+      "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\")",
+      "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\\\\|Found\")"
     ]
   }
 }
