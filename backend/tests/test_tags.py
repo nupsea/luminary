@@ -180,7 +180,7 @@ async def test_patch_tags_replaces_not_appends(test_db):
 # ---------------------------------------------------------------------------
 
 
-async def test_s162_create_note_populates_tag_index():
+async def test_s162_create_note_populates_tag_index(test_db):
     """Note with hierarchical tags creates NoteTagIndexModel rows; prefix filter works."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
@@ -206,7 +206,7 @@ async def test_s162_create_note_populates_tag_index():
 # ---------------------------------------------------------------------------
 
 
-async def test_s162_parent_tag_filter_returns_children():
+async def test_s162_parent_tag_filter_returns_children(test_db):
     """GET /notes?tag=programming returns notes tagged 'programming/python' and 'programming/go'."""
     unique = uuid.uuid4().hex[:8]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -237,7 +237,7 @@ async def test_s162_parent_tag_filter_returns_children():
 # ---------------------------------------------------------------------------
 
 
-async def test_s162_delete_note_removes_tag_rows_and_decrements_count():
+async def test_s162_delete_note_removes_tag_rows_and_decrements_count(test_db):
     """Deleting a note removes its NoteTagIndexModel rows; canonical tag note_count goes to 0."""
     unique_tag = f"del-tag-{uuid.uuid4().hex[:8]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -273,7 +273,7 @@ async def test_s162_delete_note_removes_tag_rows_and_decrements_count():
 # ---------------------------------------------------------------------------
 
 
-async def test_s162_autocomplete_prefix_matches():
+async def test_s162_autocomplete_prefix_matches(test_db):
     """Autocomplete returns tags matching the prefix query."""
     unique = uuid.uuid4().hex[:6]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -286,7 +286,7 @@ async def test_s162_autocomplete_prefix_matches():
         assert f"auto{unique}" in ids or f"auto{unique}/child" in ids
 
 
-async def test_s162_autocomplete_limit_10():
+async def test_s162_autocomplete_limit_10(test_db):
     """Autocomplete returns at most 10 results."""
     unique = uuid.uuid4().hex[:4]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -306,7 +306,7 @@ async def test_s162_autocomplete_limit_10():
 # ---------------------------------------------------------------------------
 
 
-async def test_s162_tag_tree_nests_children():
+async def test_s162_tag_tree_nests_children(test_db):
     """GET /tags/tree nests children under parents with correct structure."""
     unique = uuid.uuid4().hex[:6]
     parent_tag = f"{unique}root"
@@ -326,7 +326,7 @@ async def test_s162_tag_tree_nests_children():
         assert child_tag in child_ids
 
 
-async def test_s162_tag_tree_inclusive_count():
+async def test_s162_tag_tree_inclusive_count(test_db):
     """Parent node note_count includes own notes plus descendant notes."""
     unique = uuid.uuid4().hex[:6]
     parent_tag = f"{unique}inc"
@@ -349,7 +349,7 @@ async def test_s162_tag_tree_inclusive_count():
 # ---------------------------------------------------------------------------
 
 
-async def test_s162_delete_tag_409_when_notes_exist():
+async def test_s162_delete_tag_409_when_notes_exist(test_db):
     """DELETE /tags/{id} returns 409 when tag note_count > 0."""
     unique_tag = f"protected-{uuid.uuid4().hex[:8]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -359,7 +359,7 @@ async def test_s162_delete_tag_409_when_notes_exist():
         assert resp.status_code == 409
 
 
-async def test_s162_delete_tag_204_when_empty():
+async def test_s162_delete_tag_204_when_empty(test_db):
     """DELETE /tags/{id} succeeds (204) when tag has no notes."""
     unique_tag = f"empty-tag-{uuid.uuid4().hex[:8]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -409,7 +409,7 @@ async def test_s162_concurrent_creates_note_count_accurate(test_db):
 
 
 @pytest.mark.flaky(retries=3)
-async def test_s165_merge_replaces_source_tag_in_notes():
+async def test_s165_merge_replaces_source_tag_in_notes(test_db):
     """POST /tags/merge replaces source tag with target in all affected notes."""
     src_tag = f"old-tag-{id(object()):x}"
     tgt_tag = f"new-tag-{id(object()):x}"
@@ -446,7 +446,7 @@ async def test_s165_merge_replaces_source_tag_in_notes():
         assert g2.json()["tags"].count(tgt_tag) == 1
 
 
-async def test_s165_merge_creates_alias_and_deletes_source():
+async def test_s165_merge_creates_alias_and_deletes_source(test_db):
     """POST /tags/merge creates TagAliasModel row and removes source CanonicalTagModel."""
     src_tag = f"source-alias-{id(object()):x}"
     tgt_tag = f"target-alias-{id(object()):x}"

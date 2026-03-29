@@ -651,7 +651,7 @@
       "phase": "V3 Phase 4 - Learner Experience Refinement",
       "priority": 25,
       "featureRef": "F-STUDY",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: The Study tab currently has too many panels competing for attention -- GeneratePanel with 3 sub-tabs (Basic, Graph, Cloze), SmartGeneratePanel, DeckHealthPanel, HealthReportPanel, StrugglingPanel, and GoalsPanel. A learner opening the Study tab faces a dashboard, not a study session. USER JOURNEY: User opens Study tab -> sees card list (S184 search/filter) as the primary area -> two CTAs at top: 'Start Studying' and 'Generate Cards' -> clicking Generate runs adaptive SmartGenerate logic -> chevron disclosure expands power-user options inline -> scrolling below the card list reveals a collapsed 'Insights' accordion with health, bloom audit, and struggling cards. CROSS-STORY IMPACT: Depends on S184 (search/filter is the primary content). GoalsPanel moves to Progress tab (S177). IMPLEMENTATION NOTES: Remove GeneratePanel sub-tabs (Basic, Graph, Cloze) and standalone SmartGeneratePanel. Single 'Generate Cards' button calls SmartGenerate logic (adaptive mode based on mastery %). Disclosure chevron expands inline: scope, difficulty, mode selectors. Merge DeckHealthPanel, HealthReportPanel, StrugglingPanel into one 'Insights' Accordion component -- collapsed by default. Move GoalsPanel to Progress tab (S177).",
       "acceptanceCriteria": [
         "Single 'Generate Cards' button replaces GeneratePanel sub-tabs; clicking it runs SmartGenerate logic (adaptive mode based on mastery percentage)",
@@ -673,7 +673,7 @@
       "phase": "V3 Phase 4 - Learner Experience Refinement",
       "priority": 26,
       "featureRef": "F-CHAT",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: Chat scope (single document vs all documents) was moved to a ChatSettingsDrawer behind a gear icon. This means 2 clicks to change what document the user is asking about -- the most common chat operation. USER JOURNEY: User opens Chat tab -> sees a compact document combobox in the header showing 'All documents' with a globe icon -> clicks it -> searchable dropdown lists documents sorted by most recently viewed -> selects a document -> header shows truncated title, scope set to single -> user asks questions scoped to that document -> clicks 'x' to clear back to all documents. CROSS-STORY IMPACT: S187 depends on this (contextual recommendations need inline scope). S180 ChatSettingsDrawer modified (scope removed, model+web retained). S147 chatPreload still works. IMPLEMENTATION NOTES: Add Combobox component to Chat header (use shadcn/ui Combobox or Popover+Command). Fetch documents from GET /documents?sort=newest. Remove scope toggle from ChatSettingsDrawer.tsx. Do NOT clear conversation when changing document within single scope -- insert a subtle divider 'Scope changed to [title]' in the message list. Clear conversation only when switching between single<->all. Preserve chatPreload pre-selection from S147.",
       "acceptanceCriteria": [
         "Compact document combobox in Chat header; default shows 'All documents' with globe icon",

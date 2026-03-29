@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, Info, Loader2, Send, Settings, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, Loader2, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +15,7 @@ import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
-import { buildModelOptions, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
+import { buildModelOptions, buildScopeComboboxLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
 
@@ -78,7 +78,7 @@ interface DocListItem {
 }
 
 async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
+  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page=1&page_size=100`)
   if (!res.ok) return []
   const data = (await res.json()) as { items: DocListItem[] }
   return data.items ?? []
@@ -131,7 +131,7 @@ interface ChatMessage {
   id: string
   role: "user" | "assistant"
   text: string
-  type?: "text" | "card"
+  type?: "text" | "card" | "divider"
   cardData?: AnyCardData
   citations?: Citation[]
   confidence?: Confidence
@@ -387,6 +387,107 @@ function ConfusionBanner({
           <X size={14} />
         </button>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DocumentScopeCombobox -- inline document scope selector in Chat header (S186)
+// ---------------------------------------------------------------------------
+
+interface DocumentScopeComboboxProps {
+  docList: DocListItem[] | undefined
+  selectedDocId: string | null
+  onSelect: (docId: string | null) => void
+}
+
+function DocumentScopeCombobox({ docList, selectedDocId, onSelect }: DocumentScopeComboboxProps) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [open])
+
+  const selectedTitle = docList?.find((d) => d.id === selectedDocId)?.title ?? null
+  const label = buildScopeComboboxLabel(selectedTitle)
+
+  const filtered = (docList ?? []).filter((d) =>
+    d.title.toLowerCase().includes(search.toLowerCase()),
+  )
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        onClick={() => { setOpen((prev) => !prev); setSearch("") }}
+        className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-accent transition-colors max-w-[240px]"
+        title={selectedTitle ?? "All documents"}
+      >
+        {selectedDocId ? (
+          <>
+            <BookOpen size={13} className="shrink-0 text-muted-foreground" />
+            <span className="truncate">{label}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onSelect(null) }}
+              className="ml-0.5 shrink-0 rounded p-0.5 hover:bg-accent"
+              aria-label="Clear document selection"
+            >
+              <X size={12} />
+            </button>
+          </>
+        ) : (
+          <>
+            <Globe size={13} className="shrink-0 text-muted-foreground" />
+            <span>{label}</span>
+            <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+          </>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-background shadow-lg">
+          <div className="border-b border-border px-2 py-1.5">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search documents..."
+              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+              autoFocus
+            />
+          </div>
+          <div className="max-h-48 overflow-auto py-1">
+            {docList === undefined ? (
+              <div className="px-3 py-2">
+                <Skeleton className="h-4 w-full" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">No documents yet</p>
+            ) : (
+              filtered.map((doc) => (
+                <button
+                  key={doc.id}
+                  onClick={() => { onSelect(doc.id); setOpen(false) }}
+                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors truncate ${
+                    doc.id === selectedDocId ? "bg-accent/50 font-medium" : "text-foreground"
+                  }`}
+                >
+                  {doc.title}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -721,26 +822,47 @@ export default function Chat() {
     <div className="flex h-full flex-col">
       {/* Header controls */}
       <div className="flex items-center gap-4 border-b border-border px-6 py-3">
-        {/* Document picker — only visible in "This document" scope */}
-        {scope === "single" && (
-          <select
-            value={effectiveDocId ?? ""}
-            onChange={(e) => { setSelectedDocId(e.target.value || null); clearConversation() }}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[220px]"
-          >
-            <option value="">Select a document…</option>
-            {(docList ?? []).map((doc) => (
-              <option key={doc.id} value={doc.id}>{doc.title}</option>
-            ))}
-          </select>
-        )}
+        {/* S186: Inline document scope combobox */}
+        <DocumentScopeCombobox
+          docList={docList}
+          selectedDocId={selectedDocId}
+          onSelect={(docId) => {
+            if (docId === null) {
+              // Clear -> revert to "All documents"
+              if (scope === "single") {
+                setScope("all")
+                setSelectedDocId(null)
+                clearConversation()
+              }
+            } else if (selectedDocId === null || scope === "all") {
+              // Transition: all -> single -- clear conversation
+              setScope("single")
+              setSelectedDocId(docId)
+              clearConversation()
+            } else if (docId !== selectedDocId) {
+              // Transition: single -> single (different doc) -- insert divider, do NOT clear
+              const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
+              setSelectedDocId(docId)
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `divider-${Date.now()}`,
+                  role: "assistant",
+                  text: `Scope changed to ${docTitle}`,
+                  type: "divider" as const,
+                },
+              ])
+            }
+            // docId === selectedDocId -> no-op
+          }}
+        />
 
         {/* Web call counter -- shown when web is enabled and conversation is active */}
         {webEnabled && messages.length > 0 && (
           <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
         )}
 
-        {/* Clear conversation button — only shown when there are messages */}
+        {/* Clear conversation button -- only shown when there are messages */}
         {messages.length > 0 && !isStreaming && (
           <button
             onClick={clearConversation}
@@ -752,7 +874,7 @@ export default function Chat() {
           </button>
         )}
 
-        {/* Settings gear icon — opens ChatSettingsDrawer */}
+        {/* Settings gear icon -- opens ChatSettingsDrawer */}
         <button
           onClick={() => setSettingsOpen(true)}
           className={`${messages.length > 0 && !isStreaming ? "" : "ml-auto"} rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors`}
@@ -762,7 +884,7 @@ export default function Chat() {
         </button>
       </div>
 
-      {/* Chat settings drawer — model selector, web toggle, scope */}
+      {/* Chat settings drawer -- model selector, web toggle */}
       <ChatSettingsDrawer
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
@@ -773,13 +895,6 @@ export default function Chat() {
         webEnabled={webEnabled}
         onWebToggle={() => setWebEnabled((prev) => !prev)}
         webSearchSettings={webSearchSettings}
-        scope={scope}
-        onScopeChange={(newScope) => {
-          if (newScope !== scope) {
-            setScope(newScope)
-            clearConversation()
-          }
-        }}
       />
 
       {/* LLM settings unavailable warning */}
@@ -853,6 +968,13 @@ export default function Chat() {
         ) : (
           <div className="flex flex-col gap-4">
             {messages.map((msg) => (
+              msg.type === "divider" ? (
+                <div key={msg.id} className="flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">{msg.text}</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              ) : (
               <div
                 key={msg.id}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
@@ -989,6 +1111,7 @@ export default function Chat() {
                   )}
                 </div>
               </div>
+              )
             ))}
             <div ref={bottomRef} />
           </div>

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   buildModelOptions,
   buildTransparencyIconLabel,
+  buildScopeComboboxLabel,
   DRAWER_SECTIONS,
   TRANSPARENCY_DEFAULT_OPEN,
 } from "./chatSettingsUtils"
@@ -75,12 +76,42 @@ describe("DRAWER_SECTIONS", () => {
     expect(DRAWER_SECTIONS).toContain("model")
   })
 
-  it("includes scope selector -- scope moved to drawer", () => {
-    expect(DRAWER_SECTIONS).toContain("scope")
+  it("does NOT include scope -- scope moved to inline combobox in Chat header (S186)", () => {
+    expect(DRAWER_SECTIONS).not.toContain("scope")
   })
 
   it("includes web_search toggle -- web toggle renders in drawer, not in header", () => {
     expect(DRAWER_SECTIONS).toContain("web_search")
+  })
+})
+
+describe("buildScopeComboboxLabel", () => {
+  it("returns 'All documents' when selectedTitle is null", () => {
+    expect(buildScopeComboboxLabel(null)).toBe("All documents")
+  })
+
+  it("returns short title as-is", () => {
+    expect(buildScopeComboboxLabel("The Odyssey")).toBe("The Odyssey")
+  })
+
+  it("truncates long title to 28 chars + ellipsis", () => {
+    const long = "A very long document title that exceeds truncation limit"
+    const label = buildScopeComboboxLabel(long)
+    expect(label).toBe(long.slice(0, 28) + "...")
+    expect(label.length).toBe(31) // 28 + 3 for "..."
+  })
+
+  it("returns title at exactly 28 chars without truncation", () => {
+    const exact = "A".repeat(28)
+    expect(buildScopeComboboxLabel(exact)).toBe(exact)
+  })
+
+  it("chatPreload pre-selection: shows document title when scope is single", () => {
+    // Simulates: chatPreload sets documentId, we look up the title from docList
+    const docList = [{ id: "doc-1", title: "Doc One" }, { id: "doc-2", title: "Doc Two" }]
+    const preloadDocId = "doc-1"
+    const selectedDoc = docList.find((d) => d.id === preloadDocId)
+    expect(buildScopeComboboxLabel(selectedDoc?.title ?? null)).toBe("Doc One")
   })
 })
 

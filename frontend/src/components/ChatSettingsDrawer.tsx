@@ -22,8 +22,6 @@ interface ChatSettingsDrawerProps {
   webEnabled: boolean
   onWebToggle: () => void
   webSearchSettings: WebSearchSettings | undefined
-  scope: "single" | "all"
-  onScopeChange: (scope: "single" | "all") => void
 }
 
 export function ChatSettingsDrawer({
@@ -36,8 +34,6 @@ export function ChatSettingsDrawer({
   webEnabled,
   onWebToggle,
   webSearchSettings,
-  scope,
-  onScopeChange,
 }: ChatSettingsDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -47,33 +43,6 @@ export function ChatSettingsDrawer({
         </SheetHeader>
 
         <div className="mt-6 space-y-6">
-          {/* Scope */}
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Scope</p>
-            <div className="flex items-center rounded-md border border-border">
-              <button
-                onClick={() => onScopeChange("single")}
-                className={`flex-1 rounded-l-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  scope === "single"
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50"
-                }`}
-              >
-                This document
-              </button>
-              <button
-                onClick={() => onScopeChange("all")}
-                className={`flex-1 rounded-r-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  scope === "all"
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50"
-                }`}
-              >
-                All my content
-              </button>
-            </div>
-          </div>
-
           {/* LLM Model */}
           <div className="space-y-2">
             <p className="text-sm font-medium">LLM Model</p>

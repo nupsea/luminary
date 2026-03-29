@@ -2091,3 +2091,22 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - S185 was mostly pre-implemented in the partial commit; finishing it was a matter of verifying all ACs, creating smoke, running gates
   - InsightsAccordion uses INSIGHTS_SECTIONS.includes() as static guards rather than .map(); works for constant validation but is not truly dynamic rendering
 ---
+
+## 2026-03-29 - S186
+- Chat: inline document scope selector replaces settings drawer scope
+- Added DocumentScopeCombobox component to Chat header: searchable dropdown with globe icon default, truncated title on selection, X clear button
+- Removed scope toggle from ChatSettingsDrawer; drawer retains model + web search only
+- DRAWER_SECTIONS updated from ["scope","model","web_search"] to ["model","web_search"]
+- Added buildScopeComboboxLabel pure utility for testable label logic
+- Scope-change logic: all->single clears conversation; single->single inserts divider; single->all clears
+- Divider messages rendered as centered muted text with horizontal rules
+- chatPreload pre-selection preserved (S147 effect sets selectedDocId + scope)
+- Fixed fetchDocList to use sort=last_accessed (opened_at desc) instead of sort=newest (created_at desc)
+- Fixed pre-existing test_tags.py failures: added test_db fixture to 8 tests missing DB initialization
+- Files changed: frontend/src/pages/Chat.tsx, frontend/src/components/ChatSettingsDrawer.tsx, frontend/src/lib/chatSettingsUtils.ts, frontend/src/lib/chatSettingsUtils.test.ts, backend/tests/test_tags.py, scripts/smoke/S186.sh, docs/exec-plans/completed/S186.md
+- **Learnings for future iterations:**
+  - AsyncClient tests MUST use test_db fixture -- AsyncClient does NOT trigger FastAPI lifespan, so tables like notes_fts are never created. This caused flaky/failing tests for months.
+  - sort=last_accessed is the correct backend parameter for "most recently viewed" documents; sort=newest sorts by created_at
+  - DocumentScopeCombobox uses a simple div-based dropdown (no Popover/Command shadcn components needed) with outside-click-to-close via mousedown listener
+  - Reviewer warning: fetchDocList returns [] on error, so error state shows "No documents yet" instead of an explicit error -- acceptable for now but should be improved
+---

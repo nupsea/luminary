@@ -33,11 +33,20 @@ export function buildTransparencyIconLabel(confidenceLevel: string): string {
 
 /**
  * The sections that live inside ChatSettingsDrawer (not the Chat header).
- * Encodes the architectural invariant: model selector, web search, and scope
- * are drawer sections -- NOT header controls.
+ * Scope moved to inline combobox in Chat header (S186).
  */
-export const DRAWER_SECTIONS = ["scope", "model", "web_search"] as const
+export const DRAWER_SECTIONS = ["model", "web_search"] as const
 export type DrawerSection = (typeof DRAWER_SECTIONS)[number]
+
+/**
+ * Returns the display label for the document scope combobox.
+ * null selectedTitle -> "All documents"; long titles truncated to 28 chars + ellipsis.
+ */
+export function buildScopeComboboxLabel(selectedTitle: string | null): string {
+  if (!selectedTitle) return "All documents"
+  if (selectedTitle.length > 28) return selectedTitle.slice(0, 28) + "..."
+  return selectedTitle
+}
 
 /**
  * Default open state for the TransparencyPanel.
