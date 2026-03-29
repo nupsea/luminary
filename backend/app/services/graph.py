@@ -950,6 +950,31 @@ class KuzuService:
             logger.warning("get_entities_for_documents failed", exc_info=True)
             return []
 
+    def get_cross_document_entities(self, limit: int = 10) -> list[str]:
+        """Return entity names that appear in 2+ documents, ordered by doc count desc.
+
+        Used for all-scope chat suggestions (cross-document themes).
+        Returns empty list on any Kuzu error (non-fatal).
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
+                " WHERE e.type IN ['PERSON', 'PLACE', 'CONCEPT']"
+                " WITH e.name AS name, count(DISTINCT d.id) AS doc_count"
+                " WHERE doc_count >= 2"
+                " RETURN name"
+                f" ORDER BY doc_count DESC LIMIT {int(limit)}",
+            )
+            names: list[str] = []
+            while result.has_next():
+                row = result.get_next()
+                if row[0]:
+                    names.append(row[0])
+            return names
+        except Exception:
+            logger.debug("get_cross_document_entities failed", exc_info=True)
+            return []
+
     # -------------------------------------------------------------------------
     # Query
     # -------------------------------------------------------------------------

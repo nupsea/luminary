@@ -126,7 +126,7 @@ Each story SXXX produces or modifies these artifacts:
 | S184 | Flashcard search and unified browse replaces deck-first navigation | pass |
 | S185 | Simplified Study tab: single generate button with adaptive defaults | pass |
 | S186 | Chat: inline document scope selector replaces settings drawer scope | pass |
-| S187 | Chat: document-aware contextual recommendations | pending |
+| S187 | Chat: document-aware contextual recommendations | pass |
 | S188 | Flashcard generation: context-rich questions with source grounding | pending |
 | S189 | Auto-organize: guided plan with confirmation workflow | pending |
 | S190 | Tag search: type-ahead search in Notes sidebar | pending |

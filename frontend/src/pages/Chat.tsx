@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, Loader2, Send, Settings, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -20,52 +20,52 @@ import { buildModelOptions, buildScopeComboboxLabel, TRANSPARENCY_DEFAULT_OPEN }
 import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
-// ExploreConnectionsChips — graph-derived entity-pair suggestions (S109)
+// SuggestionPills — contextual suggestions driven by GET /chat/suggestions (S187)
 // ---------------------------------------------------------------------------
 
-interface ExplorationSuggestion {
-  text: string
-  entity_names: string[]
-}
-
-interface ExploreConnectionsChipsProps {
-  documentId: string
+interface SuggestionPillsProps {
+  documentId: string | null
   onSuggest: (text: string) => void
 }
 
-function ExploreConnectionsChips({ documentId, onSuggest }: ExploreConnectionsChipsProps) {
-  const { data, isLoading, isError } = useQuery<ExplorationSuggestion[]>({
-    queryKey: ["explorations", documentId],
+interface SuggestionsResponse {
+  suggestions: string[]
+}
+
+function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
+  const { data, isLoading, isError } = useQuery<SuggestionsResponse>({
+    queryKey: ["chat-suggestions", documentId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/chat/explorations?document_id=${encodeURIComponent(documentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch explorations")
-      return res.json() as Promise<ExplorationSuggestion[]>
+      const url = documentId
+        ? `${API_BASE}/chat/suggestions?document_id=${encodeURIComponent(documentId)}`
+        : `${API_BASE}/chat/suggestions`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Failed to fetch suggestions")
+      return res.json() as Promise<SuggestionsResponse>
     },
-    staleTime: 120_000,
+    staleTime: 60_000,
   })
 
   if (isError) return null
   if (isLoading) {
     return (
       <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-        <span className="text-xs text-muted-foreground">Explore connections:</span>
         <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
         <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
       </div>
     )
   }
-  if (!data || data.length === 0) return null
+  if (!data || data.suggestions.length === 0) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border px-6 py-3">
-      <span className="text-xs text-muted-foreground">Explore connections:</span>
-      {data.map((s) => (
+    <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
+      {data.suggestions.map((s) => (
         <button
-          key={s.text}
-          onClick={() => onSuggest(s.text)}
+          key={s}
+          onClick={() => onSuggest(s)}
           className="truncate max-w-[240px] rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
         >
-          {s.text}
+          {s}
         </button>
       ))}
     </div>
@@ -141,12 +141,6 @@ interface ChatMessage {
   web_sources?: WebSource[]  // S142: web augmentation sources
   source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
   transparency?: TransparencyInfo       // S158: retrieval transparency panel
-}
-
-interface ConfusionSignal {
-  concept: string
-  count: number
-  last_asked: string
 }
 
 interface SessionPlanItem {
@@ -241,152 +235,6 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-const EXAMPLE_QUESTIONS = [
-  "What are the main themes?",
-  "Summarize the key findings.",
-  "What conclusions are drawn?",
-]
-
-export function getContextualSuggestions(dueCount: number): string[] {
-  // The plan pill must always appear as the 4th item per S101 AC.
-  // When dueCount > 0 the due-review pill occupies slot 0, so we drop
-  // "Quiz me on the key concepts" to keep total at 4.
-  const pills: string[] = []
-  if (dueCount > 0) pills.push(`Review my ${dueCount} due flashcards`)
-  pills.push("Find gaps in my notes")
-  pills.push("Summarize this for me")
-  if (dueCount === 0) pills.push("Quiz me on the key concepts")
-  pills.push("__plan__Plan my session")
-  return pills.slice(0, 4)
-}
-
-interface ChatSuggestionsProps {
-  activeDocumentId: string
-  onSuggest: (text: string) => void
-  onPlan: () => void
-}
-
-function ChatSuggestions({ activeDocumentId, onSuggest, onPlan }: ChatSuggestionsProps) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["due-pills", activeDocumentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/study/due?document_id=${encodeURIComponent(activeDocumentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch due cards")
-      return res.json() as Promise<unknown[]>
-    },
-    staleTime: 60_000,
-  })
-
-  if (isError) return null
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-        <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />
-        <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />
-      </div>
-    )
-  }
-
-  const dueCount = (data ?? []).length
-  const suggestions = getContextualSuggestions(dueCount)
-
-  return (
-    <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-      {suggestions.map((s) => {
-        const isPlan = s.startsWith("__plan__")
-        const displayText = isPlan ? s.slice(8) : s
-        return (
-          <button
-            key={s}
-            onClick={() => { if (isPlan) { onPlan() } else { onSuggest(s) } }}
-            className="truncate max-w-[200px] rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            {displayText}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-type AddButtonState = "idle" | "loading" | "done" | "error"
-
-function ConfusionBanner({
-  signal,
-  onDismiss,
-  onAdded,
-}: {
-  signal: ConfusionSignal
-  onDismiss: () => void
-  onAdded: () => void
-}) {
-  const [addState, setAddState] = useState<AddButtonState>("idle")
-  const [addError, setAddError] = useState<string | null>(null)
-
-  async function handleAdd() {
-    setAddState("loading")
-    setAddError(null)
-    try {
-      const res = await fetch(`${API_BASE}/flashcards/from-gaps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gaps: [signal.concept], document_id: "" }),
-      })
-      if (res.status === 503) {
-        setAddError("Ollama is unavailable. Start it with: ollama serve")
-        setAddState("error")
-        return
-      }
-      if (!res.ok) {
-        setAddError("Failed to add flashcard. Please try again.")
-        setAddState("error")
-        return
-      }
-      setAddState("done")
-      onAdded()
-    } catch {
-      setAddError("Network error. Please try again.")
-      setAddState("error")
-    }
-  }
-
-  return (
-    <div className="mx-6 mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
-      <span className="text-xs text-amber-800 dark:text-amber-200">
-        You have asked about &ldquo;{signal.concept}&rdquo; {signal.count} times. Add it to your flashcards?
-      </span>
-      <div className="ml-3 flex shrink-0 items-center gap-2">
-        {addError ? (
-          <span className="text-xs text-red-600">{addError}</span>
-        ) : null}
-        {addState !== "done" && (
-          <button
-            onClick={() => void handleAdd()}
-            disabled={addState === "loading"}
-            className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900"
-          >
-            {addState === "loading" ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : addState === "error" ? (
-              "Retry"
-            ) : (
-              "Add to Flashcards"
-            )}
-          </button>
-        )}
-        <button
-          onClick={onDismiss}
-          className="rounded p-0.5 text-amber-600 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
-          aria-label="Dismiss"
-        >
-          <X size={14} />
-        </button>
-      </div>
     </div>
   )
 }
@@ -508,7 +356,6 @@ export default function Chat() {
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
   const [qaError, setQaError] = useState<string | null>(null)
-  const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
   const [webEnabled, setWebEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
@@ -560,16 +407,6 @@ export default function Chat() {
     queryFn: fetchLLMSettings,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
-  })
-
-  const { data: confusionSignals } = useQuery<ConfusionSignal[]>({
-    queryKey: ["confusion-signals"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/chat/confusion-signals`)
-      if (!res.ok) throw new Error("Failed to fetch confusion signals")
-      return res.json() as Promise<ConfusionSignal[]>
-    },
-    staleTime: 300_000,
   })
 
   const { data: webSearchSettings } = useQuery<WebSearchSettings>({
@@ -914,22 +751,6 @@ export default function Chat() {
         </div>
       )}
 
-      {/* Confusion nudge banners -- one per un-dismissed signal with count >= 3 */}
-      {(confusionSignals ?? [])
-        .filter((s) => s.count >= 3 && !dismissedSignals.has(s.concept))
-        .map((signal) => (
-          <ConfusionBanner
-            key={signal.concept}
-            signal={signal}
-            onDismiss={() => {
-              setDismissedSignals((prev) => new Set([...prev, signal.concept]))
-            }}
-            onAdded={() => {
-              setDismissedSignals((prev) => new Set([...prev, signal.concept]))
-            }}
-          />
-        ))}
-
       {/* Message list */}
       <div className="flex-1 overflow-auto px-6 py-4">
         {llmLoading ? (
@@ -953,17 +774,6 @@ export default function Chat() {
             ) : (
               <p className="text-sm text-muted-foreground">Ask a question to get started.</p>
             )}
-            <div className="flex flex-wrap justify-center gap-2">
-              {EXAMPLE_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => void sendMessage(q)}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
@@ -1118,19 +928,10 @@ export default function Chat() {
         )}
       </div>
 
-      {/* Contextual suggestion pills — only shown before conversation starts */}
-      {messages.length === 0 && activeDocumentId && (
-        <ChatSuggestions
-          activeDocumentId={activeDocumentId}
-          onSuggest={(text) => void sendMessage(text)}
-          onPlan={() => setShowPlanPanel(true)}
-        />
-      )}
-
-      {/* Graph-derived exploration chips — scope=single, document selected, chat empty (S109) */}
-      {messages.length === 0 && scope === "single" && effectiveDocId && (
-        <ExploreConnectionsChips
-          documentId={effectiveDocId}
+      {/* Contextual suggestion pills — driven by GET /chat/suggestions (S187) */}
+      {messages.length === 0 && (
+        <SuggestionPills
+          documentId={scope === "single" ? effectiveDocId ?? null : null}
           onSuggest={(text) => void sendMessage(text)}
         />
       )}

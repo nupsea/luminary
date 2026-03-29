@@ -2110,3 +2110,17 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - DocumentScopeCombobox uses a simple div-based dropdown (no Popover/Command shadcn components needed) with outside-click-to-close via mousedown listener
   - Reviewer warning: fetchDocList returns [] on error, so error state shows "No documents yet" instead of an explicit error -- acceptable for now but should be improved
 ---
+
+## 2026-03-30 - S187 - Chat: document-aware contextual recommendations
+- Implemented GET /chat/suggestions endpoint in chat_meta.py with pure template logic per doc type (book, technical, video, generic, cross-document)
+- Added get_cross_document_entities() method to KuzuService for all-scope suggestions
+- Removed GET /chat/confusion-signals endpoint and ConfusionSignalResponse model
+- Frontend: replaced ExploreConnectionsChips, ChatSuggestions, ConfusionBanner, EXAMPLE_QUESTIONS with single SuggestionPills component driven by GET /chat/suggestions
+- Removed getContextualSuggestions export function
+- 6 new backend tests, removed 1 obsolete API test from test_confusion_detector.py
+- Files changed: backend/app/routers/chat_meta.py, backend/app/services/graph.py, backend/tests/test_suggestions.py (new), backend/tests/test_confusion_detector.py, frontend/src/pages/Chat.tsx, scripts/smoke/S187.sh (new)
+- **Learnings for future iterations:**
+  - I-2 (asyncio.to_thread for sync Kuzu calls) must be applied to ALL graph service calls in async endpoints, not just LanceDB calls
+  - Pure template logic can live in the router (no service layer needed) when there are no side effects or shared state
+  - SuggestionPills queryKey includes documentId so TanStack Query auto-refetches on scope change
+---

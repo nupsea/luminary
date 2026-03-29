@@ -1,4 +1,4 @@
-"""Tests for S100: ConfusionDetectorService and GET /chat/confusion-signals.
+"""Tests for S100: ConfusionDetectorService.
 
 Covers:
   (a) test_detect_returns_signal_above_threshold: 4 questions with 'entanglement' -> signal count=4
@@ -6,7 +6,6 @@ Covers:
   (c) test_detect_counts_distinct_questions: entity in 3 questions, twice in 1 -> count=3 not 4
   (d) test_detect_lookback_respected: old rows excluded by WHERE cutoff; 2 recent < threshold -> []
   (e) test_detect_gliner_failure_returns_empty: extract() raises -> [] gracefully
-  (f) test_confusion_api_returns_list: GET /chat/confusion-signals returns HTTP 200 + JSON array
 """
 
 import uuid
@@ -14,11 +13,9 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db_init import create_all_tables
-from app.main import app
 from app.models import QAHistoryModel
 from app.services.confusion_detector import ConfusionDetectorService
 
@@ -192,20 +189,3 @@ async def test_detect_gliner_failure_returns_empty(db_session):
     assert signals == []
 
 
-# ---------------------------------------------------------------------------
-# (f) API endpoint returns HTTP 200 and JSON array
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def client():
-    with TestClient(app) as c:
-        yield c
-
-
-def test_confusion_api_returns_list(client):
-    """GET /chat/confusion-signals returns HTTP 200 and a JSON array."""
-    resp = client.get("/chat/confusion-signals")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert isinstance(body, list)
