@@ -68,18 +68,20 @@ def _strip_fences(text: str) -> str:
     return cleaned
 
 
-async def _extract_references(section_content: str, model: str) -> list[dict]:
+async def _extract_references(section_content: str) -> list[dict]:
     """Call the LLM to extract canonical references from a section summary.
 
     Returns list of dicts on success, [] on parse failure (non-fatal).
     Raises litellm.ServiceUnavailableError if Ollama is unreachable.
     """
+    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
     user_prompt = (
         f"Section summary:\n{section_content}\n\n"
         "Extract up to 5 key technical terms and for each provide a canonical reference."
     )
     response = await litellm.acompletion(
-        model=model,
+        **get_litellm_kwargs(background=True),
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -114,7 +116,6 @@ class ReferenceEnricherService:
         Raises litellm.ServiceUnavailableError (propagates to worker to mark job failed).
         """
         settings = get_settings()
-        model = settings.LITELLM_DEFAULT_MODEL
         provider = settings.WEB_SEARCH_PROVIDER
 
         async with get_session_factory()() as session:
@@ -151,7 +152,7 @@ class ReferenceEnricherService:
                     continue
 
             try:
-                refs = await _extract_references(summary.content, model)
+                refs = await _extract_references(summary.content)
             except litellm.ServiceUnavailableError:
                 raise
             except Exception as exc:
@@ -214,7 +215,6 @@ class ReferenceEnricherService:
         Returns count of new rows created.
         """
         settings = get_settings()
-        model = settings.LITELLM_DEFAULT_MODEL
         provider = settings.WEB_SEARCH_PROVIDER
 
         # Delete existing refs
@@ -248,7 +248,7 @@ class ReferenceEnricherService:
             return 0
 
         try:
-            refs = await _extract_references(summary.content, model)
+            refs = await _extract_references(summary.content)
         except litellm.ServiceUnavailableError as exc:
             raise HTTPException(
                 status_code=503,

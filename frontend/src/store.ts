@@ -7,7 +7,7 @@ interface StudySectionFilter {
 
 interface AppState {
   activeDocumentId: string | null
-  llmMode: "private" | "cloud"
+  llmMode: "private" | "cloud" | "hybrid"
   currentProvider: string
   libraryView: "grid" | "list"
   notesView: "grid" | "list"
@@ -24,7 +24,7 @@ interface AppState {
   // S165: Active tag filter for Notes tab (hierarchical prefix match).
   activeTag: string | null
   setActiveDocument: (id: string | null) => void
-  setLlmMode: (mode: "private" | "cloud", provider: string) => void
+  setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
   setNotesView: (view: "grid" | "list") => void
   setReviewRemindersEnabled: (enabled: boolean) => void

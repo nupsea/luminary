@@ -63,11 +63,17 @@ logs:
 
 ci:
 	@echo "Running CI checks..."
+ifeq ($(shell uname -s)-$(shell uname -m),Darwin-x86_64)
+	@echo "Intel Mac detected: running backend CI in Docker (lancedb has no x86_64 macOS wheel)..."
+	docker build -q -t luminary-ci -f backend/Dockerfile.ci backend/
+	docker run --rm luminary-ci
+else
 	cd backend && uv sync
 	cd backend && uv run ruff check .
 	cd backend && uv run python tools/layer_linter.py
 	cd backend && uv run python tools/boundary_checker.py
 	cd backend && uv run pytest
+endif
 	cd frontend && npm run build
 	cd frontend && npx tsc --noEmit
 	@echo "CI passed."

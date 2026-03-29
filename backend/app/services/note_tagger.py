@@ -7,8 +7,6 @@ from functools import lru_cache
 
 import litellm
 
-from app.config import get_settings
-
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
@@ -48,11 +46,12 @@ class NoteTaggerService:
         """
         if len(content) < 20:
             return []
-        settings = get_settings()
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         prompt = _USER_TMPL.format(content=content[:2000])
         try:
             response = await litellm.acompletion(
-                model=settings.LITELLM_DEFAULT_MODEL,
+                **get_litellm_kwargs(),
                 messages=[
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user", "content": prompt},
@@ -61,8 +60,9 @@ class NoteTaggerService:
             )
             raw = response.choices[0].message.content or ""
             return _parse_tag_list(raw)
-        except litellm.ServiceUnavailableError:
-            logger.warning("Ollama unreachable during note tagging; returning empty tags")
+        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+            logger.warning("LLM unavailable during note tagging; returning empty tags")
             return []
 
 

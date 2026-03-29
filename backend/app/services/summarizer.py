@@ -75,6 +75,14 @@ MAP_TOKEN_THRESHOLD = 8000
 # Max tokens per map call — stays within mistral's 8K context with room for output
 _MAP_BATCH_TOKENS = 3_000
 
+# Cap map-reduce at this many batches to bound total LLM call time.
+# Large documents are sampled evenly rather than exhaustively processed.
+_MAX_MAP_BATCHES = 8
+
+# Per-call timeout (seconds) for map-reduce batch LLM calls.
+# Keeps a stuck Ollama call from blocking pregenerate for 10 minutes.
+_MAP_CALL_TIMEOUT = 90.0
+
 # Modes pre-generated at ingestion time
 PREGENERATE_MODES = ("one_sentence", "executive", "detailed")
 
@@ -211,12 +219,28 @@ class SummarizationService:
                 else:
                     batches.append(group_chunks)
 
+        # Sample evenly when the document produces too many batches to keep
+        # total map-reduce time bounded (each batch call can take 30-90 s on Ollama).
+        total_batches = len(batches)
+        if total_batches > _MAX_MAP_BATCHES:
+            step = total_batches / _MAX_MAP_BATCHES
+            batches = [batches[int(i * step)] for i in range(_MAX_MAP_BATCHES)]
+            logger.info(
+                "Map-reduce: sampled %d/%d batches to stay within batch cap",
+                len(batches),
+                total_batches,
+                extra={"document_id": document_id},
+            )
+
         llm = get_llm_service()
         section_system = f"{GROUNDING_PREFIX}\n\nSummarize this passage concisely in 2-3 sentences."
         section_summaries: list[str] = []
         for batch in batches:
             batch_text = "\n\n".join(c.text for c in batch)
-            s = await llm.generate(batch_text, system=section_system, model=model)
+            s = await llm.generate(
+                batch_text, system=section_system, model=model, timeout=_MAP_CALL_TIMEOUT,
+                background=True,
+            )
             assert isinstance(s, str)
             section_summaries.append(s)
 
@@ -431,7 +455,7 @@ class SummarizationService:
             for mode in modes_needed:
                 try:
                     system = _build_system_prompt(mode)
-                    text = await llm.generate(input_text, system=system, model=model)
+                    text = await llm.generate(input_text, system=system, model=model, background=True)
                     assert isinstance(text, str)
                     await self._store_summary(document_id, mode, text)
                     logger.info(

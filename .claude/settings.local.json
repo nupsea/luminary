@@ -10,7 +10,26 @@
       "Bash(python3 -c \":*)",
       "Bash(curl -s \"https://pypi.org/pypi/ctranslate2/json\")",
       "Bash(curl -s \"https://pypi.org/pypi/kuzu/json\")",
-      "Bash(uv lock:*)"
+      "Bash(uv lock:*)",
+      "Bash(uv run:*)",
+      "Bash(python3:*)",
+      "Bash(npx tsc:*)",
+      "Bash(docker network:*)",
+      "Bash(lsof $HOME/.luminary/luminary.db)",
+      "Bash(lsof $HOME/.luminary/graph.kuzu)",
+      "Read(//Users/adan/AI/repos/luminary/$HOME/**)",
+      "Read(//Users/adan/AI/repos/luminary/$HOME/.luminary/**)",
+      "Bash(sed -i '' 's|-v \"\"\\\\$HOME/.luminary:/root/.luminary\"\"|-v \"\"$REPO_ROOT/.luminary:/app/.luminary\"\"|' /Users/adan/AI/repos/luminary/scripts/luminary.sh)",
+      "Bash(sed -i '' 's|-e DATA_DIR=\"\"/root/.luminary\"\"|-e DATA_DIR=\"\"/app/.luminary\"\"|' /Users/adan/AI/repos/luminary/scripts/luminary.sh)",
+      "Bash(sed -i '' 's|# Data directories|# Data directories \\(project-local runtime data\\)|' /Users/adan/AI/repos/luminary/.gitignore)",
+      "Bash(sed -i '' 's|.lance/|.luminary/\\\\n.lance/|' /Users/adan/AI/repos/luminary/.gitignore)",
+      "Bash(sed -i '' '/^\\\\*.db$/d' /Users/adan/AI/repos/luminary/.gitignore)",
+      "Bash(sed -i '' '/^DATA_DIR\\\\/$/d' /Users/adan/AI/repos/luminary/.gitignore)",
+      "Bash(uv pip:*)",
+      "Bash(curl -s https://pypi.org/pypi/lancedb/json)",
+      "Bash(ls /Users/adan/AI/repos/luminary/backend/Dockerfile*)",
+      "Bash(ls /Users/adan/AI/repos/luminary/Dockerfile*)",
+      "Bash(grep -B5 -A30 \"backend\\\\|luminary\" /Users/adan/AI/repos/luminary/docker-compose*.yml)"
     ]
   }
 }

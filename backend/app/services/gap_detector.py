@@ -17,7 +17,6 @@ import litellm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import NoteModel
 from app.types import GapReport
 
@@ -93,12 +92,13 @@ class GapDetectorService:
         chunks = await get_retriever().retrieve(query_used, [document_id], k=k)
         book_context = "\n\n".join(c.text for c in chunks)[:_BOOK_CAP]
 
-        model = get_settings().LITELLM_DEFAULT_MODEL
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         user_msg = f"NOTES:\n{notes_text}\n\nBOOK PASSAGES:\n{book_context}"
 
         try:
             response = await litellm.acompletion(
-                model=model,
+                **get_litellm_kwargs(),
                 messages=[
                     {"role": "system", "content": _ANALYSIS_SYSTEM},
                     {"role": "user", "content": user_msg},

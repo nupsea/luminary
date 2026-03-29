@@ -204,8 +204,9 @@ class ImageEnricherService:
 
                 except litellm.ServiceUnavailableError:
                     logger.warning(
-                        "image_enricher: vision model unavailable for image_id=%s "
-                        "-- Ollama is unreachable, start with: ollama serve",
+                        "image_enricher: vision model (VISION_MODEL=%s) unavailable for image_id=%s "
+                        "-- image analysis requires a running vision model",
+                        settings.VISION_MODEL,
                         img.id,
                     )
                     raise

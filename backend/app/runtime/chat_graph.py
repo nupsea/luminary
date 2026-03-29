@@ -559,12 +559,11 @@ async def _decompose_comparison(question: str) -> dict | None:
     Returns {"sides": [list of subject names], "topic": str} or None on failure.
     Handles 2-way, 3-way, and any N-way comparisons.
     """
-    from app.config import get_settings  # noqa: PLC0415
+    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
     try:
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {
                     "role": "system",
@@ -1036,7 +1035,7 @@ async def notes_gap_node(state: ChatState) -> dict:
 
     except Exception as exc:
         if isinstance(exc, (_litellm.ServiceUnavailableError, _litellm.APIConnectionError)):
-            error_msg = "Ollama is not running. Start it with: ollama serve"
+            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
         else:
             error_msg = "Gap analysis failed. Please try again."
         logger.warning("notes_gap_node: detect_gaps failed: %s", exc, exc_info=True)
@@ -1104,11 +1103,10 @@ async def socratic_node(state: ChatState) -> dict:
     )
 
     try:
-        from app.config import get_settings  # noqa: PLC0415
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": f"Passages:\n{passages}"},
@@ -1134,14 +1132,15 @@ async def socratic_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
-        logger.warning("socratic_node: Ollama unreachable")
+    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+        logger.warning("socratic_node: LLM unavailable")
         card = {
             "type": "quiz_question",
             "question": "Quiz unavailable",
             "context_hint": "",
             "document_id": document_id or "",
-            "error": "Ollama is unreachable. Start it with: ollama serve",
+            "error": "LLM unavailable. Check Settings.",
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
@@ -1215,11 +1214,10 @@ async def teach_back_node(state: ChatState) -> dict:
     }
 
     try:
-        from app.config import get_settings  # noqa: PLC0415
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {"role": "system", "content": _TEACH_BACK_SYSTEM},
                 {"role": "user", "content": user_msg},
@@ -1250,8 +1248,9 @@ async def teach_back_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
-        logger.warning("teach_back_node: Ollama unreachable")
+    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+        logger.warning("teach_back_node: LLM unavailable")
         card = {
             "type": "teach_back_result",
             "correct": [],
@@ -1259,7 +1258,7 @@ async def teach_back_node(state: ChatState) -> dict:
             "gaps": [],
             "encouragement": "",
             "document_id": document_id or "",
-            "error": "Ollama is unreachable. Start it with: ollama serve",
+            "error": "LLM unavailable. Check Settings.",
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 

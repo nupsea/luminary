@@ -82,6 +82,40 @@ def _is_xor_encrypted(value: str) -> bool:
         return False
 
 
+# Prefix written to DB when no OS keyring is available (e.g. Docker).
+# The actual key follows the prefix so load can distinguish it from legacy XOR values.
+_PLAINTEXT_PREFIX = "__plain__:"
+
+# ---------------------------------------------------------------------------
+# Keyring helpers — fall back to plaintext-in-DB when no system keyring (e.g. Docker)
+# ---------------------------------------------------------------------------
+
+
+def _keyring_set(field: str, value: str) -> bool:
+    """Store *value* in the OS keyring. Returns False (no-op) when unavailable."""
+    try:
+        keyring.set_password(_KEYCHAIN_SERVICE, field, value)
+        return True
+    except keyring.errors.NoKeyringError:
+        return False
+
+
+def _keyring_get(field: str) -> str | None:
+    """Retrieve a value from the OS keyring. Returns None when unavailable."""
+    try:
+        return keyring.get_password(_KEYCHAIN_SERVICE, field)
+    except keyring.errors.NoKeyringError:
+        return None
+
+
+def _keyring_delete(field: str) -> None:
+    """Delete a value from the OS keyring, ignoring all errors."""
+    try:
+        keyring.delete_password(_KEYCHAIN_SERVICE, field)
+    except (keyring.errors.PasswordDeleteError, keyring.errors.NoKeyringError):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # DB CRUD
 # ---------------------------------------------------------------------------
@@ -92,6 +126,8 @@ async def load_llm_settings(db: AsyncSession) -> None:
 
     For API key fields: resolves the keychain sentinel to the raw value, and
     auto-migrates legacy XOR-encrypted values to the OS keychain on first read.
+    When no system keyring is available (e.g. Docker), XOR-encrypted DB values
+    are used directly without migration.
     """
     for key in _LLM_SETTING_KEYS:
         result = await db.execute(select(SettingsModel).where(SettingsModel.key == key))
@@ -105,35 +141,35 @@ async def load_llm_settings(db: AsyncSession) -> None:
             _cache[key] = raw_value
             continue
 
-        # API key field: resolve sentinel or migrate legacy XOR value
+        # API key field: resolve by storage format
         if raw_value == _KEYCHAIN_SENTINEL:
-            retrieved = keyring.get_password(_KEYCHAIN_SERVICE, key)
+            retrieved = _keyring_get(key)
             _cache[key] = retrieved or ""
         elif raw_value == "":
             _cache[key] = ""
+        elif raw_value.startswith(_PLAINTEXT_PREFIX):
+            # No-keyring fallback path (e.g. Docker) — strip prefix and use directly
+            _cache[key] = raw_value[len(_PLAINTEXT_PREFIX):]
         elif _is_xor_encrypted(raw_value):
-            # Legacy XOR-encrypted entry — migrate to OS keychain automatically
+            # Legacy XOR-encrypted entry — try to migrate to OS keychain or plaintext prefix
             try:
                 plaintext = decrypt_setting(raw_value)
             except Exception:
                 logger.warning("Failed to decrypt legacy key %r -- clearing it", key)
                 _cache[key] = ""
                 continue
-            keyring.set_password(_KEYCHAIN_SERVICE, key, plaintext)
-            sentinel_row = SettingsModel(key=key, value=_KEYCHAIN_SENTINEL)
-            await db.merge(sentinel_row)
+            if _keyring_set(key, plaintext):
+                new_db_value = _KEYCHAIN_SENTINEL
+                logger.debug("Migrated legacy XOR key %r to OS keychain", key)
+            else:
+                new_db_value = _PLAINTEXT_PREFIX + plaintext
+                logger.debug("Migrated legacy XOR key %r to plaintext-prefix (no keyring)", key)
+            migrated_row = SettingsModel(key=key, value=new_db_value)
+            await db.merge(migrated_row)
             await db.commit()
             _cache[key] = plaintext
-            logger.debug("Migrated legacy XOR key %r to OS keychain", key)
         else:
-            # Unknown format — should not happen in normal operation since
-            # update_llm_settings always writes sentinel or empty string.
-            # Log a warning so this is visible in monitoring if it occurs.
-            logger.warning(
-                "API key field %r has unexpected DB format (not sentinel/empty/XOR); "
-                "treating as raw value. If this persists, re-save the key in Settings.",
-                key,
-            )
+            # Unrecognised format — treat as raw value (handles any pre-migration entries)
             _cache[key] = raw_value
 
 
@@ -190,15 +226,18 @@ async def update_llm_settings(
         if raw_value is None:
             continue
         if raw_value:
-            keyring.set_password(_KEYCHAIN_SERVICE, field, raw_value)
-            updates_db[field] = _KEYCHAIN_SENTINEL
+            if _keyring_set(field, raw_value):
+                # OS keyring available — store sentinel in DB
+                updates_db[field] = _KEYCHAIN_SENTINEL
+            else:
+                # No system keyring (e.g. Docker) — store with plaintext prefix.
+                # XOR is avoided because Docker container hostnames change on restart,
+                # making the derived XOR key unstable across runs.
+                updates_db[field] = _PLAINTEXT_PREFIX + raw_value
             updates_cache[field] = raw_value
         else:
             # Clear key from keychain and DB
-            try:
-                keyring.delete_password(_KEYCHAIN_SERVICE, field)
-            except keyring.errors.PasswordDeleteError:
-                pass
+            _keyring_delete(field)
             updates_db[field] = ""
             updates_cache[field] = ""
 
@@ -215,13 +254,24 @@ async def update_llm_settings(
 # ---------------------------------------------------------------------------
 
 
-def get_effective_routing() -> tuple[str, str | None]:
+def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     """Return (litellm_model_string, api_key_or_none).
 
-    Raises ValueError when cloud mode is active but the corresponding API key
-    is not configured. Callers should convert this to HTTP 503.
+    background=True  — caller is a background/ingestion task.  In hybrid mode
+                       this forces local Ollama so cloud quota is not consumed.
+    background=False — caller is user-facing (chat, explain, flashcards).
+
+    Raises ValueError when cloud routing is active but the API key is missing.
     """
-    if _cache["llm_mode"] == "private":
+    mode = _cache["llm_mode"]
+
+    # Hybrid: background tasks → local Ollama; interactive → cloud
+    if mode == "hybrid":
+        effective_mode = "private" if background else "cloud"
+    else:
+        effective_mode = mode
+
+    if effective_mode == "private":
         from app.config import get_settings  # noqa: PLC0415
 
         ollama_model = get_settings().LITELLM_DEFAULT_MODEL
@@ -238,7 +288,7 @@ def get_effective_routing() -> tuple[str, str | None]:
         "gemini": ("gemini", "google_api_key"),
     }
     prefix, key_field = _provider_map.get(provider, ("openai", "openai_api_key"))
-    api_key = _cache[key_field]  # raw value — no decrypt needed
+    api_key = _cache[key_field]
 
     if not api_key:
         raise ValueError(
@@ -247,3 +297,24 @@ def get_effective_routing() -> tuple[str, str | None]:
         )
 
     return f"{prefix}/{cloud_model}", api_key
+
+
+def get_litellm_kwargs(background: bool = False) -> dict:
+    """Return a kwargs dict ready to pass to litellm.acompletion.
+
+    background=True  — routes to local Ollama in hybrid mode (background tasks).
+    background=False — routes to cloud in hybrid/cloud mode (interactive features).
+
+    Usage::
+        kwargs = get_litellm_kwargs()                    # interactive
+        kwargs = get_litellm_kwargs(background=True)     # background task
+        response = await litellm.acompletion(messages=[...], **kwargs)
+    """
+    model, api_key = get_effective_routing(background=background)
+    kwargs: dict = {"model": model}
+    if api_key:
+        kwargs["api_key"] = api_key
+    elif model.startswith("ollama/"):
+        from app.config import get_settings  # noqa: PLC0415
+        kwargs["api_base"] = get_settings().OLLAMA_URL
+    return kwargs

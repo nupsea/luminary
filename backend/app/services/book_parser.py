@@ -255,15 +255,37 @@ class BookParser:
         doc = fitz.open(str(file_path))
         if len(doc) == 0:
             return None
-        # PDF logic extracts all text then segments
-        all_text = "\n".join([page.get_text() for page in doc])
+        # Extract per-page text to enable page number assignment after segmentation
+        page_texts = [page.get_text() for page in doc]
+        total_pages = len(doc)
+        all_text = "\n".join(page_texts)
         clean_text, _ = self._strip_gutenberg(all_text)
         sections = self._segment_chapters(clean_text)
         if not sections:
             return None
+
+        # Assign page_start by searching the section heading in per-page texts.
+        # Use the base heading (before any "—" subtitle) since it matches the
+        # raw chapter heading text found in the PDF page content.
+        for section in sections:
+            base = section.heading.split("—")[0].strip()
+            for page_num, pt in enumerate(page_texts, start=1):
+                if base in pt:
+                    section.page_start = page_num
+                    break
+
+        # Set page_end = start of the next section (or last page for the final section)
+        for i in range(len(sections) - 1):
+            if sections[i].page_start > 0 and sections[i + 1].page_start > 0:
+                sections[i].page_end = sections[i + 1].page_start
+            elif sections[i].page_start > 0:
+                sections[i].page_end = total_pages
+        if sections and sections[-1].page_start > 0:
+            sections[-1].page_end = total_pages
+
         return ParsedDocument(
             title=file_path.stem.replace("_", " ").title(),
-            format="pdf", pages=len(doc), word_count=len(all_text.split()),
+            format="pdf", pages=total_pages, word_count=len(all_text.split()),
             sections=sections, raw_text=all_text,
         )
 

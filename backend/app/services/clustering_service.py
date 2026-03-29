@@ -19,7 +19,6 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     ClusterSuggestionModel,
     NoteCollectionModel,
@@ -85,7 +84,6 @@ class ClusteringService:
             logger.info("HDBSCAN found no clusters (all noise); skipping")
             return 0
 
-        settings = get_settings()
         created = 0
 
         for label in unique_labels:
@@ -125,7 +123,7 @@ class ClusteringService:
             excerpts = [row[1][:150] for row in note_rows]
 
             # Generate collection name via LiteLLM
-            suggested_name = await self._generate_cluster_name(excerpts, settings)
+            suggested_name = await self._generate_cluster_name(excerpts)
 
             suggestion = ClusterSuggestionModel(
                 id=str(uuid.uuid4()),
@@ -144,17 +142,19 @@ class ClusteringService:
         logger.info("Clustering complete: %d suggestions created", created)
         return created
 
-    async def _generate_cluster_name(self, excerpts: list[str], settings) -> str:
+    async def _generate_cluster_name(self, excerpts: list[str]) -> str:
         """Generate a 2-4 word collection name from note excerpts via LiteLLM.
 
         Falls back to 'Notes Cluster' if LLM is unavailable.
         """
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         if not excerpts:
             return "Notes Cluster"
         excerpts_text = "\n---\n".join(excerpts)
         try:
             response = await litellm.acompletion(
-                model=settings.LITELLM_DEFAULT_MODEL,
+                **get_litellm_kwargs(),
                 messages=[
                     {
                         "role": "system",

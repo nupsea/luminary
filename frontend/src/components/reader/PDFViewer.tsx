@@ -60,6 +60,86 @@ function flattenOutline(entries: OutlineEntry[]): OutlineEntry[] {
   return flat
 }
 
+/**
+ * Build a TOC by scanning the PDF's text content for heading-sized lines.
+ *
+ * Level assignment is fully dynamic — no hardcoded font sizes:
+ *   - Body size = median of all text items (robust against heading outliers)
+ *   - Heading threshold = body * 1.15 (generous lower bound)
+ *   - TOC-page filter: real section headings are pages apart; TOC listings
+ *     cluster on the same or adjacent pages. Any heading whose nearest
+ *     neighbour heading is < MIN_GAP pages away is a TOC entry and is dropped.
+ *   - Level assignment: largest distinct size group → level 1, rest → level 2
+ */
+async function buildFontTOC(
+  doc: PDFDocumentProxy,
+  isCancelled: () => boolean,
+): Promise<OutlineEntry[]> {
+  const totalPages = doc.numPages
+  const rawItems: { page: number; text: string; size: number }[] = []
+
+  for (let p = 1; p <= totalPages; p++) {
+    if (isCancelled()) return []
+    const page = await doc.getPage(p)
+    const content = await page.getTextContent()
+    for (const item of content.items) {
+      if (!("str" in item) || !item.str.trim()) continue
+      // item.height can be 0 for some PDFs; fall back to transform[3] (Y-scale)
+      const size = item.height > 0 ? item.height : Math.abs(item.transform[3] ?? 0)
+      rawItems.push({ page: p, text: item.str.trim(), size })
+    }
+    // Do NOT call page.cleanup() — may corrupt an in-progress render
+  }
+
+  if (rawItems.length === 0) return []
+
+  const positiveSizes = rawItems.map(i => i.size).filter(s => s > 0)
+  if (positiveSizes.length === 0) return []
+
+  // Median is more robust than mean when headings inflate the average
+  const sortedSizes = [...positiveSizes].sort((a, b) => a - b)
+  const bodyMedian = sortedSizes[Math.floor(sortedSizes.length / 2)]
+  const headingThreshold = bodyMedian * 1.15  // cast a wide net; gap filter culls TOC entries
+
+  // Collect all heading candidates (above threshold, short text)
+  const candidates = rawItems.filter(
+    i => i.size >= headingThreshold && i.text.length >= 2 && i.text.length < 120
+  )
+  if (candidates.length === 0) return []
+
+  // Page-gap filter: drop any heading whose nearest neighbour is < MIN_GAP pages away.
+  // This eliminates TOC-page listings (clustered on pages 1-3) while keeping
+  // content headings that are spread through the document.
+  const MIN_GAP = 2
+  const filtered = candidates.filter((item, i) => {
+    const prevGap = i > 0 ? item.page - candidates[i - 1].page : Infinity
+    const nextGap = i < candidates.length - 1 ? candidates[i + 1].page - item.page : Infinity
+    return Math.min(prevGap, nextGap) >= MIN_GAP
+  })
+
+  if (filtered.length === 0) return []
+
+  // Dynamic level assignment: round sizes to 0.5pt buckets, then split into
+  // two groups. The largest size group = level 1; everything else = level 2.
+  const sizeSet = [...new Set(filtered.map(i => Math.round(i.size * 2) / 2))].sort((a, b) => b - a)
+  // Find the biggest size gap between consecutive distinct sizes to set the split
+  let splitSize = sizeSet[0]  // default: only the very largest = level 1
+  if (sizeSet.length >= 2) {
+    let maxGap = 0
+    for (let i = 0; i < sizeSet.length - 1; i++) {
+      const gap = sizeSet[i] - sizeSet[i + 1]
+      if (gap > maxGap) { maxGap = gap; splitSize = sizeSet[i + 1] }
+    }
+  }
+
+  return filtered.map(item => ({
+    title: item.text,
+    page: item.page,
+    level: item.size >= splitSize ? 1 : 2,
+    children: [],
+  }))
+}
+
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
 
@@ -291,13 +371,20 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             // non-fatal; zoom stays at 1.0
           }
 
-          // Extract PDF built-in outline (bookmarks) for accurate TOC navigation
+          // Extract PDF built-in outline (bookmarks) for accurate TOC navigation.
+          // If the PDF has no bookmarks, fall back to font-size scanning.
           try {
             const rawOutline = await doc.getOutline()
             if (rawOutline && rawOutline.length > 0 && !cancelled) {
               const resolved = await resolveOutline(doc, rawOutline, 1)
               if (!cancelled && resolved.length > 0) {
                 setPdfOutline(flattenOutline(resolved))
+              }
+            } else if (!cancelled) {
+              // No bookmarks — build TOC from font-size analysis of the actual content.
+              const fontToc = await buildFontTOC(doc, () => cancelled)
+              if (!cancelled && fontToc.length > 0) {
+                setPdfOutline(fontToc)
               }
             }
           } catch {
@@ -331,6 +418,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
       let cancelled = false
       let activeTextLayer: TextLayer | null = null
+      // Track active render tasks so cleanup can cancel them and avoid the
+      // "Cannot use the same canvas during multiple render() operations" error.
+      const activeRenderTasks: Array<{ cancel: () => void }> = []
 
       async function renderPage(
         pageNum: number,
@@ -350,7 +440,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           const ctx = canvas.getContext("2d")
           if (!ctx || cancelled) return
 
-          await page.render({ canvasContext: ctx, viewport }).promise
+          const renderTask = page.render({ canvasContext: ctx, viewport })
+          activeRenderTasks.push(renderTask)
+          try {
+            await renderTask.promise
+          } catch (e: unknown) {
+            // RenderingCancelledException is expected when the effect is cleaned up
+            if (e instanceof Error && e.name === "RenderingCancelledException") return
+            throw e
+          }
           if (cancelled) return
 
           // Official pdfjs TextLayer -- supports proper drag-to-select across spans.
@@ -402,6 +500,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return () => {
         cancelled = true
         activeTextLayer?.cancel()
+        // Cancel all in-progress pdfjs render tasks so the canvas is free
+        // for the next effect run. Without this, rapid page/zoom changes cause
+        // "Cannot use the same canvas during multiple render() operations".
+        for (const task of activeRenderTasks) task.cancel()
       }
     }, [pdfDoc, currentPage, zoom, totalPages, loadStatus])
 
@@ -473,14 +575,18 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       )
     }
 
+    // Use the font-scanned / bookmark outline whenever available; it has richer
+    // hierarchy than the backend sections (which only capture top-level chapters).
+    const useOutline = pdfOutline.length > 0
+
     return (
       <div className="flex h-full">
-        {/* TOC panel -- prefer PDF built-in outline for accurate page navigation */}
+        {/* TOC panel -- prefer whichever source has more entries for granular navigation */}
         <div className="w-56 flex-shrink-0 border-r overflow-y-auto p-2">
           <p className="text-xs font-semibold uppercase text-muted-foreground mb-2 px-1">
             Contents
           </p>
-          {pdfOutline.length > 0 ? (
+          {useOutline ? (
             <ul className="space-y-0.5">
               {pdfOutline.map((entry, idx) => {
                 // Active if this entry's page <= currentPage and next entry's page > currentPage
@@ -506,9 +612,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             <p className="text-xs text-muted-foreground px-1">No sections</p>
           ) : (() => {
             const hasPageNums = sections.some((s) => s.page_start > 0)
+            // Normalize levels: shift so the minimum level present = 1.
+            // This prevents all-L2 sections (from the backend parser) from
+            // appearing indented with no L1 parents.
+            const minLevel = Math.min(...sections.map(s => s.level))
             return (
               <ul className="space-y-0.5">
                 {sections.map((sec, idx) => {
+                  const displayLevel = sec.level - minLevel + 1
                   const targetPage = hasPageNums
                     ? sec.page_start
                     : Math.max(1, Math.round(((idx + 1) / sections.length) * totalPages))
@@ -523,7 +634,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                         className={`w-full text-left text-xs px-2 py-1 rounded hover:bg-accent truncate ${
                           isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground"
                         }`}
-                        style={{ paddingLeft: `${(sec.level - 1) * 8 + 8}px` }}
+                        style={{ paddingLeft: `${(displayLevel - 1) * 8 + 8}px` }}
                         onClick={() => goToPage(targetPage)}
                         title={hasPageNums ? `p.${targetPage} -- ${sec.heading}` : `~p.${targetPage} -- ${sec.heading}`}
                       >

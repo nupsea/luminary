@@ -5,7 +5,6 @@ import logging
 from collections.abc import AsyncGenerator
 
 from app.services.llm import get_llm_service
-from app.services.retriever import get_retriever
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +45,14 @@ class ExplainService:
     ) -> AsyncGenerator[str]:
         """Stream explanation tokens as SSE data events.
 
-        Retrieves the 3 most relevant surrounding chunks and asks the LLM to
-        explain the selected text using only that document context.
+        Uses the selected text directly as context — no vector retrieval — so
+        streaming begins immediately without bge-m3 encoding latency.
         """
-        retriever = get_retriever()
         llm = get_llm_service()
-
-        chunks = await retriever.retrieve(text, document_ids=[document_id], k=3)
-        context = "\n\n---\n\n".join(c.text for c in chunks) if chunks else text
 
         mode_instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["plain"])
         system = f"{EXPLAIN_SYSTEM_BASE}\n\n{mode_instruction}"
-        prompt = f"Context:\n\n{context}\n\nSelected text: {text}\n\nExplain the selected text."
+        prompt = f"Selected text:\n\n{text}\n\nExplain the selected text."
 
         token_gen = await llm.generate(prompt, system=system, stream=True)
         async for token in token_gen:

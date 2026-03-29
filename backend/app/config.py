@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    DATA_DIR: str = "~/.luminary"
+    DATA_DIR: str = ".luminary"
     OLLAMA_URL: str = "http://localhost:11434"
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/mistral"

@@ -73,6 +73,8 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
 
     if data["mode"] == "private":
         processing_mode = "local" if available_local_models else "unavailable"
+    elif data["mode"] == "hybrid":
+        processing_mode = "hybrid"
     else:
         processing_mode = "cloud"
 
@@ -92,6 +94,7 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
             available_local_models[0] if available_local_models else cfg.LITELLM_DEFAULT_MODEL
         )
     else:
+        # cloud and hybrid: backend decides routing via get_effective_routing()
         active_model = ""
 
     return LLMSettingsResponse(
@@ -141,6 +144,148 @@ async def patch_llm_settings(
     data = await get_llm_settings(db)
     cfg = get_settings()
     return await _build_response(data, cfg.OLLAMA_URL)
+
+
+# ---------------------------------------------------------------------------
+# Model list endpoint — fetches available models from each provider
+# ---------------------------------------------------------------------------
+
+# Hardcoded cost metadata (USD per 1M tokens, input/output).
+# Values are approximate list prices; free-tier notes where applicable.
+_MODEL_COSTS: dict[str, dict] = {
+    # Gemini — only models confirmed available to new API keys
+    "gemini-2.5-pro-exp-03-25": {"input": 0.0, "output": 0.0, "note": "Free (experimental)"},
+    "gemini-1.5-flash-8b-001": {"input": 0.0375, "output": 0.15, "note": ""},
+    "gemini-1.5-pro-001": {"input": 1.25, "output": 5.00, "note": ""},
+    "gemini-1.5-pro-002": {"input": 1.25, "output": 5.00, "note": ""},
+    # OpenAI
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "note": ""},
+    "gpt-4o": {"input": 2.50, "output": 10.00, "note": ""},
+    "gpt-4.1-nano": {"input": 0.10, "output": 0.40, "note": ""},
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "note": ""},
+    "gpt-4.1": {"input": 2.00, "output": 8.00, "note": ""},
+    "o4-mini": {"input": 1.10, "output": 4.40, "note": ""},
+    "o3-mini": {"input": 1.10, "output": 4.40, "note": ""},
+    # Anthropic
+    "claude-haiku-4-5-20251001": {"input": 0.25, "output": 1.25, "note": ""},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00, "note": ""},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00, "note": ""},
+    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00, "note": ""},
+    "claude-opus-4-6": {"input": 15.00, "output": 75.00, "note": ""},
+}
+
+_ANTHROPIC_MODELS = [
+    {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5"},
+    {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku"},
+    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+    {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
+    {"id": "claude-opus-4-6", "name": "Claude Opus 4.6"},
+]
+
+_OPENAI_MODELS = [
+    {"id": "gpt-4o-mini", "name": "GPT-4o mini"},
+    {"id": "gpt-4o", "name": "GPT-4o"},
+    {"id": "gpt-4.1-nano", "name": "GPT-4.1 nano"},
+    {"id": "gpt-4.1-mini", "name": "GPT-4.1 mini"},
+    {"id": "gpt-4.1", "name": "GPT-4.1"},
+    {"id": "o4-mini", "name": "o4-mini"},
+    {"id": "o3-mini", "name": "o3-mini"},
+]
+
+_MODEL_API_TIMEOUT = 5.0
+
+
+def _attach_costs(models: list[dict]) -> list[dict]:
+    """Attach cost metadata to each model dict."""
+    result = []
+    for m in models:
+        mid = m["id"]
+        cost = _MODEL_COSTS.get(mid, {})
+        result.append({
+            **m,
+            "cost_input": cost.get("input"),
+            "cost_output": cost.get("output"),
+            "cost_note": cost.get("note", ""),
+        })
+    return result
+
+
+# Model IDs that Google's ListModels API still returns with generateContent support,
+# but are no longer usable by new API keys. Confirmed 404/NOT_FOUND in production.
+# Includes both short aliases and their versioned (-001/-002) variants.
+_DEPRECATED_GEMINI_IDS = {
+    "gemini-2.0-flash",           # "no longer available to new users"
+    "gemini-2.0-flash-001",       # versioned variant — same restriction
+    "gemini-2.0-flash-lite",      # "no longer available to new users"
+    "gemini-2.0-flash-lite-001",  # versioned variant — confirmed 404
+    "gemini-1.5-flash",           # "not found for API version v1beta"
+    "gemini-1.5-flash-001",       # versioned variant — same restriction
+    "gemini-1.5-flash-002",       # versioned variant — same restriction
+}
+
+
+async def _list_gemini_models(api_key: str) -> list[dict]:
+    """Call Google's ListModels API and return models that support generateContent.
+
+    Filters out model IDs in _DEPRECATED_GEMINI_IDS which the API still lists but
+    returns 404 for new API keys.
+    """
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=50"
+    try:
+        async with httpx.AsyncClient(timeout=_MODEL_API_TIMEOUT) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                logger.warning("Gemini ListModels returned %d: %s", resp.status_code, resp.text[:200])
+                return []
+            data = resp.json()
+    except Exception as exc:
+        logger.warning("Gemini ListModels failed: %s", exc)
+        return []
+
+    models = []
+    for m in data.get("models", []):
+        if "generateContent" not in m.get("supportedGenerationMethods", []):
+            continue
+        raw_name = m.get("name", "")  # e.g. "models/gemini-1.5-flash-001"
+        model_id = raw_name.replace("models/", "")
+        if model_id in _DEPRECATED_GEMINI_IDS:
+            continue
+        display = m.get("displayName") or model_id
+        models.append({"id": model_id, "name": display})
+
+    # Sort: known models first (by _MODEL_COSTS key order), then alphabetical
+    known_order = list(_MODEL_COSTS.keys())
+    models.sort(key=lambda m: (known_order.index(m["id"]) if m["id"] in known_order else 999, m["id"]))
+    return models
+
+
+@router.get("/llm/models")
+async def list_llm_models(
+    provider: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Return available models for the given provider with cost info.
+
+    For Gemini: fetches live from Google's ListModels API using the stored key.
+    For OpenAI/Anthropic: returns a curated list (no live fetch needed).
+    """
+    settings_data = await get_llm_settings(db)
+
+    if provider == "gemini":
+        from app.services.settings_service import _cache  # noqa: PLC0415
+        api_key = _cache.get("google_api_key", "")
+        if not api_key:
+            return []
+        models = await _list_gemini_models(api_key)
+        return _attach_costs(models)
+
+    if provider == "openai":
+        return _attach_costs(_OPENAI_MODELS)
+
+    if provider == "anthropic":
+        return _attach_costs(_ANTHROPIC_MODELS)
+
+    return []
 
 
 # ---------------------------------------------------------------------------

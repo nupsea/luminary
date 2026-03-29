@@ -13,7 +13,6 @@ import re
 import litellm
 from sqlalchemy import select, update
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import SectionModel, SectionSummaryModel
 from app.services.graph import get_graph_service
@@ -91,14 +90,14 @@ class PrereqExtractorService:
         Returns [] on parse failure (non-fatal).
         Raises litellm.ServiceUnavailableError if Ollama is unreachable (propagates to worker).
         """
-        settings = get_settings()
-        model = settings.LITELLM_DEFAULT_MODEL
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         user_prompt = (
             f"Section summary:\n{section_content[:2000]}\n\n"
             "List all concepts this section requires the reader to already understand."
         )
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(background=True),
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},

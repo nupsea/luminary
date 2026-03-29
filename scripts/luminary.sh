@@ -44,18 +44,24 @@ fi
 # ---------------------------------------------------------------------------
 # Start processes — each piped through awk for prefixed, coloured output
 # ---------------------------------------------------------------------------
+DOCKER_CONTAINER=""
 if [[ "$USE_DOCKER_BACKEND" == "true" ]]; then
+    DOCKER_CONTAINER="luminary-backend-dev"
     _info "Building backend Docker image (Intel Mac)..."
     docker build -q -t luminary-backend "$REPO_ROOT/backend" >&2
+    # Remove any leftover container from a previous unclean exit
+    docker rm -f "$DOCKER_CONTAINER" 2>/dev/null || true
     (docker run --rm \
+        --name "$DOCKER_CONTAINER" \
         -p "${BACKEND_PORT}:${BACKEND_PORT}" \
-        -v "$HOME/.luminary:/root/.luminary" \
+        -v "$REPO_ROOT/.luminary:/app/.luminary" \
         -e OLLAMA_URL="http://host.docker.internal:11434" \
-        -e DATA_DIR="/root/.luminary" \
+        -e DATA_DIR="/app/.luminary" \
+        -e PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring \
         luminary-backend 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 else
-    (cd "$REPO_ROOT/backend" && uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
+    (cd "$REPO_ROOT/backend" && DATA_DIR="$REPO_ROOT/.luminary" uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 fi
 BACKEND_PIPE_PID=$!
@@ -71,6 +77,10 @@ FRONTEND_PIPE_PID=$!
 # Cleanup on Ctrl-C / SIGTERM
 # ---------------------------------------------------------------------------
 _stop() {
+    if [[ -n "$DOCKER_CONTAINER" ]]; then
+        _info "Stopping Docker container ($DOCKER_CONTAINER)..."
+        docker stop "$DOCKER_CONTAINER" 2>/dev/null || true
+    fi
     kill "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     wait "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     rm -f "$VITE_LOG"

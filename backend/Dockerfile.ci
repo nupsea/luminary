@@ -1,0 +1,15 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Install all dependencies including dev group
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --all-groups
+
+# Copy application code, tests, and tools
+COPY . .
+
+CMD ["sh", "-c", "uv run ruff check . && uv run python tools/layer_linter.py && uv run python tools/boundary_checker.py && uv run pytest"]

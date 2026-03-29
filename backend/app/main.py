@@ -18,7 +18,7 @@ from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.database import get_db, get_engine
+from app.database import get_db, get_engine, get_session_factory
 from app.db_init import create_all_tables
 from app.models import SettingsModel
 from app.routers.admin import router as admin_router
@@ -116,22 +116,23 @@ async def lifespan(app: FastAPI):
     (data_dir / "notes").mkdir(exist_ok=True)
     (data_dir / "audio").mkdir(exist_ok=True)
 
-    # Startup health check (Ollama)
+    # Startup health check (Ollama) — only warn when private/hybrid mode needs it
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
-                logger.info(
-                    "Ollama check: reachable at %s (status %s)",
-                    settings.OLLAMA_URL,
-                    resp.status_code,
-                )
+                logger.info("Ollama reachable at %s", settings.OLLAMA_URL)
     except Exception:
-        logger.warning(
-            "Ollama unreachable at startup — LLM features will be degraded. "
-            "Ensure Ollama is running at: %s",
-            settings.OLLAMA_URL,
-        )
+        from app.services.settings_service import _cache as _llm_cache  # noqa: PLC0415
+        _mode = _llm_cache.get("llm_mode", "private")
+        if _mode in ("private", "hybrid"):
+            logger.warning(
+                "Ollama unreachable at startup (mode=%s) — local LLM features will be degraded. "
+                "Ensure Ollama is running at: %s",
+                _mode, settings.OLLAMA_URL,
+            )
+        else:
+            logger.debug("Ollama not reachable at startup (mode=%s, not needed)", _mode)
 
     # ffmpeg check — required for video (MP4) ingestion.
     _ffmpeg_path = shutil.which("ffmpeg")
@@ -161,6 +162,17 @@ async def lifespan(app: FastAPI):
     _worker.register("prerequisites", prereq_extract_handler)
     _worker.register("concept_link", concept_link_handler)
     await _worker.start()
+
+    # Load persisted LLM settings into cache so cloud mode is active from first request,
+    # not only after the frontend hits GET /settings/llm.
+    try:
+        from app.services.settings_service import load_llm_settings  # noqa: PLC0415
+
+        async with get_session_factory()() as _settings_db:
+            await load_llm_settings(_settings_db)
+        logger.info("LLM settings loaded from DB")
+    except Exception:
+        logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield

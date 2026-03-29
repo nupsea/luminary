@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 # Silence litellm's verbose success logging
 litellm.suppress_debug_info = True
 litellm.telemetry = False
+# Suppress the per-call INFO log ("LiteLLM completion() model= ...") — too noisy
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # Langfuse — optional LLM call observability
@@ -88,8 +90,11 @@ class LLMService:
         settings: Settings,
         *,
         override_key: str | None = None,
+        timeout: float | None = None,
     ) -> dict:
         kwargs: dict = {"model": model, "messages": messages}
+        if timeout is not None:
+            kwargs["request_timeout"] = timeout
         if override_key is not None:
             kwargs["api_key"] = override_key
         elif model.startswith("ollama/"):
@@ -108,6 +113,8 @@ class LLMService:
         system: str = "",
         model: str | None = None,
         stream: bool = False,
+        timeout: float | None = None,
+        background: bool = False,
     ) -> str | AsyncGenerator[str]:
         settings = get_settings()
         override_key: str | None = None
@@ -118,7 +125,7 @@ class LLMService:
                     get_effective_routing,
                 )
 
-                effective_model, override_key = get_effective_routing()
+                effective_model, override_key = get_effective_routing(background=background)
             except ValueError:
                 raise
             except Exception:
@@ -132,7 +139,7 @@ class LLMService:
         messages.append({"role": "user", "content": prompt})
 
         kwargs = self._build_kwargs(
-            effective_model, messages, settings, override_key=override_key
+            effective_model, messages, settings, override_key=override_key, timeout=timeout
         )
 
         if not stream:

@@ -26,7 +26,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     FeynmanSessionModel,
     FeynmanTurnModel,
@@ -260,13 +259,11 @@ class FeynmanService:
                 system=system_prompt,
                 stream=False,
             )
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError) as exc:
+        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError) as exc:
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "Ollama is not running. "
-                    "Start Ollama to use Feynman mode: ollama serve"
-                ),
+                detail="LLM unavailable. Check Settings — if using Ollama, run: ollama serve",
             ) from exc
 
         # Strip any accidental gaps: block from opening message
@@ -369,12 +366,13 @@ class FeynmanService:
         await db_session.flush()
 
         # Stream LLM response
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         accumulated = ""
-        model = get_settings().LITELLM_DEFAULT_MODEL
 
         try:
             stream_resp = await litellm.acompletion(
-                model=model,
+                **get_litellm_kwargs(),
                 messages=messages,
                 stream=True,
             )
@@ -386,14 +384,12 @@ class FeynmanService:
                     if "\ngaps:" not in accumulated and "gaps:" not in accumulated[-20:]:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError) as exc:
-            logger.warning("Feynman stream_turn: Ollama unavailable: %s", exc)
+        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError) as exc:
+            logger.warning("Feynman stream_turn: LLM unavailable: %s", exc)
             # Learner turn was flushed but not committed; roll back so no orphan row
             await db_session.rollback()
-            error_msg = (
-                "Ollama is not running. "
-                "Start Ollama to use Feynman mode: ollama serve"
-            )
+            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
 
@@ -472,9 +468,10 @@ class FeynmanService:
                     document_id=feynman_session.document_id,
                     session=db_session,
                 )
-            except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
+            except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+                    litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
                 logger.warning(
-                    "Feynman complete_session: Ollama unavailable; skipping flashcard generation"
+                    "Feynman complete_session: LLM unavailable; skipping flashcard generation"
                 )
 
         # Fire-and-forget objective coverage update
@@ -548,12 +545,13 @@ class FeynmanService:
             section_context=section_context,
         )
 
-        model = get_settings().LITELLM_DEFAULT_MODEL
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         accumulated = ""
 
         try:
             stream_resp = await litellm.acompletion(
-                model=model,
+                **get_litellm_kwargs(),
                 messages=[
                     {"role": "system", "content": _MODEL_EXPLANATION_SYSTEM},
                     {"role": "user", "content": prompt},
@@ -570,13 +568,11 @@ class FeynmanService:
                     if not kp_started:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError) as exc:
-            logger.warning("generate_model_explanation: Ollama unavailable: %s", exc)
+        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError) as exc:
+            logger.warning("generate_model_explanation: LLM unavailable: %s", exc)
             await db_session.rollback()
-            error_msg = (
-                "Ollama is not running. "
-                "Start Ollama to use this feature: ollama serve"
-            )
+            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
 

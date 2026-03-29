@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 import litellm
 from sqlalchemy import func, select, text
@@ -676,44 +676,46 @@ def _build_genre_system_prompt(genre: str) -> str:
     )
 
 
-def _compute_cosine(v1: list[float], v2: list[float]) -> float:
-    """Cosine similarity for L2-normalised vectors (dot product suffices)."""
+
+async def _fetch_existing_embeddings(
+    deck: str, session: AsyncSession
+) -> "tuple[list[str], list] | tuple[list, None]":
+    """Fetch all existing questions in *deck* and embed them in one batch.
+
+    Returns (questions, vectors) or ([], None) when the deck is empty or embedding fails.
+    """
     import numpy as np  # noqa: PLC0415
 
-    a = np.asarray(v1, dtype=np.float32)
-    b = np.asarray(v2, dtype=np.float32)
-    return float(np.dot(a, b))
-
-
-async def _dedup_check(question: str, deck: str, session: AsyncSession) -> bool:
-    """Return True if *question* is a near-duplicate of an existing card in *deck*.
-
-    Embeds the candidate question and compares against all existing questions in
-    the same deck. If any cosine similarity >= 0.85, the card is a duplicate.
-    """
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
-    # Fetch existing questions in the same deck
     result = await session.execute(
         select(FlashcardModel.question).where(FlashcardModel.deck == deck)
     )
     existing_questions = [row[0] for row in result.all()]
     if not existing_questions:
-        return False
+        return [], None
 
     embedder = get_embedding_service()
-    all_texts = [question] + existing_questions
     try:
-        all_vectors = await asyncio.to_thread(embedder.encode, all_texts)
+        vecs = await asyncio.to_thread(embedder.encode, existing_questions)
+        return existing_questions, np.array(vecs)
     except Exception:
-        logger.warning("Embedding dedup failed; skipping dedup check", exc_info=True)
-        return False
+        logger.warning("Embedding dedup: failed to encode existing questions; skipping dedup", exc_info=True)
+        return [], None
 
-    candidate_vec = all_vectors[0]
-    for existing_vec in all_vectors[1:]:
-        if _compute_cosine(candidate_vec, existing_vec) >= 0.85:
-            return True
-    return False
+
+def _is_near_duplicate(
+    candidate_vec: "Any",
+    existing_vecs: "Any",
+    threshold: float = 0.85,
+) -> bool:
+    """Return True if candidate_vec is within *threshold* cosine similarity of any existing_vec."""
+    import numpy as np  # noqa: PLC0415
+
+    candidate_norm = candidate_vec / (np.linalg.norm(candidate_vec) + 1e-10)
+    existing_norms = existing_vecs / (np.linalg.norm(existing_vecs, axis=1, keepdims=True) + 1e-10)
+    sims = existing_norms @ candidate_norm
+    return bool(np.any(sims >= threshold))
 
 
 # ---------------------------------------------------------------------------
@@ -943,22 +945,54 @@ class FlashcardService:
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
         now = datetime.now(UTC)
-        flashcards: list[FlashcardModel] = []
+
+        # Pre-compute existing embeddings once (avoids re-embedding on every card).
+        # Also embed all candidate questions in one batch, then filter duplicates in-memory.
+        import numpy as np  # noqa: PLC0415
+        from app.services.embedder import get_embedding_service  # noqa: PLC0415
+
+        _existing_qs, existing_vecs = await _fetch_existing_embeddings("default", session)
+
+        # Collect valid candidates first, then dedup in a single embed batch
+        candidates: list[dict] = []
         for item in cards_data:
             if not isinstance(item, dict):
                 continue
+            q = str(item.get("question", "")).strip()
+            a = str(item.get("answer", "")).strip()
+            if q and a:
+                candidates.append(item)
+
+        # Batch-embed all candidate questions in one call
+        if candidates and existing_vecs is not None:
+            try:
+                embedder = get_embedding_service()
+                cand_texts = [str(c.get("question", "")).strip() for c in candidates]
+                cand_vecs = await asyncio.to_thread(embedder.encode, cand_texts)
+                cand_vecs = np.array(cand_vecs)
+            except Exception:
+                logger.warning("Embedding dedup: candidate encode failed; skipping dedup", exc_info=True)
+                cand_vecs = None
+        else:
+            cand_vecs = None
+
+        # Build accepted set, checking each candidate against existing + previously accepted
+        pool_vecs = existing_vecs  # grows as we accept cards
+        flashcards: list[FlashcardModel] = []
+        for i, item in enumerate(candidates):
             question = str(item.get("question", "")).strip()
             answer = str(item.get("answer", "")).strip()
             source_excerpt = str(item.get("source_excerpt", "")).strip()
-            if not question or not answer:
-                continue
-            # S179: embedding-based dedup -- skip near-duplicates (cosine >= 0.85)
-            if await _dedup_check(question, "default", session):
-                logger.info(
-                    "flashcard.generate: skipping near-duplicate question: %r",
-                    question[:80],
-                )
-                continue
+            # Dedup check using pre-computed vectors
+            if cand_vecs is not None and pool_vecs is not None:
+                if _is_near_duplicate(cand_vecs[i], pool_vecs):
+                    logger.info(
+                        "flashcard.generate: skipping near-duplicate question: %r",
+                        question[:80],
+                    )
+                    continue
+                # Add accepted card's vector to pool so intra-batch duplicates are also caught
+                pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
             card = FlashcardModel(
                 id=str(uuid.uuid4()),
                 document_id=document_id,

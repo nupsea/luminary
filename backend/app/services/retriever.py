@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from collections import defaultdict
@@ -417,8 +418,10 @@ class HybridRetriever:
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion."""
         with trace_retrieval("hybrid", query=query) as span:
-            vector_results = self.vector_search(query, document_ids, k=20)
-            keyword_results = await self.keyword_search(query, document_ids, k=20)
+            vector_results, keyword_results = await asyncio.gather(
+                asyncio.to_thread(self.vector_search, query, document_ids, 20),
+                self.keyword_search(query, document_ids, k=20),
+            )
             results = self.rrf_merge(vector_results, keyword_results, k=k)
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))

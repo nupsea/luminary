@@ -71,12 +71,7 @@ class DocumentParser:
         # better section boundaries than regex-based signature discovery.
         # UniversalParser is designed for plain text where font info is absent.
         doc = fitz.open(str(file_path))
-        sections: list[Section] = []
-        raw_parts: list[str] = []
-        current_heading = "Introduction"
-        current_level = 1
-        current_page_start = 1  # 1-based to match pdfjs page numbering
-        current_texts: list[str] = []
+        total_pages = len(doc)
 
         all_font_sizes: list[float] = []
         for page in doc:
@@ -88,6 +83,130 @@ class DocumentParser:
 
         body_avg = sum(all_font_sizes) / len(all_font_sizes) if all_font_sizes else 12.0
         heading_threshold = body_avg * 1.2
+
+        # Try PDF built-in bookmarks (TOC) first -- these have accurate page numbers
+        # and define the chapter-level structure the author intended.
+        toc = doc.get_toc()  # [[level, title, page_num (1-based)], ...]
+
+        if toc:
+            logger.info("PDF TOC (%d entries): %s", len(toc), toc)
+            # Use the full TOC hierarchy to build sections directly.
+            # For leaf entries (no TOC children), also run font-size detection to
+            # surface sub-headings that the PDF author didn't add as bookmarks.
+            sections: list[Section] = []
+            raw_parts: list[str] = []
+
+            for i, (lv, ti, pg) in enumerate(toc):
+                # End page = start of the next entry at the same or higher level,
+                # minus 1. This correctly handles nested entries.
+                next_page = total_pages + 1
+                for j in range(i + 1, len(toc)):
+                    if toc[j][0] <= lv:
+                        next_page = toc[j][2]
+                        break
+                page_end = min(next_page - 1, total_pages)
+
+                # Does the next TOC entry go deeper? If so, this entry has TOC children.
+                has_toc_children = (i + 1 < len(toc)) and (toc[i + 1][0] > lv)
+
+                sub_sections: list[tuple[str, int, list[str]]] = []
+                current_sub: str | None = None
+                current_sub_page = pg
+                current_sub_texts: list[str] = []
+                texts: list[str] = []
+
+                for pn in range(pg - 1, page_end):  # 0-based page index
+                    page_obj = doc[pn]
+                    page_num_1 = pn + 1
+                    for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
+                        if block.get("type") != 0:
+                            continue
+                        for line in block.get("lines", []):
+                            spans = line.get("spans", [])
+                            if not spans:
+                                continue
+                            max_size = max(s["size"] for s in spans)
+                            line_text = " ".join(s["text"] for s in spans).strip()
+                            if not line_text:
+                                continue
+                            # For leaf TOC entries, detect sub-headings by font size
+                            if not has_toc_children:
+                                is_heading = (
+                                    max_size >= heading_threshold
+                                    and len(line_text) < 120
+                                    and line_text != ti
+                                )
+                                if is_heading:
+                                    if current_sub and current_sub_texts:
+                                        sub_sections.append((current_sub, current_sub_page, current_sub_texts[:]))
+                                    current_sub = line_text
+                                    current_sub_page = page_num_1
+                                    current_sub_texts = []
+                                    continue
+                                elif current_sub:
+                                    current_sub_texts.append(line_text)
+                            texts.append(line_text)
+
+                if current_sub and current_sub_texts:
+                    sub_sections.append((current_sub, current_sub_page, current_sub_texts))
+
+                text = "\n".join(texts).strip()
+                raw_parts.append(text)
+                sections.append(Section(
+                    heading=ti,
+                    level=lv,
+                    text=text[:2000] if sub_sections else text,
+                    page_start=pg,
+                    page_end=page_end,
+                ))
+                for j, (sub_title, sub_page, sub_texts) in enumerate(sub_sections):
+                    sub_end = sub_sections[j + 1][1] - 1 if j + 1 < len(sub_sections) else page_end
+                    sections.append(Section(
+                        heading=sub_title,
+                        level=lv + 1,
+                        text="\n".join(sub_texts),
+                        page_start=sub_page,
+                        page_end=sub_end,
+                    ))
+
+            if sections:
+                raw_text = "\n".join(raw_parts)
+                return ParsedDocument(
+                    title=file_path.stem,
+                    format="pdf",
+                    pages=total_pages,
+                    word_count=len(raw_text.split()),
+                    sections=sections,
+                    raw_text=raw_text,
+                )
+
+        # No TOC available -- single-pass font-size scan preserving document order.
+        # Pre-scan all font sizes to find the two heading thresholds dynamically.
+        all_sizes: list[float] = []
+        for page in doc:
+            for block in page.get_text("dict")["blocks"]:  # type: ignore[arg-type]
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    spans = line.get("spans", [])
+                    if spans:
+                        all_sizes.append(max(s["size"] for s in spans))
+
+        # Distinct sizes above body threshold, sorted largest first.
+        heading_sizes = sorted(set(s for s in all_sizes if s >= heading_threshold), reverse=True)
+        # Level-1 = the top distinct size group; level-2 = the rest above threshold.
+        h1_min = heading_sizes[0] if heading_sizes else heading_threshold
+        logger.info(
+            "PDF fallback scan: body_avg=%.1f threshold=%.1f h1_min=%.1f distinct_heading_sizes=%s",
+            body_avg, heading_threshold, h1_min, heading_sizes[:10],
+        )
+
+        sections = []
+        raw_parts = []
+        current_heading = "Introduction"
+        current_level = 1
+        current_page_start = 1
+        current_texts: list[str] = []
 
         def flush_section(next_heading: str, next_level: int, next_page: int) -> None:
             nonlocal current_heading, current_level, current_page_start, current_texts
@@ -108,8 +227,7 @@ class DocumentParser:
             current_texts = []
 
         for page_num, page in enumerate(doc):
-            page_dict = page.get_text("dict")
-            for block in page_dict["blocks"]:  # type: ignore[arg-type]
+            for block in page.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                 if block.get("type") != 0:
                     continue
                 for line in block.get("lines", []):
@@ -121,21 +239,20 @@ class DocumentParser:
                     if not line_text:
                         continue
                     if max_size >= heading_threshold and len(line_text) < 120:
-                        flush_section(line_text, 1, page_num + 1)
+                        level = 1 if max_size >= h1_min else 2
+                        flush_section(line_text, level, page_num + 1)
                     else:
                         current_texts.append(line_text)
                         raw_parts.append(line_text)
 
-        flush_section("_end", 0, len(doc) + 1)  # +1 so last section page_end = len(doc) (1-based)
+        flush_section("_end", 0, total_pages + 1)
 
         raw_text = "\n".join(raw_parts)
-        word_count = len(raw_text.split())
-        title = file_path.stem
         return ParsedDocument(
-            title=title,
+            title=file_path.stem,
             format="pdf",
-            pages=len(doc),
-            word_count=word_count,
+            pages=total_pages,
+            word_count=len(raw_text.split()),
             sections=sections,
             raw_text=raw_text,
         )

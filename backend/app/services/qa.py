@@ -297,12 +297,20 @@ class QAService:
         stream is never silently dropped.
         """
         try:
-            settings = get_settings()
-            effective_model = model or settings.LITELLM_DEFAULT_MODEL
+            # Compute store_model for _store_qa (NOT NULL constraint on model_used).
+            # Do NOT reassign `model` — it must stay None for cloud routing so that
+            # LLMService.generate() calls get_effective_routing() and picks up the
+            # DB-cached API key.  Replacing `model` with the resolved string would
+            # cause _build_kwargs to use settings.GOOGLE_API_KEY (empty in Docker).
+            try:
+                from app.services.settings_service import get_effective_routing  # noqa: PLC0415
+                store_model = model or get_effective_routing()[0]
+            except Exception:
+                store_model = model or "unknown"
 
             with trace_chain("qa.answer", input_value=question) as root_span:
                 root_span.set_attribute("qa.scope", scope)
-                root_span.set_attribute("qa.model", effective_model)
+                root_span.set_attribute("qa.model", store_model)
                 if document_ids:
                     root_span.set_attribute("qa.document_ids", ", ".join(document_ids))
 
@@ -345,12 +353,22 @@ class QAService:
                 except Exception as exc:
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "llm_unavailable")
+                    logger.warning(
+                        "stream_answer: graph error [%s]: %s",
+                        type(exc).__name__, exc,
+                    )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
                     elif isinstance(exc, litellm.AuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
+                    elif isinstance(exc, litellm.RateLimitError):
+                        msg = "Rate limit reached. Free tier quota exhausted — wait and retry, or switch provider."
+                    elif isinstance(exc, litellm.NotFoundError):
+                        msg = f"Model not found ({type(exc).__name__}). Check the model name in Settings."
+                    elif isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+                        msg = "LLM unreachable. Check your network or Settings — if using Ollama, run: ollama serve"
                     else:
-                        msg = "Ollama is unreachable. Start it with: ollama serve"
+                        msg = f"LLM error ({type(exc).__name__}). Check backend logs and Settings."
                     payload = {
                         "type": "error",
                         "error": "llm_unavailable",
@@ -406,7 +424,7 @@ class QAService:
                     else:
                         # Chunks present but LLM could not find the answer
                         await self._store_qa(
-                            question, None, [], "low", None, scope, effective_model
+                            question, None, [], "low", None, scope, store_model
                         )
                         root_span.set_attribute("qa.not_found", True)
                         yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
@@ -434,7 +452,7 @@ class QAService:
                 collected: list[str] = []
                 try:
                     token_gen = await llm.generate(
-                        llm_prompt, system=system_prompt, model=effective_model, stream=True
+                        llm_prompt, system=system_prompt, model=model, stream=True
                     )
 
                     # Stream tokens as they arrive; stop before the citation JSON block.
@@ -454,18 +472,23 @@ class QAService:
                     async for token in token_gen:
                         collected.append(token)
 
-                except (
-                    litellm.ServiceUnavailableError,
-                    litellm.APIConnectionError,
-                    ValueError,
-                    litellm.AuthenticationError,
-                ) as exc:
+                except Exception as exc:
+                    logger.warning(
+                        "stream_answer: LLM call failed [%s]: %s",
+                        type(exc).__name__, exc,
+                    )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
                     elif isinstance(exc, litellm.AuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
+                    elif isinstance(exc, litellm.RateLimitError):
+                        msg = "Rate limit reached. Free tier quota exhausted — wait and retry, or switch provider."
+                    elif isinstance(exc, litellm.NotFoundError):
+                        msg = f"Model not found ({type(exc).__name__}). Check the model name in Settings."
+                    elif isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+                        msg = "LLM unreachable. Check your network or Settings — if using Ollama, run: ollama serve"
                     else:
-                        msg = "Ollama is unreachable. Start it with: ollama serve"
+                        msg = f"LLM error ({type(exc).__name__}). Check backend logs and Settings."
                     payload = {
                         "type": "error",
                         "error": "llm_unavailable",
@@ -483,7 +506,7 @@ class QAService:
                     if not prose_before:
                         # True not-found: sentinel at the start of response
                         await self._store_qa(question, None, [], "low", None,
-                                             scope, effective_model)
+                                             scope, store_model)
                         yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
                         return
                     # LLM appended sentinel after a real answer — use the prose portion
@@ -535,7 +558,7 @@ class QAService:
 
             # Persist Q&A history and yield final SSE event
             qa_id = await self._store_qa(
-                question, answer_text, citations, confidence, first_doc_id, scope, effective_model
+                question, answer_text, citations, confidence, first_doc_id, scope, store_model
             )
             final = {
                 "done": True,
