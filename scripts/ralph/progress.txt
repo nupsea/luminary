@@ -2076,3 +2076,18 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Test prompt assertions must track the actual constant content -- FLASHCARD_SYSTEM was rewritten in S179 and old assertions became stale
   - Reviewer caught missing UI controls for filter state: having state + chip clear but no setter control means the filter is unusable
 ---
+
+## 2026-03-29 - S185
+- Simplified Study tab: single generate button with adaptive defaults
+- GenerateButton component replaces old GeneratePanel + SmartGeneratePanel with one primary button + disclosure chevron for advanced options
+- InsightsAccordion merges DeckHealthPanel + HealthReportPanel + StrugglingPanel into a single collapsible section below card list (collapsed by default)
+- Top CTA row: Start Studying + Generate Cards (max 2 CTAs above fold)
+- Card list (S184 search/filter) is now the primary visible content area
+- GoalsPanel confirmed removed from Study tab (S177 moved it to Progress)
+- studyUtils.ts: INSIGHTS_SECTIONS constant, buildSmartGenerateParams pure function
+- studyUtils.test.ts: AC8 (adaptive generate params) + AC9 (insights sections) tests
+- Files changed: frontend/src/pages/Study.tsx, frontend/src/lib/studyUtils.ts, frontend/src/lib/studyUtils.test.ts, scripts/smoke/S185.sh, backend/tools/test_json_update.py (ruff fix)
+- **Learnings for future iterations:**
+  - S185 was mostly pre-implemented in the partial commit; finishing it was a matter of verifying all ACs, creating smoke, running gates
+  - InsightsAccordion uses INSIGHTS_SECTIONS.includes() as static guards rather than .map(); works for constant validation but is not truly dynamic rendering
+---

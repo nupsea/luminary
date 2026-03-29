@@ -1,10 +1,12 @@
 import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, JSON, Text, select
-import uuid
 
-class Base(DeclarativeBase): pass
+from sqlalchemy import JSON, String, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
 
 class DummyNote(Base):
     __tablename__ = "dummy_notes"
