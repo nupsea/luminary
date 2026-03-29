@@ -91,8 +91,10 @@ class DocumentParser:
         if toc:
             logger.info("PDF TOC (%d entries): %s", len(toc), toc)
             # Use the full TOC hierarchy to build sections directly.
-            # For leaf entries (no TOC children), also run font-size detection to
-            # surface sub-headings that the PDF author didn't add as bookmarks.
+            # Trust the TOC structure -- it reflects what the author intended.
+            # Font-based sub-heading detection is skipped here to avoid
+            # mis-classifying bold/emphasis text as section boundaries in
+            # properly structured PDFs.
             sections: list[Section] = []
             raw_parts: list[str] = []
 
@@ -106,18 +108,10 @@ class DocumentParser:
                         break
                 page_end = min(next_page - 1, total_pages)
 
-                # Does the next TOC entry go deeper? If so, this entry has TOC children.
-                has_toc_children = (i + 1 < len(toc)) and (toc[i + 1][0] > lv)
-
-                sub_sections: list[tuple[str, int, list[str]]] = []
-                current_sub: str | None = None
-                current_sub_page = pg
-                current_sub_texts: list[str] = []
                 texts: list[str] = []
 
-                for pn in range(pg - 1, page_end):  # 0-based page index
+                for pn in range(max(0, pg - 1), page_end):  # 0-based page index
                     page_obj = doc[pn]
-                    page_num_1 = pn + 1
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                         if block.get("type") != 0:
                             continue
@@ -125,51 +119,20 @@ class DocumentParser:
                             spans = line.get("spans", [])
                             if not spans:
                                 continue
-                            max_size = max(s["size"] for s in spans)
                             line_text = " ".join(s["text"] for s in spans).strip()
                             if not line_text:
                                 continue
-                            # For leaf TOC entries, detect sub-headings by font size
-                            if not has_toc_children:
-                                is_heading = (
-                                    max_size >= heading_threshold
-                                    and len(line_text) < 120
-                                    and line_text != ti
-                                )
-                                if is_heading:
-                                    if current_sub and current_sub_texts:
-                                        sub_sections.append(
-                                            (current_sub, current_sub_page, current_sub_texts[:])
-                                        )
-                                    current_sub = line_text
-                                    current_sub_page = page_num_1
-                                    current_sub_texts = []
-                                    continue
-                                elif current_sub:
-                                    current_sub_texts.append(line_text)
                             texts.append(line_text)
-
-                if current_sub and current_sub_texts:
-                    sub_sections.append((current_sub, current_sub_page, current_sub_texts))
 
                 text = "\n".join(texts).strip()
                 raw_parts.append(text)
                 sections.append(Section(
                     heading=ti,
                     level=lv,
-                    text=text[:2000] if sub_sections else text,
+                    text=text,
                     page_start=pg,
                     page_end=page_end,
                 ))
-                for j, (sub_title, sub_page, sub_texts) in enumerate(sub_sections):
-                    sub_end = sub_sections[j + 1][1] - 1 if j + 1 < len(sub_sections) else page_end
-                    sections.append(Section(
-                        heading=sub_title,
-                        level=lv + 1,
-                        text="\n".join(sub_texts),
-                        page_start=sub_page,
-                        page_end=sub_end,
-                    ))
 
             if sections:
                 raw_text = "\n".join(raw_parts)

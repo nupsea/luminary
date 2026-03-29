@@ -32,7 +32,8 @@
       "Bash(grep -B5 -A30 \"backend\\\\|luminary\" /Users/adan/AI/repos/luminary/docker-compose*.yml)",
       "Bash(uvx ruff:*)",
       "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\")",
-      "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\\\\|Found\")"
+      "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\\\\|Found\")",
+      "Bash(npx vitest:*)"
     ]
   }
 }

@@ -6,139 +6,13 @@ import "pdfjs-dist/web/pdf_viewer.css"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionItem } from "./types"
-
-/** A resolved PDF outline (bookmark) entry with a 1-based page number. */
-interface OutlineEntry {
-  title: string
-  page: number // 1-based
-  level: number
-  children: OutlineEntry[]
-}
-
-/** Recursively resolve a pdfjs outline tree into flat entries with page numbers. */
-async function resolveOutline(
-  doc: PDFDocumentProxy,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  items: Array<any>,
-  level: number,
-): Promise<OutlineEntry[]> {
-  const results: OutlineEntry[] = []
-  for (const item of items) {
-    let page = -1
-    try {
-      if (item.dest) {
-        // dest can be a string (named destination) or an array (explicit destination)
-        const dest = typeof item.dest === "string"
-          ? await doc.getDestination(item.dest)
-          : item.dest
-        if (dest && Array.isArray(dest) && dest.length > 0) {
-          // dest[0] is a page ref object; resolve to 0-based index
-          const pageIndex = await doc.getPageIndex(dest[0])
-          page = pageIndex + 1 // convert to 1-based
-        }
-      }
-    } catch {
-      // skip entries with unresolvable destinations
-    }
-    if (page >= 1) {
-      const children = item.items?.length
-        ? await resolveOutline(doc, item.items, level + 1)
-        : []
-      results.push({ title: item.title, page, level, children })
-    }
-  }
-  return results
-}
-
-/** Flatten a nested outline tree into a single array preserving level. */
-function flattenOutline(entries: OutlineEntry[]): OutlineEntry[] {
-  const flat: OutlineEntry[] = []
-  for (const e of entries) {
-    flat.push(e)
-    if (e.children.length) flat.push(...flattenOutline(e.children))
-  }
-  return flat
-}
-
-/**
- * Build a TOC by scanning the PDF's text content for heading-sized lines.
- *
- * Level assignment is fully dynamic — no hardcoded font sizes:
- *   - Body size = median of all text items (robust against heading outliers)
- *   - Heading threshold = body * 1.15 (generous lower bound)
- *   - TOC-page filter: real section headings are pages apart; TOC listings
- *     cluster on the same or adjacent pages. Any heading whose nearest
- *     neighbour heading is < MIN_GAP pages away is a TOC entry and is dropped.
- *   - Level assignment: largest distinct size group → level 1, rest → level 2
- */
-async function buildFontTOC(
-  doc: PDFDocumentProxy,
-  isCancelled: () => boolean,
-): Promise<OutlineEntry[]> {
-  const totalPages = doc.numPages
-  const rawItems: { page: number; text: string; size: number }[] = []
-
-  for (let p = 1; p <= totalPages; p++) {
-    if (isCancelled()) return []
-    const page = await doc.getPage(p)
-    const content = await page.getTextContent()
-    for (const item of content.items) {
-      if (!("str" in item) || !item.str.trim()) continue
-      // item.height can be 0 for some PDFs; fall back to transform[3] (Y-scale)
-      const size = item.height > 0 ? item.height : Math.abs(item.transform[3] ?? 0)
-      rawItems.push({ page: p, text: item.str.trim(), size })
-    }
-    // Do NOT call page.cleanup() — may corrupt an in-progress render
-  }
-
-  if (rawItems.length === 0) return []
-
-  const positiveSizes = rawItems.map(i => i.size).filter(s => s > 0)
-  if (positiveSizes.length === 0) return []
-
-  // Median is more robust than mean when headings inflate the average
-  const sortedSizes = [...positiveSizes].sort((a, b) => a - b)
-  const bodyMedian = sortedSizes[Math.floor(sortedSizes.length / 2)]
-  const headingThreshold = bodyMedian * 1.15  // cast a wide net; gap filter culls TOC entries
-
-  // Collect all heading candidates (above threshold, short text)
-  const candidates = rawItems.filter(
-    i => i.size >= headingThreshold && i.text.length >= 2 && i.text.length < 120
-  )
-  if (candidates.length === 0) return []
-
-  // Page-gap filter: drop any heading whose nearest neighbour is < MIN_GAP pages away.
-  // This eliminates TOC-page listings (clustered on pages 1-3) while keeping
-  // content headings that are spread through the document.
-  const MIN_GAP = 2
-  const filtered = candidates.filter((item, i) => {
-    const prevGap = i > 0 ? item.page - candidates[i - 1].page : Infinity
-    const nextGap = i < candidates.length - 1 ? candidates[i + 1].page - item.page : Infinity
-    return Math.min(prevGap, nextGap) >= MIN_GAP
-  })
-
-  if (filtered.length === 0) return []
-
-  // Dynamic level assignment: round sizes to 0.5pt buckets, then split into
-  // two groups. The largest size group = level 1; everything else = level 2.
-  const sizeSet = [...new Set(filtered.map(i => Math.round(i.size * 2) / 2))].sort((a, b) => b - a)
-  // Find the biggest size gap between consecutive distinct sizes to set the split
-  let splitSize = sizeSet[0]  // default: only the very largest = level 1
-  if (sizeSet.length >= 2) {
-    let maxGap = 0
-    for (let i = 0; i < sizeSet.length - 1; i++) {
-      const gap = sizeSet[i] - sizeSet[i + 1]
-      if (gap > maxGap) { maxGap = gap; splitSize = sizeSet[i + 1] }
-    }
-  }
-
-  return filtered.map(item => ({
-    title: item.text,
-    page: item.page,
-    level: item.size >= splitSize ? 1 : 2,
-    children: [],
-  }))
-}
+import {
+  type OutlineEntry,
+  buildFontTOC,
+  flattenOutline,
+  resolveOutline,
+  shouldUseOutline,
+} from "./pdfTocUtils"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
@@ -343,6 +217,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       let cancelled = false
       setLoadStatus("loading")
       setPdfDoc(null)
+      setPdfOutline([])   // clear stale outline so backend sections show while new one resolves
       setCurrentPage(1)
       setPageInput("1")
       setTotalPages(0)
@@ -371,24 +246,36 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             // non-fatal; zoom stays at 1.0
           }
 
-          // Extract PDF built-in outline (bookmarks) for accurate TOC navigation.
-          // If the PDF has no bookmarks, fall back to font-size scanning.
+          // ── TOC source determination ─────────────────────────────────────
+          // Rule 1 — Native PDF bookmarks (always preferred when present).
+          //   Standard PDFs embed an authored outline; use every entry in it.
+          //   Entries whose page cannot be resolved are kept as static labels
+          //   so the full TOC structure is always visible.
+          //   Sort navigable entries (page > 0) by page; unresolvable entries
+          //   follow in their original declaration order.
+          // Rule 2 — Font-size scanning (only when no native outline exists).
+          //   PDFs without bookmarks (e.g. scanned or minimal exports) fall back
+          //   to scanning heading-sized text across all pages.
           try {
             const rawOutline = await doc.getOutline()
             if (rawOutline && rawOutline.length > 0 && !cancelled) {
+              // Rule 1: native outline present — resolve and use all entries
               const resolved = await resolveOutline(doc, rawOutline, 1)
-              if (!cancelled && resolved.length > 0) {
-                setPdfOutline(flattenOutline(resolved))
+              if (!cancelled) {
+                const flat = flattenOutline(resolved)
+                // Navigable entries sorted by page; unresolved entries keep
+                // their original DFS (reading) order appended after.
+                const navigable = flat.filter(e => e.page > 0).sort((a, b) => a.page - b.page)
+                const unresolved = flat.filter(e => e.page === 0)
+                setPdfOutline([...navigable, ...unresolved])
               }
             } else if (!cancelled) {
-              // No bookmarks — build TOC from font-size analysis of the actual content.
+              // Rule 2: no native outline — scan font sizes
               const fontToc = await buildFontTOC(doc, () => cancelled)
-              if (!cancelled && fontToc.length > 0) {
-                setPdfOutline(fontToc)
-              }
+              if (!cancelled && fontToc.length > 0) setPdfOutline(fontToc)
             }
           } catch {
-            // non-fatal; fall back to backend sections
+            // non-fatal; TOC panel falls back to backend sections
           }
         })
         .catch(() => {
@@ -575,9 +462,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       )
     }
 
-    // Use the font-scanned / bookmark outline whenever available; it has richer
-    // hierarchy than the backend sections (which only capture top-level chapters).
-    const useOutline = pdfOutline.length > 0
+    const useOutline = shouldUseOutline(pdfOutline.length, sections.length)
 
     return (
       <div className="flex h-full">
@@ -589,18 +474,30 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           {useOutline ? (
             <ul className="space-y-0.5">
               {pdfOutline.map((entry, idx) => {
-                // Active if this entry's page <= currentPage and next entry's page > currentPage
-                const nextPage = idx < pdfOutline.length - 1 ? pdfOutline[idx + 1].page : totalPages + 1
-                const isActive = entry.page <= currentPage && currentPage < nextPage
+                const navigable = entry.page > 0
+                // isActive: only for navigable entries. Find the next navigable
+                // entry's page for the range upper bound.
+                let isActive = false
+                if (navigable) {
+                  const nextNavigablePage = pdfOutline
+                    .slice(idx + 1)
+                    .find(e => e.page > 0)?.page ?? (totalPages + 1)
+                  isActive = entry.page <= currentPage && currentPage < nextNavigablePage
+                }
                 return (
                   <li key={`outline-${idx}`}>
                     <button
-                      className={`w-full text-left text-xs px-2 py-1 rounded hover:bg-accent truncate ${
-                        isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground"
+                      className={`w-full text-left text-xs px-2 py-1 rounded truncate ${
+                        isActive
+                          ? "bg-accent text-foreground font-medium"
+                          : navigable
+                          ? "text-muted-foreground hover:bg-accent"
+                          : "text-muted-foreground/50 cursor-default"
                       }`}
                       style={{ paddingLeft: `${(entry.level - 1) * 8 + 8}px` }}
-                      onClick={() => goToPage(entry.page)}
-                      title={`p.${entry.page} -- ${entry.title}`}
+                      onClick={() => navigable && goToPage(entry.page)}
+                      title={navigable ? `p.${entry.page} — ${entry.title}` : entry.title}
+                      disabled={!navigable}
                     >
                       {entry.title}
                     </button>

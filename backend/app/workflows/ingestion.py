@@ -1160,6 +1160,15 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("entity_extract", state):
         entity_count = 0
         try:
+            from app.config import get_settings as _get_settings  # noqa: PLC0415
+            if not _get_settings().GLINER_ENABLED:
+                logger.info(
+                    "entity_extract_node: skipped (GLINER_ENABLED=false)",
+                    extra={"doc_id": doc_id},
+                )
+                await _update_stage(doc_id, "complete")
+                return {**state, "status": "complete"}
+
             from itertools import combinations  # noqa: PLC0415
 
             from sqlalchemy import select  # noqa: PLC0415
@@ -1343,6 +1352,13 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             content_type = state.get("content_type") or ""
             if content_type == "code":
                 _build_call_graph(chunks, graph, doc_id)
+        except MemoryError as exc:
+            logger.error(
+                "entity_extract_node: OOM loading GLiNER model -- "
+                "set GLINER_ENABLED=false in .env to skip NER on low-memory machines",
+                extra={"doc_id": doc_id},
+                exc_info=exc,
+            )
         except Exception as exc:
             logger.warning(
                 "entity_extract_node failed (non-fatal, proceeding to complete)",

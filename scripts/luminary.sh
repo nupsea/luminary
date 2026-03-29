@@ -51,6 +51,13 @@ if [[ "$USE_DOCKER_BACKEND" == "true" ]]; then
     docker build -q -t luminary-backend "$REPO_ROOT/backend" >&2
     # Remove any leftover container from a previous unclean exit
     docker rm -f "$DOCKER_CONTAINER" 2>/dev/null || true
+    # Build env-file args: pass .luminary/.env if it exists so users can set
+    # GLINER_ENABLED, VISION_MODEL, API keys, etc. without touching the script.
+    DOCKER_ENV_FILE_ARG=""
+    if [[ -f "$REPO_ROOT/.luminary/.env" ]]; then
+        DOCKER_ENV_FILE_ARG="--env-file $REPO_ROOT/.luminary/.env"
+        _info "Loading settings from .luminary/.env"
+    fi
     (docker run --rm \
         --name "$DOCKER_CONTAINER" \
         -p "${BACKEND_PORT}:${BACKEND_PORT}" \
@@ -58,6 +65,7 @@ if [[ "$USE_DOCKER_BACKEND" == "true" ]]; then
         -e OLLAMA_URL="http://host.docker.internal:11434" \
         -e DATA_DIR="/app/.luminary" \
         -e PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring \
+        $DOCKER_ENV_FILE_ARG \
         luminary-backend 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 else
