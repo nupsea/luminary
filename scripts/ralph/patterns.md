@@ -52,6 +52,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Slow sync work outside locks**: when using `asyncio.to_thread` for slow work (e.g. GLiNER inference) before a Kuzu operation, run the slow work OUTSIDE the lock, acquire the lock only for the Kuzu writes. This prevents GIL contention from blocking other async tasks.
 - **Kuzu thread-safety with asyncio.to_thread**: acquire `KuzuService._lock` (threading.Lock) in ALL callers of `_conn.execute()`, including existing direct callers in chat_graph and graph.py. Multiple concurrent `asyncio.to_thread` tasks can corrupt state without serialization.
 - **In-memory TTL cache pattern**: Module-level `_cache: dict = {}` with keys "graph" → result, "ts" → float. Check freshness with `time.monotonic() - _cache["ts"] < TTL` (not `time.time()`, which can go backwards). Invalidate via `_cache.clear()`. Lazy-import the invalidation function in dependent modules to avoid circular imports.
+- **All graph service calls in async endpoints must use asyncio.to_thread**: Not just LanceDB (I-2), but ALL KuzuService method calls that hit `_conn.execute()`. Pattern: `await asyncio.to_thread(get_graph_service().method_name, arg1, arg2)`. This serializes Kuzu access globally and prevents event loop blocking from sync graph operations.
 
 ---
 
@@ -135,6 +136,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ## FastAPI Patterns
 
+- **Pure template logic in router endpoints (no service layer)**: When an endpoint applies pure template functions (no side effects, no shared state, deterministic output) to derive suggestions or UI content, the template functions can live as module-level helpers in the router file. No need to create a service layer. Example: `_book_suggestions(entities, headings) -> list[str]` pure function in chat_meta.py router.
 - **HTTP 201 Created for resource generation endpoints**: POST /flashcards/generate returns 201 Created, not 200 OK. Smoke scripts must check for `200` or `201` when testing generation endpoints.
 - **Admin key header dependency**: capture `X-Admin-Key` with `Header(default=None)` parameter; validate with `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`. Allows unauthenticated access if `ADMIN_KEY` is not set.
 - **Fire-and-forget background task in router**: use `asyncio.create_task` to spawn the task; inside the task body, create a fresh AsyncSession with `async with get_session_factory()()`. Never reuse the request-scoped session (it closes after handler returns, leaving the task with a closed session).
@@ -191,6 +193,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ## Post-Save Async Flows (TanStack Query + Ollama)
 
+- **TanStack Query auto-refetch on scope change**: When a component's query result depends on a runtime parameter (e.g., document scope), include that parameter in the queryKey. TanStack Query automatically refetches when the key changes. Pattern: `queryKey: ["suggestions", documentId]` with `documentId` that changes when user switches document scope. No manual `refetch()` call needed.
 - **All entry points must be covered**: a feature that fires after save (e.g. auto-tagging) can be triggered from multiple UI surfaces (create form, edit dialog). ACs must name every entry point explicitly. Testing only one surface and marking passes:true means the feature is partially broken.
 - **TanStack Query onSuccess must be synchronous**: In v5, onSuccess callbacks are not awaited. An `async onSuccess` with `await` inside creates a Promise that TanStack Query discards. Post-mutation async logic (like firing a secondary fetch) must use `useEffect` watching `mutation.isSuccess`, or be chained inside `mutationFn` itself.
 - **Silent Ollama fallback looks identical to a broken feature**: when a best-effort LLM call returns [] because Ollama is offline, the UI must show explicit feedback ("No suggestions available" or "Ollama offline"). Auto-closing with no message is indistinguishable from the feature never running.
