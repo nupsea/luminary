@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, FileText, LayoutGrid, Loader2, Pencil, Tag, Trash2, Wand2, X } from "lucide-react"
+import { Check, FileText, LayoutGrid, Loader2, Pencil, Tag, Trash2, Wand2 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { TagAutocomplete } from "@/components/TagAutocomplete"

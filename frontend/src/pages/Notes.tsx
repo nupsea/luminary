@@ -19,7 +19,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookOpen, Check, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { CollectionTree } from "@/components/CollectionTree"

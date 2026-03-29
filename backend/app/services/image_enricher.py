@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 
 import litellm
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,9 @@ def _is_decorative(pil_image: object) -> bool:
 
     img = pil_image  # type: ignore[assignment]
     img_rgb = img.convert("RGB")  # type: ignore[attr-defined]
-    pixels = list(img_rgb.getdata())
-    if len(set(pixels)) < 5:
+    pixels = np.array(img_rgb).reshape(-1, 3)
+    unique_count = len(np.unique(pixels, axis=0))
+    if unique_count < 5:
         return True
     w, h = img.size  # type: ignore[attr-defined]
     ratio = max(w, h) / max(min(w, h), 1)

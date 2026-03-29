@@ -88,7 +88,6 @@ describe("CollectionTree item count from fixture", () => {
   })
 
   it("renders Physics and Study Targets at top level", () => {
-    const flat = flattenCollectionTree(MOCK_TREE)
     const topLevel = MOCK_TREE.map((c) => c.name)
     expect(topLevel).toContain("Physics")
     expect(topLevel).toContain("Study Targets")

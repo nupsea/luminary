@@ -47,7 +47,7 @@ import { detectLinkTrigger, insertLinkAtTrigger } from "@/lib/noteLinkUtils"
 // Types
 // ---------------------------------------------------------------------------
 
-interface Note {
+export interface Note {
   id: string
   document_id: string | null
   chunk_id: string | null

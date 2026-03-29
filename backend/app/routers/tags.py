@@ -335,17 +335,20 @@ async def merge_tags(
     )
     note_ids = [row[0] for row in note_ids_result.all()]
 
-    if not note_ids:
-        # No notes to update -- still create alias and delete source
-        pass
-    else:
-        # Load notes
-        notes_result = await session.execute(
-            select(NoteModel).where(NoteModel.id.in_(note_ids))
-        )
-        notes = list(notes_result.scalars().all())
+    try:
+        if note_ids:
+            # Ensure we are not using stale objects
+            session.expire_all()
+            # Load notes
+            notes_result = await session.execute(
+                select(NoteModel).where(NoteModel.id.in_(note_ids))
+            )
+            notes = list(notes_result.scalars().all())
+            logger.info(
+                "Merging tag %r -> %r in %d notes: %r",
+                source_id, target_id, len(notes), note_ids
+            )
 
-        try:
             for note in notes:
                 current_tags: list[str] = note.tags or []
                 # Replace source with target, deduplicate, preserve order
@@ -357,16 +360,17 @@ async def merge_tags(
                         seen.add(replacement)
                         new_tags.append(replacement)
 
-                note.tags = new_tags
-                session.add(note)
+                if new_tags != current_tags:
+                    logger.debug("Updating note %s tags: %r -> %r", note.id, current_tags, new_tags)
+                    note.tags = list(new_tags)
+                    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+                    flag_modified(note, "tags")
+                    session.add(note)
+                    await session.flush()
+                
+                # Always sync index even if tags didn't change (idempotent)
                 await _sync_tag_index(note.id, new_tags, session)
-        except Exception:
-            await session.rollback()
-            raise HTTPException(
-                status_code=500, detail="Merge failed during note updates -- rolled back"
-            )
 
-    try:
         # Create alias: source -> target
         alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
         session.add(alias)
@@ -377,15 +381,15 @@ async def merge_tags(
         )
 
         await session.commit()
-    except Exception:
+        session.expire_all()
+        logger.info("Successfully merged tag %r -> %r", source_id, target_id)
+    except Exception as exc:
+        logger.exception("Merge failed for tag %r -> %r", source_id, target_id)
         await session.rollback()
         raise HTTPException(
-            status_code=500, detail="Merge failed during alias/cleanup -- rolled back"
+            status_code=500, detail=f"Merge failed: {exc}"
         )
 
-    logger.info(
-        "Merged tag %r -> %r, affected_notes=%d", source_id, target_id, len(note_ids)
-    )
     return TagMergeResponse(affected_notes=len(note_ids))
 
 
@@ -550,7 +554,9 @@ async def accept_normalization_suggestion(
                     if replacement not in seen:
                         seen.add(replacement)
                         new_tags.append(replacement)
-                note.tags = new_tags
+                note.tags = list(new_tags)
+                from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+                flag_modified(note, "tags")
                 session.add(note)
                 await _sync_tag_index(note.id, new_tags, session)
             affected_notes = len(notes)
@@ -569,6 +575,7 @@ async def accept_normalization_suggestion(
         suggestion.status = "accepted"
         session.add(suggestion)
         await session.commit()
+        session.expire_all()
     except Exception:
         await session.rollback()
         raise HTTPException(

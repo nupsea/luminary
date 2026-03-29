@@ -310,7 +310,6 @@ export default function Progress() {
 
   // Derived stats from history
   const totalReviewed = history.reduce((s, d) => s + d.cards_reviewed, 0)
-  const totalMinutes = history.reduce((s, d) => s + d.study_time_minutes, 0)
   const streak = computeStreak(history)
   const hasAnyStudy = totalReviewed > 0
 
