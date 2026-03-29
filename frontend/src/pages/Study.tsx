@@ -2313,57 +2313,6 @@ export default function Study() {
             </div>
           )}
 
-          {/* SmartGenerate panel -- only when document is active */}
-          {activeDocumentId && (
-            <section className="flex flex-col gap-4">
-              <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
-
-              <GenerateButton
-                  documentId={activeDocumentId}
-                  sections={sections}
-                  cards={cards}
-                  onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
-                  onGenerateFromGraph={(k) => {
-                    setGenerateErrorKind(null)
-                    generateFromGraphMutation.mutate(k)
-                  }}
-                  onGenerateCloze={(sectionId, count) => {
-                    setGenerateErrorKind(null)
-                    generateClozeMutation.mutate({ sectionId, count })
-                  }}
-                  isGenerating={
-                    generateMutation.isPending ||
-                    deleteAllMutation.isPending ||
-                    generateFromGraphMutation.isPending
-                  }
-                  isClozeGenerating={generateClozeMutation.isPending}
-                />
-
-                {/* Inline generate error banners */}
-                {generateErrorKind === "ollama_offline" && (
-                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    <span className="flex-1">
-                      Ollama is not running. To generate flashcards, run:{" "}
-                      <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
-                    </span>
-                    <button
-                      onClick={() => void navigator.clipboard.writeText("ollama serve")}
-                      className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-                      title="Copy command"
-                    >
-                      <Copy size={11} />
-                      Copy
-                    </button>
-                  </div>
-                )}
-                {generateErrorKind === "server_error" && (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    Flashcard generation failed. Please try again.
-                  </div>
-                )}
-              </section>
-          )}
-
           {/* S184: Card grid -- always visible (search is global) */}
           <section className="flex flex-col gap-4">
                 {cardsLoading ? (
@@ -2458,9 +2407,6 @@ export default function Study() {
                   window.scrollTo({ top: 0, behavior: "smooth" })
                 }}
               />
-
-              {/* Struggling Cards panel */}
-              <StrugglingPanel documentId={activeDocumentId} />
 
               {/* Progress dashboard (S23b) */}
               <section className="flex flex-col gap-4">
