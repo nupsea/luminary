@@ -14,7 +14,6 @@ from collections.abc import AsyncGenerator
 import litellm
 from sqlalchemy import select
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
@@ -362,11 +361,22 @@ class QAService:
                     elif isinstance(exc, litellm.AuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
                     elif isinstance(exc, litellm.RateLimitError):
-                        msg = "Rate limit reached. Free tier quota exhausted — wait and retry, or switch provider."
+                        msg = (
+                            "Rate limit reached. Free tier quota exhausted"
+                            " — wait and retry, or switch provider."
+                        )
                     elif isinstance(exc, litellm.NotFoundError):
-                        msg = f"Model not found ({type(exc).__name__}). Check the model name in Settings."
-                    elif isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
-                        msg = "LLM unreachable. Check your network or Settings — if using Ollama, run: ollama serve"
+                        msg = (
+                            f"Model not found ({type(exc).__name__})."
+                            " Check the model name in Settings."
+                        )
+                    elif isinstance(
+                        exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)
+                    ):
+                        msg = (
+                            "LLM unreachable. Check your network or Settings"
+                            " — if using Ollama, run: ollama serve"
+                        )
                     else:
                         msg = f"LLM error ({type(exc).__name__}). Check backend logs and Settings."
                     payload = {
@@ -482,11 +492,22 @@ class QAService:
                     elif isinstance(exc, litellm.AuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
                     elif isinstance(exc, litellm.RateLimitError):
-                        msg = "Rate limit reached. Free tier quota exhausted — wait and retry, or switch provider."
+                        msg = (
+                            "Rate limit reached. Free tier quota exhausted"
+                            " — wait and retry, or switch provider."
+                        )
                     elif isinstance(exc, litellm.NotFoundError):
-                        msg = f"Model not found ({type(exc).__name__}). Check the model name in Settings."
-                    elif isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
-                        msg = "LLM unreachable. Check your network or Settings — if using Ollama, run: ollama serve"
+                        msg = (
+                            f"Model not found ({type(exc).__name__})."
+                            " Check the model name in Settings."
+                        )
+                    elif isinstance(
+                        exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)
+                    ):
+                        msg = (
+                            "LLM unreachable. Check your network or Settings"
+                            " — if using Ollama, run: ollama serve"
+                        )
                     else:
                         msg = f"LLM error ({type(exc).__name__}). Check backend logs and Settings."
                     payload = {

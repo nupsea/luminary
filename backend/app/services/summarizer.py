@@ -455,7 +455,9 @@ class SummarizationService:
             for mode in modes_needed:
                 try:
                     system = _build_system_prompt(mode)
-                    text = await llm.generate(input_text, system=system, model=model, background=True)
+                    text = await llm.generate(
+                        input_text, system=system, model=model, background=True
+                    )
                     assert isinstance(text, str)
                     await self._store_summary(document_id, mode, text)
                     logger.info(

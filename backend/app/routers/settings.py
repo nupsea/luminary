@@ -235,7 +235,9 @@ async def _list_gemini_models(api_key: str) -> list[dict]:
         async with httpx.AsyncClient(timeout=_MODEL_API_TIMEOUT) as client:
             resp = await client.get(url)
             if resp.status_code != 200:
-                logger.warning("Gemini ListModels returned %d: %s", resp.status_code, resp.text[:200])
+                logger.warning(
+                    "Gemini ListModels returned %d: %s", resp.status_code, resp.text[:200]
+                )
                 return []
             data = resp.json()
     except Exception as exc:
@@ -255,7 +257,9 @@ async def _list_gemini_models(api_key: str) -> list[dict]:
 
     # Sort: known models first (by _MODEL_COSTS key order), then alphabetical
     known_order = list(_MODEL_COSTS.keys())
-    models.sort(key=lambda m: (known_order.index(m["id"]) if m["id"] in known_order else 999, m["id"]))
+    models.sort(
+        key=lambda m: (known_order.index(m["id"]) if m["id"] in known_order else 999, m["id"])
+    )
     return models
 
 
@@ -269,8 +273,6 @@ async def list_llm_models(
     For Gemini: fetches live from Google's ListModels API using the stored key.
     For OpenAI/Anthropic: returns a curated list (no live fetch needed).
     """
-    settings_data = await get_llm_settings(db)
-
     if provider == "gemini":
         from app.services.settings_service import _cache  # noqa: PLC0415
         api_key = _cache.get("google_api_key", "")

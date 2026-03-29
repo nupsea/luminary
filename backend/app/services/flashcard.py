@@ -700,7 +700,9 @@ async def _fetch_existing_embeddings(
         vecs = await asyncio.to_thread(embedder.encode, existing_questions)
         return existing_questions, np.array(vecs)
     except Exception:
-        logger.warning("Embedding dedup: failed to encode existing questions; skipping dedup", exc_info=True)
+        logger.warning(
+            "Embedding dedup: failed to encode existing questions; skipping dedup", exc_info=True
+        )
         return [], None
 
 
@@ -949,6 +951,7 @@ class FlashcardService:
         # Pre-compute existing embeddings once (avoids re-embedding on every card).
         # Also embed all candidate questions in one batch, then filter duplicates in-memory.
         import numpy as np  # noqa: PLC0415
+
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
         _existing_qs, existing_vecs = await _fetch_existing_embeddings("default", session)
@@ -971,7 +974,9 @@ class FlashcardService:
                 cand_vecs = await asyncio.to_thread(embedder.encode, cand_texts)
                 cand_vecs = np.array(cand_vecs)
             except Exception:
-                logger.warning("Embedding dedup: candidate encode failed; skipping dedup", exc_info=True)
+                logger.warning(
+                    "Embedding dedup: candidate encode failed; skipping dedup", exc_info=True
+                )
                 cand_vecs = None
         else:
             cand_vecs = None

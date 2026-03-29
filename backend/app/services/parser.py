@@ -138,7 +138,9 @@ class DocumentParser:
                                 )
                                 if is_heading:
                                     if current_sub and current_sub_texts:
-                                        sub_sections.append((current_sub, current_sub_page, current_sub_texts[:]))
+                                        sub_sections.append(
+                                            (current_sub, current_sub_page, current_sub_texts[:])
+                                        )
                                     current_sub = line_text
                                     current_sub_page = page_num_1
                                     current_sub_texts = []

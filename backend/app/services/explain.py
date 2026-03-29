@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncGenerator
 
 from app.services.llm import get_llm_service
+from app.services.retriever import get_retriever
 
 logger = logging.getLogger(__name__)
 

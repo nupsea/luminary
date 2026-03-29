@@ -206,8 +206,8 @@ class ImageEnricherService:
 
                 except litellm.ServiceUnavailableError:
                     logger.warning(
-                        "image_enricher: vision model (VISION_MODEL=%s) unavailable for image_id=%s "
-                        "-- image analysis requires a running vision model",
+                        "image_enricher: vision model (VISION_MODEL=%s) unavailable for"
+                        " image_id=%s -- image analysis requires a running vision model",
                         settings.VISION_MODEL,
                         img.id,
                     )

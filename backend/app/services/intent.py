@@ -240,7 +240,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
         return "factual"
     except Exception:
         logger.warning(
-            "intent LLM classification failed (LLM unavailable or model error), defaulting to 'factual'",
+            "intent LLM classification failed (LLM unavailable or model error),"
+            " defaulting to 'factual'",
             exc_info=True,
         )
         return "factual"
