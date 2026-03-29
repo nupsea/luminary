@@ -468,7 +468,7 @@ async def test_s165_merge_creates_alias_and_deletes_source():
         assert tgt_tag in tag_ids
 
 
-async def test_s165_merge_404_unknown_source():
+async def test_s165_merge_404_unknown_source(test_db):
     """POST /tags/merge returns 404 when source tag does not exist."""
     tgt_tag = f"target-{id(object()):x}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -481,7 +481,7 @@ async def test_s165_merge_404_unknown_source():
         assert resp.status_code == 404
 
 
-async def test_s165_merge_422_same_source_and_target():
+async def test_s165_merge_422_same_source_and_target(test_db):
     """POST /tags/merge returns 422 when source == target."""
     tag = f"self-merge-{id(object()):x}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

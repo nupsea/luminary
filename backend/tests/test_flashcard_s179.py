@@ -153,7 +153,7 @@ async def test_concept_chunk_produces_why_how_question(test_db):
 
     with (
         patch("app.services.flashcard.get_llm_service", return_value=mock_llm),
-        patch("app.services.flashcard._dedup_check", new=AsyncMock(return_value=False)),
+        patch("app.services.flashcard._fetch_existing_embeddings", new=AsyncMock(return_value=([], None))),
     ):
         async with factory() as session:
             cards = await FlashcardService().generate(

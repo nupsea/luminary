@@ -170,6 +170,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
             _cache[key] = plaintext
         else:
             # Unrecognised format — treat as raw value (handles any pre-migration entries)
+            logger.warning("unexpected DB format for key %r, loading as-is", key)
             _cache[key] = raw_value
 
 
