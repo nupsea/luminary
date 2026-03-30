@@ -2142,3 +2142,16 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Empty catch blocks in async handlers violate I-10; always show error state or toast on failure
   - Smoke tests must exercise the full user journey (trigger -> query -> action), not just the new endpoint
 ---
+
+## 2026-03-30 - S190
+- What was implemented: Tag search type-ahead in Notes sidebar TagTree component
+- Completed partial implementation: added 150ms debounce (useRef-based timer), clear (x) button, "No tags matching" empty state, Enter key to apply first match, recursive TagSubtree rendering for arbitrary depth, auto-expand matching branches during search, placeholder "Search tags..."
+- Added S190 unit tests: filterTagTree substring match (5 tests), parent chain for deeply nested tags (2 tests), highlightMatch segments (6 tests)
+- Created smoke script S190.sh
+- Files changed: frontend/src/components/TagTree.tsx, frontend/src/components/TagTree.test.ts, scripts/smoke/S190.sh, scripts/ralph/prd-v3.json, docs/ralph-run-flow.md, docs/exec-plans/active/S190.md -> completed/
+- **Learnings for future iterations:**
+  - Partial commits (eb9999d) leave gaps that must be systematically checked against all ACs before declaring done
+  - TagTree was only rendering 2 levels deep (hardcoded depth 0 and 1) -- recursive TagSubtree component needed for arbitrary nesting
+  - useRef-based debounce avoids adding a custom hook: store timer ref, clear on unmount via useEffect cleanup
+  - debouncedQuery drives filtering while searchQuery drives input display -- keeps input responsive while preventing re-renders
+---

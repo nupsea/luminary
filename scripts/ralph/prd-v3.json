@@ -764,7 +764,7 @@
       "phase": "V3 Phase 4 - Learner Experience Refinement",
       "priority": 30,
       "featureRef": "F-NOTES",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: Tags in the Notes sidebar can only be browsed by expanding the tree and clicked to filter. There is no way to type a tag name and find it, especially problematic when the tag tree grows large with deep hierarchies. USER JOURNEY: User sees a 'Search tags...' input at the top of the TagTree sidebar -> types 'genetics' -> tree filters to show 'science / biology / genetics' with parents dimmed and 'genetics' highlighted bold -> presses Enter -> tag applied as note filter -> clears search -> full tree restored. CROSS-STORY IMPACT: None -- standalone frontend change. IMPLEMENTATION NOTES: Frontend-only change to TagTree.tsx. Add a controlled input at top. On change (debounced 150ms), filter the /tags/tree data client-side: keep tags where display_name or full slug includes query (case-insensitive). For each match, include parent chain with dimmed styling. Highlight matching substring with <mark> or bold span. Enter/click applies filterByTag from existing store. Clear restores full tree. No new API endpoints needed.",
       "acceptanceCriteria": [
         "Search input rendered at the top of TagTree sidebar with placeholder 'Search tags...'",

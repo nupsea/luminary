@@ -11,8 +11,8 @@
  * States: loading (skeleton), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Settings2, Wrench, Search } from "lucide-react"
-import { useState } from "react"
+import { ChevronDown, ChevronRight, Settings2, Wrench, Search, X } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NormalizationDrawer } from "@/components/NormalizationDrawer"
@@ -149,6 +149,74 @@ function TagTreeItemRow({
 // TagTree
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Recursive tree renderer
+// ---------------------------------------------------------------------------
+
+function TagSubtree({
+  items,
+  depth,
+  expanded,
+  toggleExpand,
+  activeTag,
+  onSelect,
+  searchQuery,
+}: {
+  items: FilteredTagTreeItem[]
+  depth: number
+  expanded: Set<string>
+  toggleExpand: (id: string) => void
+  activeTag: string | null
+  onSelect: (id: string) => void
+  searchQuery: string
+}) {
+  return (
+    <>
+      {items.map((item) => (
+        <div key={item.id}>
+          <TagTreeItemRow
+            item={item}
+            depth={depth}
+            isExpanded={searchQuery ? true : expanded.has(item.id)}
+            onToggleExpand={() => toggleExpand(item.id)}
+            isActive={activeTag === item.id}
+            onSelect={() => onSelect(item.id)}
+            searchQuery={searchQuery}
+          />
+          {(searchQuery || expanded.has(item.id)) && item.children.length > 0 && (
+            <TagSubtree
+              items={item.children}
+              depth={depth + 1}
+              expanded={expanded}
+              toggleExpand={toggleExpand}
+              activeTag={activeTag}
+              onSelect={onSelect}
+              searchQuery={searchQuery}
+            />
+          )}
+        </div>
+      ))}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Collect all matched IDs from filtered tree (for Enter key: first match)
+// ---------------------------------------------------------------------------
+
+function collectMatchedIds(items: FilteredTagTreeItem[]): string[] {
+  const result: string[] = []
+  for (const item of items) {
+    if (item.matched) result.push(item.id)
+    result.push(...collectMatchedIds(item.children))
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// TagTree
+// ---------------------------------------------------------------------------
+
 export function TagTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [normOpen, setNormOpen] = useState(false)
@@ -169,7 +237,36 @@ export function TagTree() {
   })
 
   const [searchQuery, setSearchQuery] = useState("")
-  const filteredTree = filterTagTree(tree || [], searchQuery)
+  const [debouncedQuery, setDebouncedQuery] = useState("")
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedQuery(value), 150)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
+
+  const filteredTree = filterTagTree(tree || [], debouncedQuery)
+
+  function handleSelect(id: string) {
+    setActiveCollectionId(null)
+    setActiveTag(activeTag === id ? null : id)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && debouncedQuery) {
+      const matchedIds = collectMatchedIds(filteredTree)
+      if (matchedIds.length > 0) {
+        handleSelect(matchedIds[0])
+      }
+    }
+  }
 
   async function handleNormalize() {
     setScanInFlight(true)
@@ -200,6 +297,30 @@ export function TagTree() {
     >
       <Wrench size={12} className={scanInFlight ? "animate-spin" : ""} />
     </button>
+  )
+
+  const searchInput = (
+    <div className="relative flex-1">
+      <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      <input
+        type="text"
+        value={searchQuery}
+        onChange={(e) => handleSearchChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Search tags..."
+        className="w-full rounded border border-border bg-background py-1 pl-7 pr-6 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+      />
+      {searchQuery && (
+        <button
+          type="button"
+          onClick={() => { setSearchQuery(""); setDebouncedQuery("") }}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          title="Clear search"
+        >
+          <X size={10} />
+        </button>
+      )}
+    </div>
   )
 
   if (isLoading) {
@@ -238,16 +359,7 @@ export function TagTree() {
     return (
       <>
         <div className="flex items-center gap-2 mb-1">
-          <div className="relative flex-1">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter tags..."
-              className="w-full rounded border border-border bg-background py-1 pl-7 pr-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
+          {searchInput}
           {normalizeButton}
         </div>
         <div className="flex flex-col items-center gap-1 py-4 text-center text-xs text-muted-foreground">
@@ -258,55 +370,31 @@ export function TagTree() {
     )
   }
 
+  const showEmptyResult = debouncedQuery && filteredTree.length === 0
+
   return (
     <>
       <div className="flex items-center gap-2 mb-1">
-        <div className="relative flex-1">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter tags..."
-            className="w-full rounded border border-border bg-background py-1 pl-7 pr-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
+        {searchInput}
         {normalizeButton}
       </div>
-      <div className="flex flex-col gap-0.5">
-        {filteredTree.map((item) => (
-          <div key={item.id}>
-            <TagTreeItemRow
-              item={item}
-              depth={0}
-              isExpanded={expanded.has(item.id)}
-              onToggleExpand={() => toggleExpand(item.id)}
-              isActive={activeTag === item.id}
-              onSelect={() => {
-                setActiveCollectionId(null)
-                setActiveTag(activeTag === item.id ? null : item.id)
-              }}
-              searchQuery={searchQuery}
-            />
-            {expanded.has(item.id) &&
-              item.children.map((child) => (
-                <TagTreeItemRow
-                  key={child.id}
-                  item={child}
-                  depth={1}
-                  isExpanded={false}
-                  onToggleExpand={() => {}}
-                  isActive={activeTag === child.id}
-                  onSelect={() => {
-                    setActiveCollectionId(null)
-                    setActiveTag(activeTag === child.id ? null : child.id)
-                  }}
-                  searchQuery={searchQuery}
-                />
-              ))}
-          </div>
-        ))}
-      </div>
+      {showEmptyResult ? (
+        <div className="flex flex-col items-center gap-1 py-4 text-center text-xs text-muted-foreground">
+          <span>No tags matching &ldquo;{debouncedQuery}&rdquo;</span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          <TagSubtree
+            items={filteredTree}
+            depth={0}
+            expanded={expanded}
+            toggleExpand={toggleExpand}
+            activeTag={activeTag}
+            onSelect={handleSelect}
+            searchQuery={debouncedQuery}
+          />
+        </div>
+      )}
       <NormalizationDrawer open={normOpen} onOpenChange={setNormOpen} />
     </>
   )

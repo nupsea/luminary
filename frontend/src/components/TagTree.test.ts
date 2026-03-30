@@ -19,6 +19,8 @@ import {
   buildMergeRequest,
   buildAutocompleteUrl,
   filterMergeOptions,
+  filterTagTree,
+  highlightMatch,
 } from "@/lib/tagUtils"
 import type { TagTreeItem, AutocompleteResult } from "@/lib/tagUtils"
 
@@ -238,5 +240,163 @@ describe("filterMergeOptions", () => {
     }))
     const results = filterMergeOptions(many, "tag-0", "", 5)
     expect(results).toHaveLength(5)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S190: TagTree search input filters tags by substring match
+// ---------------------------------------------------------------------------
+
+const DEEP_TAG_TREE: TagTreeItem[] = [
+  {
+    id: "science",
+    display_name: "science",
+    parent_tag: null,
+    note_count: 20,
+    children: [
+      {
+        id: "science/biology",
+        display_name: "biology",
+        parent_tag: "science",
+        note_count: 10,
+        children: [
+          {
+            id: "science/biology/genetics",
+            display_name: "genetics",
+            parent_tag: "science/biology",
+            note_count: 5,
+            children: [],
+          },
+        ],
+      },
+      {
+        id: "science/physics",
+        display_name: "physics",
+        parent_tag: "science",
+        note_count: 8,
+        children: [],
+      },
+    ],
+  },
+  {
+    id: "programming",
+    display_name: "programming",
+    parent_tag: null,
+    note_count: 15,
+    children: [
+      {
+        id: "programming/python",
+        display_name: "python",
+        parent_tag: "programming",
+        note_count: 7,
+        children: [],
+      },
+    ],
+  },
+]
+
+describe("S190: filterTagTree substring match", () => {
+  it("returns all items when query is empty", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "")
+    expect(result).toHaveLength(2)
+    expect(result[0].matched).toBe(true)
+  })
+
+  it("filters to matching tags by display_name", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "genetics")
+    // science/biology/genetics matches, parents included for context
+    expect(result).toHaveLength(1) // only science tree
+    expect(result[0].id).toBe("science")
+    expect(result[0].matched).toBe(false) // parent is dimmed
+    expect(result[0].children).toHaveLength(1) // biology
+    expect(result[0].children[0].matched).toBe(false) // biology is dimmed
+    expect(result[0].children[0].children).toHaveLength(1) // genetics
+    expect(result[0].children[0].children[0].matched).toBe(true)
+  })
+
+  it("filters by id (full slug) match", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "science/biology")
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe("science")
+    // biology matches by id, genetics also matches by id (contains "science/biology")
+    expect(result[0].children[0].matched).toBe(true)
+  })
+
+  it("returns empty array when nothing matches", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "xyz123")
+    expect(result).toHaveLength(0)
+  })
+
+  it("match is case-insensitive", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "PHYSICS")
+    expect(result).toHaveLength(1) // science tree
+    const physics = result[0].children.find((c) => c.id === "science/physics")
+    expect(physics?.matched).toBe(true)
+  })
+})
+
+describe("S190: parent chain shown for deeply nested matching tags", () => {
+  it("genetics match includes science > biology parent chain", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "genetics")
+    expect(result).toHaveLength(1)
+    // science (dimmed) > biology (dimmed) > genetics (matched)
+    const science = result[0]
+    expect(science.id).toBe("science")
+    expect(science.matched).toBe(false)
+    const biology = science.children[0]
+    expect(biology.id).toBe("science/biology")
+    expect(biology.matched).toBe(false)
+    const genetics = biology.children[0]
+    expect(genetics.id).toBe("science/biology/genetics")
+    expect(genetics.matched).toBe(true)
+  })
+
+  it("physics match excludes biology subtree", () => {
+    const result = filterTagTree(DEEP_TAG_TREE, "physics")
+    expect(result).toHaveLength(1)
+    const science = result[0]
+    // Only physics branch remains, not biology
+    expect(science.children).toHaveLength(1)
+    expect(science.children[0].id).toBe("science/physics")
+  })
+})
+
+describe("S190: highlightMatch segments", () => {
+  it("highlights matching substring", () => {
+    const segs = highlightMatch("genetics", "net")
+    expect(segs).toHaveLength(3)
+    expect(segs[0]).toEqual({ text: "ge", highlight: false })
+    expect(segs[1]).toEqual({ text: "net", highlight: true })
+    expect(segs[2]).toEqual({ text: "ics", highlight: false })
+  })
+
+  it("highlights at start of string", () => {
+    const segs = highlightMatch("python", "py")
+    expect(segs).toHaveLength(2)
+    expect(segs[0]).toEqual({ text: "py", highlight: true })
+    expect(segs[1]).toEqual({ text: "thon", highlight: false })
+  })
+
+  it("highlights at end of string", () => {
+    const segs = highlightMatch("python", "thon")
+    expect(segs).toHaveLength(2)
+    expect(segs[0]).toEqual({ text: "py", highlight: false })
+    expect(segs[1]).toEqual({ text: "thon", highlight: true })
+  })
+
+  it("returns full text unhighlighted when no match", () => {
+    const segs = highlightMatch("python", "xyz")
+    expect(segs).toEqual([{ text: "python", highlight: false }])
+  })
+
+  it("case-insensitive highlight", () => {
+    const segs = highlightMatch("Python", "PY")
+    expect(segs).toHaveLength(2)
+    expect(segs[0]).toEqual({ text: "Py", highlight: true })
+  })
+
+  it("returns full text when query is empty", () => {
+    const segs = highlightMatch("python", "")
+    expect(segs).toEqual([{ text: "python", highlight: false }])
   })
 })
