@@ -61,7 +61,12 @@ FLASHCARD_USER_TMPL = (
     "Difficulty guidelines: {difficulty_guidelines}\n"
     "{extra_instructions}"
     "Each card must be answerable from the provided text only.\n"
-    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
+    "Format: "
+    '[{{"question": "...", "answer": "...", "source_excerpt": "...",'
+    ' "bloom_level": N}}]\n'
+    "bloom_level is an integer 1-6 "
+    "(1=remember, 2=understand, 3=apply, "
+    "4=analyze, 5=evaluate, 6=create).\n"
     "The \"answer\" field may use Markdown (bold, lists) for clarity.\n\n"
     "Text:\n{text}\n\n"
     "JSON array:"
@@ -159,6 +164,132 @@ _BOOK_CONTENT_GUIDELINE = (
 
 # Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)
 _CHUNK_CHAR_LIMIT = 10_000
+
+# S188: Bloom L3+ instruction appended to the genre system prompt
+_BLOOM_L3_INSTRUCTION = (
+    "\nBLOOM LEVEL TARGETING: Generate questions at Bloom's Taxonomy Level 3 or higher "
+    "(application, analysis, synthesis, evaluation). At least 50% of questions must require "
+    "the learner to apply, analyze, or evaluate -- not merely recall or describe. "
+    "For each card, include a \"bloom_level\" integer (1-6) indicating the cognitive level. "
+    "ANSWER CITATION: Each answer must reference the section or chapter where the concept "
+    "appears (e.g., 'In Chapter XII...', 'In the section on X...'). "
+)
+
+
+async def _get_section_context_for_chunks(
+    chunks: list[ChunkModel],
+    session: AsyncSession,
+) -> dict[str, tuple[str, str | None]]:
+    """Return a map of section_id -> (section_heading, parent_heading).
+
+    Used to enrich prompt text with section/chapter context.
+    """
+    section_ids = list({c.section_id for c in chunks if c.section_id})
+    if not section_ids:
+        return {}
+
+    result = await session.execute(
+        select(SectionModel).where(SectionModel.id.in_(section_ids))
+    )
+    sections = {s.id: s for s in result.scalars().all()}
+
+    # Resolve parent headings (one level up = chapter)
+    parent_ids = [s.parent_section_id for s in sections.values() if s.parent_section_id]
+    parents: dict[str, SectionModel] = {}
+    if parent_ids:
+        parent_result = await session.execute(
+            select(SectionModel).where(SectionModel.id.in_(parent_ids))
+        )
+        parents = {s.id: s for s in parent_result.scalars().all()}
+
+    context_map: dict[str, tuple[str, str | None]] = {}
+    for sid, sec in sections.items():
+        parent_heading = (
+            parents[sec.parent_section_id].heading
+            if sec.parent_section_id and sec.parent_section_id in parents
+            else None
+        )
+        context_map[sid] = (sec.heading, parent_heading)
+    return context_map
+
+
+async def _get_entity_names_for_document(
+    document_id: str,
+    types: list[str] | None = None,
+    limit: int = 5,
+) -> list[str]:
+    """Query Kuzu for top entity names for a document, filtered by type.
+
+    Returns up to *limit* names. Non-fatal: returns [] on error.
+    """
+    try:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        graph_svc = get_graph_service()
+        by_type = await asyncio.to_thread(
+            graph_svc.get_entities_by_type_for_document, document_id
+        )
+        names: list[str] = []
+        target_types = types or ["PERSON", "PLACE"]
+        for t in target_types:
+            names.extend(by_type.get(t, []))
+        # Deduplicate while preserving order, take top N
+        seen: set[str] = set()
+        unique: list[str] = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                unique.append(n)
+        return unique[:limit]
+    except Exception:
+        logger.debug(
+            "Entity lookup failed for %s; skipping enrichment",
+            document_id, exc_info=True,
+        )
+        return []
+
+
+def _build_enriched_text(
+    chunks: list[ChunkModel],
+    section_ctx: dict[str, tuple[str, str | None]],
+) -> tuple[str, str]:
+    """Build combined text with section heading prefixes for context.
+
+    Returns (enriched_text, first_chunk_id).
+    """
+    if not chunks:
+        return "", ""
+
+    parts: list[str] = []
+    total = 0
+    for c in chunks:
+        if total >= _CHUNK_CHAR_LIMIT:
+            break
+        prefix = ""
+        if c.section_id and c.section_id in section_ctx:
+            heading, parent = section_ctx[c.section_id]
+            if parent:
+                prefix = f"[{parent} > {heading}]\n"
+            else:
+                prefix = f"[{heading}]\n"
+        part = prefix + c.text
+        parts.append(part)
+        total += len(part)
+
+    return "\n\n".join(parts), chunks[0].id
+
+
+def _resolve_section_heading(
+    chunk: ChunkModel,
+    section_ctx: dict[str, tuple[str, str | None]],
+) -> str | None:
+    """Build a display-friendly section heading for a card from its chunk's section context."""
+    if not chunk.section_id or chunk.section_id not in section_ctx:
+        return None
+    heading, parent = section_ctx[chunk.section_id]
+    if parent:
+        return f"{parent} - {heading}"
+    return heading
 
 
 async def _fetch_chunks(
@@ -881,6 +1012,8 @@ class FlashcardService:
 
         # When the caller supplies selected text, use it directly (bypass classifier).
         chunk_classification: str | None = None
+        section_ctx: dict[str, tuple[str, str | None]] = {}
+        resolved_section_heading: str | None = None
         if context and context.strip():
             combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
             # Still need a chunk_id (NOT NULL) — grab the first chunk for the document.
@@ -895,6 +1028,9 @@ class FlashcardService:
             chunks = await _fetch_chunks(document_id, scope, section_heading, session, content_type)
             if not chunks:
                 return []
+
+            # S188: look up section headings for context enrichment
+            section_ctx = await _get_section_context_for_chunks(chunks, session)
 
             # S179: classify chunks and filter to concept/definition (+ adjacent elaborators)
             classified = _filter_chunks_by_classification(chunks)
@@ -915,13 +1051,51 @@ class FlashcardService:
                     len(chunks),
                 )
 
-            combined_text, first_chunk_id = _build_text(eligible_chunks)
+            # S188: build enriched text with section heading prefixes
+            if section_ctx:
+                combined_text, first_chunk_id = _build_enriched_text(eligible_chunks, section_ctx)
+            else:
+                combined_text, first_chunk_id = _build_text(eligible_chunks)
             if not combined_text:
                 return []
 
+            # S188: resolve section heading for cards (first chunk's section)
+            first_sec = eligible_chunks[0].section_id if eligible_chunks else None
+            if first_sec and first_sec in section_ctx:
+                resolved_section_heading = _resolve_section_heading(
+                    eligible_chunks[0], section_ctx
+                )
+
+        # S188: enrich system prompt with Bloom L3+ targeting and citation instruction
+        system_prompt += _BLOOM_L3_INSTRUCTION
+
+        # S188: for books, inject entity names into the system prompt
         extra_instructions = ""
         if content_type == "book":
             extra_instructions = _BOOK_CONTENT_GUIDELINE
+            entity_names = await _get_entity_names_for_document(
+                document_id, types=["PERSON", "PLACE"], limit=5
+            )
+            if entity_names:
+                names_str = ", ".join(entity_names)
+                extra_instructions += (
+                    f"Key characters and places in this work: {names_str}. "
+                    "Reference these names directly in questions when relevant.\n"
+                )
+
+        # S188: for technical docs, include code block excerpts
+        is_tech = content_type in ("code", "tech_book", "tech_article")
+        has_context = context and context.strip()
+        if is_tech and not has_context:
+            code_chunks = [c for c in eligible_chunks if c.has_code]
+            if code_chunks:
+                code_excerpts = "\n\n".join(
+                    c.text[:1000] for c in code_chunks[:3]
+                )
+                extra_instructions += (
+                    f"Code blocks from the document:\n{code_excerpts}\n"
+                    "Include code examples in questions where appropriate.\n"
+                )
 
         prompt = FLASHCARD_USER_TMPL.format(
             count=count,
@@ -998,6 +1172,13 @@ class FlashcardService:
                     continue
                 # Add accepted card's vector to pool so intra-batch duplicates are also caught
                 pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
+            # S188: extract bloom_level from LLM response if present
+            card_bloom_level = item.get("bloom_level")
+            if isinstance(card_bloom_level, int) and 1 <= card_bloom_level <= 6:
+                pass  # valid
+            else:
+                card_bloom_level = None
+
             card = FlashcardModel(
                 id=str(uuid.uuid4()),
                 document_id=document_id,
@@ -1014,6 +1195,8 @@ class FlashcardService:
                 lapses=0,
                 created_at=now,
                 chunk_classification=chunk_classification,
+                bloom_level=card_bloom_level,
+                section_heading=resolved_section_heading,
             )
             session.add(card)
             await _sync_flashcard_fts(card, session)

@@ -145,6 +145,8 @@ class FlashcardResponse(BaseModel):
     cloze_text: str | None = None
     # S179: chunk classifier label; null for non-document-chunk cards
     chunk_classification: str | None = None
+    # S188: section heading for source grounding display
+    section_heading: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -138,6 +138,8 @@ class FlashcardModel(Base):
     # S179: chunk classifier label (concept/definition/example/analogy/narrative/transition);
     # null for note/gap/context-sourced cards that bypass the classifier
     chunk_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # S188: section heading denormalized at generation time for source grounding display
+    section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

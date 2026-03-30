@@ -99,6 +99,8 @@ interface Flashcard {
   bloom_level: number | null
   // S154: cloze deletion text with {{term}} markers; null for non-cloze cards
   cloze_text: string | null
+  // S188: section heading for source grounding display
+  section_heading: string | null
 }
 
 interface SectionItem {
@@ -474,6 +476,10 @@ function FlashcardCard({
 
   return (
     <Card className="flex flex-col gap-3">
+      {/* S188: Section heading label */}
+      {card.section_heading && !editing && (
+        <p className="text-xs text-muted-foreground">{card.section_heading}</p>
+      )}
       {/* Question */}
       <div className="flex items-start justify-between gap-2">
         {editing ? (

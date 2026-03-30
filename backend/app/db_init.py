@@ -326,6 +326,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         except Exception:
             pass  # Column already exists (idempotent)
 
+        # S188: section_heading for source grounding display on flashcards.
+        try:
+            await conn.execute(
+                text("ALTER TABLE flashcards ADD COLUMN section_heading TEXT")
+            )
+        except Exception:
+            pass  # Column already exists (idempotent)
+
         # S183-fix: flashcards.document_id must be nullable for note-sourced cards.
         # Old databases have NOT NULL on this column. Use table-rebuild idiom since
         # SQLite does not support ALTER COLUMN to drop a NOT NULL constraint.
@@ -360,6 +368,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     " source_content_hash TEXT,"
                     " note_id TEXT,"
                     " chunk_classification TEXT,"
+                    " section_heading TEXT,"
                     " created_at DATETIME"
                     ")"
                 )
@@ -371,12 +380,12 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     "  source_excerpt, difficulty, is_user_edited, fsrs_stability,"
                     "  fsrs_difficulty, due_date, fsrs_state, reps, lapses, last_review,"
                     "  flashcard_type, bloom_level, cloze_text, source_content_hash,"
-                    "  note_id, chunk_classification, created_at)"
+                    "  note_id, chunk_classification, section_heading, created_at)"
                     " SELECT id, document_id, chunk_id, source, deck, question, answer,"
                     "  source_excerpt, difficulty, is_user_edited, fsrs_stability,"
                     "  fsrs_difficulty, due_date, fsrs_state, reps, lapses, last_review,"
                     "  flashcard_type, bloom_level, cloze_text, source_content_hash,"
-                    "  note_id, chunk_classification, created_at"
+                    "  note_id, chunk_classification, section_heading, created_at"
                     " FROM flashcards"
                 )
             )
