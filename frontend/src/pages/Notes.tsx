@@ -69,7 +69,7 @@ interface Note {
 
 interface GroupInfo { name: string; count: number }
 interface TagInfo { name: string; count: number }
-interface GroupsData { groups: GroupInfo[]; tags: TagInfo[] }
+interface GroupsData { groups: GroupInfo[]; tags: TagInfo[]; total_notes: number }
 
 interface DocumentItem {
   id: string
@@ -110,7 +110,7 @@ async function fetchNotes(
 
 async function fetchGroups(): Promise<GroupsData> {
   const res = await fetch(`${API_BASE}/notes/groups`)
-  if (!res.ok) return { groups: [], tags: [] }
+  if (!res.ok) return { groups: [], tags: [], total_notes: 0 }
   return res.json() as Promise<GroupsData>
 }
 
@@ -732,6 +732,7 @@ export default function NotesPage() {
   function handleRefetch() {
     void qc.invalidateQueries({ queryKey: ["notes"] })
     void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+    void qc.invalidateQueries({ queryKey: ["collections-tree"] })
   }
 
   async function handleConvertClipToNote(clip: Clip) {
@@ -1023,7 +1024,7 @@ export default function NotesPage() {
           }`}
         >
           All Notes
-          <span className="ml-auto text-xs">{noteList.length}</span>
+          <span className="ml-auto text-xs">{groups?.total_notes ?? noteList.length}</span>
         </button>
 
         <button
@@ -1231,6 +1232,7 @@ export default function NotesPage() {
         onSaved={(savedNote) => {
           void qc.invalidateQueries({ queryKey: ["notes"] })
           void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          void qc.invalidateQueries({ queryKey: ["collections-tree"] })
           
           if (isCreating && activeCollectionId) {
             // If we're inside a collection, add the new note to it immediately
@@ -1240,6 +1242,8 @@ export default function NotesPage() {
               body: JSON.stringify({ note_ids: [savedNote.id] }),
             }).then(() => {
               void qc.invalidateQueries({ queryKey: ["notes"] })
+              void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+              void qc.invalidateQueries({ queryKey: ["collections-tree"] })
             })
           }
 

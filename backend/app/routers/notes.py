@@ -87,6 +87,7 @@ class TagInfo(BaseModel):
 class GroupsResponse(BaseModel):
     groups: list[GroupInfo]
     tags: list[TagInfo]
+    total_notes: int
 
 
 class SuggestedTagsResponse(BaseModel):
@@ -433,7 +434,13 @@ async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     )
     tags = [TagInfo(name=row[0], count=row[1]) for row in tag_result.fetchall()]
 
-    return GroupsResponse(groups=groups, tags=tags)
+    # Total notes count (unarchived)
+    total_result = await session.execute(
+        select(func.count()).select_from(NoteModel).where(NoteModel.archived.is_(False))
+    )
+    total_notes = total_result.scalar_one()
+
+    return GroupsResponse(groups=groups, tags=tags, total_notes=total_notes)
 
 
 @router.get("", response_model=list[NoteResponse])
@@ -571,8 +578,21 @@ async def _apply_note_update(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
+    # Re-fetch relevant IDs for a fully populated response
+    coll_rows = (
+        await session.execute(
+            select(NoteCollectionMemberModel.collection_id).where(
+                NoteCollectionMemberModel.note_id == note.id
+            )
+        )
+    ).scalars().all()
+
     logger.info("Updated note", extra={"note_id": note_id})
-    return _to_response(note, source_document_ids=list(src_rows))
+    return _to_response(
+        note,
+        collection_ids=list(coll_rows),
+        source_document_ids=list(src_rows),
+    )
 
 
 @router.put("/{note_id}", response_model=NoteResponse)
