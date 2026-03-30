@@ -38,6 +38,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - All uv/pytest commands run from the absolute path `/Users/sethurama/DEV/LM/learning-mate/backend` — never `cd backend &&` prefix in subprocess calls
 - Run tests: `uv run pytest` (from backend dir)
 - Run lint: `uv run ruff check .` (from backend dir)
+- **Smoke test full user journey**: Smoke scripts must exercise the complete workflow (trigger endpoint → query endpoint → action endpoint), not just the new endpoint in isolation. Example: `POST /trigger -> GET /results -> POST /batch-action`. This verifies integration and prevents breakage in downstream consumers.
 - **Force-add .gitignored story deliverables**: `docs/`, `scripts/ralph/`, and other execution/tracking files are in `.gitignore`. Use `git add -f <path>` when committing story changes to prd-v3.json, progress.txt, or docs/exec-plans/ files. Without `-f`, these files stay untracked and are not included in the commit.
 - **Smoke scripts on macOS**: BSD `head` does not support `head -n -1`. Capture HTTP response body separately from status code using `curl -o $TMPFILE -w "%{http_code}"` and then `cat $TMPFILE` to read body. Don't use `head -n -1` in smoke scripts.
 - **macOS mktemp syntax**: `mktemp --suffix=.ext` is Linux-only. Use `mktemp /tmp/prefix_XXXXXX.ext` (template with extension after placeholder) for BSD compatibility.
@@ -136,6 +137,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ## FastAPI Patterns
 
+- **Batch-accept endpoint field overrides for frontend mutations**: Batch-accept endpoints (e.g., `POST /suggestions/batch-accept`) should accept optional field overrides (e.g., `note_ids: list[str] | None`) in the request item model. Use `effective_value = override or original` in the service to persist frontend drag-and-drop reordering. Without overrides, the backend cannot represent user-performed mutations that differ from the original suggestion.
 - **Pure template logic in router endpoints (no service layer)**: When an endpoint applies pure template functions (no side effects, no shared state, deterministic output) to derive suggestions or UI content, the template functions can live as module-level helpers in the router file. No need to create a service layer. Example: `_book_suggestions(entities, headings) -> list[str]` pure function in chat_meta.py router.
 - **HTTP 201 Created for resource generation endpoints**: POST /flashcards/generate returns 201 Created, not 200 OK. Smoke scripts must check for `200` or `201` when testing generation endpoints.
 - **Admin key header dependency**: capture `X-Admin-Key` with `Header(default=None)` parameter; validate with `if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY: raise HTTPException(403)`. Allows unauthenticated access if `ADMIN_KEY` is not set.
@@ -151,6 +153,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ## Frontend Rendering Consistency
 
+- **Async handler error handling violates I-10**: Empty catch blocks in async dialog/component handlers (e.g., `try { await mutate() } catch (e) { }`) hide errors from the user, violating I-10 (every feature needs error state). Always set an error state variable and render it as an inline error message: `const [error, setError] = useState(""); ... catch (e) { setError(e.message) }; ... {error && <p className="text-red-500">{error}</p>}`.
 - List/table views must NOT use MarkdownRenderer inline — block-level elements (h1, ul) inside a td break layout. Use a stripMarkdown() utility to strip heading markers, bold, italic, blockquote, and backtick symbols for single-line text previews. Card and detail views should use the full renderer.
 - stripMarkdown() is a pure function in src/lib/utils.ts. It strips `#`, `**`, `__`, `*`, `_`, `>` markers from preview text without rendering HTML.
 - Vite dev server does NOT hot-reload tailwind.config.cjs changes. Restart `npm run dev` after any config change. `npm run build` always produces correct output.
