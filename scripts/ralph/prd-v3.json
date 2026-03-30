@@ -719,7 +719,7 @@
       "phase": "V3 Phase 4 - Learner Experience Refinement",
       "priority": 28,
       "featureRef": "F-STUDY",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: Generated flashcard questions are often surface-level ('What is X?') and lack the context needed for real understanding. Answers do not reference where in the material the concept appears. The LLM prompt currently receives a 10K char text sample but no section heading, chapter context, or entity context. USER JOURNEY: User generates flashcards for a book -> cards now ask 'Why does Ulysses resist the Sirens in Chapter XII?' instead of 'What are the Sirens?' -> answer includes 'In Book XII, Ulysses...' with section reference -> card displays 'Book XII - The Sirens' as a subtle source label. CROSS-STORY IMPACT: S184 search benefits from richer question text. S179 chunk classification preserved. None broken. IMPLEMENTATION NOTES: Refactor FlashcardService.generate() prompt construction. When building the text sample, include section.heading and parent chapter heading. For books: query Kuzu for top 5 entities (PERSON, PLACE types) and inject into system prompt. For technical docs: detect code blocks in chunks and include them. Update LLM system prompt: 'Generate questions at Bloom L3+ (application, analysis, synthesis). Answers must cite the section or chapter.' Add section_heading to FlashcardResponse schema. Populate it via chunk -> section join when creating FlashcardModel rows. Frontend: display section_heading as muted text above question in FlashcardCard.",
       "acceptanceCriteria": [
         "FlashcardService.generate() prompt includes section heading and parent chapter/part heading alongside chunk text",

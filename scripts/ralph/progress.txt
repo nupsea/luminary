@@ -2124,3 +2124,12 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Pure template logic can live in the router (no service layer needed) when there are no side effects or shared state
   - SuggestionPills queryKey includes documentId so TanStack Query auto-refetches on scope change
 ---
+
+## 2026-03-30 - S188
+- What was implemented: Context-rich flashcard generation with source grounding -- enriched LLM prompts with section headings, entity context (books), code blocks (tech docs), Bloom L3+ targeting, section_heading field on FlashcardModel/Response
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/flashcard.py, backend/app/routers/flashcards.py, frontend/src/pages/Study.tsx, backend/tests/test_flashcard_s188.py, scripts/smoke/S188.sh, docs/exec-plans/completed/S188.md
+- **Learnings for future iterations:**
+  - _to_response helper was missing chunk_classification and section_heading -- always verify helper maps all schema fields when adding new columns
+  - Server must be restarted for OpenAPI schema smoke tests to reflect new fields
+  - Reviewer warning: smoke test did not exercise POST /flashcards/generate (requires live LLM); unit tests provide coverage
+---

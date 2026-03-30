@@ -239,6 +239,8 @@ def _to_response(
         bloom_level=getattr(card, "bloom_level", None),
         section_id=section_id,
         cloze_text=getattr(card, "cloze_text", None),
+        chunk_classification=getattr(card, "chunk_classification", None),
+        section_heading=getattr(card, "section_heading", None),
     )
 
 
