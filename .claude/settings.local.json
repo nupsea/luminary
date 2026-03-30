@@ -33,7 +33,8 @@
       "Bash(uvx ruff:*)",
       "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\")",
       "Bash(grep -v \"^Download\\\\|^Installed\\\\|^$\\\\|Found\")",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(grep -A 500 \"^$\")"
     ]
   }
 }

@@ -21,6 +21,8 @@ class ParsedDocument:
     word_count: int
     sections: list[Section] = field(default_factory=list)
     raw_text: str = ""
+    # Character offsets in raw_text where each new page begins
+    page_breaks: list[int] = field(default_factory=list)
 
 
 @dataclass

@@ -216,6 +216,78 @@ def _match_any_pattern(text: str) -> int | None:
     return None
 
 
+_RE_BASE_HEADING = re.compile(
+    r"((?:chapter|chap\.?|part|book|section|volume"
+    r"|adventure)\s+(?:\w+))",
+    re.IGNORECASE,
+)
+
+
+def _base_heading(heading: str) -> str:
+    """Extract canonical heading key for dedup.
+
+    E.g. 'chapter 6' from both 'CHAPTER 6' and 'Chapter 6: Partitioning'.
+    """
+    h = heading.split("\u2014", maxsplit=1)[0].strip()
+    m = _RE_BASE_HEADING.match(h)
+    if m:
+        return m.group(1).lower()
+    return h.lower()
+
+
+def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
+    """Merge sections that share the same base heading.
+
+    PDF running headers/footers (e.g. "Chapter 1: Title" on every page)
+    cause the segmenter to create dozens of micro-sections per chapter.
+    Cross-references ("In Chapter 7, we discussed...") at line starts
+    create additional orphan sections.
+
+    Two-pass approach:
+    1. Merge consecutive sections with the same base heading.
+    2. For each base heading that still appears multiple times, keep the
+       longest section and absorb shorter duplicates' text into it.
+    """
+    if not sections:
+        return sections
+
+    # Pass 1: merge consecutive duplicates
+    consec: list[Section] = [sections[0]]
+    for s in sections[1:]:
+        prev = consec[-1]
+        if _base_heading(s.heading) == _base_heading(prev.heading):
+            prev.text = prev.text + "\n\n" + s.text
+            prev.page_end = max(prev.page_end, s.page_end)
+        else:
+            consec.append(s)
+
+    # Pass 2: for each base heading appearing multiple times, keep
+    # the longest section and absorb the shorter ones' text.
+    from collections import defaultdict  # noqa: PLC0415
+
+    groups: dict[str, list[int]] = defaultdict(list)
+    for i, s in enumerate(consec):
+        groups[_base_heading(s.heading)].append(i)
+
+    drop: set[int] = set()
+    for key, idxs in groups.items():
+        if len(idxs) <= 1:
+            continue
+        # Pick the longest section as the primary
+        primary_idx = max(idxs, key=lambda i: len(consec[i].text))
+        primary = consec[primary_idx]
+        for i in idxs:
+            if i == primary_idx:
+                continue
+            primary.text = primary.text + "\n\n" + consec[i].text
+            primary.page_end = max(
+                primary.page_end, consec[i].page_end,
+            )
+            drop.add(i)
+
+    return [s for i, s in enumerate(consec) if i not in drop]
+
+
 class BookParser:
     """Chapter-aware parser for book-format documents."""
 
@@ -258,7 +330,9 @@ class BookParser:
         # Extract per-page text to enable page number assignment after segmentation
         page_texts = [page.get_text() for page in doc]
         total_pages = len(doc)
-        all_text = "\n".join(page_texts)
+        # S146: Join pages with \f (form feed) so we can map chunks back to physical
+        # page numbers even after Gutenberg/metadata stripping alters string offsets.
+        all_text = "\f".join(page_texts)
         clean_text, _ = self._strip_gutenberg(all_text)
         sections = self._segment_chapters(clean_text)
         if not sections:
@@ -267,11 +341,14 @@ class BookParser:
         # Assign page_start by searching the section heading in per-page texts.
         # Use the base heading (before any "—" subtitle) since it matches the
         # raw chapter heading text found in the PDF page content.
+        # Enforce monotonically increasing pages to skip TOC matches on early pages.
+        min_page = 1
         for section in sections:
             base = section.heading.split("—")[0].strip()
             for page_num, pt in enumerate(page_texts, start=1):
-                if base in pt:
+                if page_num >= min_page and base in pt:
                     section.page_start = page_num
+                    min_page = page_num
                     break
 
         # Set page_end = start of the next section (or last page for the final section)
@@ -486,4 +563,6 @@ class BookParser:
                 text="\n".join(lines[body_offset:]).strip(),
                 page_start=0, page_end=0,
             ))
-        return sections if len(sections) >= _MIN_CHAPTERS else None
+        if not sections or len(sections) < _MIN_CHAPTERS:
+            return None
+        return _merge_duplicate_sections(sections)

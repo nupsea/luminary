@@ -340,6 +340,7 @@ async def _chunk_book(
         chunks: list[dict] = []
         chunk_idx = 0
         chunk_models: list[ChunkModel] = []
+        is_pdf = state.get("format", "").lower() == "pdf"
         for section_model, s in zip(section_models, raw_sections, strict=False):
             section_text = s.get("text", "")
             if not section_text.strip():
@@ -348,13 +349,40 @@ async def _chunk_book(
             section_heading = section_model.heading
             context_header = f"[{book_title} > {section_heading}] "
 
-            # S146: populate pdf_page_number for PDF-format documents (1-based page)
-            fmt = state.get("format", "").lower()
-            chunk_pdf_page: int | None = None
-            if fmt == "pdf":
-                chunk_pdf_page = s.get("page_start", 0) or 1  # ensure at least page 1
+            # S146: populate pdf_page_number for PDF-format documents (1-based page).
+            # Use \f (form feed) markers inserted by book_parser to compute per-chunk
+            # page numbers instead of assigning the section start page to every chunk.
+            section_page_start = s.get("page_start", 0) or (1 if is_pdf else 0)
 
-            for raw_chunk_text in splitter.split_text(section_text):
+            # Strip \f from the text used for splitting (it's a control char, not content),
+            # but first compute page-break positions in clean-text coordinates.
+            if is_pdf and "\f" in section_text:
+                # Convert \f positions from original-text coords to clean-text coords.
+                # Original pos `fp` maps to clean pos `fp - n` where n = count of \f before it.
+                ff_clean_positions: list[int] = []
+                for i, ch in enumerate(section_text):
+                    if ch == "\f":
+                        ff_clean_positions.append(i - len(ff_clean_positions))
+                clean_section_text = section_text.replace("\f", "")
+            else:
+                ff_clean_positions = []
+                clean_section_text = section_text
+
+            # Track search position to handle overlapping chunks correctly
+            search_start = 0
+            for raw_chunk_text in splitter.split_text(clean_section_text):
+                # Compute per-chunk PDF page from \f positions
+                chunk_pdf_page: int | None = None
+                if is_pdf:
+                    pos = clean_section_text.find(raw_chunk_text[:80], search_start)
+                    if pos >= 0:
+                        # Count how many page breaks occur before this chunk's start
+                        ff_before = sum(1 for fp in ff_clean_positions if fp <= pos)
+                        chunk_pdf_page = section_page_start + ff_before
+                        search_start = pos  # allow overlap
+                    else:
+                        chunk_pdf_page = section_page_start
+
                 # Inject context into the text that will be embedded/indexed
                 enriched_text = context_header + raw_chunk_text
                 chunk_id = str(uuid.uuid4())
@@ -972,18 +1000,27 @@ async def chunk_node(state: IngestionState) -> IngestionState:
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
             )
-            all_texts = (
-                [s["text"] for s in pd["sections"] if s["text"]] if pd else []
-            )
-            raw_chunks_text = splitter.split_text("\n\n".join(all_texts))
             chunks = []
             async with get_session_factory()() as session:
-                # Store sections with preview text
-                for s_idx, s in enumerate(pd["sections"] if pd else []):
+                raw_sections = pd["sections"] if pd else []
+                if not raw_sections:
+                    raw_text = pd["raw_text"] if pd else ""
+                    raw_sections = [
+                        {
+                            "heading": "Full Text",
+                            "level": 1,
+                            "text": raw_text,
+                            "page_start": 0,
+                            "page_end": 0,
+                        }
+                    ]
+
+                section_models: list[SectionModel] = []
+                for s_idx, s in enumerate(raw_sections):
                     section_model = SectionModel(
                         id=str(uuid.uuid4()),
                         document_id=doc_id,
-                        heading=s.get("heading", ""),
+                        heading=s.get("heading", "") or f"Section {s_idx + 1}",
                         level=s.get("level", 1),
                         page_start=s.get("page_start", 0),
                         page_end=s.get("page_end", 0),
@@ -991,22 +1028,39 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                         preview=s.get("text", "")[:10000],
                     )
                     session.add(section_model)
+                    section_models.append(section_model)
+                await session.flush()
+
                 chunk_models: list[ChunkModel] = []
-                for idx, text in enumerate(raw_chunks_text):
-                    chunk_id = str(uuid.uuid4())
-                    chunk_models.append(ChunkModel(
-                        id=chunk_id,
-                        document_id=doc_id,
-                        section_id=None,
-                        text=text,
-                        token_count=len(text.split()),
-                        page_number=0,
-                        speaker=None,
-                        chunk_index=idx,
-                    ))
-                    chunks.append(
-                        {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
-                    )
+                chunk_idx = 0
+                fmt = state.get("format", "").lower()
+                
+                for section_model, s in zip(section_models, raw_sections, strict=False):
+                    section_text = s.get("text", "")
+                    if not section_text.strip():
+                        continue
+
+                    chunk_pdf_page: int | None = None
+                    if fmt == "pdf":
+                        chunk_pdf_page = s.get("page_start", 0) or 1
+
+                    for text in splitter.split_text(section_text):
+                        chunk_id = str(uuid.uuid4())
+                        chunk_models.append(ChunkModel(
+                            id=chunk_id,
+                            document_id=doc_id,
+                            section_id=section_model.id,
+                            text=text,
+                            token_count=len(text.split()),
+                            page_number=s.get("page_start", 0),
+                            speaker=None,
+                            chunk_index=chunk_idx,
+                            pdf_page_number=chunk_pdf_page,
+                        ))
+                        chunks.append(
+                            {"id": chunk_id, "document_id": doc_id, "text": text, "index": chunk_idx}
+                        )
+                        chunk_idx += 1
                 session.add_all(chunk_models)
                 await session.commit()
             logger.info(

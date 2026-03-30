@@ -32,7 +32,7 @@ class EmbeddingService:
         from sentence_transformers import SentenceTransformer
 
         try:
-            self._model = SentenceTransformer(MODEL_NAME, cache_folder=str(cache_dir))
+            self._model = SentenceTransformer(MODEL_NAME, cache_folder=str(cache_dir), device="cpu")
             logger.info("Loaded %s via SentenceTransformer", MODEL_NAME)
         except Exception as exc:
             logger.error("Failed to load embedding model: %s", exc)

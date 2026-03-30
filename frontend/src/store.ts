@@ -23,6 +23,18 @@ interface AppState {
   activeCollectionId: string | null
   // S165: Active tag filter for Notes tab (hierarchical prefix match).
   activeTag: string | null
+  // Chat persistence
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  chatMessages: any[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setChatMessages: (msgs: any[]) => void
+  chatScope: "single" | "all"
+  setChatScope: (scope: "single" | "all") => void
+  chatSelectedDocId: string | null
+  setChatSelectedDocId: (id: string | null) => void
+  chatQaError: string | null
+  setChatQaError: (err: string | null) => void
+  clearChat: () => void
   setActiveDocument: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
@@ -47,6 +59,15 @@ export const useAppStore = create<AppState>((set) => ({
   chatPreload: null,
   activeCollectionId: null,
   activeTag: null,
+  chatMessages: [],
+  setChatMessages: (msgs) => set({ chatMessages: msgs }),
+  chatScope: "all",
+  setChatScope: (scope) => set({ chatScope: scope }),
+  chatSelectedDocId: null,
+  setChatSelectedDocId: (id) => set({ chatSelectedDocId: id }),
+  chatQaError: null,
+  setChatQaError: (err) => set({ chatQaError: err }),
+  clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all" }),
   setActiveDocument: (id) => set({ activeDocumentId: id }),
   setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
   setLibraryView: (view) => set({ libraryView: view }),

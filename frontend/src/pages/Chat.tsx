@@ -227,8 +227,8 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
           </div>
           <div>
             <span className="font-medium text-foreground">Sources:</span>{" "}
-            {transparency.chunk_count} chunk{transparency.chunk_count !== 1 ? "s" : ""} from{" "}
-            {transparency.section_count} section{transparency.section_count !== 1 ? "s" : ""}
+            {transparency.chunk_count} chunk{transparency.chunk_count !== 1 ? "s" : ""}
+            {transparency.section_count > 0 ? ` from ${transparency.section_count} section${transparency.section_count !== 1 ? "s" : ""}` : ""}
           </div>
           {transparency.augmented && (
             <div className="italic">Context was extended after initial low confidence</div>
@@ -348,14 +348,25 @@ export default function Chat() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const messages = useAppStore((s) => s.chatMessages) as ChatMessage[]
+  const setMessagesRaw = useAppStore((s) => s.setChatMessages)
+  const setMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    if (typeof updater === "function") {
+      setMessagesRaw(updater(useAppStore.getState().chatMessages as ChatMessage[]))
+    } else {
+      setMessagesRaw(updater)
+    }
+  }
   const [input, setInput] = useState("")
-  const [scope, setScope] = useState<"single" | "all">("all")
+  const scope = useAppStore((s) => s.chatScope)
+  const setScope = useAppStore((s) => s.setChatScope)
   // selectedDocId: explicit in-tab selection; falls back to global activeDocumentId
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
+  const selectedDocId = useAppStore((s) => s.chatSelectedDocId)
+  const setSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
-  const [qaError, setQaError] = useState<string | null>(null)
+  const qaError = useAppStore((s) => s.chatQaError)
+  const setQaError = useAppStore((s) => s.setChatQaError)
   const [webEnabled, setWebEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
@@ -373,10 +384,10 @@ export default function Chat() {
 
   // Pre-populate from global store when user arrives from Learning tab
   useEffect(() => {
-    if (activeDocumentId) {
-      setSelectedDocId((prev) => prev ?? activeDocumentId)
+    if (activeDocumentId && !selectedDocId) {
+      setSelectedDocId(activeDocumentId)
     }
-  }, [activeDocumentId])
+  }, [activeDocumentId, selectedDocId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // S147: Pre-fill input from chatPreload set by SelectionActionBar "Ask in Chat" action
   useEffect(() => {

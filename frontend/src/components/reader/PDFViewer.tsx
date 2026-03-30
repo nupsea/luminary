@@ -288,16 +288,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       }
     }, [documentId])
 
-    // S148: navigate to initialPage once the PDF is loaded
+    // S148: navigate to initialPage once the PDF is loaded or when initialPage changes
     useEffect(() => {
       if (!initialPage || loadStatus !== "ready" || !totalPages) return
       if (initialPage >= 1 && initialPage <= totalPages) {
         setCurrentPage(initialPage)
         setPageInput(String(initialPage))
       }
-    // Only fire once after load
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loadStatus, totalPages])
+    }, [initialPage, loadStatus, totalPages])
 
     // Render the current page + pre-render next for fast navigation
     useEffect(() => {

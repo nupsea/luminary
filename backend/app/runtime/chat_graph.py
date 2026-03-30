@@ -1525,8 +1525,14 @@ async def synthesize_node(state: ChatState) -> dict:
             doc_title = doc_titles_map.get(doc_id, "")
             section_heading = c.get("section_heading", "")
 
-            # Dedup key: section_id when present; else chunk_id (each uncategorised chunk unique)
-            dedup_key = section_id if section_id else cid
+            # Dedup key: (section_id, page) for PDFs so different pages in the same
+            # section produce separate citations; section_id alone for non-PDFs.
+            if pdf_page is not None and section_id:
+                dedup_key = f"{section_id}:{pdf_page}"
+            elif section_id:
+                dedup_key = section_id
+            else:
+                dedup_key = cid
             if dedup_key in seen_dedup_keys:
                 continue
             seen_dedup_keys.add(dedup_key)
@@ -1571,12 +1577,30 @@ async def synthesize_node(state: ChatState) -> dict:
         "augmented": transparency_augmented,
     }
 
+    # Estimate retrieval confidence from chunk scores so confidence_gate_node
+    # can make an informed routing decision.  Before this fix the gate always
+    # saw the initial "low" default (synthesize_node prepares the prompt but
+    # does not call the LLM, so LLM-derived confidence is not available yet).
+    retrieval_confidence = "low"
+    if chunks_dicts:
+        scores = sorted(
+            (c.get("score", 0) for c in chunks_dicts), reverse=True,
+        )
+        top3_avg = sum(scores[:3]) / min(len(scores), 3)
+        # RRF with k=60: max score ~0.033 (rank 1 in both sources).
+        # 0.025+ = strong matches in both sources; 0.015+ = decent single-source.
+        if top3_avg >= 0.025:
+            retrieval_confidence = "high"
+        elif top3_avg >= 0.015:
+            retrieval_confidence = "medium"
+
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent
     # as the LLM generates it, not after all tokens are buffered.
     return {
         "_llm_prompt": prompt,
         "_system_prompt": system_prompt,
+        "confidence": retrieval_confidence,
         "source_citations": source_citations_out,
         "transparency": transparency_info,
     }

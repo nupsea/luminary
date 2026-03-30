@@ -1564,7 +1564,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     }
   }, [initialSectionId, doc])
 
-  // Auto-switch to PDF view for PDF documents; Book view for EPUB
+  // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
   useEffect(() => {
     if (!doc) return
     if (doc.format === "pdf") {
@@ -1573,8 +1573,11 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     } else if (doc.format === "epub") {
       setBookViewVisited(true)
       setLeftTab("bookview")
+    } else if (initialSectionId || initialPage) {
+      if (initialSectionId) setReadSectionId(initialSectionId)
+      setLeftTab("read")
     }
-  }, [doc?.format]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
@@ -2159,11 +2162,18 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           </div>
 
           {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
-          {doc.format === "pdf" && pdfViewVisited && (
-            <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-              <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={initialPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={setPdfCurrentPage} />
-            </div>
-          )}
+          {doc.format === "pdf" && pdfViewVisited && (() => {
+            let targetPdfPage = initialPage
+            if (!targetPdfPage && initialSectionId) {
+              const sec = doc.sections.find((s) => s.id === initialSectionId)
+              if (sec && sec.page_start > 0) targetPdfPage = sec.page_start
+            }
+            return (
+              <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
+                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={setPdfCurrentPage} />
+              </div>
+            )
+          })()}
 
           {/* S149: Book View — lazy-mounted for EPUB documents */}
           {doc.format === "epub" && bookViewVisited && (
