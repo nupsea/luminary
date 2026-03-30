@@ -368,3 +368,186 @@ async def test_get_cluster_suggestions_empty(test_db):
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: batch_accept_suggestions (S189)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_batch_accept_creates_collections(test_db):
+    """batch_accept_suggestions creates N collections with correct memberships."""
+    _engine, factory, _ = test_db
+
+    # Create notes
+    note_ids_a = [str(uuid.uuid4()) for _ in range(3)]
+    note_ids_b = [str(uuid.uuid4()) for _ in range(2)]
+
+    async with factory() as session:
+        for nid in note_ids_a + note_ids_b:
+            session.add(_make_note("Content", nid))
+        await session.commit()
+
+    # Create two pending suggestions
+    sid_a = str(uuid.uuid4())
+    sid_b = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            ClusterSuggestionModel(
+                id=sid_a,
+                suggested_name="Group A",
+                note_ids=note_ids_a,
+                confidence_score=0.9,
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            ClusterSuggestionModel(
+                id=sid_b,
+                suggested_name="Group B",
+                note_ids=note_ids_b,
+                confidence_score=0.8,
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+    svc = ClusteringService()
+    async with factory() as session:
+        created_ids = await svc.batch_accept_suggestions(
+            [
+                {"suggestion_id": sid_a, "name_override": None},
+                {"suggestion_id": sid_b, "name_override": None},
+            ],
+            session,
+        )
+
+    assert len(created_ids) == 2
+
+    # Verify collections and memberships
+    async with factory() as session:
+        for i, (cid, expected_note_ids) in enumerate(
+            zip(created_ids, [note_ids_a, note_ids_b])
+        ):
+            col = (
+                await session.execute(
+                    select(NoteCollectionModel).where(NoteCollectionModel.id == cid)
+                )
+            ).scalar_one()
+            assert col is not None
+
+            members = (
+                await session.execute(
+                    select(NoteCollectionMemberModel).where(
+                        NoteCollectionMemberModel.collection_id == cid
+                    )
+                )
+            ).scalars().all()
+            assert {m.note_id for m in members} == set(expected_note_ids)
+
+        # Suggestions marked as accepted
+        for sid in [sid_a, sid_b]:
+            suggestion = (
+                await session.execute(
+                    select(ClusterSuggestionModel).where(ClusterSuggestionModel.id == sid)
+                )
+            ).scalar_one()
+            assert suggestion.status == "accepted"
+
+
+@pytest.mark.anyio
+async def test_batch_accept_with_name_override(test_db):
+    """batch_accept with name_override uses the override instead of suggested name."""
+    _engine, factory, _ = test_db
+
+    note_ids = [str(uuid.uuid4()) for _ in range(3)]
+    async with factory() as session:
+        for nid in note_ids:
+            session.add(_make_note("Content", nid))
+        await session.commit()
+
+    sid = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            ClusterSuggestionModel(
+                id=sid,
+                suggested_name="Original Name",
+                note_ids=note_ids,
+                confidence_score=0.85,
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+    svc = ClusteringService()
+    async with factory() as session:
+        created_ids = await svc.batch_accept_suggestions(
+            [{"suggestion_id": sid, "name_override": "My Custom Name"}],
+            session,
+        )
+
+    assert len(created_ids) == 1
+
+    async with factory() as session:
+        col = (
+            await session.execute(
+                select(NoteCollectionModel).where(NoteCollectionModel.id == created_ids[0])
+            )
+        ).scalar_one()
+        assert col.name == "My Custom Name"
+
+
+@pytest.mark.anyio
+async def test_batch_accept_endpoint(test_db):
+    """POST /notes/cluster/suggestions/batch-accept creates collections via HTTP."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    _engine, factory, _ = test_db
+
+    note_ids = [str(uuid.uuid4()) for _ in range(3)]
+    async with factory() as session:
+        for nid in note_ids:
+            session.add(_make_note("Content", nid))
+        await session.commit()
+
+    sid = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            ClusterSuggestionModel(
+                id=sid,
+                suggested_name="HTTP Test",
+                note_ids=note_ids,
+                confidence_score=0.9,
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/notes/cluster/suggestions/batch-accept",
+            json={"items": [{"suggestion_id": sid, "name_override": "Renamed"}]},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "collection_ids" in data
+    assert len(data["collection_ids"]) == 1
+
+    # Verify collection name
+    async with factory() as session:
+        col = (
+            await session.execute(
+                select(NoteCollectionModel).where(
+                    NoteCollectionModel.id == data["collection_ids"][0]
+                )
+            )
+        ).scalar_one()
+        assert col.name == "Renamed"

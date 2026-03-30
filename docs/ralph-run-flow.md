@@ -128,5 +128,5 @@ Each story SXXX produces or modifies these artifacts:
 | S186 | Chat: inline document scope selector replaces settings drawer scope | pass |
 | S187 | Chat: document-aware contextual recommendations | pass |
 | S188 | Flashcard generation: context-rich questions with source grounding | pass |
-| S189 | Auto-organize: guided plan with confirmation workflow | pending |
+| S189 | Auto-organize: guided plan with confirmation workflow | pass |
 | S190 | Tag search: type-ahead search in Notes sidebar | pending |

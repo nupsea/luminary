@@ -189,7 +189,7 @@ class ClusteringService:
     async def get_pending_suggestions(self, db: AsyncSession) -> list[dict]:
         """Return pending ClusterSuggestionModel rows sorted by confidence_score DESC.
 
-        Each row includes up to 3 note content previews from the first 3 note_ids.
+        Each row includes ALL note_ids with content excerpts (for Organization Plan dialog).
         """
         result = await db.execute(
             select(ClusterSuggestionModel)
@@ -201,17 +201,17 @@ class ClusteringService:
         if not suggestions:
             return []
 
-        # Bulk-load note previews for all suggestions
-        all_preview_ids: list[str] = []
+        # Bulk-load note excerpts for ALL note_ids across all suggestions
+        all_note_ids: list[str] = []
         for s in suggestions:
-            all_preview_ids.extend((s.note_ids or [])[:3])
+            all_note_ids.extend(s.note_ids or [])
 
         note_map: dict[str, str] = {}
-        if all_preview_ids:
+        if all_note_ids:
             note_rows = (
                 await db.execute(
                     select(NoteModel.id, NoteModel.content).where(
-                        NoteModel.id.in_(all_preview_ids)
+                        NoteModel.id.in_(all_note_ids)
                     )
                 )
             ).all()
@@ -219,16 +219,17 @@ class ClusteringService:
 
         output = []
         for s in suggestions:
-            preview_ids = (s.note_ids or [])[:3]
+            nids = s.note_ids or []
             previews = [
                 {"note_id": nid, "excerpt": note_map.get(nid, "")}
-                for nid in preview_ids
+                for nid in nids
             ]
             output.append(
                 {
                     "id": s.id,
                     "suggested_name": s.suggested_name,
-                    "note_count": len(s.note_ids or []),
+                    "note_ids": nids,
+                    "note_count": len(nids),
                     "confidence_score": s.confidence_score,
                     "status": s.status,
                     "created_at": s.created_at,
@@ -292,6 +293,91 @@ class ClusteringService:
             len(suggestion.note_ids or []),
         )
         return collection_id
+
+    async def batch_accept_suggestions(
+        self,
+        items: list[dict],
+        db: AsyncSession,
+    ) -> list[str]:
+        """Accept multiple cluster suggestions in a single transaction.
+
+        Args:
+            items: list of {"suggestion_id": str, "name_override": str | None,
+                            "note_ids": list[str] | None}
+            db: AsyncSession
+
+        Returns:
+            List of created collection IDs.
+        """
+        suggestion_ids = [it["suggestion_id"] for it in items]
+        result = await db.execute(
+            select(ClusterSuggestionModel).where(
+                ClusterSuggestionModel.id.in_(suggestion_ids),
+                ClusterSuggestionModel.status == "pending",
+            )
+        )
+        suggestion_map = {s.id: s for s in result.scalars().all()}
+
+        # Build override maps keyed by suggestion_id
+        name_overrides = {
+            it["suggestion_id"]: it["name_override"]
+            for it in items
+            if it.get("name_override")
+        }
+        note_ids_overrides = {
+            it["suggestion_id"]: it["note_ids"]
+            for it in items
+            if it.get("note_ids") is not None
+        }
+
+        from sqlalchemy import text as sa_text  # noqa: PLC0415
+
+        created_ids: list[str] = []
+
+        for sid in suggestion_ids:
+            suggestion = suggestion_map.get(sid)
+            if suggestion is None:
+                continue
+
+            collection_id = str(uuid.uuid4())
+            name = name_overrides.get(sid) or suggestion.suggested_name
+            collection = NoteCollectionModel(
+                id=collection_id,
+                name=name,
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+            db.add(collection)
+            await db.flush()
+
+            # Use overridden note_ids if provided (drag-and-drop), else original
+            effective_note_ids = note_ids_overrides.get(sid) or suggestion.note_ids or []
+
+            for note_id in effective_note_ids:
+                await db.execute(
+                    sa_text(
+                        "INSERT OR IGNORE INTO note_collection_members"
+                        " (id, note_id, collection_id, added_at)"
+                        " VALUES (:id, :note_id, :collection_id, :added_at)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "note_id": note_id,
+                        "collection_id": collection_id,
+                        "added_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+
+            suggestion.status = "accepted"
+            created_ids.append(collection_id)
+
+        if created_ids:
+            await db.commit()
+
+        logger.info("Batch accepted %d/%d cluster suggestions", len(created_ids), len(items))
+        return created_ids
 
     async def reject_suggestion(self, suggestion_id: str, db: AsyncSession) -> bool:
         """Reject a cluster suggestion. Returns False if not found."""

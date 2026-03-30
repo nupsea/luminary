@@ -2133,3 +2133,12 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Server must be restarted for OpenAPI schema smoke tests to reflect new fields
   - Reviewer warning: smoke test did not exercise POST /flashcards/generate (requires live LLM); unit tests provide coverage
 ---
+
+## 2026-03-30 - S189
+- Implemented: OrganizationPlanDialog frontend component, POST /notes/cluster/suggestions/batch-accept endpoint, expanded GET /notes/cluster/suggestions to include all note_ids, drag-and-drop note reassignment persists via note_ids override in batch-accept
+- Files changed: backend/app/services/clustering_service.py, backend/app/routers/notes.py, backend/tests/test_clustering.py, frontend/src/components/OrganizationPlanDialog.tsx (new), frontend/src/pages/Notes.tsx, scripts/smoke/S189.sh (new)
+- **Learnings for future iterations:**
+  - Batch-accept endpoints should accept optional field overrides (e.g. note_ids) to persist frontend drag-and-drop reordering, not just name changes
+  - Empty catch blocks in async handlers violate I-10; always show error state or toast on failure
+  - Smoke tests must exercise the full user journey (trigger -> query -> action), not just the new endpoint
+---

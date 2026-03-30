@@ -780,11 +780,22 @@ class ClusterNotePreview(BaseModel):
 class ClusterSuggestionResponse(BaseModel):
     id: str
     suggested_name: str
+    note_ids: list[str] = []
     note_count: int
     confidence_score: float
     status: str
     created_at: datetime
     previews: list[ClusterNotePreview]
+
+
+class BatchAcceptItem(BaseModel):
+    suggestion_id: str
+    name_override: str | None = None
+    note_ids: list[str] | None = None  # If set, overrides the suggestion's note_ids (drag-and-drop)
+
+
+class BatchAcceptRequest(BaseModel):
+    items: list[BatchAcceptItem]
 
 
 @router.post("/cluster", status_code=202)
@@ -843,6 +854,7 @@ async def list_cluster_suggestions(
         ClusterSuggestionResponse(
             id=item["id"],
             suggested_name=item["suggested_name"],
+            note_ids=item.get("note_ids", []),
             note_count=item["note_count"],
             confidence_score=item["confidence_score"],
             status=item["status"],
@@ -851,6 +863,30 @@ async def list_cluster_suggestions(
         )
         for item in items
     ]
+
+
+# NOTE: batch-accept must be registered BEFORE /{suggestion_id} routes
+@router.post("/cluster/suggestions/batch-accept")
+async def batch_accept_cluster_suggestions(
+    req: BatchAcceptRequest,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Accept multiple cluster suggestions in a single transaction.
+
+    Returns list of created collection IDs.
+    """
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    items_dicts = [
+        {
+            "suggestion_id": it.suggestion_id,
+            "name_override": it.name_override,
+            "note_ids": it.note_ids,
+        }
+        for it in req.items
+    ]
+    created_ids = await get_clustering_service().batch_accept_suggestions(items_dicts, session)
+    return {"collection_ids": created_ids}
 
 
 @router.post("/cluster/suggestions/{suggestion_id}/accept")

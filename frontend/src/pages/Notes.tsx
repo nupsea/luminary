@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookOpen, Check, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -26,6 +26,7 @@ import { CollectionTree } from "@/components/CollectionTree"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
 import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
+import { OrganizationPlanDialog } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
@@ -176,6 +177,7 @@ interface ClusterNotePreview {
 interface ClusterSuggestion {
   id: string
   suggested_name: string
+  note_ids: string[]
   note_count: number
   confidence_score: number
   status: string
@@ -195,17 +197,8 @@ async function postCluster(): Promise<{ queued?: boolean; cached?: boolean; tota
   return res.json() as Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }>
 }
 
-async function acceptSuggestion(id: string): Promise<{ collection_id: string }> {
-  const res = await fetch(`${API_BASE}/notes/cluster/suggestions/${id}/accept`, { method: "POST" })
-  if (!res.ok) throw new Error(`POST /notes/cluster/suggestions/${id}/accept failed: ${res.status}`)
-  return res.json() as Promise<{ collection_id: string }>
-}
-
-async function rejectSuggestion(id: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_BASE}/notes/cluster/suggestions/${id}/reject`, { method: "POST" })
-  if (!res.ok) throw new Error(`POST /notes/cluster/suggestions/${id}/reject failed: ${res.status}`)
-  return res.json() as Promise<{ ok: boolean }>
-}
+// Individual accept/reject API helpers removed; OrganizationPlanDialog uses batch-accept.
+// Backend endpoints preserved for backward compatibility.
 
 interface NoteSearchItem {
   note_id: string
@@ -618,6 +611,7 @@ export default function NotesPage() {
   const [showCreateCollection, setShowCreateCollection] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [isClusterQueued, setIsClusterQueued] = useState(false)
+  const [showOrgPlan, setShowOrgPlan] = useState(false)
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
@@ -687,11 +681,19 @@ export default function NotesPage() {
   async function handleAutoOrganize() {
     setIsClusterQueued(true)
     try {
-      await postCluster()
+      const result = await postCluster()
+      if (result.cached) {
+        // Already have pending suggestions -- show the plan immediately
+        setIsClusterQueued(false)
+        setShowOrgPlan(true)
+        return
+      }
       // Poll suggestions after a short delay to give clustering a head start
       setTimeout(() => {
-        void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
-        setIsClusterQueued(false)
+        void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] }).then(() => {
+          setIsClusterQueued(false)
+          setShowOrgPlan(true)
+        })
       }, 3000)
     } catch {
       toast.error("Failed to start auto-organize")
@@ -699,25 +701,7 @@ export default function NotesPage() {
     }
   }
 
-  async function handleAcceptSuggestion(id: string) {
-    try {
-      await acceptSuggestion(id)
-      void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
-      void qc.invalidateQueries({ queryKey: ["collections"] })
-      toast.success("Collection created")
-    } catch {
-      toast.error("Failed to accept suggestion")
-    }
-  }
-
-  async function handleRejectSuggestion(id: string) {
-    try {
-      await rejectSuggestion(id)
-      void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
-    } catch {
-      toast.error("Failed to reject suggestion")
-    }
-  }
+  // Individual accept/reject kept as API helpers (backward compat) but UI uses OrganizationPlanDialog
 
   useEffect(() => {
     if (!notesLoading) {
@@ -1065,7 +1049,7 @@ export default function NotesPage() {
           <TagTree />
         </div>
 
-        {/* Suggested Collections section (visible only when suggestions exist or scan queued) */}
+        {/* Suggested Collections summary + auto-organize trigger */}
         {(clusterSuggestions.length > 0 || isClusterQueued) && (
           <div className="mt-3">
             <div className="mb-1 flex items-center justify-between px-1">
@@ -1096,47 +1080,17 @@ export default function NotesPage() {
                 </button>
               </p>
             )}
-            {clusterSuggestions.map((s) => (
-              <div key={s.id} className="mb-1 rounded border border-border p-2 text-xs">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="font-medium truncate">{s.suggested_name}</span>
-                  <span className="shrink-0 text-muted-foreground">{s.note_count} notes</span>
-                </div>
-                {/* Confidence bar */}
-                <div className="my-1 h-1 rounded bg-border">
-                  <div
-                    className="h-1 rounded bg-primary"
-                    style={{ width: `${Math.round(s.confidence_score * 100)}%` }}
-                  />
-                </div>
-                {/* Note previews */}
-                <div className="mb-1.5 space-y-0.5">
-                  {s.previews.slice(0, 3).map((p) => (
-                    <p key={p.note_id} className="truncate text-muted-foreground italic">
-                      {p.excerpt}
-                    </p>
-                  ))}
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => void handleAcceptSuggestion(s.id)}
-                    className="flex items-center gap-0.5 rounded bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20"
-                    title="Accept — create collection"
-                  >
-                    <Check size={10} />
-                    Accept
-                  </button>
-                  <button
-                    onClick={() => void handleRejectSuggestion(s.id)}
-                    className="flex items-center gap-0.5 rounded px-2 py-0.5 text-muted-foreground hover:bg-accent"
-                    title="Reject suggestion"
-                  >
-                    <X size={10} />
-                    Reject
-                  </button>
-                </div>
-              </div>
-            ))}
+            {clusterSuggestions.length > 0 && !clusterSuggestionsLoading && (
+              <button
+                onClick={() => setShowOrgPlan(true)}
+                className="w-full rounded border border-border p-2 text-xs text-left hover:bg-accent/40"
+              >
+                <span className="font-medium">
+                  {clusterSuggestions.length} group{clusterSuggestions.length !== 1 ? "s" : ""} found
+                </span>
+                <span className="text-muted-foreground"> -- click to review plan</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -1153,6 +1107,22 @@ export default function NotesPage() {
             </button>
           </div>
         )}
+
+        {/* Organization Plan dialog */}
+        <OrganizationPlanDialog
+          open={showOrgPlan}
+          onOpenChange={setShowOrgPlan}
+          suggestions={clusterSuggestions}
+          onApplied={() => {
+            void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+            void qc.invalidateQueries({ queryKey: ["collections"] })
+            void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+            toast.success("Organization plan applied")
+          }}
+          onDismissed={() => {
+            void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+          }}
+        />
       </div>
 
       {/* Right panel */}
