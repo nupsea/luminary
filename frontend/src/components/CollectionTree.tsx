@@ -391,6 +391,7 @@ export function CollectionTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const setActiveTag = useAppStore((s) => s.setActiveTag)
 
   const {
     data: tree,
@@ -455,9 +456,10 @@ export function CollectionTree() {
             isExpanded={expanded.has(item.id)}
             onToggleExpand={() => toggleExpand(item.id)}
             isActive={activeCollectionId === item.id}
-            onSelect={() =>
+            onSelect={() => {
+              setActiveTag(null)
               setActiveCollectionId(activeCollectionId === item.id ? null : item.id)
-            }
+            }}
           />
           {expanded.has(item.id) &&
             item.children.map((child) => (
@@ -468,9 +470,10 @@ export function CollectionTree() {
                 isExpanded={false}
                 onToggleExpand={() => {}}
                 isActive={activeCollectionId === child.id}
-                onSelect={() =>
+                onSelect={() => {
+                  setActiveTag(null)
                   setActiveCollectionId(activeCollectionId === child.id ? null : child.id)
-                }
+                }}
               />
             ))}
         </div>

@@ -11,8 +11,8 @@
  * States: loading (skeleton), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Settings2, Wrench, X, Search } from "lucide-react"
-import { useState, useRef, useEffect, useCallback } from "react"
+import { ChevronDown, ChevronRight, Settings2, Wrench, Search } from "lucide-react"
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NormalizationDrawer } from "@/components/NormalizationDrawer"
@@ -155,6 +155,7 @@ export function TagTree() {
   const [scanInFlight, setScanInFlight] = useState(false)
   const activeTag = useAppStore((s) => s.activeTag)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
 
   const {
     data: tree,
@@ -166,6 +167,9 @@ export function TagTree() {
     queryFn: fetchTagTree,
     staleTime: 30_000,
   })
+
+  const [searchQuery, setSearchQuery] = useState("")
+  const filteredTree = filterTagTree(tree || [], searchQuery)
 
   async function handleNormalize() {
     setScanInFlight(true)
@@ -233,7 +237,19 @@ export function TagTree() {
   if (!tree || tree.length === 0) {
     return (
       <>
-        <div className="flex items-center mb-1">{normalizeButton}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="relative flex-1">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter tags..."
+              className="w-full rounded border border-border bg-background py-1 pl-7 pr-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          {normalizeButton}
+        </div>
         <div className="flex flex-col items-center gap-1 py-4 text-center text-xs text-muted-foreground">
           <span>Notes you save will be auto-tagged</span>
         </div>
@@ -244,9 +260,21 @@ export function TagTree() {
 
   return (
     <>
-      <div className="flex items-center mb-1">{normalizeButton}</div>
+      <div className="flex items-center gap-2 mb-1">
+        <div className="relative flex-1">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter tags..."
+            className="w-full rounded border border-border bg-background py-1 pl-7 pr-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+        {normalizeButton}
+      </div>
       <div className="flex flex-col gap-0.5">
-        {tree.map((item) => (
+        {filteredTree.map((item) => (
           <div key={item.id}>
             <TagTreeItemRow
               item={item}
@@ -254,7 +282,11 @@ export function TagTree() {
               isExpanded={expanded.has(item.id)}
               onToggleExpand={() => toggleExpand(item.id)}
               isActive={activeTag === item.id}
-              onSelect={() => setActiveTag(activeTag === item.id ? null : item.id)}
+              onSelect={() => {
+                setActiveCollectionId(null)
+                setActiveTag(activeTag === item.id ? null : item.id)
+              }}
+              searchQuery={searchQuery}
             />
             {expanded.has(item.id) &&
               item.children.map((child) => (
@@ -265,7 +297,11 @@ export function TagTree() {
                   isExpanded={false}
                   onToggleExpand={() => {}}
                   isActive={activeTag === child.id}
-                  onSelect={() => setActiveTag(activeTag === child.id ? null : child.id)}
+                  onSelect={() => {
+                    setActiveCollectionId(null)
+                    setActiveTag(activeTag === child.id ? null : child.id)
+                  }}
+                  searchQuery={searchQuery}
                 />
               ))}
           </div>

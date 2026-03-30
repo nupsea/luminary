@@ -618,7 +618,9 @@ export default function NotesPage() {
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const activeTag = useAppStore((s) => s.activeTag)
+  const setActiveTag = useAppStore((s) => s.setActiveTag)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -635,6 +637,23 @@ export default function NotesPage() {
     queryFn: fetchDocumentList,
     staleTime: 60_000,
   })
+
+  // S165: Fetch tree to resolve ID to name in header
+  const { data: tree } = useQuery({
+    queryKey: ["collections-tree"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/collections/tree`)
+      return (await res.json()) as any[]
+    },
+    staleTime: 30_000,
+  })
+
+  const getCollectionName = (id: string) => {
+    if (!tree) return id.slice(0, 8) + "..."
+    const flat = (items: any[]): any[] => items.flatMap(i => [i, ...flat(i.children || [])])
+    const found = flat(tree).find(i => i.id === id)
+    return found ? found.name : id.slice(0, 8) + "..."
+  }
 
   const groupParam = filter.type === "group" ? filter.name : undefined
   // activeTag from store takes precedence over sidebar filter tag
@@ -992,9 +1011,13 @@ export default function NotesPage() {
       {/* Left sidebar */}
       <div className="flex w-[280px] shrink-0 flex-col gap-1 overflow-auto border-r border-border p-4">
         <button
-          onClick={() => setFilter({ type: "all" })}
+          onClick={() => {
+            setFilter({ type: "all" })
+            setActiveCollectionId(null)
+            setActiveTag(null)
+          }}
           className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
-            filter.type === "all"
+            filter.type === "all" && !activeCollectionId && !activeTag
               ? "bg-accent font-medium text-foreground"
               : "text-muted-foreground hover:bg-accent/60"
           }`}
@@ -1004,7 +1027,11 @@ export default function NotesPage() {
         </button>
 
         <button
-          onClick={() => setFilter({ type: "journal" })}
+          onClick={() => {
+            setFilter({ type: "journal" })
+            setActiveCollectionId(null)
+            setActiveTag(null)
+          }}
           className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
             filter.type === "journal"
               ? "bg-accent font-medium text-foreground"
@@ -1130,13 +1157,17 @@ export default function NotesPage() {
         {/* Panel header with view toggle + button */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
-            {filter.type === "all"
-              ? "All Notes"
-              : filter.type === "journal"
-                ? "Reading Journal"
-                : filter.type === "group"
-                  ? filter.name
-                  : `#${filter.name}`}
+            {activeCollectionId 
+              ? `Collection: ${getCollectionName(activeCollectionId)}`
+              : activeTag
+                ? `Tag: #${activeTag}`
+                : filter.type === "all"
+                  ? "All Notes"
+                  : filter.type === "journal"
+                    ? "Reading Journal"
+                    : filter.type === "group"
+                      ? filter.name
+                      : `#${filter.name}`}
           </h2>
           {filter.type !== "journal" && (
             <div className="flex items-center gap-2">
