@@ -11,14 +11,16 @@
  * States: loading (skeleton), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Settings2, Wrench } from "lucide-react"
-import { useState } from "react"
+import { ChevronDown, ChevronRight, Settings2, Wrench, X, Search } from "lucide-react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NormalizationDrawer } from "@/components/NormalizationDrawer"
 import { TagManagementPanel } from "@/components/TagManagementPanel"
 import { API_BASE } from "@/lib/config"
 import { useAppStore } from "@/store"
+import { filterTagTree, highlightMatch } from "@/lib/tagUtils"
+import type { FilteredTagTreeItem } from "@/lib/tagUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,12 +49,13 @@ async function fetchTagTree(): Promise<TagTreeItem[]> {
 // ---------------------------------------------------------------------------
 
 interface TagTreeItemRowProps {
-  item: TagTreeItem
+  item: FilteredTagTreeItem
   depth: number
   isExpanded: boolean
   onToggleExpand: () => void
   isActive: boolean
   onSelect: () => void
+  searchQuery: string
 }
 
 function TagTreeItemRow({
@@ -62,10 +65,12 @@ function TagTreeItemRow({
   onToggleExpand,
   isActive,
   onSelect,
+  searchQuery,
 }: TagTreeItemRowProps) {
   const [showManage, setShowManage] = useState(false)
   const hasChildren = item.children.length > 0
   const paddingLeft = depth * 12 + 8
+  const isDimmed = searchQuery && !item.matched
 
   return (
     <>
@@ -73,7 +78,9 @@ function TagTreeItemRow({
         className={`group flex items-center gap-1 rounded px-2 py-1 text-sm cursor-pointer transition-colors ${
           isActive
             ? "bg-accent font-medium text-foreground"
-            : "text-muted-foreground hover:bg-accent/60"
+            : isDimmed
+              ? "text-muted-foreground/50 hover:bg-accent/40"
+              : "text-muted-foreground hover:bg-accent/60"
         }`}
         style={{ paddingLeft }}
         onClick={onSelect}
@@ -91,8 +98,22 @@ function TagTreeItemRow({
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </button>
 
-        {/* Tag name */}
-        <span className="flex-1 min-w-0 truncate text-sm">{item.display_name}</span>
+        {/* Tag name with optional search highlight */}
+        <span className={`flex-1 min-w-0 truncate text-sm ${item.matched && searchQuery ? "font-semibold" : ""}`}>
+          {searchQuery && item.matched ? (
+            highlightMatch(item.display_name, searchQuery).map((seg, i) =>
+              seg.highlight ? (
+                <mark key={i} className="bg-yellow-200 dark:bg-yellow-800 rounded-sm px-0.5">
+                  {seg.text}
+                </mark>
+              ) : (
+                <span key={i}>{seg.text}</span>
+              ),
+            )
+          ) : (
+            item.display_name
+          )}
+        </span>
 
         {/* Note count pill */}
         <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
