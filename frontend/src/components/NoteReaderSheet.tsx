@@ -50,6 +50,8 @@ export interface NoteReaderSheetProps {
   onClose: () => void
   onSaved: (note: Note) => void
   isNew?: boolean
+  /** When set, this collection appears checked and cannot be unchecked (reader context). */
+  lockedCollectionId?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +139,7 @@ export function NoteReaderSheet({
   onClose,
   onSaved,
   isNew = false,
+  lockedCollectionId,
 }: NoteReaderSheetProps) {
   const [mode, setMode] = useState<"read" | "edit">(isNew ? "edit" : "read")
   const [editContent, setEditContent] = useState("")
@@ -261,12 +264,17 @@ export function NoteReaderSheet({
   const saveMut = useMutation({
     mutationFn: async () => {
       if (isNew) {
-        return createNote({
+        const saved = await createNote({
           content: editContent,
           tags: editTags,
           document_id: selectedDocIds[0] || null,
           source_document_ids: selectedDocIds,
         })
+        // When opened from the reader panel, auto-add to the book's collection
+        if (lockedCollectionId) {
+          await addNoteToCollection(lockedCollectionId, saved.id)
+        }
+        return saved
       } else {
         return patchNote(note!.id, {
           content: editContent,
@@ -277,6 +285,7 @@ export function NoteReaderSheet({
     },
     onSuccess: (savedNote) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: ["reader-notes"] })
       if (!isNew) {
         setMode("read")
       }
@@ -512,14 +521,14 @@ export function NoteReaderSheet({
                         allCollections.map((col) => (
                           <label
                             key={col.id}
-                            className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50 ${isNew ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            title={isNew ? "Create the note first to add to collections" : ""}
+                            className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50 ${isNew || col.id === lockedCollectionId ? 'opacity-75' : ''}`}
+                            title={col.id === lockedCollectionId ? "This collection is linked to the current document" : isNew ? "Create the note first to add to collections" : ""}
                           >
                             <input
                               type="checkbox"
-                              checked={checkedCollectionIds.has(col.id)}
+                              checked={checkedCollectionIds.has(col.id) || col.id === lockedCollectionId}
                               onChange={(e) => handleCollectionToggle(col.id, e.target.checked)}
-                              disabled={isNew}
+                              disabled={isNew || col.id === lockedCollectionId}
                               className="h-3 w-3 rounded border-border"
                             />
                             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: col.color }} />

@@ -32,11 +32,20 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
 
 def make_engine(db_url: str | None = None):
     url = db_url or _get_db_url()
-    kwargs = {}
+    kwargs: dict = {}
     if ":memory:" in url:
         kwargs["poolclass"] = StaticPool
+    else:
+        kwargs["pool_size"] = 10
+        kwargs["max_overflow"] = 20
+        kwargs["pool_timeout"] = 60
+        kwargs["pool_recycle"] = 300
 
-    engine = create_async_engine(url, echo=False, **kwargs)
+    engine = create_async_engine(
+        url,
+        echo=False,
+        **kwargs,
+    )
     event.listen(engine.sync_engine, "connect", _enable_sqlite_pragmas)
     return engine
 

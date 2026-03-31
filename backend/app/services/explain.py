@@ -1,9 +1,15 @@
-"""Explain service — context-grounded explanations and glossary extraction."""
+"""Explain service -- context-grounded explanations and glossary extraction."""
 
 import json
 import logging
+import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
+from sqlalchemy import delete, select, text
+
+from app.database import get_session_factory
+from app.models import GlossaryTermModel, SectionModel
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
 
@@ -29,11 +35,12 @@ GLOSSARY_SYSTEM = (
 GLOSSARY_USER_TMPL = (
     "Extract all domain-specific technical terms from this text. "
     "For each term, define it based only on how it is used in the text. "
-    'Output a JSON array: [{{"term": str, "definition": str, "first_mention_page": int}}]\n\n'
+    "Categorize each term as one of: character, place, concept, technical, event, or general. "
+    'Output a JSON array: [{{"term": str, "definition": str, "category": str}}]\n\n'
     "Text:\n{text}"
 )
 
-# Approximate token limit for glossary context (8000 tokens ≈ 32000 chars)
+# Approximate token limit for glossary context (8000 tokens ~ 32000 chars)
 _GLOSSARY_CHAR_LIMIT = 32_000
 
 
@@ -44,11 +51,7 @@ class ExplainService:
         document_id: str,
         mode: str,
     ) -> AsyncGenerator[str]:
-        """Stream explanation tokens as SSE data events.
-
-        Uses the selected text directly as context — no vector retrieval — so
-        streaming begins immediately without bge-m3 encoding latency.
-        """
+        """Stream explanation tokens as SSE data events."""
         llm = get_llm_service()
 
         mode_instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["plain"])
@@ -62,11 +65,7 @@ class ExplainService:
         yield f'data: {json.dumps({"done": True})}\n\n'
 
     async def extract_glossary(self, document_id: str) -> list[dict]:
-        """Extract technical terms from a document and return a structured list.
-
-        Samples document chunks up to _GLOSSARY_CHAR_LIMIT characters to fit the
-        LLM context window.
-        """
+        """Extract technical terms from a document, persist to DB, and return."""
         retriever = get_retriever()
         llm = get_llm_service()
 
@@ -102,12 +101,112 @@ class ExplainService:
 
         try:
             terms = json.loads(raw)
-            if isinstance(terms, list):
-                return terms
+            if not isinstance(terms, list):
+                return []
         except (json.JSONDecodeError, ValueError):
             logger.warning("Glossary parse failed for doc %s: %r", document_id, raw[:200])
+            raise GlossaryParseError("Glossary generation failed -- try again")
 
-        return []
+        # Persist terms via upsert
+        persisted = await self._upsert_terms(document_id, terms)
+        return persisted
+
+    async def _upsert_terms(
+        self, document_id: str, terms: list[dict]
+    ) -> list[dict]:
+        """Upsert glossary terms into DB and return the full persisted list."""
+        now = datetime.now(UTC)
+
+        # Load sections for first_mention matching
+        async with get_session_factory()() as session:
+            sections = (
+                await session.execute(
+                    select(SectionModel).where(SectionModel.document_id == document_id)
+                    .order_by(SectionModel.section_order)
+                )
+            ).scalars().all()
+
+            for t in terms:
+                term_text = t.get("term", "").strip()
+                if not term_text:
+                    continue
+                definition = t.get("definition", "").strip()
+                category = t.get("category", "general").strip().lower()
+
+                # Match first mention section
+                first_section_id = None
+                term_lower = term_text.lower()
+                for sec in sections:
+                    preview = (sec.preview or "").lower()
+                    if term_lower in preview or term_lower in sec.heading.lower():
+                        first_section_id = sec.id
+                        break
+
+                # Upsert via raw SQL for ON CONFLICT
+                await session.execute(
+                    text(
+                        "INSERT INTO glossary_terms "
+                        "(id, document_id, term, definition, first_mention_section_id, "
+                        "category, created_at, updated_at) "
+                        "VALUES (:id, :doc_id, :term, :definition, :section_id, "
+                        ":category, :created_at, :updated_at) "
+                        "ON CONFLICT(document_id, term) DO UPDATE SET "
+                        "definition = :definition, category = :category, "
+                        "first_mention_section_id = :section_id, updated_at = :updated_at"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "doc_id": document_id,
+                        "term": term_text,
+                        "definition": definition,
+                        "section_id": first_section_id,
+                        "category": category,
+                        "created_at": now.isoformat(),
+                        "updated_at": now.isoformat(),
+                    },
+                )
+
+            await session.commit()
+
+        # Return the full persisted list
+        return await self.get_cached_glossary(document_id)
+
+    async def get_cached_glossary(self, document_id: str) -> list[dict]:
+        """Return persisted glossary terms without LLM call."""
+        async with get_session_factory()() as session:
+            rows = (
+                await session.execute(
+                    select(GlossaryTermModel)
+                    .where(GlossaryTermModel.document_id == document_id)
+                    .order_by(GlossaryTermModel.term)
+                )
+            ).scalars().all()
+
+        return [
+            {
+                "id": r.id,
+                "term": r.term,
+                "definition": r.definition,
+                "first_mention_section_id": r.first_mention_section_id,
+                "category": r.category,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ]
+
+    async def delete_term(self, term_id: str) -> bool:
+        """Delete a single glossary term by ID. Returns True if deleted."""
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                delete(GlossaryTermModel).where(GlossaryTermModel.id == term_id)
+            )
+            await session.commit()
+            return result.rowcount > 0
+
+
+class GlossaryParseError(Exception):
+    pass
 
 
 _explain_service: ExplainService | None = None

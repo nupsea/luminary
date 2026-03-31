@@ -2,15 +2,17 @@
  * NotesReaderPanel -- S192: collection-scoped active reading sidebar.
  *
  * Shows notes from the document's auto-collection in the right panel of DocumentReader.
- * Supports inline add/edit/delete and click-to-scroll-to-section.
+ * Clicking edit / double-click opens the full NoteReaderSheet (same as Notes tab).
+ * The book's auto-collection is shown checked and locked in the sheet.
  */
 
 import { useEffect, useState, useCallback } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { Loader2, Plus, Pencil, Trash2, BookOpen } from "lucide-react"
 import { toast } from "sonner"
-import { stripMarkdown } from "@/lib/utils"
 import { API_BASE } from "@/lib/config"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +30,10 @@ interface NoteItem {
   section_id: string | null
   content: string
   tags: string[]
+  collection_ids: string[]
+  source_document_ids: string[]
+  chunk_id: string | null
+  group_name: string | null
   created_at: string
   updated_at: string
 }
@@ -36,6 +42,11 @@ interface SectionInfo {
   id: string
   heading: string
   section_order: number
+}
+
+interface DocumentItem {
+  id: string
+  title: string
 }
 
 interface NotesReaderPanelProps {
@@ -91,6 +102,13 @@ async function fetchSections(
   return doc.sections ?? []
 }
 
+async function fetchDocuments(): Promise<DocumentItem[]> {
+  const res = await fetch(`${API_BASE}/documents?page_size=200`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { items: DocumentItem[] }
+  return data.items ?? []
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -104,14 +122,11 @@ export function NotesReaderPanel({
   const qc = useQueryClient()
   const [collectionId, setCollectionId] = useState<string | null>(null)
   const [ensured, setEnsured] = useState(false)
-  const [addingNote, setAddingNote] = useState(false)
-  const [newNoteContent, setNewNoteContent] = useState("")
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
-  const [editContent, setEditContent] = useState("")
-  const [editTags, setEditTags] = useState<string[]>([])
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(
-    null,
-  )
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  // Sheet state: which note is open for viewing/editing
+  const [sheetNote, setSheetNote] = useState<NoteItem | null>(null)
+  const [sheetIsNew, setSheetIsNew] = useState(false)
 
   // Step 1: ensure auto-collection exists
   useEffect(() => {
@@ -126,15 +141,13 @@ export function NotesReaderPanel({
           setCollectionId(col.id)
         }
       } catch {
-        // silently fail -- user can still use other tabs
+        // silently fail
       } finally {
         if (!cancelled) setEnsured(true)
       }
     }
     void ensure()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [documentId])
 
   // Step 2: fetch notes for the auto-collection
@@ -149,10 +162,17 @@ export function NotesReaderPanel({
     staleTime: 10_000,
   })
 
-  // Step 3: fetch sections to get section_order for sorting
+  // Step 3: fetch sections for sort + heading display
   const { data: sections } = useQuery({
     queryKey: ["doc-sections", documentId],
     queryFn: () => fetchSections(documentId),
+    staleTime: 60_000,
+  })
+
+  // Fetch documents list for NoteReaderSheet
+  const { data: documents = [] } = useQuery({
+    queryKey: ["documents-list-mini"],
+    queryFn: fetchDocuments,
     staleTime: 60_000,
   })
 
@@ -171,8 +191,7 @@ export function NotesReaderPanel({
     sectionHeadingMap.set(sec.id, sec.heading)
   }
 
-  // Sort notes by section_order (AC6): linked notes first by section_order,
-  // unlinked notes at the end sorted by created_at.
+  // Sort notes by section_order (AC6)
   const sortedNotes = (notes ?? []).slice().sort((a, b) => {
     const aOrder = a.section_id
       ? sectionOrderMap.get(a.section_id) ?? Infinity
@@ -185,76 +204,6 @@ export function NotesReaderPanel({
       new Date(a.created_at).getTime() -
       new Date(b.created_at).getTime()
     )
-  })
-
-  // Create note mutation
-  const createMut = useMutation({
-    mutationFn: async (content: string) => {
-      const res = await fetch(`${API_BASE}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: activeSectionId ?? undefined,
-          content,
-          tags: [],
-          group_name: null,
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to create note")
-      const note = (await res.json()) as { id: string }
-      // Add to auto-collection
-      if (collectionId) {
-        await fetch(
-          `${API_BASE}/collections/${collectionId}/notes`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ note_ids: [note.id] }),
-          },
-        )
-      }
-      return note
-    },
-    onSuccess: () => {
-      setAddingNote(false)
-      setNewNoteContent("")
-      void qc.invalidateQueries({
-        queryKey: ["reader-notes", collectionId],
-      })
-      toast.success("Note saved")
-    },
-    onError: () => toast.error("Failed to save note"),
-  })
-
-  // Edit note mutation (AC9: sends content + tags)
-  const editMut = useMutation({
-    mutationFn: async ({
-      noteId,
-      content,
-      tags,
-    }: {
-      noteId: string
-      content: string
-      tags: string[]
-    }) => {
-      const res = await fetch(`${API_BASE}/notes/${noteId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, tags }),
-      })
-      if (!res.ok) throw new Error("Failed to update note")
-    },
-    onSuccess: () => {
-      setEditingNoteId(null)
-      setEditContent("")
-      setEditTags([])
-      void qc.invalidateQueries({
-        queryKey: ["reader-notes", collectionId],
-      })
-      toast.success("Note updated")
-    },
-    onError: () => toast.error("Failed to update note"),
   })
 
   // Delete note mutation
@@ -270,18 +219,48 @@ export function NotesReaderPanel({
       void qc.invalidateQueries({
         queryKey: ["reader-notes", collectionId],
       })
+      void qc.invalidateQueries({ queryKey: ["notes"] })
       toast.success("Note deleted")
     },
     onError: () => toast.error("Failed to delete note"),
   })
 
-  const handleStartEdit = useCallback((note: NoteItem) => {
-    setEditingNoteId(note.id)
-    setEditContent(note.content)
-    setEditTags([...note.tags])
-  }, [])
+  function handleOpenNew() {
+    setSheetNote({
+      id: "",
+      document_id: documentId,
+      section_id: activeSectionId ?? null,
+      content: "",
+      tags: [],
+      collection_ids: collectionId ? [collectionId] : [],
+      source_document_ids: [documentId],
+      chunk_id: null,
+      group_name: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    setSheetIsNew(true)
+  }
 
-  // Loading state
+  function handleOpenExisting(note: NoteItem) {
+    setSheetNote(note)
+    setSheetIsNew(false)
+  }
+
+  function handleSheetClose() {
+    setSheetNote(null)
+    setSheetIsNew(false)
+  }
+
+  const handleSheetSaved = useCallback((_savedNote: unknown) => {
+    void qc.invalidateQueries({ queryKey: ["reader-notes", collectionId] })
+    void qc.invalidateQueries({ queryKey: ["notes"] })
+    if (sheetIsNew) {
+      setSheetNote(null)
+      setSheetIsNew(false)
+    }
+  }, [qc, collectionId, sheetIsNew])
+
   if (!ensured) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -298,56 +277,13 @@ export function NotesReaderPanel({
   return (
     <div className="flex h-full flex-col gap-3">
       {/* Add note button */}
-      {!addingNote && (
-        <button
-          onClick={() => setAddingNote(true)}
-          className="flex items-center gap-1.5 self-start rounded-md border border-dashed border-muted-foreground/30 px-3 py-1.5 text-xs text-muted-foreground hover:border-foreground/50 hover:text-foreground"
-        >
-          <Plus size={12} />
-          Add note
-        </button>
-      )}
-
-      {/* Inline add editor */}
-      {addingNote && (
-        <div className="rounded-md border border-primary/30 p-2">
-          <textarea
-            autoFocus
-            rows={3}
-            placeholder="Write your note..."
-            value={newNoteContent}
-            onChange={(e) => setNewNoteContent(e.target.value)}
-            className="w-full resize-none rounded border border-muted bg-transparent px-2 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          {activeSectionId && (
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              Linked to current section
-            </p>
-          )}
-          <div className="mt-2 flex gap-2">
-            <button
-              disabled={
-                !newNoteContent.trim() || createMut.isPending
-              }
-              onClick={() =>
-                void createMut.mutate(newNoteContent.trim())
-              }
-              className="rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {createMut.isPending ? "Saving..." : "Save"}
-            </button>
-            <button
-              onClick={() => {
-                setAddingNote(false)
-                setNewNoteContent("")
-              }}
-              className="rounded px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <button
+        onClick={handleOpenNew}
+        className="flex items-center gap-1.5 self-start rounded-md border border-dashed border-muted-foreground/30 px-3 py-1.5 text-xs text-muted-foreground hover:border-foreground/50 hover:text-foreground"
+      >
+        <Plus size={12} />
+        Add note
+      </button>
 
       {/* Notes list */}
       {notesLoading ? (
@@ -357,7 +293,7 @@ export function NotesReaderPanel({
         </div>
       ) : sortedNotes.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No notes yet -- start annotating as you read.
+          No notes yet — start annotating as you read.
         </p>
       ) : (
         <div className="flex flex-col gap-2">
@@ -366,167 +302,88 @@ export function NotesReaderPanel({
               key={note.id}
               className="group rounded-md border border-muted p-2.5"
             >
-              {editingNoteId === note.id ? (
-                /* Inline editor (AC9: full content + tags) */
-                <div>
-                  <textarea
-                    autoFocus
-                    rows={4}
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full resize-none rounded border border-muted bg-transparent px-2 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  {/* Tags editor */}
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {editTags.map((tag, i) => (
-                      <span
-                        key={tag}
-                        className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                      >
-                        {tag}
-                        <button
-                          onClick={() =>
-                            setEditTags((t) =>
-                              t.filter((_, idx) => idx !== i),
-                            )
-                          }
-                          className="ml-0.5 text-muted-foreground hover:text-foreground"
-                        >
-                          x
-                        </button>
-                      </span>
-                    ))}
-                    <input
-                      placeholder="Add tag..."
-                      className="w-16 bg-transparent text-[10px] outline-none placeholder:text-muted-foreground/50"
-                      onKeyDown={(e) => {
-                        if (
-                          (e.key === "Enter" || e.key === ",") &&
-                          e.currentTarget.value.trim()
-                        ) {
-                          e.preventDefault()
-                          const val = e.currentTarget.value.trim()
-                          if (!editTags.includes(val)) {
-                            setEditTags((t) => [...t, val])
-                          }
-                          e.currentTarget.value = ""
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      disabled={
-                        !editContent.trim() || editMut.isPending
-                      }
-                      onClick={() =>
-                        void editMut.mutate({
-                          noteId: note.id,
-                          content: editContent.trim(),
-                          tags: editTags,
-                        })
-                      }
-                      className="rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                    >
-                      {editMut.isPending ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingNoteId(null)
-                        setEditContent("")
-                        setEditTags([])
-                      }}
-                      className="rounded px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Note card */
-                <>
-                  <p className="line-clamp-2 text-xs text-foreground">
-                    {stripMarkdown(note.content)}
-                  </p>
-                  {/* Section heading link */}
-                  {note.section_id && onScrollToSection && (
-                    <button
-                      onClick={() =>
-                        onScrollToSection(note.section_id!)
-                      }
-                      className="mt-1 flex items-center gap-1 text-[10px] text-primary hover:underline"
-                    >
-                      <BookOpen size={10} />
-                      {sectionHeadingMap.get(note.section_id) ??
-                        "Go to section"}
-                    </button>
-                  )}
-                  {note.tags.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {note.tags.map((t) => (
-                        <span
-                          key={t}
-                          className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground">
-                      {new Date(
-                        note.created_at,
-                      ).toLocaleDateString()}
-                    </span>
-                    <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100">
-                      <button
-                        title="Edit"
-                        onClick={() => handleStartEdit(note)}
-                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      {deleteConfirmId === note.id ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              void deleteMut.mutate(note.id)
-                            }
-                            className="rounded bg-red-500 px-2 py-0.5 text-[10px] text-white"
-                          >
-                            {deleteMut.isPending
-                              ? "..."
-                              : "Confirm"}
-                          </button>
-                          <button
-                            onClick={() =>
-                              setDeleteConfirmId(null)
-                            }
-                            className="text-[10px] text-muted-foreground hover:text-foreground"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          title="Delete"
-                          onClick={() =>
-                            setDeleteConfirmId(note.id)
-                          }
-                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-red-500"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </>
+              {/* Note card: markdown preview, double-click to open sheet */}
+              <div
+                className="cursor-text select-text"
+                onDoubleClick={() => handleOpenExisting(note)}
+                title="Double-click to edit"
+              >
+                <MarkdownRenderer className="prose-xs">{note.content}</MarkdownRenderer>
+              </div>
+              {/* Section heading link */}
+              {note.section_id && onScrollToSection && (
+                <button
+                  onClick={() => onScrollToSection(note.section_id!)}
+                  className="mt-1 flex items-center gap-1 text-[10px] text-primary hover:underline"
+                >
+                  <BookOpen size={10} />
+                  {sectionHeadingMap.get(note.section_id) ?? "Go to section"}
+                </button>
               )}
+              {note.tags.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {note.tags.map((t) => (
+                    <span
+                      key={t}
+                      className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="mt-1 flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">
+                  {new Date(note.created_at).toLocaleDateString()}
+                </span>
+                <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100">
+                  <button
+                    title="Edit"
+                    onClick={() => handleOpenExisting(note)}
+                    className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  {deleteConfirmId === note.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => void deleteMut.mutate(note.id)}
+                        className="rounded bg-red-500 px-2 py-0.5 text-[10px] text-white"
+                      >
+                        {deleteMut.isPending ? "..." : "Confirm"}
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      title="Delete"
+                      onClick={() => setDeleteConfirmId(note.id)}
+                      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-red-500"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* NoteReaderSheet — reuses the full Notes tab editor */}
+      <NoteReaderSheet
+        note={sheetNote}
+        documents={documents}
+        onClose={handleSheetClose}
+        onSaved={handleSheetSaved}
+        isNew={sheetIsNew}
+        lockedCollectionId={collectionId}
+      />
     </div>
   )
 }

@@ -1256,8 +1256,12 @@ async def suggest_tags(
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
 
+    # Grab content before releasing DB session to avoid holding a connection
+    # during a potentially slow LLM call.
+    note_content = note.content
+
     from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
 
-    tags = await get_note_tagger().suggest_tags(note.content)
+    tags = await get_note_tagger().suggest_tags(note_content)
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)

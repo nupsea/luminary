@@ -103,7 +103,6 @@ def _to_response(col: NoteCollectionModel) -> CollectionResponse:
         updated_at=col.updated_at,
     )
 
-
 # Color palette for auto-collections based on content_type
 _AUTO_COLLECTION_COLORS: dict[str, str] = {
     "book": "#8B5CF6",       # violet
@@ -112,6 +111,65 @@ _AUTO_COLLECTION_COLORS: dict[str, str] = {
     "notes": "#10B981",      # emerald
     "code": "#6366F1",       # indigo
 }
+
+# Human-readable doc type suffixes for collection names
+_DOC_TYPE_LABELS: dict[str, str] = {
+    "book": "Book",
+    "paper": "Paper",
+    "conversation": "Video",
+    "notes": "Notes",
+    "code": "Code",
+}
+
+
+def _make_collection_name(title: str, content_type: str) -> str:
+    """Generate a concise collection name from a document title + type.
+
+    Examples:
+      - "DDIA.pdf" + "book"          -> "DDIA_Book"
+      - "Designing Data-Intensive Applications" + "book" -> "DDIA_Book"
+      - "Andrej Karpathy on Code Agents, AutoResearch, and the Loopy Era of AI"
+            + "conversation" -> "Code_Agents_Karpathy_Video"
+    """
+    suffix = _DOC_TYPE_LABELS.get(content_type, content_type.capitalize())
+
+    # Strip file extensions
+    name = re.sub(r"\.(pdf|epub|docx?|txt|md)$", "", title, flags=re.IGNORECASE).strip()
+
+    # If the remaining name is already short (≤ 20 chars, like "DDIA"), use as-is
+    if len(name) <= 20:
+        # Replace spaces/hyphens with underscores, collapse multiples
+        short = re.sub(r"[\s\-]+", "_", name)
+        short = re.sub(r"_+", "_", short).strip("_")
+        return f"{short}_{suffix}"
+
+    # For longer titles, extract key words (capitalized, acronyms, proper nouns)
+    # Remove common filler words
+    filler = {
+        "the", "a", "an", "and", "or", "of", "in", "on", "for", "to", "with",
+        "by", "is", "at", "from", "as", "into", "its", "this", "that", "how",
+        "era", "about",
+    }
+
+    words = re.findall(r"[A-Za-z0-9]+", name)
+    key_words: list[str] = []
+    for w in words:
+        # Always keep all-caps / acronyms (DDIA, AI, LLM)
+        if w.isupper() and len(w) >= 2:
+            key_words.append(w)
+        # Keep capitalized words that aren't filler
+        elif w[0].isupper() and w.lower() not in filler:
+            key_words.append(w)
+
+    # Fallback: if we filtered too aggressively, take first 3 significant words
+    if len(key_words) < 2:
+        key_words = [w for w in words if w.lower() not in filler][:3]
+
+    # Cap at 3 key words to keep it short
+    key_words = key_words[:3]
+    short = "_".join(key_words)
+
+    return f"{short}_{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -267,9 +325,10 @@ async def create_auto_collection(
         raise HTTPException(status_code=404, detail="Document not found")
 
     color = _AUTO_COLLECTION_COLORS.get(doc.content_type, "#6366F1")
+    col_name = _make_collection_name(doc.title, doc.content_type)
     col = NoteCollectionModel(
         id=str(uuid.uuid4()),
-        name=f"{doc.title} Notes",
+        name=col_name,
         color=color,
         auto_document_id=document_id,
         created_at=datetime.now(UTC),

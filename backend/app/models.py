@@ -777,3 +777,27 @@ class PredictionEventModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class GlossaryTermModel(Base):
+    """Persistent glossary term extracted from a document via LLM."""
+
+    __tablename__ = "glossary_terms"
+    __table_args__ = (
+        UniqueConstraint("document_id", "term", name="uq_glossary_doc_term"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    term: Mapped[str] = mapped_column(String, nullable=False)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    first_mention_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )

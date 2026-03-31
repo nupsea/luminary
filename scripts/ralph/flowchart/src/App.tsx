@@ -140,6 +140,8 @@ const shortTitle: Record<string, string[]> = {
   S195: ['S195 P35', 'Bloom Chat Recs',    'Summary-grounded + dedup'],
   S196: ['S196 P36', 'Scope Clear Fix',    'Non-destructive clear'],
   S197: ['S197 P37', 'Auto-Gap Analysis',  'Collection-based compare'],
+  S198: ['S198 P38', 'Highlight Fixes',    'Text/PDF/large select'],
+  S199: ['S199 P39', 'Naming Standards',   'UPPER cols, lower tags'],
 }
 
 // Layout: Phase 1 cols x=60..1180, Phase 2 row y=580, Phase 3 row y=820
@@ -160,6 +162,8 @@ const storyPositions: Record<string, { x: number; y: number }> = {
   S191: { x: 60,   y: 1300 }, S192: { x: 380,  y: 1300 }, S193: { x: 700,  y: 1300 },
   S194: { x: 1020, y: 1300 }, S195: { x: 1340, y: 1300 }, S196: { x: 1660, y: 1300 },
   S197: { x: 1980, y: 1300 },
+  S198: { x: 2300, y: 1300 },
+  S199: { x: 2620, y: 1300 },
 }
 
 // Phase label nodes (left column, non-clickable)
@@ -168,7 +172,7 @@ const phaseLabels: Node[] = [
   { id: 'ph2', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 2</div><div style={{ fontSize: 10, opacity: 0.7 }}>Note Intelligence</div><div style={{ fontSize: 10, opacity: 0.7 }}>S171-S175</div></div>) }, position: { x: -190, y: 590 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
   { id: 'ph3', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 3</div><div style={{ fontSize: 10, opacity: 0.7 }}>UX Polish</div><div style={{ fontSize: 10, opacity: 0.7 }}>S176-S183</div></div>) }, position: { x: -190, y: 830 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
   { id: 'ph4', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 4</div><div style={{ fontSize: 10, opacity: 0.7 }}>Learner Experience</div><div style={{ fontSize: 10, opacity: 0.7 }}>S184-S190</div></div>) }, position: { x: -190, y: 1070 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
-  { id: 'ph5', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 5</div><div style={{ fontSize: 10, opacity: 0.7 }}>Reading & Chat</div><div style={{ fontSize: 10, opacity: 0.7 }}>S191-S197</div></div>) }, position: { x: -190, y: 1310 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
+  { id: 'ph5', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 5</div><div style={{ fontSize: 10, opacity: 0.7 }}>Reading & Chat</div><div style={{ fontSize: 10, opacity: 0.7 }}>S191-S199</div></div>) }, position: { x: -190, y: 1310 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
 ]
 
 function storyNode(s: Story): Node {
@@ -265,7 +269,7 @@ function StoryLegend({ total, done, p1Done, p2Done, p3Done, p4Done, p5Done }: { 
       <div style={{ background: '#0f172a', borderRadius: 4, height: 8, overflow: 'hidden', marginBottom: 10 }}>
         <div style={{ width: `${(done / total) * 100}%`, height: '100%', background: '#16a34a', borderRadius: 4 }} />
       </div>
-      {([['Phase 1', p1Done, 10, '#818cf8'], ['Phase 2', p2Done, 5, '#34d399'], ['Phase 3', p3Done, 8, '#fb923c'], ['Phase 4', p4Done, 7, '#f472b6'], ['Phase 5', p5Done, 7, '#38bdf8']] as [string, number, number, string][]).map(([label, cnt, tot, color]) => (
+      {([['Phase 1', p1Done, 10, '#818cf8'], ['Phase 2', p2Done, 5, '#34d399'], ['Phase 3', p3Done, 8, '#fb923c'], ['Phase 4', p4Done, 7, '#f472b6'], ['Phase 5', p5Done, 9, '#38bdf8']] as [string, number, number, string][]).map(([label, cnt, tot, color]) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <div style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
           <span style={{ color: '#94a3b8', fontSize: 11, flex: 1 }}>{label}</span>
