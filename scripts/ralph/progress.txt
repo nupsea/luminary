@@ -2191,3 +2191,19 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Section sorting in frontend: fetch document sections separately to get section_order, build lookup map
   - Route ordering: /by-document and /auto must be registered BEFORE /{collection_id} wildcard
 ---
+
+## 2026-03-31T10:30:00Z - S193
+- What was implemented:
+  - GlossaryTermModel in models.py with UniqueConstraint on (document_id, term)
+  - ExplainService: extract_glossary with DB persistence (_upsert_terms), get_cached_glossary, delete_term, robust _parse_glossary_json with regex fallback
+  - Three new endpoints: GET /explain/glossary/{doc_id}/cached, POST /explain/glossary/{doc_id}, DELETE /explain/glossary/{doc_id}/terms/{term_id}
+  - GlossaryPanel rewrite in DocumentReader.tsx: cached load on mount, category badges, search filter, sort toggle, regenerate button, section scroll link, loading/error/empty states
+  - 5 new tests in test_glossary_s193.py
+  - Smoke test scripts/smoke/S193.sh
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/database.py, backend/app/services/explain.py, backend/app/routers/explain.py, backend/tests/test_glossary_s193.py, backend/tests/test_explain.py, backend/tests/test_auto_collections.py, frontend/src/components/reader/DocumentReader.tsx, scripts/smoke/S193.sh
+- **Learnings for future iterations:**
+  - StaticPool for in-memory SQLite is incompatible with pool_size/max_overflow/pool_timeout/pool_recycle -- must conditionally skip these params in make_engine
+  - Small LLMs (mistral 7B) ignore system prompts with large text context (32K chars) -- reduced to 16K chars and added explicit JSON format example at the end of the user prompt
+  - LLM JSON output parsing needs regex fallback: re.search(r'\[.*\]', raw, re.DOTALL) to extract array from mixed text
+  - Pre-existing test_auto_collections assertion was stale after S192 naming convention change (_make_collection_name)
+---

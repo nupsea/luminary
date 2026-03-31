@@ -84,6 +84,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ## Database Patterns
 
+- **StaticPool incompatible with pool_size/max_overflow parameters**: When creating an in-memory SQLite engine with StaticPool for tests, do NOT set `pool_size`, `max_overflow`, `pool_timeout`, or `pool_recycle` kwargs. StaticPool is a NullPool variant that does not manage a connection pool, so these parameters are ignored and can cause subtle failures. Use conditional logic: `kwargs["poolclass"] = StaticPool` for `:memory:` URLs, and only set pool sizing params for file-backed databases.
 - SectionSummaryModel batch lookup by (document_id, heading) using SQLAlchemy OR conditions — avoids N+1 queries
 - pack_context groups by section_id or section_heading fallback; sorts groups by max(relevance_score) desc
 - To get the latest executive summary per document across all documents, use a subquery grouped by document_id with `func.max(created_at)`, then join back to SummaryModel and DocumentModel. Do not use DISTINCT ON (not supported by SQLite).
@@ -126,6 +127,13 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Book chunk fetching skips preface**: `_fetch_chunks(content_type="book")` skips the first `max(1, n//20)` chunks to avoid Gutenberg metadata. Tests with only 1 candidate chunk will return empty. Always provide 2+ chunks when testing flashcard generation with content_type="book".
 - **LanceDB schema introspection**: use `tbl.schema.field("vector").type.list_size` to read the FixedSizeList dimension. Wrap in try/except — if the field is missing or the attribute doesn't exist, log a warning and proceed with safe default (assume 1024).
 - **LanceDB drop+recreate**: use `self._db.drop_table(TABLE_NAME)` via the connection object, NOT `tbl.drop()`. Then `self._db.create_table(TABLE_NAME, schema=NEW_SCHEMA)`. Use this when a table's schema (e.g. vector dimension) needs to change.
+
+---
+
+## LLM Output Parsing
+
+- **JSON extraction with regex fallback**: When parsing LLM JSON output, first attempt `json.loads(raw)` on the full text. If that fails, search for a JSON array with `re.search(r"\[.*\]", raw, re.DOTALL)` and try parsing the extracted substring. This handles cases where the LLM includes explanatory text before/after the JSON. Log a warning if both methods fail before raising an exception.
+- **Small LLM system prompt size limit**: Mistral 7B and similar small models with 8K context ignore system prompts larger than ~16K chars when paired with substantial user context. Reduce glossary/extraction system prompts to 16K chars max (roughly 4000 tokens). Add explicit format examples at the END of the user prompt message to reinforce output structure when the system prompt alone is insufficient.
 
 ---
 
