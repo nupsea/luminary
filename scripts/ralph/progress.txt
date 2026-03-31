@@ -2172,3 +2172,22 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Simple div-based dropdown with useRef + outside-click works well without shadcn DropdownMenu component
   - Existing luminary:navigate handler must be extended for each new tab target; check coverage in I-11 pattern
 ---
+
+## 2026-03-31T03:00:00Z - S192
+- Implemented: DocumentReader notes panel with auto-collection per document
+- NoteCollectionModel gains auto_document_id nullable string column with index
+- GET /collections/by-document/{document_id} returns auto-collection or 404
+- POST /collections/auto/{document_id} creates auto-collection idempotently, named '{title} Notes'
+- SummaryPanel: One-liner tab replaced with Notes tab as first tab
+- NotesReaderPanel component: fetches/creates auto-collection on mount, lists notes sorted by section_order, inline add/edit/delete, click-to-scroll-to-section, section heading display
+- Default tab logic: Notes if document has notes, Key Points otherwise (via onNoteCountKnown callback)
+- Edit form includes tags (chips with add/remove) per AC9
+- 5 pytest tests for auto-collection endpoints
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/routers/collections.py, backend/tests/test_auto_collections.py (new), frontend/src/components/reader/types.ts, frontend/src/components/reader/DocumentReader.tsx, frontend/src/components/reader/NotesReaderPanel.tsx (new), scripts/smoke/S192.sh (new), docs/ralph-run-flow.md
+- **Learnings for future iterations:**
+  - asyncio.run() instead of asyncio.get_event_loop().run_until_complete() in test helpers avoids event loop ordering issues across test files
+  - Auto-collection pattern: one collection per document via auto_document_id field, idempotent POST endpoint
+  - Default tab conditional logic: use onNoteCountKnown callback from child to parent to avoid flash of wrong tab
+  - Section sorting in frontend: fetch document sections separately to get section_order, build lookup map
+  - Route ordering: /by-document and /auto must be registered BEFORE /{collection_id} wildcard
+---

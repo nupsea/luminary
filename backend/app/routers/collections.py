@@ -22,7 +22,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import NoteCollectionMemberModel, NoteCollectionModel
+from app.models import DocumentModel, NoteCollectionMemberModel, NoteCollectionModel
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 
@@ -60,6 +60,7 @@ class CollectionResponse(BaseModel):
     color: str
     icon: str | None
     parent_collection_id: str | None
+    auto_document_id: str | None = None
     sort_order: int
     created_at: datetime
     updated_at: datetime
@@ -96,10 +97,21 @@ def _to_response(col: NoteCollectionModel) -> CollectionResponse:
         color=col.color,
         icon=col.icon,
         parent_collection_id=col.parent_collection_id,
+        auto_document_id=getattr(col, "auto_document_id", None),
         sort_order=col.sort_order,
         created_at=col.created_at,
         updated_at=col.updated_at,
     )
+
+
+# Color palette for auto-collections based on content_type
+_AUTO_COLLECTION_COLORS: dict[str, str] = {
+    "book": "#8B5CF6",       # violet
+    "paper": "#3B82F6",      # blue
+    "conversation": "#F59E0B",  # amber
+    "notes": "#10B981",      # emerald
+    "code": "#6366F1",       # indigo
+}
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +216,70 @@ async def get_collection_tree(
     # Suppress unused variable warning from by_id lookup
     _ = by_id
     return top_level
+
+
+# NOTE: /by-document and /auto routes MUST be registered BEFORE /{collection_id}
+# to prevent FastAPI from matching "by-document" or "auto" as a collection_id wildcard.
+
+
+@router.get("/by-document/{document_id}", response_model=CollectionResponse)
+async def get_auto_collection_by_document(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> CollectionResponse:
+    """Return the auto-collection for a document, or 404 if none exists."""
+    col = (
+        await session.execute(
+            select(NoteCollectionModel).where(
+                NoteCollectionModel.auto_document_id == document_id
+            )
+        )
+    ).scalar_one_or_none()
+    if col is None:
+        raise HTTPException(status_code=404, detail="No auto-collection for this document")
+    return _to_response(col)
+
+
+@router.post("/auto/{document_id}", response_model=CollectionResponse, status_code=201)
+async def create_auto_collection(
+    document_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> CollectionResponse:
+    """Create auto-collection for a document. Idempotent -- returns existing."""
+    # Check if one already exists
+    existing = (
+        await session.execute(
+            select(NoteCollectionModel).where(
+                NoteCollectionModel.auto_document_id == document_id
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return _to_response(existing)
+
+    # Fetch document title
+    doc = (
+        await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+    ).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    color = _AUTO_COLLECTION_COLORS.get(doc.content_type, "#6366F1")
+    col = NoteCollectionModel(
+        id=str(uuid.uuid4()),
+        name=f"{doc.title} Notes",
+        color=color,
+        auto_document_id=document_id,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.add(col)
+    await session.commit()
+    await session.refresh(col)
+    logger.info("Created auto-collection id=%s for document=%s", col.id, document_id)
+    return _to_response(col)
 
 
 @router.get("/{collection_id}", response_model=CollectionResponse)

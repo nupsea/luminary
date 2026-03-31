@@ -597,6 +597,8 @@ class NoteCollectionModel(Base):
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Self-FK for 2-level hierarchy; null = top-level collection
     parent_collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S192: auto-collection for a document (one per document, nullable for manual collections)
+    auto_document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

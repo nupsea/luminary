@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -22,6 +22,7 @@ import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { EPUBViewer } from "./EPUBViewer"
 import { ReadView } from "./ReadView"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
+import { NotesReaderPanel } from "./NotesReaderPanel"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -411,27 +412,41 @@ function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: ChapterGoals
 // Summary + Glossary panel (right side)
 // ---------------------------------------------------------------------------
 
-type PanelTab = SummaryMode | "glossary" | "references"
+type PanelTab = SummaryMode | "glossary" | "references" | "notes"
 
 interface SummaryPanelProps {
   documentId: string
   contentType: string
+  activeSectionId?: string | null
+  onScrollToSection?: (sectionId: string) => void
 }
 
-function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
+function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSection }: SummaryPanelProps) {
   const summaryTabs: SummaryTabDef[] =
     contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
   const allTabs = [
+    { mode: "notes" as PanelTab, label: "Notes" },
     ...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })),
     { mode: "glossary" as PanelTab, label: "Glossary" },
     { mode: "references" as PanelTab, label: "References" },
   ]
 
-  const [activeTab, setActiveTab] = useState<PanelTab>(allTabs[0].mode)
+  const [activeTab, setActiveTab] = useState<PanelTab>("notes")
+  const defaultTabResolved = useRef(false)
   const [summaries, setSummaries] = useState<SummaryMap>({})
   const [streaming, setStreaming] = useState<StreamingMap>({})
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [cacheLoading, setCacheLoading] = useState(true)
+
+  // AC5: switch default tab to Key Points if no notes exist
+  const handleNoteCountKnown = useCallback((count: number) => {
+    if (!defaultTabResolved.current) {
+      defaultTabResolved.current = true
+      if (count === 0) {
+        setActiveTab("executive")
+      }
+    }
+  }, [])
 
   // Load pre-generated summaries from DB on mount — no LLM call needed
   useEffect(() => {
@@ -523,7 +538,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
     }
   }
 
-  const isSidePanel = activeTab === "glossary" || activeTab === "references"
+  const isSidePanel = activeTab === "glossary" || activeTab === "references" || activeTab === "notes"
   const currentSummary = !isSidePanel ? summaries[activeTab as SummaryMode] : undefined
   const isStreaming = !isSidePanel ? (streaming[activeTab as SummaryMode] ?? false) : false
 
@@ -549,12 +564,14 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 
       {/* Content area */}
       <div className="flex-1 overflow-auto">
-        {summaryError && activeTab !== "references" && (
+        {summaryError && activeTab !== "references" && activeTab !== "notes" && (
           <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {summaryError}
           </div>
         )}
-        {activeTab === "references" ? (
+        {activeTab === "notes" ? (
+          <NotesReaderPanel documentId={documentId} activeSectionId={activeSectionId ?? null} onScrollToSection={onScrollToSection} onNoteCountKnown={handleNoteCountKnown} />
+        ) : activeTab === "references" ? (
           <ReferencesPanel documentId={documentId} />
         ) : activeTab === "glossary" ? (
           <GlossaryPanel documentId={documentId} />
@@ -2427,7 +2444,20 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             sectionId={activeSectionGoals}
             onStudyClick={handleStudyClick}
           />
-          <SummaryPanel documentId={documentId} contentType={doc.content_type} />
+          <SummaryPanel
+            documentId={documentId}
+            contentType={doc.content_type}
+            activeSectionId={readSectionId}
+            onScrollToSection={(sectionId) => {
+              if (leftTab !== "read") {
+                setReadSectionId(sectionId)
+                setLeftTab("read")
+              } else {
+                const el = document.getElementById(`read-sec-${sectionId}`)
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            }}
+          />
         </div>
       </div>
 

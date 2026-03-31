@@ -69,7 +69,6 @@ export interface SummaryTabDef {
 }
 
 export const SUMMARY_TABS: SummaryTabDef[] = [
-  { mode: "one_sentence", label: "One-liner" },
   { mode: "executive", label: "Key Points" },
   { mode: "detailed", label: "Detailed" },
 ]

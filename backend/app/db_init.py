@@ -164,6 +164,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S182: YouTube channel/uploader name and canonical YouTube URL
             "ALTER TABLE documents ADD COLUMN channel_name TEXT",
             "ALTER TABLE documents ADD COLUMN youtube_url TEXT",
+            # S192: auto-collection document linkage
+            "ALTER TABLE note_collections ADD COLUMN auto_document_id TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))
@@ -209,6 +211,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 JOIN note_collections ON notes.group_name = note_collections.name
                 WHERE notes.group_name IS NOT NULL
                 """
+            )
+        )
+
+        # S192: index on auto_document_id for fast auto-collection lookup.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_note_collections_auto_doc_id "
+                "ON note_collections(auto_document_id)"
             )
         )
 
