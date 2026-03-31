@@ -807,8 +807,7 @@
         "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
         "scripts/smoke/S190.sh exits 0"
       ]
-    }
-    ,
+    },
     {
       "id": "S191",
       "title": "Library document action menu: quick navigation to document-scoped tabs",

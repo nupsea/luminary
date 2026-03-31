@@ -245,6 +245,7 @@ function AppShell() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const setActiveTag = useAppStore((s) => s.setActiveTag)
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
 
   // S118: review reminder notifications
   useReviewNotification()
@@ -267,9 +268,18 @@ function AppShell() {
         // S176: source document subtitle click from NoteReaderSheet
         const target = detail.documentId ? `/?doc=${detail.documentId}` : "/"
         navigate(target)
+      } else if (detail.tab === "chat") {
+        // S191: document action menu -> Chat about this
+        // Store updates (chatSelectedDocId, chatScope) happen at dispatch site
+        navigate("/chat")
       } else if (detail.tab === "study") {
-        // S183: cards due pill click from LibraryStatsBar
+        // S183/S191: cards due pill or document action menu
+        if (detail.documentId) setActiveDocument(detail.documentId)
         navigate("/study")
+      } else if (detail.tab === "viz") {
+        // S191: document action menu -> View in graph
+        if (detail.documentId) setActiveDocument(detail.documentId)
+        navigate("/viz")
       } else if (detail.tab === "progress") {
         // S183: avg mastery pill click from LibraryStatsBar
         navigate("/progress")
@@ -277,7 +287,7 @@ function AppShell() {
     }
     window.addEventListener("luminary:navigate", onLuminaryNavigate)
     return () => window.removeEventListener("luminary:navigate", onLuminaryNavigate)
-  }, [navigate, setActiveTag])
+  }, [navigate, setActiveTag, setActiveDocument])
 
   // Startup prefetch: documents list + LLM settings
   useEffect(() => {

@@ -1057,9 +1057,10 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                             chunk_index=chunk_idx,
                             pdf_page_number=chunk_pdf_page,
                         ))
-                        chunks.append(
-                            {"id": chunk_id, "document_id": doc_id, "text": text, "index": chunk_idx}
-                        )
+                        chunks.append({
+                            "id": chunk_id, "document_id": doc_id,
+                            "text": text, "index": chunk_idx,
+                        })
                         chunk_idx += 1
                 session.add_all(chunk_models)
                 await session.commit()

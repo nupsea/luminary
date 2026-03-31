@@ -621,6 +621,8 @@ export default function NotesPage() {
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const activeTag = useAppStore((s) => s.activeTag)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
+  const notesDocumentId = useAppStore((s) => s.notesDocumentId)
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -667,8 +669,8 @@ export default function NotesPage() {
     isError: notesError,
     refetch,
   } = useQuery({
-    queryKey: ["notes", groupParam, tagParam, collectionParam],
-    queryFn: () => fetchNotes(undefined, groupParam, tagParam, collectionParam),
+    queryKey: ["notes", groupParam, tagParam, collectionParam, notesDocumentId],
+    queryFn: () => fetchNotes(notesDocumentId ?? undefined, groupParam, tagParam, collectionParam),
     gcTime: 60_000,
   })
 
@@ -1158,18 +1160,29 @@ export default function NotesPage() {
         {/* Panel header with view toggle + button */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
-            {activeCollectionId 
-              ? `Collection: ${getCollectionName(activeCollectionId)}`
-              : activeTag
-                ? `Tag: #${activeTag}`
-                : filter.type === "all"
-                  ? "All Notes"
-                  : filter.type === "journal"
-                    ? "Reading Journal"
-                    : filter.type === "group"
-                      ? filter.name
-                      : `#${filter.name}`}
+            {notesDocumentId
+              ? `Document: ${documents.find((d) => d.id === notesDocumentId)?.title ?? "..."}`
+              : activeCollectionId
+                ? `Collection: ${getCollectionName(activeCollectionId)}`
+                : activeTag
+                  ? `Tag: #${activeTag}`
+                  : filter.type === "all"
+                    ? "All Notes"
+                    : filter.type === "journal"
+                      ? "Reading Journal"
+                      : filter.type === "group"
+                        ? filter.name
+                        : `#${filter.name}`}
           </h2>
+          {notesDocumentId && (
+            <button
+              onClick={() => setNotesDocumentId(null)}
+              className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground hover:bg-primary/20 transition-colors flex items-center gap-1"
+            >
+              Clear document filter
+              <X size={10} />
+            </button>
+          )}
           {filter.type !== "journal" && (
             <div className="flex items-center gap-2">
               <div className="relative">

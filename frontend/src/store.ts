@@ -23,6 +23,9 @@ interface AppState {
   activeCollectionId: string | null
   // S165: Active tag filter for Notes tab (hierarchical prefix match).
   activeTag: string | null
+  // S191: Document filter for Notes tab (set by doc action menu).
+  notesDocumentId: string | null
+  setNotesDocumentId: (id: string | null) => void
   // Chat persistence
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   chatMessages: any[]
@@ -59,6 +62,8 @@ export const useAppStore = create<AppState>((set) => ({
   chatPreload: null,
   activeCollectionId: null,
   activeTag: null,
+  notesDocumentId: null,
+  setNotesDocumentId: (id) => set({ notesDocumentId: id }),
   chatMessages: [],
   setChatMessages: (msgs) => set({ chatMessages: msgs }),
   chatScope: "all",

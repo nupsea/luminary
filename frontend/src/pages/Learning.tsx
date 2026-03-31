@@ -39,6 +39,8 @@ import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 import { buildStatPillNavigateDetail, computeAvgMastery, STAT_PILL_LABELS } from "@/lib/learningUtils"
+import { buildDocActionDetail } from "@/lib/docActionUtils"
+import type { DocAction } from "@/lib/docActionUtils"
 
 import { API_BASE } from "@/lib/config"
 const PAGE_SIZE = 20
@@ -613,6 +615,9 @@ function WhereToStartPanel({
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
+  const setChatScope = useAppStore((s) => s.setChatScope)
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const libraryView = useAppStore((s) => s.libraryView)
   const setLibraryView = useAppStore((s) => s.setLibraryView)
   const queryClient = useQueryClient()
@@ -691,6 +696,24 @@ export default function Learning() {
 
   function handleDocumentClick(id: string) {
     setActiveDocument(id)
+  }
+
+  // S191: Document action menu handler
+  function handleDocAction(docId: string, action: DocAction) {
+    if (action === "read") {
+      handleDocumentClick(docId)
+      return
+    }
+    if (action === "chat") {
+      setChatSelectedDocId(docId)
+      setChatScope("single")
+    } else if (action === "notes") {
+      setNotesDocumentId(docId)
+    } else {
+      setActiveDocument(docId)
+    }
+    const detail = buildDocActionDetail(action, docId)
+    window.dispatchEvent(new CustomEvent("luminary:navigate", { detail }))
   }
 
   function handleTagClick(tag: string) {
@@ -973,6 +996,7 @@ export default function Learning() {
                         onTagsChange={handleTagsChange}
                         onDelete={!selectMode ? handleDeleteDocument : undefined}
                         onContentTypeChange={handleContentTypeChange}
+                        onAction={handleDocAction}
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}
                       />

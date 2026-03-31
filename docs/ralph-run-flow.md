@@ -136,7 +136,7 @@ Each story SXXX produces or modifies these artifacts:
 
 | Story | Title | Status |
 |---|---|---|
-| S191 | Library document action menu: quick navigation to document-scoped tabs | pending |
+| S191 | Library document action menu: quick navigation to document-scoped tabs | pass |
 | S192 | DocumentReader notes panel: collection-scoped active reading sidebar | pending |
 | S193 | Glossary: persistent storage, categorization, and regeneration | pending |
 | S194 | References: URL validation and pruning of dead links | pending |
