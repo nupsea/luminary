@@ -2207,3 +2207,12 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - LLM JSON output parsing needs regex fallback: re.search(r'\[.*\]', raw, re.DOTALL) to extract array from mixed text
   - Pre-existing test_auto_collections assertion was stale after S192 naming convention change (_make_collection_name)
 ---
+
+## 2026-04-01T08:00:00Z - S194
+- What was implemented: URL validation for web references. WebReferenceModel gains is_valid (nullable bool) and last_checked_at (nullable datetime). New ReferenceValidatorService performs async HEAD requests (httpx, 5s timeout, Semaphore(5), max 20 URLs). POST /references/documents/{id}/validate endpoint. GET endpoint gains include_invalid query param. Reference extraction validates URLs before persisting. Frontend ReferencesPanel shows three tiers (verified/unchecked/unavailable) with auto-validation on mount and refresh button.
+- Files changed: backend/app/models.py, backend/app/db_init.py, backend/app/services/reference_validator.py (new), backend/app/services/reference_enricher.py, backend/app/routers/references.py, backend/tests/test_reference_validator.py (new), backend/tests/test_reference_enricher.py, frontend/src/components/reader/ReferencesPanel.tsx, scripts/smoke/S194.sh (new)
+- **Learnings for future iterations:**
+  - When adding URL validation to an existing enrichment service, existing tests that assert "no HTTP calls" will break because the new validation calls httpx. Mock _validate_urls in those tests.
+  - Avoid double-validation in refresh handlers: if enrich() already validates internally, don't call validate_references() again afterward.
+  - Reviewer Warning: auto-validation useEffect with [hasUnchecked] dependency relies on staleTime to prevent re-triggering. A useRef guard would be more robust.
+---

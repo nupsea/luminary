@@ -167,6 +167,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE documents ADD COLUMN youtube_url TEXT",
             # S192: auto-collection document linkage
             "ALTER TABLE note_collections ADD COLUMN auto_document_id TEXT",
+            # S194: URL validation status for web references
+            "ALTER TABLE web_references ADD COLUMN is_valid INTEGER",
+            "ALTER TABLE web_references ADD COLUMN last_checked_at DATETIME",
         ]:
             try:
                 await conn.execute(text(ddl))

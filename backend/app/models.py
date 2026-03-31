@@ -517,6 +517,9 @@ class WebReferenceModel(Base):
     # official_docs | spec | wiki | tutorial | blog | unknown
     source_quality: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
     is_llm_suggested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # S194: URL validation status — None = unchecked, True = reachable, False = dead link
+    is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )

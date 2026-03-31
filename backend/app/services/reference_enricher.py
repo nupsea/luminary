@@ -166,7 +166,10 @@ class ReferenceEnricherService:
             if not refs:
                 continue
 
-            # Optionally verify URLs via HEAD request
+            # Validate URLs via HEAD request (S194)
+            url_validity = await self._validate_urls(refs)
+
+            # Optionally verify URLs via HEAD request (legacy provider check)
             if provider != "none":
                 refs = await self._verify_urls(refs)
 
@@ -174,21 +177,26 @@ class ReferenceEnricherService:
             sorted_refs = sort_by_quality(refs)[:_MAX_REFS_PER_SECTION]
 
             # Write rows
+            now = datetime.now(UTC)
             async with get_session_factory()() as session:
                 for ref in sorted_refs:
+                    url = str(ref.get("url", ""))
+                    is_valid = url_validity.get(url)
                     row = WebReferenceModel(
                         id=str(uuid.uuid4()),
                         document_id=document_id,
                         section_id=summary.section_id,
                         term=str(ref.get("term", ""))[:200],
-                        url=str(ref.get("url", "")),
+                        url=url,
                         title=str(ref.get("title", ""))[:300],
                         excerpt=str(ref.get("excerpt", "")),
                         source_quality=str(
                             ref.get("source_quality", "unknown")
                         )[:30],
                         is_llm_suggested=True,
-                        created_at=datetime.now(UTC),
+                        is_valid=is_valid,
+                        last_checked_at=now if is_valid is not None else None,
+                        created_at=now,
                     )
                     session.add(row)
                 try:
@@ -258,29 +266,47 @@ class ReferenceEnricherService:
         if not refs:
             return 0
 
+        # Validate URLs via HEAD request (S194)
+        url_validity = await self._validate_urls(refs)
+
         if provider != "none":
             refs = await self._verify_urls(refs)
 
         sorted_refs = sort_by_quality(refs)[:_MAX_REFS_PER_SECTION]
 
+        now = datetime.now(UTC)
         async with get_session_factory()() as session:
             for ref in sorted_refs:
+                url = str(ref.get("url", ""))
+                is_valid = url_validity.get(url)
                 row = WebReferenceModel(
                     id=str(uuid.uuid4()),
                     document_id=document_id,
                     section_id=section_id,
                     term=str(ref.get("term", ""))[:200],
-                    url=str(ref.get("url", "")),
+                    url=url,
                     title=str(ref.get("title", ""))[:300],
                     excerpt=str(ref.get("excerpt", "")),
                     source_quality=str(ref.get("source_quality", "unknown"))[:30],
                     is_llm_suggested=True,
-                    created_at=datetime.now(UTC),
+                    is_valid=is_valid,
+                    last_checked_at=now if is_valid is not None else None,
+                    created_at=now,
                 )
                 session.add(row)
             await session.commit()
 
         return len(sorted_refs)
+
+    async def _validate_urls(self, refs: list[dict]) -> dict[str, bool]:
+        """Validate URLs via HEAD requests (S194). Returns {url: is_reachable}."""
+        from app.services.reference_validator import ReferenceValidatorService  # noqa: PLC0415
+
+        urls = [str(r.get("url", "")) for r in refs if r.get("url")]
+        if not urls:
+            return {}
+        svc = ReferenceValidatorService()
+        return await svc.validate_urls(urls)
 
     async def _verify_urls(self, refs: list[dict]) -> list[dict]:
         """Issue HEAD requests to verify URLs when provider != 'none'.

@@ -139,7 +139,7 @@ Each story SXXX produces or modifies these artifacts:
 | S191 | Library document action menu: quick navigation to document-scoped tabs | pass |
 | S192 | DocumentReader notes panel: collection-scoped active reading sidebar | pass |
 | S193 | Glossary: persistent storage, categorization, and regeneration | pass |
-| S194 | References: URL validation and pruning of dead links | pending |
+| S194 | References: URL validation and pruning of dead links | pass |
 | S195 | Chat: Bloom-progressive recommendations with dedup and summary grounding | pending |
 | S196 | Chat: non-destructive scope clear preserves conversation context | pending |
 | S197 | Compare notes with book: auto-collection gap analysis | pending |
