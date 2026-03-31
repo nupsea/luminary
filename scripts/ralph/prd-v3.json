@@ -14,7 +14,8 @@
       "Every new service method and every new API endpoint must have at least one pytest test. No exceptions (inherited from v2 philosophy).",
       "Phase 2 seed (post Phase 1): note-to-note bidirectional links (S171), notes visible in Knowledge graph (S172), collection health reports (S173), export to Obsidian vault and Anki (S174), multi-document notes (S175). Phase 2 gate cleared 2026-03-26: docs/v3-phase1-completion.md fully checked, all S161-S170 pass=true.",
       "Phase 3 (UX Polish and Learner Focus, S176-S183): ruthlessly separates the learner layer from the diagnostic/admin layer. Notes get a reader-first layout with clickable tag navigation (S176). Monitoring becomes a Progress tab with all dev metrics hidden at /admin (S177). Study tab declutters with Smart Generate and merged health panels (S178). Flashcard generation becomes context-aware and best-practices-driven (S179). Chat settings move to a drawer with collapsed transparency panels (S180). Viz gets a collapsible View Options panel, select-all entity controls, and hides Call Graph for non-code documents (S181). YouTube transcripts gain full Read section parity (S182). Learning tab LibraryOverview slims to a single stats bar with document list as primary focus (S183).",
-      "Phase 4 (Learner Experience Refinement, S184-S190): eliminates friction in the three highest-touch surfaces -- Study, Chat, and Notes. Flashcard navigation drops the deck concept in favour of a unified search-and-filter browser (S184). Study tab collapses to two CTAs with an Insights accordion (S185). Chat brings document scope back inline and removes confusion-signal noise (S186-S187). Flashcard generation gets deeper context and Bloom L3+ bias (S188). Auto-organize shows a holistic plan instead of individual suggestion cards (S189). Tag tree gains type-ahead search (S190)."
+      "Phase 4 (Learner Experience Refinement, S184-S190): eliminates friction in the three highest-touch surfaces -- Study, Chat, and Notes. Flashcard navigation drops the deck concept in favour of a unified search-and-filter browser (S184). Study tab collapses to two CTAs with an Insights accordion (S185). Chat brings document scope back inline and removes confusion-signal noise (S186-S187). Flashcard generation gets deeper context and Bloom L3+ bias (S188). Auto-organize shows a holistic plan instead of individual suggestion cards (S189). Tag tree gains type-ahead search (S190).",
+      "Phase 5 (Reading Experience and Chat Intelligence, S191-S197): elevates the reading and questioning loops into cohesive learning experiences. The Library gains a document action menu for one-click navigation to any tab scoped to a specific book (S191). DocumentReader replaces the one-liner tab with a live notes panel tied to a per-document auto-collection, creating an active-reading marginalia experience (S192). Glossary becomes a persistent, categorized study artifact stored in the database with regeneration and section linking (S193). References gain HTTP validation so only live, browsable links are shown -- dead links are pruned (S194). Chat recommendations become Bloom-progressive and summary-grounded, with deduplication history so the same question never appears twice (S195). The chat scope clear button stops destroying conversation context (S196). Gap analysis auto-selects the document's collection notes for frictionless compare-my-notes-with-book (S197)."
     ]
   },
   "architecture": {
@@ -48,7 +49,20 @@
       "scripts/smoke/S167.sh",
       "scripts/smoke/S168.sh",
       "scripts/smoke/S169.sh",
-      "scripts/smoke/S170.sh"
+      "scripts/smoke/S170.sh",
+      "backend/app/services/reference_validator.py -- ReferenceValidatorService: async HEAD validation of WebReferenceModel URLs",
+      "backend/tests/test_glossary.py",
+      "backend/tests/test_reference_validator.py",
+      "backend/tests/test_chat_suggestions_v2.py",
+      "frontend/src/components/reader/NotesReaderPanel.tsx -- collection-scoped notes sidebar in DocumentReader",
+      "frontend/src/components/reader/GlossaryPanel.tsx -- persistent glossary with search, sort, section linking",
+      "scripts/smoke/S191.sh",
+      "scripts/smoke/S192.sh",
+      "scripts/smoke/S193.sh",
+      "scripts/smoke/S194.sh",
+      "scripts/smoke/S195.sh",
+      "scripts/smoke/S196.sh",
+      "scripts/smoke/S197.sh"
     ],
     "modifiedFiles": [
       "backend/app/models.py -- add NoteCollectionModel, NoteCollectionMemberModel, NoteTagIndexModel, CanonicalTagModel, TagAliasModel, ClusterSuggestionModel, TagMergeSuggestionModel; FlashcardModel.source_content_hash column",
@@ -65,7 +79,20 @@
       "frontend/src/components/GenerateFlashcardsDialog.tsx -- By Collection tab",
       "frontend/src/App.tsx -- luminary:navigate event handler",
       "frontend/src/store/useAppStore.ts -- activeCollectionId, activeTag state fields",
-      "frontend/src/pages/Viz.tsx -- Tags mode button + TagGraph component"
+      "frontend/src/pages/Viz.tsx -- Tags mode button + TagGraph component",
+      "backend/app/models.py -- add GlossaryTermModel, ChatSuggestionHistoryModel; WebReferenceModel gains is_valid + last_checked_at; NoteCollectionModel gains auto_document_id",
+      "backend/app/db_init.py -- migrations for glossary_terms, chat_suggestion_history, WebReferenceModel columns, NoteCollectionModel auto_document_id",
+      "backend/app/services/explain.py -- extract_glossary now persists to GlossaryTermModel; cached endpoint",
+      "backend/app/routers/explain.py -- GET /explain/glossary/{id}/cached; DELETE /explain/glossary/{id}/terms/{term_id}",
+      "backend/app/services/reference_enricher.py -- extraction pipeline validates URLs before persisting",
+      "backend/app/routers/references.py -- POST /references/documents/{id}/validate; include_invalid query param on GET",
+      "backend/app/routers/chat_meta.py -- GET /chat/suggestions refactored for LLM-powered Bloom-progressive questions; POST /chat/suggestions/{id}/asked",
+      "backend/app/routers/collections.py -- GET /collections/by-document/{id}; POST /collections/auto/{id}",
+      "backend/app/runtime/chat_graph.py -- notes_gap_node auto-fetches from document auto-collection",
+      "frontend/src/pages/Learning.tsx -- DocumentCard context menu with tab navigation actions",
+      "frontend/src/components/reader/DocumentReader.tsx -- Notes tab replaces One-liner; GlossaryPanel uses cached endpoint; ReferencesPanel validation tiers",
+      "frontend/src/pages/Chat.tsx -- scope clear preserves conversation; suggestion pills POST asked endpoint",
+      "frontend/src/components/GapDetectDialog.tsx -- Quick compare mode using auto-collection"
     ]
   },
   "stories": [
@@ -779,6 +806,183 @@
         "Unit test: parent chain shown for deeply nested matching tags",
         "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0",
         "scripts/smoke/S190.sh exits 0"
+      ]
+    }
+    ,
+    {
+      "id": "S191",
+      "title": "Library document action menu: quick navigation to document-scoped tabs",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 31,
+      "featureRef": "F-LEARNING",
+      "passes": false,
+      "description": "CONTEXT: The Library is the entry point for learning, but once a user sees a document card, the only action is 'click to read.' Users need quick paths to Study (flashcards for this book), Chat (ask about this book), Notes (notes for this book), and Viz (entities for this book) without opening the reader first. USER JOURNEY: User sees document grid -> hovers a card -> three-dot menu appears -> options: 'Read', 'Chat about this', 'Study flashcards', 'View notes', 'View in graph' -> clicks 'Chat about this' -> navigates to Chat tab with this document pre-selected in scope. CROSS-STORY IMPACT: Uses luminary:navigate DOM event (I-11). Does not modify DocumentReader. Uses existing Zustand store fields (chatSelectedDocId, activeDocumentId, activeCollectionId). FRONTEND: Add ContextMenu (shadcn DropdownMenu) to DocumentCard in Learning.tsx. Menu items dispatch luminary:navigate with appropriate tab + filter detail. 'Chat about this' sets chatSelectedDocId in Zustand store before navigating. 'Study flashcards' navigates to Study tab with document_id filter. 'View notes' navigates to Notes tab with document title as search query (or collection_id filter if auto-collection exists from S192). 'View in graph' navigates to Viz tab with document_id scope. No new backend endpoints required.",
+      "acceptanceCriteria": [
+        "Document cards in Library show a three-dot action menu on hover (desktop) and on long-press or always-visible on mobile",
+        "Menu contains five items: Read, Chat about this, Study flashcards, View notes, View in graph",
+        "Each action navigates to the correct tab with the document pre-scoped via luminary:navigate DOM event and Zustand store updates",
+        "'Read' opens DocumentReader (existing behavior, now explicit in menu)",
+        "'Chat about this' sets chatSelectedDocId and chatScope='single' in Zustand before dispatching navigation",
+        "'Study flashcards' navigates to Study tab with document_id filter applied",
+        "'View notes' navigates to Notes tab; uses collection_id filter if auto-collection exists, else document title search",
+        "'View in graph' navigates to Viz tab with document_id scope pre-set",
+        "No new backend endpoints required; all navigation via existing Zustand store + DOM event",
+        "npx tsc --noEmit exits 0",
+        "scripts/smoke/S191.sh exits 0"
+      ]
+    },
+    {
+      "id": "S192",
+      "title": "DocumentReader notes panel: collection-scoped active reading sidebar",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 32,
+      "featureRef": "F-NOTES",
+      "passes": false,
+      "description": "CONTEXT: The right panel of DocumentReader has summary tabs (One-liner, Key Points, Detailed) plus Glossary and References. While reading, users want to see and edit their notes for this document without leaving the reader. The One-liner tab is the least-used summary mode and should be replaced with a Notes tab that shows the document's auto-collection notes. Research shows note-taking during reading improves retention by 34% -- surfacing collection-scoped notes beside the text creates a marginalia experience. USER JOURNEY: User opens a book -> right panel shows tabs: 'Notes | Key Points | Detailed | Glossary | References' -> Notes tab is default when the document has an auto-collection -> shows notes in this collection sorted by section_order -> user clicks '+ Add note' -> inline editor appears with the auto-collection pre-assigned -> user types and saves -> note appears in the list and is visible in the main Notes tab later. User clicks a note -> it scrolls the left panel to the corresponding section. CROSS-STORY IMPACT: Depends on S161 (collections exist). Creates an auto-collection per document if one does not exist (named after document title). Reuses NoteEditor component from existing inline editor. Does not remove one_sentence summary mode from backend -- only hides the tab in the reader UI. BACKEND: New endpoint GET /collections/by-document/{document_id} returns the auto-collection for a document (convention: collection with metadata field auto_document_id = document_id). If none exists, returns 404. POST /collections/auto/{document_id} creates one named '{doc_title} Notes' with color from document content_type palette, sets auto_document_id = document_id, and returns it. Idempotent -- returns existing if already created. Add auto_document_id (nullable str) column to NoteCollectionModel. GET /notes?collection_id=X already works (S161). POST /notes already works -- frontend pre-fills collection assignment via POST /collections/{id}/notes after note creation. Register new endpoints in collections router. FRONTEND: Replace One-liner tab in SummaryPanel with Notes tab. NotesReaderPanel component: fetches auto-collection on mount via GET /collections/by-document/{docId} (creates if 404 via POST). Lists notes via GET /notes?collection_id={autoCollectionId}. Each note card shows: content preview (2 lines), section heading if linked, tags, created_at. Click note -> dispatch scrollToSection in left panel. '+ Add note' button opens inline NoteEditor with collection pre-assigned and current section_id pre-filled if a section is active. Edit/delete buttons on each note card with same functionality as main Notes section. Empty state: 'No notes yet -- start annotating as you read.'",
+      "acceptanceCriteria": [
+        "NoteCollectionModel gains auto_document_id nullable string column; db_init.py migration adds it with CREATE INDEX on auto_document_id",
+        "GET /collections/by-document/{document_id} returns the auto-collection with auto_document_id matching, or 404 if none exists",
+        "POST /collections/auto/{document_id} creates auto-collection named '{title} Notes' and returns it; idempotent (returns existing if already created)",
+        "DocumentReader right panel shows 'Notes' tab replacing 'One-liner' tab as the first tab",
+        "Notes tab is the default active tab when the document has notes in its auto-collection; otherwise Key Points is default",
+        "Notes list sorted by section_order (notes linked to earlier sections appear first); unlinked notes at the end",
+        "Clicking a note scrolls the left panel to the note's linked section",
+        "'+ Add note' pre-fills the auto-collection and current active section; opens inline editor with same edit/save/cancel as main Notes section",
+        "Edit and delete inline on each note card with optimistic UI update; editing opens same editor with full content, tags, and save/cancel",
+        "Empty state shows 'No notes yet -- start annotating as you read'",
+        "One-sentence summary mode still available via API; only the UI tab is replaced",
+        "Unit test: GET /collections/by-document returns auto-collection; returns 404 for document with no auto-collection",
+        "Unit test: POST /collections/auto creates collection with auto_document_id set; second call returns same collection",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S192.sh exits 0"
+      ]
+    },
+    {
+      "id": "S193",
+      "title": "Glossary: persistent storage, categorization, and regeneration",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 33,
+      "featureRef": "F-LEARNING",
+      "passes": false,
+      "description": "CONTEXT: The glossary feature calls the LLM on every 'Generate Glossary' click with no persistence. If the LLM is unavailable or returns malformed JSON, the user sees nothing with no error feedback. There is no way to regenerate or incrementally update. The glossary should be a persistent, categorized study artifact that grows with the document. USER JOURNEY: User opens a book -> clicks Glossary tab -> if a cached glossary exists, it loads instantly from DB -> if not, 'Generate Glossary' button shown -> user clicks -> LLM extracts terms -> terms saved to DB -> displayed as a searchable, sortable table with category badges (character, place, concept, technical) -> user clicks 'Regenerate' -> new terms merged with existing (new terms added, existing definitions updated, no terms deleted unless user explicitly removes) -> user clicks a term's section link -> left panel scrolls to first mention. CROSS-STORY IMPACT: None broken. GlossaryPanel in DocumentReader enhanced. New GlossaryTermModel in models.py. ExplainService modified. BACKEND: GlossaryTermModel in models.py: id (UUID), document_id (FK), term (str), definition (str), first_mention_section_id (nullable FK to sections), category (nullable str -- e.g. 'character', 'place', 'concept', 'technical', 'event', 'general'), created_at, updated_at. Unique constraint on (document_id, lower(term)). db_init.py migration: CREATE TABLE glossary_terms. ExplainService.extract_glossary() updated: after LLM extraction, upsert terms into glossary_terms (INSERT ... ON CONFLICT(document_id, term) DO UPDATE definition, category, updated_at). LLM prompt updated to also extract category per term. Section matching: after extraction, match each term to SectionModel using text search to populate first_mention_section_id. New GET /explain/glossary/{document_id}/cached returns persisted terms (no LLM call, fast). Existing POST /explain/glossary/{document_id} now generates + persists + returns. DELETE /explain/glossary/{document_id}/terms/{term_id} removes a single term (204). Error handling: if LLM unavailable, return 503 with clear message; if parse fails, return 422 with 'Glossary generation failed -- try again'. FRONTEND: GlossaryPanel updated: on mount, fetch GET /explain/glossary/{docId}/cached. If terms exist, render table. If empty, show 'Generate Glossary' button. Table columns: Term, Definition, Category (colored badge), Section (clickable link). Search filter input across term and definition. Sort by term (default) or category. 'Regenerate' button calls POST endpoint and merges results. Click section link -> scrollToSection on left panel. Loading skeleton during generation. Error state: show message from API response.",
+      "acceptanceCriteria": [
+        "GlossaryTermModel in models.py with fields: id, document_id, term, definition, first_mention_section_id (nullable), category (nullable), created_at, updated_at",
+        "Unique constraint on (document_id, term) with ON CONFLICT UPDATE for upserts during generation",
+        "GET /explain/glossary/{document_id}/cached returns persisted terms without LLM call; empty list if none generated yet",
+        "POST /explain/glossary/{document_id} extracts via LLM and upserts to DB; returns the full persisted term list",
+        "DELETE /explain/glossary/{document_id}/terms/{term_id} removes a single term; returns 204",
+        "LLM prompt extracts category per term (character, place, concept, technical, event, or general)",
+        "first_mention_section_id populated by searching section content for term occurrence",
+        "GlossaryPanel loads cached terms on mount; shows 'Generate Glossary' button only when no cached terms exist",
+        "Clicking a term's section link scrolls the DocumentReader left panel to that section",
+        "'Regenerate' button merges new terms with existing (adds new, updates definitions, does not delete existing terms)",
+        "Search filter works across term and definition text",
+        "Category badges shown with distinct colors per category type",
+        "Error state: LLM unavailable shows 'Ollama unavailable -- start it to generate glossary'; parse failure shows retry message",
+        "Unit test: extract_glossary persists terms to GlossaryTermModel table",
+        "Unit test: cached endpoint returns persisted terms without invoking LLM",
+        "Unit test: regenerate upserts (updates existing term definition, adds new terms, does not remove old terms)",
+        "Unit test: DELETE removes a specific term by ID",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S193.sh exits 0"
+      ]
+    },
+    {
+      "id": "S194",
+      "title": "References: URL validation and pruning of dead links",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 34,
+      "featureRef": "F-LEARNING",
+      "passes": false,
+      "description": "CONTEXT: References are LLM-generated URLs stored with is_llm_suggested=True. Many are hallucinated and do not resolve to real pages. Users click links that 404 or lead to domain parking pages. The references tab should only show validated links, and dead links should be flagged and hidden. USER JOURNEY: User opens References tab -> sees verified links with green check badge and 'unverified' links with amber 'Checking...' badge -> background validation runs on first tab open -> dead links moved to a collapsed 'Unavailable' section (strikethrough text, not clickable) -> user clicks 'Refresh references' -> new extraction runs, validated against live HTTP -> only reachable URLs shown in main list. CROSS-STORY IMPACT: WebReferenceModel gains is_valid (bool nullable) and last_checked_at (datetime nullable) columns. Existing reference_enricher service enhanced. S138 reference extraction preserved. BACKEND: Add is_valid (nullable bool, default None = unchecked) and last_checked_at (datetime nullable) to WebReferenceModel. db_init.py migration adds columns. New ReferenceValidatorService in services/reference_validator.py: validate_references(document_id) fetches all refs for a document, performs HEAD requests (httpx async, 5s timeout, follow redirects, concurrency limited to 5 via asyncio.Semaphore) to each URL. Updates is_valid = True/False and last_checked_at. Returns count of valid/invalid. New POST /references/documents/{document_id}/validate endpoint triggers validation. GET /references/documents/{document_id} gains include_invalid query param (default false) -- when false, excludes is_valid=False rows; is_valid=None rows included (not yet checked). Reference extraction (POST /references/sections/{section_id}/refresh) now runs validation on newly extracted refs before persisting -- only refs that pass HEAD check get is_valid=True; others get is_valid=False. Rate limit: max 20 HEAD requests per validation run to avoid network abuse. FRONTEND: ReferencesPanel: on mount, if any refs have is_valid=None, trigger POST /references/documents/{docId}/validate in background. Show refs grouped: verified first (green check badge), unchecked next (amber spinner while validation running), invalid last in a collapsed 'Unavailable' accordion (strikethrough text, no clickable link). After validation completes, refetch and re-render. 'Refresh references' button re-runs extraction + validation for the whole document.",
+      "acceptanceCriteria": [
+        "WebReferenceModel gains is_valid (nullable bool) and last_checked_at (nullable datetime) columns; db_init.py migration adds them with no data loss",
+        "POST /references/documents/{document_id}/validate runs async HEAD requests (httpx, 5s timeout, max concurrency 5 via Semaphore, max 20 URLs per run) and updates is_valid + last_checked_at per reference",
+        "GET /references/documents/{document_id} excludes is_valid=False rows by default; include_invalid=true query param returns all rows",
+        "Reference extraction (refresh) validates newly extracted refs before persisting; reachable refs get is_valid=True, unreachable get is_valid=False",
+        "Frontend shows three tiers: verified (green check badge), unchecked (amber spinner during validation), unavailable (collapsed accordion, strikethrough, not clickable)",
+        "Validation triggers automatically on first References tab open if any refs have is_valid=None; does not re-trigger if all refs already checked",
+        "'Refresh references' button re-runs extraction + validation for the entire document and updates the view",
+        "No external HTTP calls made during tests (httpx mocked with respx or unittest.mock)",
+        "Unit test: validate_references marks reachable URL as is_valid=True with last_checked_at set",
+        "Unit test: validate_references marks unreachable URL (timeout/4xx/5xx) as is_valid=False",
+        "Unit test: GET /references excludes invalid refs by default; includes them with include_invalid=true",
+        "Unit test: extraction + validation pipeline persists valid refs as is_valid=True and invalid as is_valid=False",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S194.sh exits 0"
+      ]
+    },
+    {
+      "id": "S195",
+      "title": "Chat: Bloom-progressive recommendations with dedup and summary grounding",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 35,
+      "featureRef": "F-CHAT",
+      "passes": false,
+      "description": "CONTEXT: Chat suggestion pills (S187) are template-based and entity-driven but repeat the same 4 questions on every visit. They do not use the document's summary for higher-order question generation, do not track which suggestions were shown or asked, and do not progress through Bloom taxonomy levels. For a learning tool, recommendations should push the user toward deeper engagement -- starting with analysis/evaluation questions and descending to comprehension only when needed. USER JOURNEY: User selects 'The Odyssey' -> sees 4 suggestion pills at Bloom L4-L5: 'Evaluate whether Ulysses's deception of Polyphemus was justified', 'Analyze how hospitality norms drive the plot structure' -> user asks one -> next refresh shows 4 NEW questions (the asked one never reappears) -> after 8+ questions asked, system mixes in L3 application questions -> user clears scope to all-documents -> sees cross-document analytical questions -> returns tomorrow -> sees fresh questions (not yesterday's). CROSS-STORY IMPACT: Enhances S187 template logic in chat_meta.py with LLM-generated questions. SuggestionPills component contract unchanged (still GET /chat/suggestions returning 4 strings). New ChatSuggestionHistoryModel tracks shown/asked suggestions. Falls back to S187 templates when LLM unavailable. BACKEND: ChatSuggestionHistoryModel in models.py: id (UUID), document_id (nullable str), suggestion_text (str), bloom_level (int 1-6), was_asked (bool default False), shown_at (datetime), session_id (nullable str). db_init.py migration. GET /chat/suggestions refactored: 1) Fetch document's executive summary from SummaryModel (mode=executive). 2) Fetch top 5 entities from Kuzu. 3) Fetch recent suggestion history (last 50 shown_at DESC) for this document_id. 4) Call LLM with system prompt: 'Given this book summary and key entities, generate 6 questions at Bloom level {target_level}. Avoid these previously asked questions: {history}. Format: JSON array of {question, bloom_level}.' 5) Filter out any near-duplicate matches against history (Jaccard similarity > 0.7 on word tokens). 6) Take top 4, persist to history table with shown_at=now. 7) Return list of {id, text} objects. Target bloom_level starts at 5 (evaluate), decreases by 1 for every 4 questions asked for this document scope (floor at 2). POST /chat/suggestions/{id}/asked marks a suggestion as was_asked=True (called when user clicks a pill). Fallback: if LLM unavailable (litellm.ServiceUnavailableError), fall back to existing S187 template logic -- no breakage. FRONTEND: SuggestionPills: when user clicks a pill, POST /chat/suggestions/{id}/asked before submitting the question. Invalidate suggestions query after each question submission (forces fresh generation). No other frontend changes -- same 4-pill UI, same visual.",
+      "acceptanceCriteria": [
+        "ChatSuggestionHistoryModel in models.py: id (UUID), document_id (nullable), suggestion_text, bloom_level (int 1-6), was_asked (bool default False), shown_at (datetime), session_id (nullable)",
+        "GET /chat/suggestions uses document executive summary + top entities to generate LLM-powered questions at a target Bloom level",
+        "Target Bloom level starts at 5 (evaluate) and decreases by 1 for every 4 asked questions in this document scope (minimum floor at level 2 -- comprehension)",
+        "Previously shown suggestions (last 50) excluded from generation; near-duplicates (Jaccard > 0.7 on word tokens) also excluded",
+        "GET /chat/suggestions returns list of {id, text} objects (id is the ChatSuggestionHistoryModel UUID for the asked endpoint)",
+        "POST /chat/suggestions/{id}/asked marks suggestion as was_asked=True; returns 204",
+        "Frontend calls POST /chat/suggestions/{id}/asked when a suggestion pill is clicked, before submitting the question",
+        "Suggestions refresh after each question submission (React Query invalidation); pills never show stale or repeated questions",
+        "Fallback to S187 template logic when LLM is unavailable (litellm.ServiceUnavailableError); no error shown to user",
+        "Cross-document (all-scope) suggestions also use LLM with multi-document summary context from SummaryModel",
+        "Unit test: suggestions endpoint returns 4 items not in recent history",
+        "Unit test: bloom_level decreases from 5 to 4 after 4 asked questions for the same document",
+        "Unit test: fallback to template when LLM raises ServiceUnavailableError",
+        "Unit test: near-duplicate suggestion (Jaccard > 0.7) filtered out from results",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S195.sh exits 0"
+      ]
+    },
+    {
+      "id": "S196",
+      "title": "Chat: non-destructive scope clear preserves conversation context",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 36,
+      "featureRef": "F-CHAT",
+      "passes": false,
+      "description": "CONTEXT: The 'x' button on the document scope selector clears the entire conversation and switches to 'All documents' scope. This is jarring -- the user may just want to browse a different document or may have accidentally clicked it. The conversation context is destroyed with no undo. The clear action should be non-destructive, preserving conversation history with a scope-change divider, consistent with how switching between documents already works. The 'New conversation' button (trash icon) remains the explicit way to start fresh. USER JOURNEY: User is chatting about 'The Odyssey' -> clicks 'x' on scope pill -> scope switches to 'All documents' but conversation is PRESERVED with a scope-change divider (same as switching between documents) -> suggestion pills refresh to all-scope questions -> user can continue asking cross-document questions with prior context visible. If user wants a fresh start, they use the existing 'New conversation' button. CROSS-STORY IMPACT: Modifies Chat.tsx scope-change logic only. No backend changes. Aligns with S186 inline scope selector behavior for document-to-document switching. FRONTEND: In Chat.tsx, when onSelect(null) is called (X button click): instead of clearConversation(), insert a scope-change divider message (reuse the same divider pattern as switching between documents in single-scope mode) and set scope to 'all'. Remove the clearConversation() call from the null-select path. The 'New conversation' button (existing trash icon) remains the only way to clear history. If conversation is empty (no messages), the X button simply switches scope without inserting a divider. Suggestion pills refresh to all-scope via existing React Query invalidation on scope change.",
+      "acceptanceCriteria": [
+        "Clicking 'x' on document scope selector switches to 'All documents' scope WITHOUT clearing the conversation history",
+        "A scope-change divider message is inserted in the message list showing 'Switched to All documents' (same visual style as document-to-document dividers)",
+        "Suggestion pills refresh to all-scope suggestions after scope clear",
+        "If conversation is empty (no messages), no divider inserted -- just scope change to 'all'",
+        "'New conversation' button (trash icon) remains the only explicit way to clear all messages and start fresh",
+        "Switching from all-scope back to a specific document also inserts a divider (consistent behavior)",
+        "No backend changes required",
+        "npx tsc --noEmit exits 0",
+        "scripts/smoke/S196.sh exits 0"
+      ]
+    },
+    {
+      "id": "S197",
+      "title": "Compare notes with book: auto-collection gap analysis",
+      "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
+      "priority": 37,
+      "featureRef": "F-NOTES",
+      "passes": false,
+      "description": "CONTEXT: 'Compare notes with book' currently requires the user to manually select individual notes or type a keyword trigger in Chat. With auto-collections per document (S192), the natural comparison is: 'how well do my reading notes cover this book?' The gap detector should auto-select notes from the book's auto-collection, removing all manual selection friction. This is the high-value use case -- comparing the marginalia a reader created while studying against the actual book content. USER JOURNEY: User is reading 'The Odyssey' with 15 notes in the auto-collection -> clicks 'Compare my notes' button in DocumentReader toolbar -> system automatically uses notes from the document's auto-collection -> gap analysis runs -> shows covered concepts (green check) and missed concepts (red x) -> user clicks a missed concept -> 'Take a note on this' button opens NoteEditor pre-filled with concept heading and auto-collection pre-assigned -> 'Generate flashcard for this gap' also available. Alternatively, user types 'compare my notes' in Chat with document scoped -> same auto-collection detection happens. CROSS-STORY IMPACT: Depends on S192 (auto-collections with auto_document_id). Modifies notes_gap_node in chat_graph.py and GapDetectDialog.tsx. Existing manual note selection preserved as advanced option for users who want to compare arbitrary notes. BACKEND: notes_gap_node in chat_graph.py updated: when scope=single and no explicit note_ids provided in the question, auto-detect the document's auto-collection by querying NoteCollectionModel WHERE auto_document_id = document_id. Fetch all note_ids in that collection via NoteCollectionMemberModel. If auto-collection has no notes, return card answer: 'No notes found for this document. Start taking notes in the reader to use gap analysis.' If auto-collection has fewer than 3 notes, return card answer: 'You have only N notes for this document. Take a few more notes while reading, then try gap analysis again.' If >= 3 notes, proceed with existing detect_gaps(note_ids, document_id). GapDetectorService unchanged. FRONTEND: DocumentReader toolbar: add 'Compare my notes' button (icon: GitCompare or similar). Visible only when auto-collection has >= 3 notes (fetch count from GET /collections/by-document/{docId}). On click, navigate to Chat with scope=single for this document and auto-submit 'compare my notes with this book' as a message via Zustand pendingMessage field. GapDetectDialog: add 'Quick compare' default mode. When a document is selected, auto-populate note list from the document's auto-collection. 'Advanced' toggle reveals manual note search and selection (existing behavior). GapResultCard: add 'Take a note on this' action per missed concept -- opens NoteEditorDialog pre-filled with the concept name as a heading and the document's auto-collection pre-assigned.",
+      "acceptanceCriteria": [
+        "notes_gap_node in chat_graph.py auto-fetches notes from the document's auto-collection (NoteCollectionModel WHERE auto_document_id = document_id) when scope=single and no explicit note_ids in question",
+        "If auto-collection has no notes, returns card message: 'No notes found for this document. Start taking notes in the reader to use gap analysis.'",
+        "If auto-collection has fewer than 3 notes, returns card message suggesting the user take more notes first",
+        "If auto-collection has >= 3 notes, proceeds with existing GapDetectorService.detect_gaps(note_ids, document_id)",
+        "DocumentReader toolbar shows 'Compare my notes' button only when auto-collection has >= 3 notes",
+        "Clicking 'Compare my notes' navigates to Chat with scope=single and auto-submits the compare question",
+        "GapDetectDialog defaults to 'Quick compare' mode that auto-populates notes from the document's auto-collection",
+        "'Advanced' toggle in GapDetectDialog reveals manual note search and selection (existing behavior preserved)",
+        "GapResultCard includes 'Take a note on this' action per missed concept that opens NoteEditorDialog with concept heading and auto-collection pre-assigned",
+        "Manual note selection path (typing specific note IDs or using Advanced mode) continues to work unchanged",
+        "Unit test: notes_gap_node auto-fetches notes from auto-collection when no explicit note_ids",
+        "Unit test: returns helpful card message when auto-collection is empty",
+        "Unit test: returns helpful card message when auto-collection has fewer than 3 notes",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S197.sh exits 0"
       ]
     }
   ],

@@ -104,7 +104,8 @@ Each story SXXX produces or modifies these artifacts:
 | v3 Phase 1 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S161-S170 (all pass) -- Note organization: collections, hierarchical tags, graph nodes, performance |
 | v3 Phase 2 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S171-S175 (all pass) -- Note intelligence: bidirectional links, Viz integration, health reports, Obsidian/Anki export, multi-doc notes |
 | v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (all pass) -- UX polish and learner focus |
-| v3 Phase 4 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S184-S190 (pending) -- Learner experience refinement |
+| v3 Phase 4 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S184-S190 (all pass) -- Learner experience refinement |
+| v3 Phase 5 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S191-S197 (pending) -- Reading experience and chat intelligence |
 
 ## V3 Phase 3 Story Status
 
@@ -130,3 +131,15 @@ Each story SXXX produces or modifies these artifacts:
 | S188 | Flashcard generation: context-rich questions with source grounding | pass |
 | S189 | Auto-organize: guided plan with confirmation workflow | pass |
 | S190 | Tag search: type-ahead search in Notes sidebar | pass |
+
+## V3 Phase 5 Story Status
+
+| Story | Title | Status |
+|---|---|---|
+| S191 | Library document action menu: quick navigation to document-scoped tabs | pending |
+| S192 | DocumentReader notes panel: collection-scoped active reading sidebar | pending |
+| S193 | Glossary: persistent storage, categorization, and regeneration | pending |
+| S194 | References: URL validation and pruning of dead links | pending |
+| S195 | Chat: Bloom-progressive recommendations with dedup and summary grounding | pending |
+| S196 | Chat: non-destructive scope clear preserves conversation context | pending |
+| S197 | Compare notes with book: auto-collection gap analysis | pending |
