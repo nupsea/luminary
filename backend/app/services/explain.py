@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -29,19 +30,22 @@ MODE_INSTRUCTIONS: dict[str, str] = {
 
 GLOSSARY_SYSTEM = (
     "You are a technical terminology extractor. "
-    "Output a JSON array with no preamble or markdown."
+    "You MUST output ONLY a JSON array. No explanations, no preamble, "
+    "no markdown. Just the raw JSON array."
 )
 
 GLOSSARY_USER_TMPL = (
     "Extract all domain-specific technical terms from this text. "
     "For each term, define it based only on how it is used in the text. "
-    "Categorize each term as one of: character, place, concept, technical, event, or general. "
-    'Output a JSON array: [{{"term": str, "definition": str, "category": str}}]\n\n'
-    "Text:\n{text}"
+    "Categorize each term as one of: character, place, concept, "
+    "technical, event, or general.\n\n"
+    "Text:\n{text}\n\n"
+    "Respond with ONLY a JSON array. Example format:\n"
+    '[{{"term": "example", "definition": "a sample", "category": "concept"}}]'
 )
 
-# Approximate token limit for glossary context (8000 tokens ~ 32000 chars)
-_GLOSSARY_CHAR_LIMIT = 32_000
+# Approximate token limit for glossary context (4000 tokens ~ 16000 chars)
+_GLOSSARY_CHAR_LIMIT = 16_000
 
 
 class ExplainService:
@@ -97,19 +101,44 @@ class ExplainService:
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1]
-            raw = raw.rsplit("```", 1)[0]
+            raw = raw.rsplit("```", 1)[0].strip()
 
-        try:
-            terms = json.loads(raw)
-            if not isinstance(terms, list):
-                return []
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("Glossary parse failed for doc %s: %r", document_id, raw[:200])
-            raise GlossaryParseError("Glossary generation failed -- try again")
+        terms = self._parse_glossary_json(raw, document_id)
+        if terms is None:
+            raise GlossaryParseError(
+                "Glossary generation failed -- try again"
+            )
 
         # Persist terms via upsert
         persisted = await self._upsert_terms(document_id, terms)
         return persisted
+
+    def _parse_glossary_json(
+        self, raw: str, document_id: str
+    ) -> list[dict] | None:
+        """Parse LLM glossary output, tolerating common formatting issues."""
+        try:
+            terms = json.loads(raw)
+            if isinstance(terms, list):
+                return terms
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Try to extract a JSON array from the raw text
+        match = re.search(r"\[.*\]", raw, re.DOTALL)
+        if match:
+            try:
+                terms = json.loads(match.group())
+                if isinstance(terms, list):
+                    return terms
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        logger.warning(
+            "Glossary parse failed for doc %s: %r",
+            document_id, raw[:200],
+        )
+        return None
 
     async def _upsert_terms(
         self, document_id: str, terms: list[dict]
