@@ -814,7 +814,7 @@
       "phase": "V3 Phase 5 - Reading Experience and Chat Intelligence",
       "priority": 31,
       "featureRef": "F-LEARNING",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: The Library is the entry point for learning, but once a user sees a document card, the only action is 'click to read.' Users need quick paths to Study (flashcards for this book), Chat (ask about this book), Notes (notes for this book), and Viz (entities for this book) without opening the reader first. USER JOURNEY: User sees document grid -> hovers a card -> three-dot menu appears -> options: 'Read', 'Chat about this', 'Study flashcards', 'View notes', 'View in graph' -> clicks 'Chat about this' -> navigates to Chat tab with this document pre-selected in scope. CROSS-STORY IMPACT: Uses luminary:navigate DOM event (I-11). Does not modify DocumentReader. Uses existing Zustand store fields (chatSelectedDocId, activeDocumentId, activeCollectionId). FRONTEND: Add ContextMenu (shadcn DropdownMenu) to DocumentCard in Learning.tsx. Menu items dispatch luminary:navigate with appropriate tab + filter detail. 'Chat about this' sets chatSelectedDocId in Zustand store before navigating. 'Study flashcards' navigates to Study tab with document_id filter. 'View notes' navigates to Notes tab with document title as search query (or collection_id filter if auto-collection exists from S192). 'View in graph' navigates to Viz tab with document_id scope. No new backend endpoints required.",
       "acceptanceCriteria": [
         "Document cards in Library show a three-dot action menu on hover (desktop) and on long-press or always-visible on mobile",

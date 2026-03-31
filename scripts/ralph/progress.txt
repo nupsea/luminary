@@ -2155,3 +2155,20 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - useRef-based debounce avoids adding a custom hook: store timer ref, clear on unmount via useEffect cleanup
   - debouncedQuery drives filtering while searchQuery drives input display -- keeps input responsive while preventing re-renders
 ---
+
+## 2026-03-31T01:55:00Z - S191
+- Implemented: Document action menu (three-dot MoreVertical) on DocumentCard with 5 actions: Read, Chat about this, Study flashcards, View notes, View in graph
+- Each action sets Zustand store state and dispatches luminary:navigate DOM event
+- App.tsx onLuminaryNavigate handler extended for chat, study, viz tabs with documentId support
+- Notes tab gains notesDocumentId store field for document-scoped filtering with clear chip
+- Pure utility docActionUtils.ts with DOC_ACTIONS constant and buildDocActionDetail function
+- 7 Vitest tests for pure utility
+- Menu visible always on mobile, hover on desktop (sm:opacity-0 sm:group-hover:opacity-100)
+- Fixed pre-existing ruff line-too-long in ingestion.py
+- Files changed: frontend/src/lib/docActionUtils.ts (new), frontend/src/lib/docActionUtils.test.ts (new), frontend/src/components/library/DocumentCard.tsx, frontend/src/pages/Learning.tsx, frontend/src/pages/Notes.tsx, frontend/src/store.ts, frontend/src/App.tsx, backend/app/workflows/ingestion.py, scripts/smoke/S191.sh (new), docs/exec-plans/completed/S191.md
+- **Learnings for future iterations:**
+  - Mobile visibility requires sm: breakpoint prefix on opacity classes (not just hover); touch devices don't trigger CSS hover
+  - Notes tab uses its own store fields (activeCollectionId, activeTag) not activeDocumentId; added notesDocumentId for document-scoped filtering
+  - Simple div-based dropdown with useRef + outside-click works well without shadcn DropdownMenu component
+  - Existing luminary:navigate handler must be extended for each new tab target; check coverage in I-11 pattern
+---

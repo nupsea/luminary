@@ -183,8 +183,16 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ---
 
+## Frontend Navigation and Routing
+
+- **Cross-tab navigation with pre-dispatch state mutation**: When dispatching `luminary:navigate` from a component action (e.g., document action menu), mutate the target tab's Zustand store state BEFORE dispatching the event. App.tsx's handler reads the event detail and navigates; the store mutation ensures UI state is in place when the tab renders. Pattern: `setActiveDocument(docId)`, then `dispatch({ tab: "study", documentId: docId })`. Never rely on App.tsx to set store state from event detail.
+- **Tab-specific Zustand store fields prevent cross-tab conflicts**: Notes tab uses dedicated `notesDocumentId`, `activeCollectionId`, `activeTag` fields for filtering instead of shared `activeDocumentId`. This isolation prevents the document filter set by one tab from bleeding into another tab's UI. Each tab with persistent filter state needs its own Zustand fields + setters.
+
+---
+
 ## Frontend UI Components
 
+- **Mobile-aware button visibility with group-hover**: Use `sm:opacity-0 sm:group-hover:opacity-100` to hide action buttons on mobile/touch and show them on desktop hover. The `sm:` breakpoint prefix ensures the button is always visible on small screens (mobile users cannot hover), while larger screens hide it until hover. Regular `opacity-0 group-hover:opacity-100` would hide the button on mobile, breaking accessibility.
 - **Segmented control inside dropdown**: a multi-option type selector (e.g., 5-option link types) fits cleanly at the top of an autocomplete dropdown with one row of small buttons. Use `onMouseDown` (not `onClick`) to prevent parent textarea blur. Active option gets indigo background highlight. This pattern eliminates an extra dialog step for type selection.
 - **useRef-based input debounce**: store `debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)`, clear old timer on every change: `if (debounceRef.current) clearTimeout(debounceRef.current); debounceRef.current = setTimeout(...)`. Cleanup on unmount via `useEffect(() => { return () => { if (debounceRef.current) clearTimeout(...) } })`. This pattern avoids adding a custom hook dependency and keeps the debounce logic locally scoped.
 - **Dual input state for responsive search**: separate `searchQuery` (drives input value and display) from `debouncedQuery` (drives filtering/fetching). `searchQuery` updates synchronously on every keystroke; `debouncedQuery` updates after debounce timer. This keeps the input responsive while preventing excessive re-renders and API calls.
