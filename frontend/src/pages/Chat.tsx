@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
@@ -20,7 +20,7 @@ import { buildModelOptions, buildScopeComboboxLabel, TRANSPARENCY_DEFAULT_OPEN }
 import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
-// SuggestionPills — contextual suggestions driven by GET /chat/suggestions (S187)
+// SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
 // ---------------------------------------------------------------------------
 
 interface SuggestionPillsProps {
@@ -38,7 +38,25 @@ interface SuggestionsResponse {
 }
 
 function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
-  const { data, isLoading, isError } = useQuery<SuggestionsResponse>({
+  const qc = useQueryClient()
+
+  // Phase 1: Instant — fetch from DB cache (no LLM, sub-50ms)
+  const { data: cached } = useQuery<SuggestionsResponse>({
+    queryKey: ["chat-suggestions-cached", documentId],
+    queryFn: async () => {
+      const url = documentId
+        ? `${API_BASE}/chat/suggestions/cached?document_id=${encodeURIComponent(documentId)}`
+        : `${API_BASE}/chat/suggestions/cached`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Failed to fetch cached suggestions")
+      return res.json() as Promise<SuggestionsResponse>
+    },
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  })
+
+  // Phase 2: Background refresh — LLM-generated (may take seconds)
+  const { data: fresh } = useQuery<SuggestionsResponse>({
     queryKey: ["chat-suggestions", documentId],
     queryFn: async () => {
       const url = documentId
@@ -46,13 +64,23 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
         : `${API_BASE}/chat/suggestions`
       const res = await fetch(url)
       if (!res.ok) throw new Error("Failed to fetch suggestions")
-      return res.json() as Promise<SuggestionsResponse>
+      const result = res.json() as Promise<SuggestionsResponse>
+      // Once fresh data arrives, also update the cached query so next switch is instant
+      result.then((data) => {
+        qc.setQueryData(["chat-suggestions-cached", documentId], data)
+      }).catch(() => {})
+      return result
     },
     staleTime: 0,
+    placeholderData: keepPreviousData,
   })
 
-  if (isError) return null
-  if (isLoading) {
+  // Use fresh data if available, otherwise cached
+  const data = fresh ?? cached
+  const hasSuggestions = data && data.suggestions.length > 0
+  const isInitialLoading = !cached && !fresh
+
+  if (isInitialLoading) {
     return (
       <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
         <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
@@ -60,7 +88,7 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
       </div>
     )
   }
-  if (!data || data.suggestions.length === 0) return null
+  if (!hasSuggestions) return null
 
   return (
     <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">

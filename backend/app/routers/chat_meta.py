@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, SectionModel
+from app.models import ChatSuggestionHistoryModel, DocumentModel, SectionModel
 from app.services.graph import get_graph_service
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,40 @@ async def mark_suggestion_asked(
     if not found:
         logger.warning("mark_asked: suggestion %s not found", suggestion_id)
     return Response(status_code=204)
+
+
+@router.get("/suggestions/cached", response_model=SuggestionResponse)
+async def get_suggestions_cached(
+    document_id: str | None = Query(None, description="Document ID; null for all-scope"),
+) -> SuggestionResponse:
+    """Return the most recent un-asked suggestions from DB — instant, no LLM call.
+
+    This lets the frontend show suggestions immediately on tab switch,
+    while a background refresh via GET /chat/suggestions can update them.
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        query = (
+            select(
+                ChatSuggestionHistoryModel.id,
+                ChatSuggestionHistoryModel.suggestion_text,
+            )
+            .where(
+                ChatSuggestionHistoryModel.was_asked.is_(False),
+                ChatSuggestionHistoryModel.document_id == document_id,
+            )
+            .order_by(ChatSuggestionHistoryModel.shown_at.desc())
+            .limit(4)
+        )
+        result = await session.execute(query)
+        rows = result.all()
+
+    if not rows:
+        return SuggestionResponse(suggestions=[])
+
+    return SuggestionResponse(
+        suggestions=[SuggestionItem(id=r[0], text=r[1]) for r in rows]
+    )
 
 
 @router.get("/suggestions", response_model=SuggestionResponse)
