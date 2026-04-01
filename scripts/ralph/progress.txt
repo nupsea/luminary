@@ -2240,3 +2240,13 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Frontend-only stories need minimal smoke (tsc only) -- no backend endpoints to curl
   - The divider pattern from S186 (single->single doc switch) was reusable for all scope transitions
 ---
+
+## 2026-04-01T00:00:00Z - S197 - Compare notes with book: auto-collection gap analysis
+- Implemented: notes_gap_node auto-fetches from NoteCollectionModel (auto_document_id) + NoteCollectionMemberModel instead of NoteModel.document_id; count-based card messages for 0 and <3 notes; auto_collection_id in gap result card payload; GapDetectDialog quick/advanced modes with auto-collection auto-populate; GapResultCard "Take a note" per gap with luminary:navigate dispatch; DocumentReader "Compare my notes" button (noteCount >= 3, autoSubmit chatPreload); App.tsx navigate handler for prefilledContent+collectionId; notePreload store field; NoteReaderSheet initialContent/initialCollectionId props
+- Files changed: backend/app/runtime/chat_graph.py, backend/tests/test_chat_graph_gap.py, frontend/src/App.tsx, frontend/src/components/GapDetectDialog.tsx, frontend/src/components/GapResultCard.tsx, frontend/src/components/NoteReaderSheet.tsx, frontend/src/components/reader/DocumentReader.tsx, frontend/src/pages/Chat.tsx, frontend/src/pages/Notes.tsx, frontend/src/store.ts, scripts/smoke/S197.sh
+- **Learnings for future iterations:**
+  - Auto-collection query is two-step: first find NoteCollectionModel by auto_document_id, then fetch NoteCollectionMemberModel.note_id by collection_id
+  - chatPreload autoSubmit flag requires setTimeout to defer sendMessage() until scope/docId state updates are applied by React
+  - When adding a new Zustand store field consumed by a useEffect that opens a sheet, clearing the preload with queueMicrotask ensures the sheet reads the value before it's cleared
+  - _mock_get_session_factory can be extended with list-of-lists pattern for sequential execute calls (side_effect)
+---

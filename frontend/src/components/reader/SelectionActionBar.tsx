@@ -25,6 +25,14 @@ export interface SourceRef {
   documentTitle: string
 }
 
+/** Maximum character count for highlights. Longer selections can still use other actions. */
+const HIGHLIGHT_CHAR_LIMIT = 10_000
+
+/** Approximate height of the bar in pixels (for viewport clamping). */
+const BAR_HEIGHT = 44
+/** Approximate half-width of the bar in pixels (for viewport clamping). */
+const BAR_HALF_WIDTH = 160
+
 export interface SelectionActionBarProps {
   containerRef: React.RefObject<HTMLElement | null>
   resolveSourceRef: (startContainer: Node) => SourceRef
@@ -113,6 +121,10 @@ export function SelectionActionBar({
           left = mouseUpCoords.current.x
         }
 
+        // S198: clamp to viewport bounds so bar is never offscreen
+        top = Math.max(8, Math.min(top, window.innerHeight - BAR_HEIGHT - 8))
+        left = Math.max(BAR_HALF_WIDTH, Math.min(left, window.innerWidth - BAR_HALF_WIDTH))
+
         const sourceRef = resolveSourceRef(range.startContainer)
         setPendingSourceRef(sourceRef)
         setSelectedText(text)
@@ -137,6 +149,7 @@ export function SelectionActionBar({
   if (!position || !selectedText || !pendingSourceRef) return null
 
   const canHighlight = pendingSourceRef.sectionId !== undefined
+  const isOversized = selectedText.length > HIGHLIGHT_CHAR_LIMIT
 
   return (
     <div
@@ -181,11 +194,11 @@ export function SelectionActionBar({
             key={swatch.color}
             onMouseDown={(e) => {
               e.preventDefault(); e.stopPropagation()
-              if (!canHighlight) return
+              if (!canHighlight || isOversized) return
               onHighlight(selectedText, pendingSourceRef, swatch.color); reset()
             }}
-            disabled={!canHighlight}
-            title={canHighlight ? `Highlight ${swatch.color}` : "Highlight not available without section mapping"}
+            disabled={!canHighlight || isOversized}
+            title={isOversized ? "Selection too long to highlight (max 10,000 chars)" : canHighlight ? `Highlight ${swatch.color}` : "Highlight not available without section mapping"}
             className={`h-5 w-5 rounded-full ${swatch.bg} border border-border/50 disabled:cursor-not-allowed disabled:opacity-40 hover:ring-2 hover:ring-primary/40`}
           />
         ))}

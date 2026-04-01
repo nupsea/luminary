@@ -21,6 +21,7 @@ import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { EPUBViewer } from "./EPUBViewer"
 import { ReadView } from "./ReadView"
+import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 import { NotesReaderPanel } from "./NotesReaderPanel"
 import { ReferencesPanel } from "./ReferencesPanel"
@@ -2031,44 +2032,27 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     setSheetOpen(true)
   }
 
-  // S147: walk up DOM from startContainer looking for [data-section-id] attribute
+  // S147/S198: walk up DOM from startContainer looking for [data-section-id] attribute
   function resolveSourceRef(startContainer: Node): SourceRef {
-    let node: Node | null = startContainer
-    while (node) {
-      if (node instanceof HTMLElement && node.dataset.sectionId) {
-        return {
-          sectionId: node.dataset.sectionId,
-          documentId,
-          documentTitle: doc?.title ?? "",
-        }
-      }
-      node = node.parentNode
+    // DOM walk: works for section list view, ReadView, and any view with data-section-id
+    const sectionId = resolveFromDom(startContainer)
+    if (sectionId) {
+      return { sectionId, documentId, documentTitle: doc?.title ?? "" }
     }
+
     // Fallback for PDF view: map currentPage to section by page range
     if (leftTab === "pdfview" && doc?.sections && doc.sections.length > 0) {
-      const hasPageNums = doc.sections.some((s) => s.page_start > 0)
-      let sec: SectionItem | undefined
-      if (hasPageNums) {
-        // Find section whose page range contains the current page
-        sec = doc.sections.find((s) => {
-          const start = s.page_start
-          const end = s.page_end || start
-          return start > 0 && pdfCurrentPage >= start && pdfCurrentPage <= end
-        })
-        // If no exact match, find the last section that starts before current page
-        if (!sec) {
-          for (let i = doc.sections.length - 1; i >= 0; i--) {
-            if (doc.sections[i].page_start > 0 && doc.sections[i].page_start <= pdfCurrentPage) {
-              sec = doc.sections[i]
-              break
-            }
-          }
-        }
+      const pdfSectionId = resolvePdfFallback(doc.sections, pdfCurrentPage, doc.page_count)
+      if (pdfSectionId) {
+        return { sectionId: pdfSectionId, documentId, documentTitle: doc?.title ?? "" }
       }
-      // Ultimate fallback: use first section
-      if (!sec) sec = doc.sections[0]
-      return { sectionId: sec.id, documentId, documentTitle: doc?.title ?? "" }
     }
+
+    // Fallback for read view: use first section when DOM walk failed
+    if (leftTab === "read" && doc?.sections && doc.sections.length > 0) {
+      return { sectionId: doc.sections[0].id, documentId, documentTitle: doc?.title ?? "" }
+    }
+
     return { sectionId: undefined, documentId, documentTitle: doc?.title ?? "" }
   }
 
