@@ -140,6 +140,8 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 ## External Service Integrations
 
 - **yt-dlp metadata field extraction**: `meta.get("uploader") or meta.get("channel") or None` — `uploader` is the channel name in yt-dlp output; `channel` is a fallback. Always use this pattern when storing channel name from metadata.
+- **External validation service with concurrency limits**: When a service validates external URLs/APIs (e.g., ReferenceValidatorService), use `asyncio.Semaphore(N)` inside an inner async function within `gather()`, and cap the number of items processed per run (e.g., `_MAX_URLS_PER_RUN = 20`). This prevents overwhelming external services and timeouts in batch operations.
+- **Avoid double-validation when enrichment pipelines internally validate**: If an enrichment service (e.g., reference_enricher) internally calls _validate_urls before persisting, the refresh handler should NOT call validate_references afterward. Instead, count valid/invalid from the freshly-persisted DB rows. Double calls waste bandwidth and introduce race conditions.
 
 ---
 
@@ -227,6 +229,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - **Dialog close after save must be explicit**: auto-closing a dialog immediately after save prevents any post-save feedback (suggestions, status messages) from being visible. Always transition to a "Saved" state and let the user close with Done.
 - **AbortController on unmount**: in-flight fetch requests inside a dialog must be cancelled when the dialog closes (onOpenChange fires with open=false). Store the AbortController in a ref; call abort() in the cleanup. Prevents React "setState on unmounted component" warnings.
 - **Toast pattern for async browser downloads**: Call `const toastId = toast.loading("Preparing...")` before fetch. In the finally block (or on error/success), update the same toast with `toast.success("Downloaded", { id: toastId })` or `toast.warning(msg, { id: toastId })`. Pair with backend `X-Luminary-Warning` header: read `res.headers.get("x-luminary-warning")` and conditionally show warning toast.
+- **Auto-validation useEffect with staleTime guard is fragile**: When a component auto-triggers validation on mount if unchecked items exist, use dependency `[hasUnchecked]` and skip the call if `!validateMutation.isPending`. However, this pattern relies on TanStack Query's staleTime (e.g., 5min) to prevent re-triggering on every remount. A `useRef`-based guard (`hasAutoValidated.current`) is more robust: set it to true after the first trigger, never re-run. Use the staleTime pattern only when safe; prefer useRef guards for critical flows.
 - **Accordion lazy-load with query gate**: when an accordion contains heavy sub-queries (e.g., Deck Health + Health Report panels), pass the parent's pre-loaded data (e.g., `cards`) and use TanStack Query `enabled: isOpen` gate on sub-queries. This defers expensive queries until the user opens the accordion and avoids double-fetching when the parent already has the data. Show a summary in the collapsed header (total items, percentage) from the parent data.
 
 ---

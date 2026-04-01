@@ -782,6 +782,22 @@ class PredictionEventModel(Base):
     )
 
 
+class ChatSuggestionHistoryModel(Base):
+    """Tracks shown/asked chat suggestion pills for Bloom-progressive dedup (S195)."""
+
+    __tablename__ = "chat_suggestion_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    suggestion_text: Mapped[str] = mapped_column(Text, nullable=False)
+    bloom_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    was_asked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    shown_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class GlossaryTermModel(Base):
     """Persistent glossary term extracted from a document via LLM."""
 
