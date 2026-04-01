@@ -2250,3 +2250,13 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - When adding a new Zustand store field consumed by a useEffect that opens a sheet, clearing the preload with queueMicrotask ensures the sheet reads the value before it's cleared
   - _mock_get_session_factory can be extended with list-of-lists pattern for sequential execute calls (side_effect)
 ---
+
+## 2026-04-02 - S198
+- Completed partial S198 implementation: fixed resolveSourceRefUtils.ts to guard `instanceof Element` and `instanceof HTMLElement` checks for Vitest node environment compatibility; fixed test mock to not use `Object.setPrototypeOf(sectionDiv, HTMLElement.prototype)` (unavailable in node env); created smoke test scripts/smoke/S198.sh
+- Files changed: frontend/src/components/reader/resolveSourceRefUtils.ts (fixed), frontend/src/components/reader/resolveSourceRefUtils.test.ts (fixed), scripts/smoke/S198.sh (new), scripts/ralph/prd-v3.json (passes=true), docs/ralph-run-flow.md (pass), docs/exec-plans/active/S198.md -> completed/
+- **Learnings for future iterations:**
+  - `instanceof Element` and `instanceof HTMLElement` are not available in Vitest node environment -- guard with `typeof Element !== "undefined"` before using instanceof
+  - For the manual DOM walk fallback in node env, use `"dataset" in node` property check instead of instanceof HTMLElement
+  - Test mocks for DOM nodes in node env should use plain objects with `dataset` property, not `Object.setPrototypeOf(obj, HTMLElement.prototype)`
+  - Reviewer warnings about out-of-scope changes from partial commits are non-blocking
+---

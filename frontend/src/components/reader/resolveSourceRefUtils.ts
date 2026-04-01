@@ -16,16 +16,22 @@ import type { SectionItem } from "./types"
  */
 export function resolveFromDom(startContainer: Node): string | undefined {
   // If the node itself is an Element, try closest() first (fast path)
-  if (startContainer instanceof Element) {
+  if (typeof Element !== "undefined" && startContainer instanceof Element) {
     const el = startContainer.closest("[data-section-id]")
     if (el) return (el as HTMLElement).dataset.sectionId
   }
 
   // Manual walk for Text nodes and other non-Element nodes
   let node: Node | null = startContainer
+  const hasHTMLElement = typeof HTMLElement !== "undefined"
   while (node) {
-    if (node instanceof HTMLElement && node.dataset.sectionId) {
+    if (hasHTMLElement && node instanceof HTMLElement && node.dataset.sectionId) {
       return node.dataset.sectionId
+    }
+    // Fallback for environments without HTMLElement (e.g., node/test): check dataset directly
+    if (!hasHTMLElement && "dataset" in node) {
+      const ds = (node as unknown as HTMLElement).dataset
+      if (ds?.sectionId) return ds.sectionId
     }
     node = node.parentNode
   }

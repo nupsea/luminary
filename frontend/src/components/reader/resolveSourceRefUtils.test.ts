@@ -28,13 +28,12 @@ function makeSec(id: string, pageStart = 0, pageEnd = 0): SectionItem {
 describe("resolveFromDom", () => {
   it("returns sectionId from ancestor with data-section-id (simulated ReadView DOM)", () => {
     // Simulate: div[data-section-id="sec-1"] > div > p > textNode
-    // Using minimal mock objects since we're in node env
+    // In node env, HTMLElement is not available. The utility's fallback checks
+    // "dataset" property directly via `"dataset" in node`.
     const sectionDiv = {
       dataset: { sectionId: "sec-1" },
       parentNode: null,
-    } as unknown as HTMLElement
-    // Make it pass instanceof HTMLElement check by setting constructor
-    Object.setPrototypeOf(sectionDiv, HTMLElement.prototype)
+    } as unknown as Node
 
     const innerDiv = { parentNode: sectionDiv } as unknown as Node
     const paragraph = { parentNode: innerDiv } as unknown as Node
