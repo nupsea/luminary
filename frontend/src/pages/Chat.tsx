@@ -689,17 +689,38 @@ export default function Chat() {
           selectedDocId={selectedDocId}
           onSelect={(docId) => {
             if (docId === null) {
-              // Clear -> revert to "All documents"
+              // S196: Clear -> revert to "All documents" -- preserve conversation
               if (scope === "single") {
                 setScope("all")
                 setSelectedDocId(null)
-                clearConversation()
+                if (messages.length > 0) {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `divider-${Date.now()}`,
+                      role: "assistant" as const,
+                      text: "Switched to All documents",
+                      type: "divider" as const,
+                    },
+                  ])
+                }
               }
             } else if (selectedDocId === null || scope === "all") {
-              // Transition: all -> single -- clear conversation
+              // S196: Transition: all -> single -- insert divider, preserve conversation
+              const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
               setScope("single")
               setSelectedDocId(docId)
-              clearConversation()
+              if (messages.length > 0) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `divider-${Date.now()}`,
+                    role: "assistant" as const,
+                    text: `Scope changed to ${docTitle}`,
+                    type: "divider" as const,
+                  },
+                ])
+              }
             } else if (docId !== selectedDocId) {
               // Transition: single -> single (different doc) -- insert divider, do NOT clear
               const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
@@ -953,7 +974,8 @@ export default function Chat() {
       </div>
 
       {/* Contextual suggestion pills — driven by GET /chat/suggestions (S187) */}
-      {messages.length === 0 && (
+      {/* S196: Also show pills after a scope-change divider (last msg is divider) */}
+      {(messages.length === 0 || messages[messages.length - 1]?.type === "divider") && (
         <SuggestionPills
           documentId={scope === "single" ? effectiveDocId ?? null : null}
           onSuggest={(text) => void sendMessage(text)}

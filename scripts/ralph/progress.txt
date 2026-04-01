@@ -2231,3 +2231,12 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Tests exercising LLM path require SummaryModel to be seeded; without executive summary the router guards skip the LLM call entirely
   - Backend service and router were already partially implemented from prior partial commit; always check existing state before creating files
 ---
+
+## 2026-04-01 - S196
+- What was implemented: Non-destructive scope clear in Chat.tsx. Clicking X on scope selector now inserts a divider instead of clearing conversation. All->single transition also uses divider. SuggestionPills render after scope-change dividers.
+- Files changed: frontend/src/pages/Chat.tsx, scripts/smoke/S196.sh, scripts/ralph/prd-v3.json, docs/ralph-run-flow.md
+- **Learnings for future iterations:**
+  - SuggestionPills render condition must account for scope-change dividers (not just empty messages)
+  - Frontend-only stories need minimal smoke (tsc only) -- no backend endpoints to curl
+  - The divider pattern from S186 (single->single doc switch) was reusable for all scope transitions
+---
