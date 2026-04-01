@@ -369,3 +369,4 @@ async def get_explorations(
         "explorations: doc=%s returned %d suggestions", document_id, len(suggestions)
     )
     return suggestions
+    return suggestions

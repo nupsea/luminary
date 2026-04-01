@@ -52,7 +52,6 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
       return res.json() as Promise<SuggestionsResponse>
     },
     staleTime: 30_000,
-    placeholderData: keepPreviousData,
   })
 
   // Phase 2: Background refresh — LLM-generated (may take seconds)
@@ -68,11 +67,10 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
       // Once fresh data arrives, also update the cached query so next switch is instant
       result.then((data) => {
         qc.setQueryData(["chat-suggestions-cached", documentId], data)
-      }).catch(() => {})
+      }).catch(() => { })
       return result
     },
     staleTime: 0,
-    placeholderData: keepPreviousData,
   })
 
   // Use fresh data if available, otherwise cached
@@ -97,7 +95,7 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
           key={s.id || s.text}
           onClick={() => {
             if (s.id) {
-              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => {})
+              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { })
             }
             onSuggest(s.text)
           }}
@@ -363,9 +361,8 @@ function DocumentScopeCombobox({ docList, selectedDocId, onSelect }: DocumentSco
                 <button
                   key={doc.id}
                   onClick={() => { onSelect(doc.id); setOpen(false) }}
-                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors truncate ${
-                    doc.id === selectedDocId ? "bg-accent/50 font-medium" : "text-foreground"
-                  }`}
+                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors truncate ${doc.id === selectedDocId ? "bg-accent/50 font-medium" : "text-foreground"
+                    }`}
                 >
                   {doc.title}
                 </button>
@@ -634,8 +631,8 @@ export default function Chat() {
                 errorCode === "llm_unavailable"
                   ? "Ollama is not running. Start it with: ollama serve"
                   : errorCode === "no_context"
-                  ? "No relevant content found. Make sure at least one document has been ingested."
-                  : fallbackMsg
+                    ? "No relevant content found. Make sure at least one document has been ingested."
+                    : fallbackMsg
               setIsStreaming(false)
               setMessages((m) => m.filter((msg) => msg.id !== assistantId))
               setQaError(errorMsg)
@@ -656,18 +653,18 @@ export default function Chat() {
                 m.map((msg) =>
                   msg.id === assistantId
                     ? {
-                        ...msg,
-                        // Replace streamed tokens with clean parsed answer from backend.
-                        // This removes any citation JSON fragments that leaked during streaming.
-                        text: finalAnswer !== undefined ? finalAnswer : msg.text,
-                        isStreaming: false,
-                        citations,
-                        confidence,
-                        not_found,
-                        image_ids,
-                        web_sources,
-                        source_citations,
-                      }
+                      ...msg,
+                      // Replace streamed tokens with clean parsed answer from backend.
+                      // This removes any citation JSON fragments that leaked during streaming.
+                      text: finalAnswer !== undefined ? finalAnswer : msg.text,
+                      isStreaming: false,
+                      citations,
+                      confidence,
+                      not_found,
+                      image_ids,
+                      web_sources,
+                      source_citations,
+                    }
                     : msg,
                 ),
               )
@@ -865,49 +862,48 @@ export default function Chat() {
                   <div className="h-px flex-1 bg-border" />
                 </div>
               ) : (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
                 <div
-                  className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                    msg.role === "user"
-                      ? "bg-slate-100 text-slate-900"
-                      : "border border-border bg-white text-foreground shadow-sm"
-                  }`}
+                  key={msg.id}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  {msg.type === "card" && msg.cardData !== undefined ? (
-                    msg.cardData.type === "quiz_question" ? (
-                      <QuizQuestionCard
-                        question={(msg.cardData as QuizCardData).question}
-                        contextHint={(msg.cardData as QuizCardData).context_hint}
-                        documentId={(msg.cardData as QuizCardData).document_id}
-                        error={(msg.cardData as QuizCardData).error}
-                        onSubmit={sendMessage}
-                      />
-                    ) : msg.cardData.type === "teach_back_result" ? (
-                      <TeachBackResultCard data={msg.cardData as TeachBackCardData} />
-                    ) : msg.cardData.type === "gap_result" ? (
-                      <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
+                  <div
+                    className={`max-w-[80%] rounded-lg px-4 py-3 ${msg.role === "user"
+                        ? "bg-slate-100 text-slate-900"
+                        : "border border-border bg-white text-foreground shadow-sm"
+                      }`}
+                  >
+                    {msg.type === "card" && msg.cardData !== undefined ? (
+                      msg.cardData.type === "quiz_question" ? (
+                        <QuizQuestionCard
+                          question={(msg.cardData as QuizCardData).question}
+                          contextHint={(msg.cardData as QuizCardData).context_hint}
+                          documentId={(msg.cardData as QuizCardData).document_id}
+                          error={(msg.cardData as QuizCardData).error}
+                          onSubmit={sendMessage}
+                        />
+                      ) : msg.cardData.type === "teach_back_result" ? (
+                        <TeachBackResultCard data={msg.cardData as TeachBackCardData} />
+                      ) : msg.cardData.type === "gap_result" ? (
+                        <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Unknown card type</p>
+                      )
+                    ) : msg.not_found ? (
+                      <p className="text-sm text-blue-600">
+                        This information was not found in the selected content.
+                      </p>
+                    ) : msg.role === "user" ? (
+                      <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
+                    ) : msg.isStreaming && msg.text === "" ? (
+                      // Skeleton shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
+                      // or before the first token of a streamed text response arrives.
+                      <div className="flex flex-col gap-2">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-4 w-64" />
+                        <Skeleton className="h-4 w-40" />
+                      </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground">Unknown card type</p>
-                    )
-                  ) : msg.not_found ? (
-                    <p className="text-sm text-blue-600">
-                      This information was not found in the selected content.
-                    </p>
-                  ) : msg.role === "user" ? (
-                    <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
-                  ) : msg.isStreaming && msg.text === "" ? (
-                    // Skeleton shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
-                    // or before the first token of a streamed text response arrives.
-                    <div className="flex flex-col gap-2">
-                      <Skeleton className="h-4 w-48" />
-                      <Skeleton className="h-4 w-64" />
-                      <Skeleton className="h-4 w-40" />
-                    </div>
-                  ) : (
-                    <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
+                      <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
                       [&_ol]:text-sm [&_ol]:my-1 [&_ol]:pl-5 [&_ol]:list-decimal
                       [&_ul]:text-sm [&_ul]:my-1 [&_ul]:pl-5 [&_ul]:list-disc
                       [&_li]:my-0.5
@@ -915,92 +911,92 @@ export default function Chat() {
                       [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
                       [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
                       [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
-                      <MarkdownRenderer>{msg.text}</MarkdownRenderer>
-                      {msg.isStreaming && <span className="animate-pulse">▍</span>}
-                    </div>
-                  )}
+                        <MarkdownRenderer>{msg.text}</MarkdownRenderer>
+                        {msg.isStreaming && <span className="animate-pulse">▍</span>}
+                      </div>
+                    )}
 
-                  {/* Citations and confidence — shown after streaming completes */}
-                  {!msg.isStreaming && msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        {msg.citations.map((c, i) => (
-                          <span
+                    {/* Citations and confidence — shown after streaming completes */}
+                    {!msg.isStreaming && msg.citations && msg.citations.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.citations.map((c, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                              title={c.excerpt}
+                            >
+                              {c.document_title
+                                ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
+                                : `p.${c.page}`}
+                              {c.version_mismatch && (
+                                <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
+                                  Version mismatch
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                        {msg.confidence && (
+                          <Badge variant={CONFIDENCE_BADGE[msg.confidence]}>
+                            {msg.confidence} confidence
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Web sources — shown after streaming completes (S142) */}
+                    {!msg.isStreaming && msg.web_sources && msg.web_sources.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <span className="text-xs font-medium text-muted-foreground">Web sources:</span>
+                        {msg.web_sources.map((s, i) => (
+                          <a
                             key={i}
-                            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                            title={c.excerpt}
+                            href={s.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-xs text-blue-600 hover:underline"
+                            title={s.title}
                           >
-                            {c.document_title
-                              ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
-                              : `p.${c.page}`}
-                            {c.version_mismatch && (
-                              <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
-                                Version mismatch
-                              </span>
-                            )}
-                          </span>
+                            [Web: {s.domain}] {s.title}
+                          </a>
                         ))}
                       </div>
-                      {msg.confidence && (
-                        <Badge variant={CONFIDENCE_BADGE[msg.confidence]}>
-                          {msg.confidence} confidence
-                        </Badge>
-                      )}
-                    </div>
-                  )}
+                    )}
 
-                  {/* Web sources — shown after streaming completes (S142) */}
-                  {!msg.isStreaming && msg.web_sources && msg.web_sources.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">Web sources:</span>
-                      {msg.web_sources.map((s, i) => (
-                        <a
-                          key={i}
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block truncate text-xs text-blue-600 hover:underline"
-                          title={s.title}
-                        >
-                          [Web: {s.domain}] {s.title}
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                    {/* Retrieval transparency panel: confidence badge + How I Answered (S158) */}
+                    {!msg.isStreaming && msg.transparency && (
+                      <TransparencyPanel transparency={msg.transparency} />
+                    )}
 
-                  {/* Retrieval transparency panel: confidence badge + How I Answered (S158) */}
-                  {!msg.isStreaming && msg.transparency && (
-                    <TransparencyPanel transparency={msg.transparency} />
-                  )}
+                    {/* Source citation chips — deep-links to exact section/page (S157) */}
+                    {!msg.isStreaming && (
+                      <SourceCitationChips
+                        citations={msg.source_citations ?? []}
+                        navigateToCitation={navigateToCitation}
+                      />
+                    )}
 
-                  {/* Source citation chips — deep-links to exact section/page (S157) */}
-                  {!msg.isStreaming && (
-                    <SourceCitationChips
-                      citations={msg.source_citations ?? []}
-                      navigateToCitation={navigateToCitation}
-                    />
-                  )}
-
-                  {/* Image thumbnails — shown when retrieval matched image descriptions (S134) */}
-                  {!msg.isStreaming && msg.image_ids && msg.image_ids.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {msg.image_ids.map((id) => (
-                        <img
-                          key={id}
-                          src={`${API_BASE}/images/${id}/raw`}
-                          alt="Diagram from document"
-                          className="h-24 w-auto rounded border border-border object-contain"
-                          loading="lazy"
-                          onError={(e) => {
-                            // Hide the broken image element if the file is missing on disk
-                            ;(e.currentTarget as HTMLImageElement).style.display = "none"
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
+                    {/* Image thumbnails — shown when retrieval matched image descriptions (S134) */}
+                    {!msg.isStreaming && msg.image_ids && msg.image_ids.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {msg.image_ids.map((id) => (
+                          <img
+                            key={id}
+                            src={`${API_BASE}/images/${id}/raw`}
+                            alt="Diagram from document"
+                            className="h-24 w-auto rounded border border-border object-contain"
+                            loading="lazy"
+                            onError={(e) => {
+                              // Hide the broken image element if the file is missing on disk
+                              ; (e.currentTarget as HTMLImageElement).style.display = "none"
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
               )
             ))}
             <div ref={bottomRef} />
@@ -1010,12 +1006,14 @@ export default function Chat() {
 
       {/* Contextual suggestion pills — driven by GET /chat/suggestions (S187) */}
       {/* S196: Also show pills after a scope-change divider (last msg is divider) */}
-      {(messages.length === 0 || messages[messages.length - 1]?.type === "divider") && (
-        <SuggestionPills
-          documentId={scope === "single" ? effectiveDocId ?? null : null}
-          onSuggest={(text) => void sendMessage(text)}
-        />
-      )}
+      {(messages.length === 0 || messages[messages.length - 1]?.type === "divider") &&
+        scope === "single" &&
+        effectiveDocId && (
+          <SuggestionPills
+            documentId={effectiveDocId}
+            onSuggest={(text) => void sendMessage(text)}
+          />
+        )}
 
       {/* Session plan slide-up panel — positioned above the input area */}
       <div
