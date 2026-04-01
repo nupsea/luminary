@@ -18,11 +18,15 @@ interface AppState {
   // S143: Navigate to Study tab filtered to a specific section + bloom level.
   studySectionFilter: StudySectionFilter | null
   // S147: Pre-populate Chat input when user selects "Ask in Chat" from SelectionActionBar.
-  chatPreload: { text: string; documentId: string | null } | null
+  // S197: autoSubmit flag triggers immediate send on preload consumption.
+  chatPreload: { text: string; documentId: string | null; autoSubmit?: boolean } | null
   // S164: Active collection filter for Notes tab.
   activeCollectionId: string | null
   // S165: Active tag filter for Notes tab (hierarchical prefix match).
   activeTag: string | null
+  // S197: Pre-fill new note content from gap analysis "Take a note" action.
+  notePreload: { content: string; collectionId?: string } | null
+  setNotePreload: (preload: { content: string; collectionId?: string } | null) => void
   // S191: Document filter for Notes tab (set by doc action menu).
   notesDocumentId: string | null
   setNotesDocumentId: (id: string | null) => void
@@ -44,7 +48,7 @@ interface AppState {
   setNotesView: (view: "grid" | "list") => void
   setReviewRemindersEnabled: (enabled: boolean) => void
   setStudySectionFilter: (filter: StudySectionFilter | null) => void
-  setChatPreload: (preload: { text: string; documentId: string | null }) => void
+  setChatPreload: (preload: { text: string; documentId: string | null; autoSubmit?: boolean }) => void
   clearChatPreload: () => void
   setActiveCollectionId: (id: string | null) => void
   setActiveTag: (tag: string | null) => void
@@ -62,6 +66,8 @@ export const useAppStore = create<AppState>((set) => ({
   chatPreload: null,
   activeCollectionId: null,
   activeTag: null,
+  notePreload: null,
+  setNotePreload: (preload) => set({ notePreload: preload }),
   notesDocumentId: null,
   setNotesDocumentId: (id) => set({ notesDocumentId: id }),
   chatMessages: [],

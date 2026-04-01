@@ -254,6 +254,7 @@ function AppShell() {
   const navigate = useNavigate()
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setNotePreload = useAppStore((s) => s.setNotePreload)
 
   // S118: review reminder notifications
   useReviewNotification()
@@ -266,8 +267,14 @@ function AppShell() {
         tagFilter?: string
         filter?: { tag?: string }
         documentId?: string
+        prefilledContent?: string
+        collectionId?: string
       }>).detail
       if (detail.tab === "notes") {
+        // S197: prefilled note from gap analysis "Take a note" action
+        if (detail.prefilledContent) {
+          setNotePreload({ content: detail.prefilledContent, collectionId: detail.collectionId })
+        }
         // Support both legacy shape (detail.tagFilter) and new shape (detail.filter.tag)
         const tagPath = detail.filter?.tag ?? detail.tagFilter ?? null
         setActiveTag(tagPath)
@@ -295,7 +302,7 @@ function AppShell() {
     }
     window.addEventListener("luminary:navigate", onLuminaryNavigate)
     return () => window.removeEventListener("luminary:navigate", onLuminaryNavigate)
-  }, [navigate, setActiveTag, setActiveDocument])
+  }, [navigate, setActiveTag, setActiveDocument, setNotePreload])
 
   // Startup prefetch: documents list + LLM settings
   useEffect(() => {

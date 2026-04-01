@@ -428,20 +428,27 @@ export default function Chat() {
   }, [activeDocumentId, selectedDocId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // S147: Pre-fill input from chatPreload set by SelectionActionBar "Ask in Chat" action
+  // S197: autoSubmit flag triggers immediate send
   useEffect(() => {
     if (chatPreload) {
+      const shouldAutoSubmit = chatPreload.autoSubmit
       setInput(chatPreload.text)
       if (chatPreload.documentId) {
         setSelectedDocId(chatPreload.documentId)
         setScope("single")
       }
       clearChatPreload()
-      setTimeout(() => {
-        textareaRef.current?.focus()
-        autoResize()
-      }, 50)
+      if (shouldAutoSubmit) {
+        // Defer send to next tick so state updates (scope, docId) are applied
+        setTimeout(() => void sendMessage(chatPreload.text), 100)
+      } else {
+        setTimeout(() => {
+          textareaRef.current?.focus()
+          autoResize()
+        }, 50)
+      }
     }
-  }, [chatPreload, clearChatPreload])
+  }, [chatPreload, clearChatPreload]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill input from ?q= query param (e.g. from Notes "Compare with Book" button)
   useEffect(() => {

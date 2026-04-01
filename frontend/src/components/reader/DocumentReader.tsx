@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight } from "lucide-react"
+import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight, GitCompareArrows } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -577,7 +577,10 @@ function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSect
   const [cacheLoading, setCacheLoading] = useState(true)
 
   // AC5: switch default tab to Key Points if no notes exist
+  // S197: also track noteCount for "Compare my notes" button visibility
+  const [noteCount, setNoteCount] = useState(0)
   const handleNoteCountKnown = useCallback((count: number) => {
+    setNoteCount(count)
     if (!defaultTabResolved.current) {
       defaultTabResolved.current = true
       if (count === 0) {
@@ -2174,8 +2177,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Back button */}
-      <div className="border-b border-border px-6 py-3">
+      {/* Back button + Compare my notes (S197) */}
+      <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <button
           onClick={onBack}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -2183,6 +2186,20 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           <ArrowLeft size={14} />
           Back to library
         </button>
+        {noteCount >= 3 && (
+          <button
+            onClick={() => {
+              setChatPreload({ text: "compare my notes with this book", documentId, autoSubmit: true })
+              window.dispatchEvent(
+                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } })
+              )
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <GitCompareArrows size={14} />
+            Compare my notes
+          </button>
+        )}
       </div>
 
       {/* Two-panel layout */}

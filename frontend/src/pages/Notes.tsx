@@ -623,11 +623,23 @@ export default function NotesPage() {
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const notesDocumentId = useAppStore((s) => s.notesDocumentId)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
+  const notePreload = useAppStore((s) => s.notePreload)
+  const setNotePreload = useAppStore((s) => s.setNotePreload)
   const navigate = useNavigate()
 
   useEffect(() => {
     logger.info("[Notes] mounted")
   }, [])
+
+  // S197: consume notePreload from store (set by gap analysis "Take a note" action)
+  useEffect(() => {
+    if (notePreload) {
+      setIsCreating(true)
+      // preload is consumed by NoteReaderSheet via props; clear store after opening
+      // Use a microtask to ensure the sheet opens first
+      queueMicrotask(() => setNotePreload(null))
+    }
+  }, [notePreload, setNotePreload])
 
   const { data: groups } = useQuery({
     queryKey: ["notes-groups"],
@@ -1237,6 +1249,8 @@ export default function NotesPage() {
       <NoteReaderSheet
         note={editingNote}
         isNew={isCreating}
+        initialContent={notePreload?.content}
+        initialCollectionId={notePreload?.collectionId}
         documents={documents}
         onClose={() => {
           setEditingNote(null)

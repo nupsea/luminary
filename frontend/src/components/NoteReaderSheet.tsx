@@ -50,6 +50,10 @@ export interface NoteReaderSheetProps {
   onClose: () => void
   onSaved: (note: Note) => void
   isNew?: boolean
+  /** S197: Pre-fill content when creating a note from gap analysis. */
+  initialContent?: string
+  /** S197: Pre-check a collection when creating a note from gap analysis. */
+  initialCollectionId?: string
   /** When set, this collection appears checked and cannot be unchecked (reader context). */
   lockedCollectionId?: string | null
 }
@@ -139,6 +143,8 @@ export function NoteReaderSheet({
   onClose,
   onSaved,
   isNew = false,
+  initialContent,
+  initialCollectionId,
   lockedCollectionId,
 }: NoteReaderSheetProps) {
   const [mode, setMode] = useState<"read" | "edit">(isNew ? "edit" : "read")
@@ -163,9 +169,9 @@ export function NoteReaderSheet({
   // Re-initialise local state when note changes or isNew changes
   useEffect(() => {
     if (isNew) {
-      setEditContent("")
+      setEditContent(initialContent ?? "")
       setEditTags([])
-      setCheckedCollectionIds(new Set())
+      setCheckedCollectionIds(initialCollectionId ? new Set([initialCollectionId]) : new Set())
       setSelectedDocIds([])
       setMode("edit")
       setConfirmDelete(false)

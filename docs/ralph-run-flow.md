@@ -142,6 +142,6 @@ Each story SXXX produces or modifies these artifacts:
 | S194 | References: URL validation and pruning of dead links | pass |
 | S195 | Chat: Bloom-progressive recommendations with dedup and summary grounding | pass |
 | S196 | Chat: non-destructive scope clear preserves conversation context | pass |
-| S197 | Compare notes with book: auto-collection gap analysis | pending |
+| S197 | Compare notes with book: auto-collection gap analysis | pass |
 | S198 | Highlight reliability: text viewer, PDF edge cases, and large selection menu | pending |
 | S199 | Naming conventions: UPPER-CASE collections and lower-case tags with dash separators | pending |

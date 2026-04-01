@@ -981,17 +981,32 @@ async def notes_gap_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
+    # S197: auto-fetch notes from the document's auto-collection
+    auto_collection_id: str | None = None
     try:
         from sqlalchemy import select  # noqa: PLC0415
 
         from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import NoteModel  # noqa: PLC0415
+        from app.models import NoteCollectionMemberModel, NoteCollectionModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
-            rows = (await session.execute(
-                select(NoteModel.id).where(NoteModel.document_id == document_id)
-            )).fetchall()
-            note_ids = [r[0] for r in rows]
+            # Step 1: find auto-collection for this document
+            coll_row = (await session.execute(
+                select(NoteCollectionModel.id).where(
+                    NoteCollectionModel.auto_document_id == document_id
+                )
+            )).first()
+            if coll_row:
+                auto_collection_id = coll_row[0]
+                # Step 2: fetch note IDs from collection members
+                member_rows = (await session.execute(
+                    select(NoteCollectionMemberModel.note_id).where(
+                        NoteCollectionMemberModel.collection_id == auto_collection_id
+                    )
+                )).fetchall()
+                note_ids = [r[0] for r in member_rows]
+            else:
+                note_ids = []
     except Exception:
         logger.warning("notes_gap_node: note fetch failed", exc_info=True)
         card = {
@@ -1003,12 +1018,28 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     if not note_ids:
-        logger.info("notes_gap_node: no notes for document %s -- returning error card", document_id)
+        logger.info("notes_gap_node: no notes for document %s -- returning card", document_id)
         card = {
             "type": "gap_result",
             "error": (
-                "No notes linked to this document. "
-                "Create notes for this document first, then ask again."
+                "No notes found for this document. "
+                "Start taking notes in the reader to use gap analysis."
+            ),
+            "gaps": [],
+            "covered": [],
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    if len(note_ids) < 3:
+        logger.info(
+            "notes_gap_node: only %d notes for document %s -- suggesting more",
+            len(note_ids), document_id,
+        )
+        card = {
+            "type": "gap_result",
+            "error": (
+                f"You have only {len(note_ids)} note(s) for this document. "
+                "Take a few more notes while reading, then try gap analysis again."
             ),
             "gaps": [],
             "covered": [],
@@ -1021,13 +1052,15 @@ async def notes_gap_node(state: ChatState) -> dict:
         from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
 
         report = await get_gap_detector().detect_gaps(note_ids, document_id)
-        card = {
+        card: dict = {
             "type": "gap_result",
             "gaps": report["gaps"],
             "covered": report["covered"],
             "query_used": report["query_used"],
             "document_id": document_id,
         }
+        if auto_collection_id:
+            card["auto_collection_id"] = auto_collection_id
         logger.info(
             "notes_gap_node: gaps=%d covered=%d", len(report["gaps"]), len(report["covered"])
         )
