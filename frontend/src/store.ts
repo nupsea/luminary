@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
 
 interface StudySectionFilter {
   sectionId: string
@@ -54,42 +55,58 @@ interface AppState {
   setActiveTag: (tag: string | null) => void
 }
 
-export const useAppStore = create<AppState>((set) => ({
-  activeDocumentId: null,
-  llmMode: "private",
-  currentProvider: "openai",
-  libraryView: "grid",
-  notesView: "grid",
-  // Only "false" disables; absent key (first run) defaults to enabled.
-  reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
-  studySectionFilter: null,
-  chatPreload: null,
-  activeCollectionId: null,
-  activeTag: null,
-  notePreload: null,
-  setNotePreload: (preload) => set({ notePreload: preload }),
-  notesDocumentId: null,
-  setNotesDocumentId: (id) => set({ notesDocumentId: id }),
-  chatMessages: [],
-  setChatMessages: (msgs) => set({ chatMessages: msgs }),
-  chatScope: "all",
-  setChatScope: (scope) => set({ chatScope: scope }),
-  chatSelectedDocId: null,
-  setChatSelectedDocId: (id) => set({ chatSelectedDocId: id }),
-  chatQaError: null,
-  setChatQaError: (err) => set({ chatQaError: err }),
-  clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all" }),
-  setActiveDocument: (id) => set({ activeDocumentId: id }),
-  setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
-  setLibraryView: (view) => set({ libraryView: view }),
-  setNotesView: (view) => set({ notesView: view }),
-  setReviewRemindersEnabled: (enabled) => {
-    localStorage.setItem("luminary:reviewReminders", String(enabled))
-    set({ reviewRemindersEnabled: enabled })
-  },
-  setStudySectionFilter: (filter) => set({ studySectionFilter: filter }),
-  setChatPreload: (preload) => set({ chatPreload: preload }),
-  clearChatPreload: () => set({ chatPreload: null }),
-  setActiveCollectionId: (id) => set({ activeCollectionId: id }),
-  setActiveTag: (tag) => set({ activeTag: tag }),
-}))
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
+      activeDocumentId: null,
+      llmMode: "private",
+      currentProvider: "openai",
+      libraryView: "grid",
+      notesView: "grid",
+      // Only "false" disables; absent key (first run) defaults to enabled.
+      reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
+      studySectionFilter: null,
+      chatPreload: null,
+      activeCollectionId: null,
+      activeTag: null,
+      notePreload: null,
+      setNotePreload: (preload) => set({ notePreload: preload }),
+      notesDocumentId: null,
+      setNotesDocumentId: (id) => set({ notesDocumentId: id }),
+      chatMessages: [],
+      setChatMessages: (msgs) => set({ chatMessages: msgs }),
+      chatScope: "all",
+      setChatScope: (scope) => set({ chatScope: scope }),
+      chatSelectedDocId: null,
+      setChatSelectedDocId: (id) => set({ chatSelectedDocId: id }),
+      chatQaError: null,
+      setChatQaError: (err) => set({ chatQaError: err }),
+      clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all" }),
+      setActiveDocument: (id) => set({ activeDocumentId: id }),
+      setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
+      setLibraryView: (view) => set({ libraryView: view }),
+      setNotesView: (view) => set({ notesView: view }),
+      setReviewRemindersEnabled: (enabled) => {
+        localStorage.setItem("luminary:reviewReminders", String(enabled))
+        set({ reviewRemindersEnabled: enabled })
+      },
+      setStudySectionFilter: (filter) => set({ studySectionFilter: filter }),
+      setChatPreload: (preload) => set({ chatPreload: preload }),
+      clearChatPreload: () => set({ chatPreload: null }),
+      setActiveCollectionId: (id) => set({ activeCollectionId: id }),
+      setActiveTag: (tag) => set({ activeTag: tag }),
+    }),
+    {
+      name: "luminary-app-store",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        chatMessages: state.chatMessages,
+        chatScope: state.chatScope,
+        chatSelectedDocId: state.chatSelectedDocId,
+        libraryView: state.libraryView,
+        notesView: state.notesView,
+        reviewRemindersEnabled: state.reviewRemindersEnabled,
+      }),
+    }
+  )
+)

@@ -53,9 +53,11 @@ function highlightText(text: string, term: string): React.ReactNode {
 
 interface YouTubeTranscriptViewProps {
   doc: DocumentDetail
+  initialSectionId?: string | null
+  initialChunkId?: string | null
 }
 
-export function YouTubeTranscriptView({ doc }: YouTubeTranscriptViewProps) {
+export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }: YouTubeTranscriptViewProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -71,6 +73,28 @@ export function YouTubeTranscriptView({ doc }: YouTubeTranscriptViewProps) {
       return false
     },
   })
+
+  // S151: Scroll to initialSectionId or initialChunkId once chunks load
+  useEffect(() => {
+    if (!chunks || chunks.length === 0 || !contentRef.current) return
+
+    // Prioritize chunk_id if provided (exact match)
+    if (initialChunkId) {
+      const el = document.getElementById(`chunk-${initialChunkId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+        return
+      }
+    }
+
+    // Fallback to section_id
+    if (initialSectionId) {
+      const el = contentRef.current.querySelector(`[data-section-id="${initialSectionId}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }
+  }, [initialSectionId, initialChunkId, chunks])
 
   // Cmd+F / Ctrl+F opens search bar
   useEffect(() => {
@@ -204,6 +228,8 @@ export function YouTubeTranscriptView({ doc }: YouTubeTranscriptViewProps) {
                 .map((chunk) => (
                   <div
                     key={chunk.id}
+                    id={`chunk-${chunk.id}`}
+                    data-section-id={chunk.section_id || ""}
                     className="text-sm leading-relaxed text-foreground"
                   >
                     {chunk.start_time != null && (

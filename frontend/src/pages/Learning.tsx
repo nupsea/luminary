@@ -631,6 +631,9 @@ export default function Learning() {
   const [savedSectionId, setSavedSectionId] = useState<string | undefined>(
     searchParams.get("section_id") ?? undefined,
   )
+  const [savedChunkId, setSavedChunkId] = useState<string | undefined>(
+    searchParams.get("chunk_id") ?? undefined,
+  )
   const [savedPage, setSavedPage] = useState<number | undefined>(() => {
     const raw = searchParams.get("page")
     if (!raw) return undefined
@@ -782,9 +785,11 @@ export default function Learning() {
     if (docParam) {
       // Snapshot deep-link params into state before clearing URL
       const sectionId = searchParams.get("section_id") ?? undefined
+      const chunkId = searchParams.get("chunk_id") ?? undefined
       const rawPage = searchParams.get("page")
       const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
       setSavedSectionId(sectionId)
+      setSavedChunkId(chunkId)
       setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
 
       setActiveDocument(docParam)
@@ -792,6 +797,7 @@ export default function Learning() {
         const next = new URLSearchParams(prev)
         next.delete("doc")
         next.delete("section_id")
+        next.delete("chunk_id")
         next.delete("page")
         return next
       })
@@ -817,8 +823,14 @@ export default function Learning() {
         <div className="flex-1 min-h-0">
           <DocumentReader
             documentId={activeDocumentId}
-            onBack={() => { setActiveDocument(null); setSavedSectionId(undefined); setSavedPage(undefined) }}
+            onBack={() => {
+              setActiveDocument(null)
+              setSavedSectionId(undefined)
+              setSavedChunkId(undefined)
+              setSavedPage(undefined)
+            }}
             initialSectionId={savedSectionId}
+            initialChunkId={savedChunkId}
             initialPage={savedPage}
           />
         </div>

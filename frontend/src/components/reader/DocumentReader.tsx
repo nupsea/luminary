@@ -558,9 +558,10 @@ interface SummaryPanelProps {
   contentType: string
   activeSectionId?: string | null
   onScrollToSection?: (sectionId: string) => void
+  onNoteCountKnown: (count: number) => void
 }
 
-function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSection }: SummaryPanelProps) {
+function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSection, onNoteCountKnown }: SummaryPanelProps) {
   const summaryTabs: SummaryTabDef[] =
     contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
   const allTabs = [
@@ -578,17 +579,15 @@ function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSect
   const [cacheLoading, setCacheLoading] = useState(true)
 
   // AC5: switch default tab to Key Points if no notes exist
-  // S197: also track noteCount for "Compare my notes" button visibility
-  const [noteCount, setNoteCount] = useState(0)
   const handleNoteCountKnown = useCallback((count: number) => {
-    setNoteCount(count)
+    onNoteCountKnown(count)
     if (!defaultTabResolved.current) {
       defaultTabResolved.current = true
       if (count === 0) {
         setActiveTab("executive")
       }
     }
-  }, [])
+  }, [onNoteCountKnown])
 
   // Load pre-generated summaries from DB on mount — no LLM call needed
   useEffect(() => {
@@ -1607,16 +1606,18 @@ interface DocumentReaderProps {
   documentId: string
   onBack: () => void
   initialSectionId?: string
+  initialChunkId?: string
   initialPage?: number  // S148: PDF page to navigate to on mount (from citation deep-link)
 }
 
-export function DocumentReader({ documentId, onBack, initialSectionId, initialPage }: DocumentReaderProps) {
+export function DocumentReader({ documentId, onBack, initialSectionId, initialChunkId, initialPage }: DocumentReaderProps) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { data: doc, isLoading } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
   })
+
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
@@ -1639,6 +1640,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
+  // S197: noteCount for "Compare my notes" button visibility
+  const [noteCount, setNoteCount] = useState(0)
   // S151: in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
@@ -1717,11 +1720,28 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   // Scroll to initialSectionId once document sections are loaded (S114)
   useEffect(() => {
     if (!initialSectionId || !doc) return
-    const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
+    // Wait a tick for DOM to update after doc is available
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }, 100)
+    return () => clearTimeout(timer)
   }, [initialSectionId, doc])
+
+  // S151: Explicit scroll when switching to Read tab via citation link
+  useEffect(() => {
+    if (leftTab === "read" && readSectionId) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`read-sec-${readSectionId}`)
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+      }, 150)
+      return () => clearTimeout(timer)
+    }
+  }, [leftTab, readSectionId])
 
   // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
   useEffect(() => {
@@ -1729,12 +1749,13 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     if (doc.format === "pdf") {
       setPdfViewVisited(true)
       setLeftTab("pdfview")
+      if (initialSectionId) setReadSectionId(initialSectionId)
+    } else if (initialSectionId || initialChunkId || initialPage) {
+      if (initialSectionId) setReadSectionId(initialSectionId)
+      setLeftTab("read")
     } else if (doc.format === "epub") {
       setBookViewVisited(true)
       setLeftTab("bookview")
-    } else if (initialSectionId || initialPage) {
-      if (initialSectionId) setReadSectionId(initialSectionId)
-      setLeftTab("read")
     }
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2332,22 +2353,25 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           })()}
 
           {/* S149: Book View — lazy-mounted for EPUB documents */}
-          {doc.format === "epub" && bookViewVisited && (
+          {bookViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer documentId={documentId} />
             </div>
           )}
 
           {/* Read View — full document content as markdown, or transcript for YouTube */}
-          {leftTab === "read" && (
-            <div className="flex-1 overflow-hidden">
-              {isYouTube ? (
-                <YouTubeTranscriptView doc={doc} />
-              ) : (
-                <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} />
-              )}
-            </div>
-          )}
+          <div className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}>
+            {isYouTube ? (
+              <YouTubeTranscriptView doc={doc} initialSectionId={readSectionId} initialChunkId={initialChunkId} />
+            ) : (
+              <ReadView
+                documentId={documentId}
+                initialSectionId={readSectionId}
+                annotations={docAnnotations ?? []}
+                highlightsVisible={highlightsVisible}
+              />
+            )}
+          </div>
 
           {/* S147: SelectionActionBar — fires on selections in both section list and PDF viewer */}
           <SelectionActionBar
@@ -2587,6 +2611,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             documentId={documentId}
             contentType={doc.content_type}
             activeSectionId={readSectionId}
+            onNoteCountKnown={setNoteCount}
             onScrollToSection={(sectionId) => {
               if (leftTab !== "read") {
                 setReadSectionId(sectionId)

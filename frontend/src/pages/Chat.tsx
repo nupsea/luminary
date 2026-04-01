@@ -704,6 +704,7 @@ export default function Chat() {
     const params = new URLSearchParams()
     params.set("doc", c.document_id)
     if (c.section_id) params.set("section_id", c.section_id)
+    if (c.chunk_id) params.set("chunk_id", c.chunk_id)
     if (c.pdf_page_number) params.set("page", String(c.pdf_page_number))
     navigate(`/?${params.toString()}`)
   }

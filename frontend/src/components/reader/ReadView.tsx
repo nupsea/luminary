@@ -119,10 +119,13 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
   // Scroll to initial section
   useEffect(() => {
     if (!initialSectionId || !sections) return
-    const el = document.getElementById(`read-sec-${initialSectionId}`)
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`read-sec-${initialSectionId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }, 200) // Slightly longer to ensure layout calculation is done
+    return () => clearTimeout(timer)
   }, [initialSectionId, sections])
 
   // Set initial active section once data loads
