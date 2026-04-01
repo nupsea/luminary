@@ -28,8 +28,13 @@ interface SuggestionPillsProps {
   onSuggest: (text: string) => void
 }
 
+interface SuggestionItem {
+  id: string
+  text: string
+}
+
 interface SuggestionsResponse {
-  suggestions: string[]
+  suggestions: SuggestionItem[]
 }
 
 function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
@@ -43,7 +48,7 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
       if (!res.ok) throw new Error("Failed to fetch suggestions")
       return res.json() as Promise<SuggestionsResponse>
     },
-    staleTime: 60_000,
+    staleTime: 0,
   })
 
   if (isError) return null
@@ -61,11 +66,16 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
     <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
       {data.suggestions.map((s) => (
         <button
-          key={s}
-          onClick={() => onSuggest(s)}
+          key={s.id || s.text}
+          onClick={() => {
+            if (s.id) {
+              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => {})
+            }
+            onSuggest(s.text)
+          }}
           className="truncate max-w-[240px] rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
         >
-          {s}
+          {s.text}
         </button>
       ))}
     </div>
@@ -627,6 +637,9 @@ export default function Chat() {
                 ),
               )
               setIsStreaming(false)
+              // S195: refresh suggestion pills after each answered question
+              const suggestDocId = scope === "single" ? (selectedDocId ?? activeDocumentId) : null
+              void qc.invalidateQueries({ queryKey: ["chat-suggestions", suggestDocId] })
             }
           } catch {
             // skip malformed SSE event

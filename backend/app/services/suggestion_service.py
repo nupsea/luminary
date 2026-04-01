@@ -30,7 +30,7 @@ _SYSTEM_PROMPT = (
     "level {bloom_level} ({bloom_label}). "
     "Avoid these previously asked questions:\n{history}\n\n"
     "Output ONLY a JSON array of objects with keys 'question' and 'bloom_level' (integer). "
-    "Example: [{\"question\": \"...\", \"bloom_level\": 5}]. "
+    "Example: [{{\"question\": \"...\", \"bloom_level\": 5}}]. "
     "No explanation, no markdown fences."
 )
 
@@ -69,7 +69,10 @@ def _parse_questions(raw: str) -> list[dict]:
         result = json.loads(cleaned)
         if isinstance(result, list):
             return [
-                {"question": str(item.get("question", "")), "bloom_level": int(item.get("bloom_level", 5))}
+                {
+                    "question": str(item.get("question", "")),
+                    "bloom_level": int(item.get("bloom_level", 5)),
+                }
                 for item in result
                 if isinstance(item, dict) and item.get("question")
             ]
@@ -81,7 +84,10 @@ def _parse_questions(raw: str) -> list[dict]:
             result = json.loads(match.group(0))
             if isinstance(result, list):
                 return [
-                    {"question": str(item.get("question", "")), "bloom_level": int(item.get("bloom_level", 5))}
+                    {
+                        "question": str(item.get("question", "")),
+                        "bloom_level": int(item.get("bloom_level", 5)),
+                    }
                     for item in result
                     if isinstance(item, dict) and item.get("question")
                 ]
@@ -94,7 +100,7 @@ class SuggestionService:
     """Generates Bloom-progressive, LLM-powered chat suggestions with dedup."""
 
     async def get_target_bloom_level(self, document_id: str | None) -> int:
-        """Compute target Bloom level: starts at 5, decreases by 1 per 4 asked questions. Floor=2."""
+        """Bloom level: starts at 5, -1 per 4 asked. Floor=2."""
         factory = get_session_factory()
         async with factory() as session:
             query = select(func.count()).select_from(ChatSuggestionHistoryModel).where(
@@ -226,7 +232,8 @@ class SuggestionService:
             user = (
                 f"Document summaries:\n{summary[:4000]}\n\n"
                 f"Key entities: {', '.join(entity_names[:10])}\n\n"
-                f"Generate 6 cross-document questions at Bloom level {target_bloom} ({bloom_label})."
+                f"Generate 6 cross-document questions at Bloom level "
+                f"{target_bloom} ({bloom_label})."
             )
 
         try:

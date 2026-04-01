@@ -2216,3 +2216,18 @@ S141 - Cross-book concept linking: SAME_CONCEPT edges, contradiction detection
   - Avoid double-validation in refresh handlers: if enrich() already validates internally, don't call validate_references() again afterward.
   - Reviewer Warning: auto-validation useEffect with [hasUnchecked] dependency relies on staleTime to prevent re-triggering. A useRef guard would be more robust.
 ---
+
+## 2026-04-01T12:00:00Z - S195
+- What was implemented: Bloom-progressive LLM-powered chat suggestions with dedup and history tracking
+  - SuggestionService: LLM generation with Bloom taxonomy targeting, Jaccard dedup, history persistence, template fallback
+  - ChatSuggestionHistoryModel (already existed in models.py)
+  - GET /chat/suggestions returns {id, text} objects; POST /chat/suggestions/{id}/asked returns 204
+  - Frontend: SuggestionPills updated for new shape, POST /asked on click, query invalidation after done event
+  - 10 tests: 6 existing updated for new response shape + 4 new (history dedup, bloom decrease, LLM fallback, Jaccard filter)
+- Files changed: backend/app/services/suggestion_service.py (line length fixes, format string escaping), backend/tests/test_suggestions.py (full rewrite for new shape + new tests), frontend/src/pages/Chat.tsx (SuggestionsResponse interface, SuggestionPills, query invalidation), scripts/smoke/S195.sh (new)
+- **Learnings for future iterations:**
+  - Python str.format() interprets curly braces in prompt strings; use double braces {{...}} for JSON examples in format templates
+  - Lazy import patch target: when function is imported lazily via `from app.services.X import fn`, patch at source module `app.services.X.fn` not destination
+  - Tests exercising LLM path require SummaryModel to be seeded; without executive summary the router guards skip the LLM call entirely
+  - Backend service and router were already partially implemented from prior partial commit; always check existing state before creating files
+---
