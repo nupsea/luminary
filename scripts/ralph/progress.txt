@@ -141,3 +141,13 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - Migration endpoint note_count can over-count when _sync_tag_index increments on INSERT CONFLICT during rename path; set initial note_count=0 when recreating canonical tags to avoid double-counting
   - Reviewer warning: lazy import of naming.py in notes.py is unnecessary (no circular risk) but harmless
 ---
+
+## 2026-04-02 - S200
+- What was implemented: PDF Viewer link handling extracted to pdfLinkService.ts. GoTo action dictionaries (dest and D key) now unwrapped and resolved. GoToR actions open external URLs. External links (http/https/mailto/tel) always get target='_blank' regardless of newWindow flag. --scale-factor CSS variable synced on canvas and annotation layer divs (not just text layer). Annotation layer z-index (3) set above text layer z-index (2) so link annotations are not blocked by highlight marks.
+- Files changed: frontend/src/components/reader/pdfLinkService.ts (new), frontend/src/components/reader/pdfLinkService.test.ts (new, 12 tests), frontend/src/components/reader/PDFViewer.tsx (modified), scripts/smoke/S200.sh (new), scripts/ralph/prd-v3.json (passes=true), docs/ralph-run-flow.md (pass), docs/exec-plans/active/S200.md -> completed/
+- **Learnings for future iterations:**
+  - isExternalUrl protocol matching must include the colon (use `url.startsWith("http:")` not `url.startsWith("http")`) to avoid false positives on protocol lookalikes (e.g. httpx, telnet)
+  - In Vitest node env, `window` is not defined -- use `vi.stubGlobal("window", { open: openSpy })` to mock window.open
+  - pdfjs AnnotationLayer CSS already sets pointer-events:none on the container and pointer-events:all on individual link elements -- no explicit pointer-events style needed on the div
+  - Reviewer warnings: console.log debug statements and as-any type assertions will be addressed in S202
+---

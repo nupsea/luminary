@@ -13,6 +13,7 @@ import {
   resolveOutline,
   shouldUseOutline,
 } from "./pdfTocUtils"
+import { createLinkService } from "./pdfLinkService"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
@@ -323,6 +324,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           const viewport = page.getViewport({ scale: zoom })
           canvas.width = viewport.width
           canvas.height = viewport.height
+          // Sync --scale-factor on canvas so CSS can reference it uniformly
+          canvas.style.setProperty("--scale-factor", String(viewport.scale))
 
           const ctx = canvas.getContext("2d")
           if (!ctx || cancelled) return
@@ -379,48 +382,17 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             annotationLayerDiv.replaceChildren()
             annotationLayerDiv.style.width = `${viewport.width}px`
             annotationLayerDiv.style.height = `${viewport.height}px`
+            // Sync --scale-factor so annotation layer CSS matches canvas/text layer
+            annotationLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
 
             try {
               const annotationsData = await page.getAnnotations()
               console.log(`[PDFViewer] found ${annotationsData.length} annotations for page ${pageNum}`)
               if (cancelled) return
 
-              // Minimal link service to handle "goToPage" for internal links (Rules 1/2)
-              // and "BLANK" target for external browser links (e.g. GitHub repos).
-              const linkService = {
-                externalLinkTarget: 2, // BLANK
-                externalLinkRel: "noopener noreferrer nofollow",
-                externalLinkEnabled: true,
-                getDestinationHash: () => "#",
-                getAnchorUrl: () => "#",
-                setHash: () => {},
-                executeNamedAction: () => {},
-                cachePageRef: () => {},
-                addLinkAttributes(link: HTMLAnchorElement, url: string, newWindow: boolean) {
-                  if (url) link.href = url
-                  if (newWindow) {
-                    link.target = "_blank"
-                    link.rel = "noopener noreferrer nofollow"
-                  }
-                },
-                async navigateTo(dest: unknown) {
-                  console.log("[PDFViewer] navigateTo", dest)
-                  if (!pdfDoc) return
-                  let pageIdx: number | null = null
-                  if (typeof dest === "string") {
-                    const resolved = await pdfDoc.getDestination(dest)
-                    if (resolved && Array.isArray(resolved)) {
-                      pageIdx = await pdfDoc.getPageIndex(resolved[0])
-                    }
-                  } else if (Array.isArray(dest)) {
-                    pageIdx = await pdfDoc.getPageIndex(dest[0])
-                  }
-                  if (pageIdx !== null) {
-                    console.log(`[PDFViewer] jumping to page ${pageIdx + 1}`)
-                    goToPage(pageIdx + 1)
-                  }
-                },
-              }
+              // Link service handles internal destinations (named, array, GoTo actions)
+              // and external URLs (http, https, mailto, tel).
+              const linkService = createLinkService(pdfDoc, goToPage)
 
               const al = new AnnotationLayer({
                 div: annotationLayerDiv,
@@ -626,10 +598,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
               <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
               {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
-                  and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
-              <div ref={textLayerRef} className="textLayer" />
-              {/* Official pdfjs annotationLayer -- handles links and form fields. */}
-              <div ref={annotationLayerRef} className="annotationLayer" />
+                  and ::selection styling. Class "textLayer" matches pdf_viewer.css.
+                  z-index 2 so highlights are visible but below annotation links. */}
+              <div ref={textLayerRef} className="textLayer" style={{ zIndex: 2 }} />
+              {/* Official pdfjs annotationLayer -- handles links and form fields.
+                  z-index 3 so link annotations sit above highlight marks in the text layer.
+                  pointer-events set to auto so links are clickable; non-link areas pass through. */}
+              <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 3 }} />
             </div>
             <canvas ref={nextCanvasRef} className="hidden" />
           </div>
