@@ -15,11 +15,11 @@ export interface PdfLinkService {
   externalLinkTarget: number
   externalLinkRel: string
   externalLinkEnabled: boolean
-  getDestinationHash: (dest: any) => string
+  getDestinationHash: (dest: any) => string // pdf.js destination type is untyped
   getAnchorUrl: (hash: string) => string
   setHash: (hash: string) => void
   executeNamedAction: (action: string) => void
-  cachePageRef: (ref: any, pageIndex: number) => void
+  cachePageRef: (ref: any, pageIndex: number) => void // pdf.js ref type is untyped
   addLinkAttributes: (link: HTMLAnchorElement, url: string, newWindow: boolean) => void
   navigateTo: (dest: unknown) => Promise<void>
   goToDestination: (dest: unknown) => Promise<void>
@@ -54,11 +54,11 @@ export function createLinkService(
     externalLinkTarget: 2, // BLANK
     externalLinkRel: "noopener noreferrer nofollow",
     externalLinkEnabled: true,
-    getDestinationHash: (dest: any) => "#",
+    getDestinationHash: (dest: any) => "#", // pdf.js destination type is untyped
     getAnchorUrl: (hash: string) => "#",
-    setHash: (hash: string) => { },
-    executeNamedAction: (action: string) => { },
-    cachePageRef: (ref: any, pageIndex: number) => { },
+    setHash: (hash: string) => { /* no-op: required by pdf.js link service interface */ },
+    executeNamedAction: (action: string) => { /* no-op: required by pdf.js link service interface */ },
+    cachePageRef: (ref: any, pageIndex: number) => { /* no-op: required by pdf.js link service interface */ }, // pdf.js ref type is untyped
 
     addLinkAttributes(link: HTMLAnchorElement, url: string, newWindow: boolean) {
       if (url) {

@@ -1106,7 +1106,7 @@
       "phase": "V3 Phase 6 - Polish and Bug Fixes",
       "priority": 42,
       "featureRef": "F-INFRA",
-      "passes": false,
+      "passes": true,
       "description": "CONTEXT: A sweep story to fix any errors surfaced by the CI pipeline (make CI: ruff check, pytest, tsc --noEmit) and browser developer console errors. As of the current commit, all three gates pass cleanly, but this story serves as a catch-all for regressions introduced by S200 and S201 or any latent issues. The scope: (1) Run the full CI pipeline (ruff check, pytest with all non-slow tests, tsc --noEmit) and fix any failures. (2) Start the backend (uvicorn) and frontend (vite dev), open each of the 6 tabs (Learning, Chat, Viz, Study, Notes, Monitoring/Progress) in a browser, and check the developer console for errors. Fix any JavaScript errors, failed fetch requests (non-404), or React warnings that indicate bugs (not deprecation warnings from third-party libraries). (3) Verify that empty catch blocks in Chat.tsx (lines 70, 98) are intentional fire-and-forget patterns and add a // fire-and-forget comment if missing. (4) Check that all lazy-loaded pages (Viz, Monitoring/Admin) have Suspense fallbacks with loading UI per invariant I-10. (5) Ensure no TypeScript 'any' type assertions were introduced in S200/S201 changes -- use proper types. BACKEND: Fix any ruff violations or pytest failures. FRONTEND: Fix any tsc errors, React key warnings, missing error boundaries, or unhandled promise rejections. This story is intentionally broad -- ralph should run the gates, observe failures, and fix them iteratively until all three pass and a manual browser check shows no console errors.",
       "acceptanceCriteria": [
         "uv run ruff check . exits 0 with zero warnings",

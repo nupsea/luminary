@@ -67,7 +67,7 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
       // Once fresh data arrives, also update the cached query so next switch is instant
       result.then((data) => {
         qc.setQueryData(["chat-suggestions-cached", documentId], data)
-      }).catch(() => { })
+      }).catch(() => { /* fire-and-forget: cache update is best-effort */ })
       return result
     },
     staleTime: 0,
@@ -95,7 +95,7 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
           key={s.id || s.text}
           onClick={() => {
             if (s.id) {
-              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { })
+              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { /* fire-and-forget: suggestion tracking is best-effort */ })
             }
             onSuggest(s.text)
           }}
