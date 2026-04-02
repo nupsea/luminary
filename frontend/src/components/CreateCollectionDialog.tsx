@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { API_BASE } from "@/lib/config"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
+import { normalizeCollectionName } from "@/lib/tagUtils"
 
 // ---------------------------------------------------------------------------
 // 8 colour swatches
@@ -85,10 +86,12 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
   // Only top-level collections are valid parents (2-level nesting max).
   const topLevelCollections = tree
 
+  const normalizedName = normalizeCollectionName(name)
+
   const createMut = useMutation({
     mutationFn: () =>
       createCollection({
-        name: name.trim(),
+        name: normalizedName,
         description: description.trim() || null,
         color,
         parent_collection_id: parentId || null,
@@ -126,6 +129,9 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
               placeholder="Collection name"
               className="rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
             />
+            {name.trim() && normalizedName !== name.trim() && (
+              <span className="text-[10px] text-muted-foreground">{normalizedName}</span>
+            )}
           </div>
 
           {/* Description */}
@@ -190,7 +196,7 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
           </button>
           <button
             onClick={() => createMut.mutate()}
-            disabled={!name.trim() || createMut.isPending}
+            disabled={!normalizedName || createMut.isPending}
             className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             Create

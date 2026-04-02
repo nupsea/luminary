@@ -180,6 +180,11 @@ async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) 
     Handles create (empty -> new tags), update (old -> new tags), and delete
     (call with tags=[] to remove all rows for this note).
     """
+    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
+    # Normalize all incoming tags before comparison
+    tags = [normalize_tag_slug(t) for t in tags if normalize_tag_slug(t)]
+
     # Load currently indexed tags for this note
     old_rows = (
         await session.execute(

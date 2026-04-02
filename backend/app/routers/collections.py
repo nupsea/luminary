@@ -25,6 +25,7 @@ from app.database import get_db
 from app.models import DocumentModel, NoteCollectionMemberModel, NoteCollectionModel
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
+from app.services.naming import normalize_collection_name
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ def _make_collection_name(title: str, content_type: str) -> str:
         # Replace spaces/hyphens with underscores, collapse multiples
         short = re.sub(r"[\s\-]+", "_", name)
         short = re.sub(r"_+", "_", short).strip("_")
-        return f"{short}_{suffix}"
+        return normalize_collection_name(f"{short}_{suffix}")
 
     # For longer titles, extract key words (capitalized, acronyms, proper nouns)
     # Remove common filler words
@@ -169,7 +170,7 @@ def _make_collection_name(title: str, content_type: str) -> str:
     key_words = key_words[:3]
     short = "_".join(key_words)
 
-    return f"{short}_{suffix}"
+    return normalize_collection_name(f"{short}_{suffix}")
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +202,7 @@ async def create_collection(
 
     col = NoteCollectionModel(
         id=str(uuid.uuid4()),
-        name=req.name,
+        name=normalize_collection_name(req.name),
         description=req.description,
         color=req.color,
         icon=req.icon,
@@ -341,6 +342,111 @@ async def create_auto_collection(
     return _to_response(col)
 
 
+@router.post("/migrate-naming")
+async def migrate_collection_naming(
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """One-time migration: normalize all existing collection names.
+
+    Merges duplicates that collapse to the same normalized form
+    (keeps the collection with more members, reassigns members from the other).
+    """
+    all_cols_result = await session.execute(select(NoteCollectionModel))
+    all_cols = list(all_cols_result.scalars().all())
+
+    # Group by normalized name
+    groups: dict[str, list[NoteCollectionModel]] = {}
+    for col in all_cols:
+        normalized = normalize_collection_name(col.name)
+        if not normalized:
+            continue
+        groups.setdefault(normalized, []).append(col)
+
+    renamed_count = 0
+    merged_count = 0
+
+    for normalized_name, col_group in groups.items():
+        if len(col_group) == 1:
+            col = col_group[0]
+            if col.name != normalized_name:
+                col.name = normalized_name
+                col.updated_at = datetime.now(UTC)
+                session.add(col)
+                renamed_count += 1
+        else:
+            # Multiple collections collapse to same name -- merge
+            # Count members for each to find keeper
+            member_counts: list[tuple[NoteCollectionModel, int]] = []
+            for col in col_group:
+                count_result = await session.execute(
+                    select(func.count(NoteCollectionMemberModel.note_id)).where(
+                        NoteCollectionMemberModel.collection_id == col.id
+                    )
+                )
+                count = count_result.scalar() or 0
+                member_counts.append((col, count))
+
+            # Sort by member count desc -- keeper is first
+            member_counts.sort(key=lambda x: x[1], reverse=True)
+            keeper = member_counts[0][0]
+            keeper.name = normalized_name
+            keeper.updated_at = datetime.now(UTC)
+            session.add(keeper)
+
+            # Move members from losers to keeper, then delete losers
+            for loser, _ in member_counts[1:]:
+                # Get all member note_ids from loser
+                loser_members_result = await session.execute(
+                    select(NoteCollectionMemberModel.note_id).where(
+                        NoteCollectionMemberModel.collection_id == loser.id
+                    )
+                )
+                loser_note_ids = [row[0] for row in loser_members_result.all()]
+
+                # Reassign to keeper (idempotent via INSERT OR IGNORE)
+                for note_id in loser_note_ids:
+                    await session.execute(
+                        text(
+                            "INSERT OR IGNORE INTO note_collection_members"
+                            " (id, note_id, collection_id, added_at)"
+                            " VALUES (:id, :note_id, :collection_id, :added_at)"
+                        ),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "note_id": note_id,
+                            "collection_id": keeper.id,
+                            "added_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+
+                # Delete loser's members and the loser itself
+                await session.execute(
+                    delete(NoteCollectionMemberModel).where(
+                        NoteCollectionMemberModel.collection_id == loser.id
+                    )
+                )
+                # Also delete child collections of loser
+                await session.execute(
+                    delete(NoteCollectionModel).where(
+                        NoteCollectionModel.parent_collection_id == loser.id
+                    )
+                )
+                await session.execute(
+                    delete(NoteCollectionModel).where(
+                        NoteCollectionModel.id == loser.id
+                    )
+                )
+
+            merged_count += 1
+
+    await session.commit()
+    logger.info(
+        "Collection naming migration complete: renamed=%d merged=%d",
+        renamed_count, merged_count,
+    )
+    return {"renamed": renamed_count, "merged": merged_count}
+
+
 @router.get("/{collection_id}", response_model=CollectionResponse)
 async def get_collection(
     collection_id: str,
@@ -371,7 +477,7 @@ async def update_collection(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     if req.name is not None:
-        col.name = req.name
+        col.name = normalize_collection_name(req.name)
     if req.description is not None:
         col.description = req.description
     if req.color is not None:

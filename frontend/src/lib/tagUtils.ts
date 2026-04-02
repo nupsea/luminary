@@ -147,6 +147,53 @@ export function highlightMatch(
   return segments
 }
 
+// ---------------------------------------------------------------------------
+// Naming convention normalizers (S199) -- must mirror backend naming.py exactly
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a collection name to UPPER-CASE with hyphen separators.
+ * Mirrors backend normalize_collection_name().
+ */
+export function normalizeCollectionName(name: string): string {
+  let s = name.trim()
+  if (!s) return ""
+  // Replace underscores and spaces with hyphens
+  s = s.replace(/[_\s]+/g, "-")
+  // Collapse consecutive hyphens
+  s = s.replace(/-+/g, "-")
+  // Upper case
+  s = s.toUpperCase()
+  // Strip leading/trailing hyphens
+  s = s.replace(/^-+|-+$/g, "")
+  return s
+}
+
+/**
+ * Normalize a tag slug to lower-case with hyphen separators, preserving '/' hierarchy.
+ * Mirrors backend normalize_tag_slug().
+ */
+export function normalizeTagSlug(slug: string): string {
+  const s = slug.trim()
+  if (!s) return ""
+  const segments = s.split("/")
+  const normalized: string[] = []
+  for (let seg of segments) {
+    seg = seg.trim()
+    if (!seg) continue
+    // Replace underscores and spaces with hyphens
+    seg = seg.replace(/[_\s]+/g, "-")
+    // Collapse consecutive hyphens
+    seg = seg.replace(/-+/g, "-")
+    // Lower case
+    seg = seg.toLowerCase()
+    // Strip leading/trailing hyphens
+    seg = seg.replace(/^-+|-+$/g, "")
+    if (seg) normalized.push(seg)
+  }
+  return normalized.join("/")
+}
+
 /**
  * Filter autocomplete results for merge combobox:
  * exclude the source tag and filter by query substring.

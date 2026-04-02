@@ -85,7 +85,7 @@ def test_create_auto_collection(client):
     resp = client.post(f"/collections/auto/{doc_id}")
     assert resp.status_code == 201
     data = resp.json()
-    assert data["name"] == "The_Odyssey_Book"
+    assert data["name"] == "THE-ODYSSEY-BOOK"
     assert data["auto_document_id"] == doc_id
     assert data["color"] == "#8B5CF6"  # book color
 

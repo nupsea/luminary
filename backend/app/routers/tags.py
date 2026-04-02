@@ -179,9 +179,12 @@ async def autocomplete_tags(
     session: AsyncSession = Depends(get_db),
 ) -> list[TagAutocompleteResult]:
     """Return up to 10 canonical tags matching the prefix q, sorted by note_count DESC."""
+    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
+    normalized_q = normalize_tag_slug(q) if q else ""
     result = await session.execute(
         select(CanonicalTagModel)
-        .where(CanonicalTagModel.id.like(f"{q}%"))
+        .where(CanonicalTagModel.id.like(f"{normalized_q}%"))
         .order_by(CanonicalTagModel.note_count.desc())
         .limit(10)
     )
@@ -266,16 +269,19 @@ async def create_tag(
     session: AsyncSession = Depends(get_db),
 ) -> TagResponse:
     """Create a canonical tag. Returns 409 if the slug already exists."""
+    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
+    normalized_id = normalize_tag_slug(req.id)
     existing = (
         await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == req.id)
+            select(CanonicalTagModel).where(CanonicalTagModel.id == normalized_id)
         )
     ).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=409, detail="Tag already exists")
 
     tag = CanonicalTagModel(
-        id=req.id,
+        id=normalized_id,
         display_name=req.display_name,
         parent_tag=req.parent_tag,
         note_count=0,
@@ -606,6 +612,180 @@ async def reject_normalization_suggestion(
         await service.reject_suggestion(suggestion_id, session)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/migrate-naming")
+async def migrate_tag_naming(
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """One-time migration: normalize all existing tag slugs.
+
+    For canonical_tags: normalizes id and display_name.
+    For note_tag_index: normalizes tag_full, tag_root, tag_parent.
+    For NoteModel.tags: normalizes the JSON tags array on each note.
+    Merges duplicates that collapse to the same normalized form (keeps higher note_count).
+    """
+    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
+    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+    from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
+
+    # Step 1: Load all canonical tags
+    all_tags_result = await session.execute(select(CanonicalTagModel))
+    all_tags = list(all_tags_result.scalars().all())
+
+    # Group by normalized id to detect merges
+    groups: dict[str, list[CanonicalTagModel]] = {}
+    for tag in all_tags:
+        normalized = normalize_tag_slug(tag.id)
+        if not normalized:
+            continue
+        groups.setdefault(normalized, []).append(tag)
+
+    merged_count = 0
+    renamed_count = 0
+
+    for normalized_id, tag_group in groups.items():
+        if len(tag_group) == 1:
+            tag = tag_group[0]
+            if tag.id != normalized_id:
+                # Rename: update canonical_tags id, note_tag_index, and NoteModel.tags
+                old_id = tag.id
+                # Update all notes with this tag
+                note_ids_result = await session.execute(
+                    select(NoteTagIndexModel.note_id)
+                    .where(NoteTagIndexModel.tag_full == old_id)
+                    .distinct()
+                )
+                note_ids = [row[0] for row in note_ids_result.all()]
+
+                # Delete old index rows
+                await session.execute(
+                    delete(NoteTagIndexModel).where(NoteTagIndexModel.tag_full == old_id)
+                )
+                # Delete old canonical tag
+                await session.execute(
+                    delete(CanonicalTagModel).where(CanonicalTagModel.id == old_id)
+                )
+                # Recreate canonical tag with normalized id
+                segments = normalized_id.split("/")
+                new_display = segments[-1]
+                new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
+                from sqlalchemy import text as sa_text  # noqa: PLC0415
+
+                await session.execute(
+                    sa_text(
+                        "INSERT OR IGNORE INTO canonical_tags"
+                        " (id, display_name, parent_tag, note_count, created_at)"
+                        " VALUES (:id, :display_name, :parent_tag, :note_count, datetime('now'))"
+                    ),
+                    {
+                        "id": normalized_id,
+                        "display_name": new_display,
+                        "parent_tag": new_parent,
+                        "note_count": tag.note_count,
+                    },
+                )
+
+                # Update NoteModel.tags and re-sync index
+                if note_ids:
+                    notes_result = await session.execute(
+                        select(NoteModel).where(NoteModel.id.in_(note_ids))
+                    )
+                    for note in notes_result.scalars().all():
+                        current_tags: list[str] = note.tags or []
+                        new_tags = [
+                            normalize_tag_slug(t) for t in current_tags
+                        ]
+                        # Deduplicate preserving order
+                        seen: set[str] = set()
+                        deduped: list[str] = []
+                        for t in new_tags:
+                            if t and t not in seen:
+                                seen.add(t)
+                                deduped.append(t)
+                        note.tags = deduped
+                        from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+
+                        flag_modified(note, "tags")
+                        session.add(note)
+                        await _sync_tag_index(note.id, deduped, session)
+
+                renamed_count += 1
+        else:
+            # Multiple tags collapse to same normalized form -- merge
+            # Sort by note_count desc so merged count reflects the best variant
+            tag_group.sort(key=lambda t: t.note_count, reverse=True)
+
+            # Collect all note_ids from all variants
+            all_note_ids: set[str] = set()
+            for tag in tag_group:
+                note_ids_result = await session.execute(
+                    select(NoteTagIndexModel.note_id)
+                    .where(NoteTagIndexModel.tag_full == tag.id)
+                    .distinct()
+                )
+                for row in note_ids_result.all():
+                    all_note_ids.add(row[0])
+
+            # Delete all old index rows and canonical tags for all variants
+            for tag in tag_group:
+                await session.execute(
+                    delete(NoteTagIndexModel).where(NoteTagIndexModel.tag_full == tag.id)
+                )
+                await session.execute(
+                    delete(CanonicalTagModel).where(CanonicalTagModel.id == tag.id)
+                )
+
+            # Create the normalized canonical tag
+            segments = normalized_id.split("/")
+            new_display = segments[-1]
+            new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
+            from sqlalchemy import text as sa_text  # noqa: PLC0415
+
+            await session.execute(
+                sa_text(
+                    "INSERT OR IGNORE INTO canonical_tags"
+                    " (id, display_name, parent_tag, note_count, created_at)"
+                    " VALUES (:id, :display_name, :parent_tag, :note_count, datetime('now'))"
+                ),
+                {
+                    "id": normalized_id,
+                    "display_name": new_display,
+                    "parent_tag": new_parent,
+                    "note_count": len(all_note_ids),
+                },
+            )
+
+            # Update all notes to use normalized tag
+            if all_note_ids:
+                notes_result = await session.execute(
+                    select(NoteModel).where(NoteModel.id.in_(list(all_note_ids)))
+                )
+                for note in notes_result.scalars().all():
+                    current_tags: list[str] = note.tags or []
+                    new_tags_list: list[str] = []
+                    seen_tags: set[str] = set()
+                    for t in current_tags:
+                        nt = normalize_tag_slug(t)
+                        if nt and nt not in seen_tags:
+                            seen_tags.add(nt)
+                            new_tags_list.append(nt)
+                    note.tags = new_tags_list
+                    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+
+                    flag_modified(note, "tags")
+                    session.add(note)
+                    await _sync_tag_index(note.id, new_tags_list, session)
+
+            merged_count += 1
+
+    await session.commit()
+    invalidate_tag_graph_cache()
+    logger.info(
+        "Tag naming migration complete: renamed=%d merged=%d",
+        renamed_count, merged_count,
+    )
+    return {"renamed": renamed_count, "merged": merged_count}
 
 
 @router.get("/{tag_id}/notes", response_model=list[NoteItem])

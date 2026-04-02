@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react"
 import { Tag, X } from "lucide-react"
 import { useDebounce } from "@/hooks/useDebounce"
 import { API_BASE } from "@/lib/config"
+import { normalizeTagSlug } from "@/lib/tagUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -96,7 +97,7 @@ export function TagAutocomplete({ tags, onChange, onUnsavedChange }: TagAutocomp
   }, [debouncedInput])
 
   function addTag(slug: string) {
-    const trimmed = slug.trim()
+    const trimmed = normalizeTagSlug(slug)
     if (!trimmed || tags.includes(trimmed)) return
     onChange([...tags, trimmed])
     onUnsavedChange?.()
@@ -178,6 +179,13 @@ export function TagAutocomplete({ tags, onChange, onUnsavedChange }: TagAutocomp
         placeholder="Add tag..."
         className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
       />
+
+      {/* Normalized preview */}
+      {inputValue.trim() && normalizeTagSlug(inputValue) !== inputValue.trim() && (
+        <div className="text-[10px] text-muted-foreground mt-0.5">
+          {normalizeTagSlug(inputValue)}
+        </div>
+      )}
 
       {/* Dropdown */}
       {showDropdown && results.length > 0 && (
