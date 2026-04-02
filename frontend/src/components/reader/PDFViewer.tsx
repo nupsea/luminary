@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
 import * as pdfjsLib from "pdfjs-dist"
-import { TextLayer } from "pdfjs-dist"
+import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
@@ -186,6 +186,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const textLayerRef = useRef<HTMLDivElement>(null)
+    const annotationLayerRef = useRef<HTMLDivElement>(null)
     const nextCanvasRef = useRef<HTMLCanvasElement>(null)
     const scrollAreaRef = useRef<HTMLDivElement>(null)
     // Bumped after each text layer render to trigger highlight application
@@ -311,6 +312,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         pageNum: number,
         canvas: HTMLCanvasElement | null,
         textLayerDiv: HTMLDivElement | null,
+        annotationLayerDiv: HTMLDivElement | null,
       ): Promise<void> {
         if (!canvas || !pdfDoc) return
         let page: PDFPageProxy | null = null
@@ -342,13 +344,11 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           if (textLayerDiv) {
             // Cancel any previous text layer
             activeTextLayer?.cancel()
-
             // Clear previous content
             textLayerDiv.replaceChildren()
 
             // Set the CSS variable that TextLayer needs for sizing
             textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
-
             // Set explicit dimensions as fallback
             textLayerDiv.style.width = `${viewport.width}px`
             textLayerDiv.style.height = `${viewport.height}px`
@@ -372,14 +372,86 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               setTextLayerVersion((v) => v + 1)
             }
           }
+
+          // Annotation Layer -- handles links (external browser links and internal page jumps)
+          if (annotationLayerDiv && !cancelled) {
+            console.log(`[PDFViewer] rendering annotations for page ${pageNum}`, { annotationLayerDiv })
+            annotationLayerDiv.replaceChildren()
+            annotationLayerDiv.style.width = `${viewport.width}px`
+            annotationLayerDiv.style.height = `${viewport.height}px`
+
+            try {
+              const annotationsData = await page.getAnnotations()
+              console.log(`[PDFViewer] found ${annotationsData.length} annotations for page ${pageNum}`)
+              if (cancelled) return
+
+              // Minimal link service to handle "goToPage" for internal links (Rules 1/2)
+              // and "BLANK" target for external browser links (e.g. GitHub repos).
+              const linkService = {
+                externalLinkTarget: 2, // BLANK
+                externalLinkRel: "noopener noreferrer nofollow",
+                externalLinkEnabled: true,
+                getDestinationHash: () => "#",
+                getAnchorUrl: () => "#",
+                setHash: () => {},
+                executeNamedAction: () => {},
+                cachePageRef: () => {},
+                addLinkAttributes(link: HTMLAnchorElement, url: string, newWindow: boolean) {
+                  if (url) link.href = url
+                  if (newWindow) {
+                    link.target = "_blank"
+                    link.rel = "noopener noreferrer nofollow"
+                  }
+                },
+                async navigateTo(dest: unknown) {
+                  console.log("[PDFViewer] navigateTo", dest)
+                  if (!pdfDoc) return
+                  let pageIdx: number | null = null
+                  if (typeof dest === "string") {
+                    const resolved = await pdfDoc.getDestination(dest)
+                    if (resolved && Array.isArray(resolved)) {
+                      pageIdx = await pdfDoc.getPageIndex(resolved[0])
+                    }
+                  } else if (Array.isArray(dest)) {
+                    pageIdx = await pdfDoc.getPageIndex(dest[0])
+                  }
+                  if (pageIdx !== null) {
+                    console.log(`[PDFViewer] jumping to page ${pageIdx + 1}`)
+                    goToPage(pageIdx + 1)
+                  }
+                },
+              }
+
+              const al = new AnnotationLayer({
+                div: annotationLayerDiv,
+                accessibilityManager: null,
+                annotationCanvasMap: null,
+                annotationEditorUIManager: null,
+                page,
+                viewport: viewport.clone({ dontFlip: true }),
+              } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+
+              await al.render({
+                annotations: annotationsData,
+                viewport: viewport.clone({ dontFlip: true }),
+                linkService: linkService as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+                div: annotationLayerDiv,
+                intent: "display",
+              } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+              console.log(`[PDFViewer] annotation layer rendered for page ${pageNum}`)
+            } catch (err) {
+              console.error(`[PDFViewer] failed to render annotations for page ${pageNum}`, err)
+            }
+          }
         } finally {
           page?.cleanup()
         }
       }
 
-      void renderPage(currentPage, canvasRef.current, textLayerRef.current)
+      console.log(`[PDFViewer] triggering renderPage for page ${currentPage}`)
+      void renderPage(currentPage, canvasRef.current, textLayerRef.current, annotationLayerRef.current)
       if (currentPage < totalPages) {
-        void renderPage(currentPage + 1, nextCanvasRef.current, null)
+        void renderPage(currentPage + 1, nextCanvasRef.current, null, null)
       }
 
       return () => {
@@ -556,6 +628,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
                   and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
               <div ref={textLayerRef} className="textLayer" />
+              {/* Official pdfjs annotationLayer -- handles links and form fields. */}
+              <div ref={annotationLayerRef} className="annotationLayer" />
             </div>
             <canvas ref={nextCanvasRef} className="hidden" />
           </div>
