@@ -105,7 +105,7 @@ Each story SXXX produces or modifies these artifacts:
 | v3 Phase 2 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S171-S175 (all pass) -- Note intelligence: bidirectional links, Viz integration, health reports, Obsidian/Anki export, multi-doc notes |
 | v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (all pass) -- UX polish and learner focus |
 | v3 Phase 4 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S184-S190 (all pass) -- Learner experience refinement |
-| v3 Phase 5 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S191-S199 (pending) -- Reading experience and chat intelligence |
+| v3 Phase 5 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S191-S199 (all pass) -- Reading experience and chat intelligence |
 
 ## V3 Phase 3 Story Status
 
@@ -144,4 +144,4 @@ Each story SXXX produces or modifies these artifacts:
 | S196 | Chat: non-destructive scope clear preserves conversation context | pass |
 | S197 | Compare notes with book: auto-collection gap analysis | pass |
 | S198 | Highlight reliability: text viewer, PDF edge cases, and large selection menu | pass |
-| S199 | Naming conventions: UPPER-CASE collections and lower-case tags with dash separators | pending |
+| S199 | Naming conventions: UPPER-CASE collections and lower-case tags with dash separators | pass |

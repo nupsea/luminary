@@ -132,3 +132,12 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - Test mocks for DOM nodes in node env should use plain objects with `dataset` property, not `Object.setPrototypeOf(obj, HTMLElement.prototype)`
   - Reviewer warnings about out-of-scope changes from partial commits are non-blocking
 ---
+
+## 2026-04-02 - S199
+- What was implemented: Naming convention normalization for tags (lower-case, hyphen-separated, '/' preserved) and collections (UPPER-CASE, hyphen-separated). Backend naming.py with normalize_collection_name and normalize_tag_slug. Applied in collections.py (_make_collection_name, create_collection, update_collection), notes.py (_sync_tag_index), tags.py (create_tag, autocomplete). Migration endpoints POST /tags/migrate-naming and POST /collections/migrate-naming merge duplicates. Frontend normalizers in tagUtils.ts with live preview in TagAutocomplete and CreateCollectionDialog. 25 new tests (11 pure unit + 5 integration).
+- Files changed: backend/app/services/naming.py, backend/app/routers/collections.py, backend/app/routers/tags.py, backend/app/routers/notes.py, backend/tests/test_S199.py (new), frontend/src/lib/tagUtils.ts, frontend/src/components/TagAutocomplete.tsx, frontend/src/components/CreateCollectionDialog.tsx, scripts/smoke/S199.sh, scripts/ralph/prd-v3.json, docs/ralph-run-flow.md
+- **Learnings for future iterations:**
+  - Most implementation was done in a prior partial commit; this iteration only needed the test file
+  - Migration endpoint note_count can over-count when _sync_tag_index increments on INSERT CONFLICT during rename path; set initial note_count=0 when recreating canonical tags to avoid double-counting
+  - Reviewer warning: lazy import of naming.py in notes.py is unnecessary (no circular risk) but harmless
+---
