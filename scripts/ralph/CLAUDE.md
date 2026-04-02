@@ -4,11 +4,15 @@ You are an autonomous coding agent implementing Luminary stories.
 
 ## Your Task
 
-1. Read the active PRD -- detect it from the current git branch:
+1. Detect the active PRD from the current git branch:
    - branch `ralph/luminary-v3` -> `scripts/ralph/prd-v3.json`
    - branch `ralph/luminary-v2` -> `scripts/ralph/prd-v2.json`
+   **Do NOT read the entire PRD.** Use `Grep` to find `"passes": false` entries,
+   then read only the story block you will implement (the lowest-priority one).
 
-2. Read `scripts/ralph/progress.txt` -- check the **Codebase Patterns** section first.
+2. Read `scripts/ralph/progress.txt` -- it contains only recent story entries.
+   Older entries are archived in `scripts/ralph/archive/`.
+   Only read the last ~100 lines (use offset/limit) if the file grows large again.
 
 3. Read `scripts/ralph/patterns.md` -- stable patterns accumulated across all stories.
    Never skip this step; it prevents repeating known mistakes.
@@ -18,6 +22,8 @@ You are an autonomous coding agent implementing Luminary stories.
 
 5. Pick the **lowest priority number** story where `passes: false`.
    (Priority 1 = implement first; do not skip ahead.)
+   Use the Grep results from step 1 to identify it, then read only that story's
+   JSON block from the PRD (use offset/limit targeting the specific line range).
 
 6. Read or create the execution plan at `docs/exec-plans/active/<STORY_ID>.md`.
    If it does not exist, invoke the `luminary-planner` agent to create it.

@@ -548,8 +548,20 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
         {/* Main viewer */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Toolbar */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b bg-background flex-shrink-0">
+          {/* Canvas scroll area */}
+          <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4">
+            <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
+              {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
+              <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
+              {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
+                  and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
+              <div ref={textLayerRef} className="textLayer" />
+            </div>
+            <canvas ref={nextCanvasRef} className="hidden" />
+          </div>
+
+          {/* Toolbar (moved to bottom) */}
+          <div className="flex items-center gap-2 px-3 py-2 border-t bg-background flex-shrink-0">
             <button
               className="px-2 py-1 text-sm border rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage - 1)}
@@ -590,18 +602,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               />
               <span className="text-xs w-10">{Math.round(zoom * 100)}%</span>
             </div>
-          </div>
-
-          {/* Canvas scroll area */}
-          <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4">
-            <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
-              {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
-              <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
-              {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
-                  and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
-              <div ref={textLayerRef} className="textLayer" />
-            </div>
-            <canvas ref={nextCanvasRef} className="hidden" />
           </div>
         </div>
       </div>
