@@ -358,7 +358,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             textLayerDiv.style.left = "0"
             textLayerDiv.style.width = `${viewport.width}px`
             textLayerDiv.style.height = `${viewport.height}px`
-            textLayerDiv.style.pointerEvents = "none" // Allow clicks to pass through to annotation layer
+            textLayerDiv.style.pointerEvents = "auto"
             textLayerDiv.style.zIndex = "10"
 
             const textContent = await page.getTextContent()
@@ -390,7 +390,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             annotationLayerDiv.style.top = "0"
             annotationLayerDiv.style.left = "0"
             annotationLayerDiv.style.zIndex = "20"
-            annotationLayerDiv.style.pointerEvents = "auto"
+            annotationLayerDiv.style.pointerEvents = "none"
             annotationLayerDiv.style.display = "block"
             annotationLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
             annotationLayerDiv.setAttribute("data-page-num", String(pageNum))
@@ -405,11 +405,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                   top: 0 !important;
                   left: 0 !important;
                   opacity: 1 !important;
+                  pointer-events: none !important;
                 }
                 .annotationLayer section {
                   display: block !important;
                   position: absolute !important;
                   box-sizing: border-box !important;
+                  pointer-events: none !important;
                 }
                 .annotationLayer .linkAnnotation > a {
                   display: block !important;
@@ -417,6 +419,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                   height: 100% !important;
                   background-color: rgba(59, 130, 246, 0.05) !important; /* Very subtle blue tint */
                   cursor: pointer !important;
+                  pointer-events: auto !important;
                 }
                 .annotationLayer .linkAnnotation > a:hover {
                   background-color: rgba(59, 130, 246, 0.15) !important; /* Slightly stronger blue on hover */
@@ -639,7 +642,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                   and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
               <div ref={textLayerRef} className="textLayer" />
               {/* Official pdfjs annotationLayer -- handles links and form fields. */}
-              <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 20, pointerEvents: "auto" }} />
+              <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 20, pointerEvents: "none" }} />
             </div>
             <canvas ref={nextCanvasRef} className="hidden" />
           </div>
