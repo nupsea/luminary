@@ -171,3 +171,24 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - pdf.js types are incomplete in pdfjs-dist -- destination objects, page refs, l10n interfaces, and AnnotationLayerParameters all require `as any` casts with explanatory comments
   - test_e2e_upload.py::test_http_corrupt_upload_terminates is flaky (fails in full suite, passes in isolation) -- likely test ordering issue
 ---
+
+## 2026-04-03 - S203
+- What was implemented: PDF Viewer in-page and cross-page text search. PdfSearchBar.tsx overlay component with input, match counter, prev/next/close buttons. pdfSearchUtils.ts with pure functions (findMatchIndices, buildGlobalMatches, formatMatchCounts). PDFViewer.tsx integration: search state, Ctrl+F/Escape keyboard shortcuts, toolbar search button, lazy progressive text extraction with Map cache, cross-page next/prev navigation via goToPage, applySearchHighlights with distinct data-search-highlight marks coexisting with annotation highlights. Scanning indicator shows "(scanning...)" while pages are being extracted.
+- Files changed: frontend/src/components/reader/PDFViewer.tsx, frontend/src/components/reader/PdfSearchBar.tsx (new), frontend/src/components/reader/pdfSearchUtils.ts (new), frontend/src/components/reader/pdfSearchUtils.test.ts (new, 14 tests), scripts/smoke/S203.sh (new), scripts/ralph/prd-v3.json, docs/ralph-run-flow.md, docs/exec-plans/completed/S203.md
+- **Learnings for future iterations:**
+  - Most implementation was done in a prior partial commit; this iteration mainly verified gates, added scanning indicator, and finalized
+  - Search highlights must use a distinct data attribute (data-search-highlight) to coexist with annotation highlights (data-pdf-highlight) -- clear functions must only target their own marks
+  - Progressive text extraction with batch size of 10 pages provides good UX feedback without excessive re-renders
+  - extractedPageCount state should always be consumed (for scanning indicator) to avoid dead state causing spurious re-renders
+  - test_s165_merge_replaces_source_tag_in_notes is flaky in full suite (passes in isolation) -- pre-existing, not related to S203
+---
+
+## 2026-04-03 - S204
+- What was implemented: Fixed state synchronization gap where notes created from highlighted text in DocumentReader did not update NotesReaderPanel sidebar, Notes page, or collection lists. Added TanStack Query invalidation for ["reader-notes"], ["notes"], ["notes-groups"], and ["collections"] in three onSaved callbacks in DocumentReader.tsx: inline NoteEditor, NoteCreationDialog (highlight flow), and NoteEditorDialog (post-creation editing).
+- Files changed: frontend/src/components/reader/DocumentReader.tsx (modified -- 3 onSaved callbacks), scripts/smoke/S204.sh (new), scripts/ralph/prd-v3.json (passes=true), docs/ralph-run-flow.md (pass)
+- **Learnings for future iterations:**
+  - When adding a new note creation surface, always invalidate ALL note-related query keys used across the app: ["notes"], ["notes-groups"], ["reader-notes"], ["notes-for-doc", documentId], ["collections"]. TanStack Query prefix matching with ["reader-notes"] busts all ["reader-notes", collectionId] variants.
+  - Backend POST /notes already returns full NoteResponse with id, tags, collection_ids -- no backend change was needed
+  - The invalidation belongs in the parent component's onSaved callback (DocumentReader.tsx), not in NoteCreationDialog itself, because the dialog is reusable and shouldn't know about all consuming surfaces
+  - Reviewer warning: smoke tests for frontend-only fixes can only verify backend contract and code presence, not UI cache invalidation behavior
+---

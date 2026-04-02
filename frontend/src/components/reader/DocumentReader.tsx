@@ -2580,6 +2580,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
                                 onSaved={() => {
                                   setOpenNoteEditor(null)
                                   void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+                                  void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+                                  void qc.invalidateQueries({ queryKey: ["notes"] })
+                                  void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+                                  void qc.invalidateQueries({ queryKey: ["collections"] })
                                 }}
                                 onCancel={() => setOpenNoteEditor(null)}
                               />
@@ -2664,6 +2668,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
         onClose={() => setSelectionNoteOpen(false)}
         onSaved={(note: Note) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          void qc.invalidateQueries({ queryKey: ["collections"] })
           setEditingCreatedNote(note)
         }}
       />
@@ -2674,6 +2682,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
         onClose={() => setEditingCreatedNote(null)}
         onSaved={(_updated) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          void qc.invalidateQueries({ queryKey: ["collections"] })
           setEditingCreatedNote(null)
         }}
       />
