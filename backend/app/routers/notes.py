@@ -5,9 +5,10 @@ Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes
 """
 
 import asyncio
+import hashlib
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -356,12 +357,30 @@ async def create_note(
     session: AsyncSession = Depends(get_db),
 ) -> NoteResponse:
     """Create a new note."""
+    # Dedup: if a note with identical (document_id, section_id, content_hash) was
+    # created within the last 5 seconds, return the existing note instead.
+    content_hash = hashlib.sha256(req.content.encode()).hexdigest()[:16]
+    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=5)
+    existing_result = await session.execute(
+        select(NoteModel).where(
+            NoteModel.document_id == req.document_id,
+            NoteModel.section_id == req.section_id,
+            NoteModel.content_hash == content_hash,
+            NoteModel.created_at >= dedup_cutoff,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing is not None:
+        logger.info("Dedup: returning existing note %s", existing.id)
+        return _to_response(existing)
+
     note = NoteModel(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
         chunk_id=req.chunk_id,
         section_id=req.section_id,
         content=req.content,
+        content_hash=content_hash,
         tags=req.tags,
         group_name=req.group_name,
         created_at=datetime.now(UTC),
@@ -1265,8 +1284,10 @@ async def suggest_tags(
     # during a potentially slow LLM call.
     note_content = note.content
 
+    from app.services.naming import normalize_tag_slug as _norm_tag  # noqa: PLC0415
     from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
 
-    tags = await get_note_tagger().suggest_tags(note_content)
+    raw_tags = await get_note_tagger().suggest_tags(note_content)
+    tags = [n for t in raw_tags if (n := _norm_tag(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)

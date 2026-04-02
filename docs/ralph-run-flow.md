@@ -152,5 +152,5 @@ Each story SXXX produces or modifies these artifacts:
 | Story | Title | Status |
 |---|---|---|
 | S200 | PDF Viewer: working internal links, external links, and rendering fidelity | pass |
-| S201 | Fix tag auto-save on note creation and eliminate duplicate notes | pending |
+| S201 | Fix tag auto-save on note creation and eliminate duplicate notes | pass |
 | S202 | Fix CI gate errors and browser console errors | pending |

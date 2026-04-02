@@ -249,7 +249,7 @@ async def test_accept_creates_collection(test_db):
             )
         ).scalar_one_or_none()
         assert col is not None
-        assert col.name == "My Cluster"
+        assert col.name == "MY-CLUSTER"  # S201: normalize_collection_name applied
 
         # All 4 members created
         members = (
@@ -498,7 +498,7 @@ async def test_batch_accept_with_name_override(test_db):
                 select(NoteCollectionModel).where(NoteCollectionModel.id == created_ids[0])
             )
         ).scalar_one()
-        assert col.name == "My Custom Name"
+        assert col.name == "MY-CUSTOM-NAME"  # S201: normalize_collection_name applied
 
 
 @pytest.mark.anyio
@@ -550,4 +550,4 @@ async def test_batch_accept_endpoint(test_db):
                 )
             )
         ).scalar_one()
-        assert col.name == "Renamed"
+        assert col.name == "RENAMED"  # S201: normalize_collection_name applied

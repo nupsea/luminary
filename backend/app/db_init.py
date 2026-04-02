@@ -348,6 +348,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         except Exception:
             pass  # Column already exists (idempotent)
 
+        # S201: content_hash on notes for dedup.
+        try:
+            await conn.execute(
+                text("ALTER TABLE notes ADD COLUMN content_hash TEXT")
+            )
+        except Exception:
+            pass  # Column already exists (idempotent)
+
         # S183-fix: flashcards.document_id must be nullable for note-sourced cards.
         # Old databases have NOT NULL on this column. Use table-rebuild idiom since
         # SQLite does not support ALTER COLUMN to drop a NOT NULL constraint.

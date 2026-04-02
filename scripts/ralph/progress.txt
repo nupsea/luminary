@@ -151,3 +151,14 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - pdfjs AnnotationLayer CSS already sets pointer-events:none on the container and pointer-events:all on individual link elements -- no explicit pointer-events style needed on the div
   - Reviewer warnings: console.log debug statements and as-any type assertions will be addressed in S202
 ---
+
+## 2026-04-02 - S201
+- What was implemented: Tag auto-save normalization, duplicate note dedup, and clustering name normalization. Backend: suggest_tags endpoint now normalizes via normalize_tag_slug before returning; create_note has content-hash based dedup within 5s window (new content_hash column on NoteModel); clustering_service accept_suggestion and batch_accept_suggestions normalize collection names via normalize_collection_name. Frontend: save button debounce already in place (NoteCreationDialog, NoteReaderSheet). Tag persistence via addTagMut -> patchNote -> _sync_tag_index already worked -- the gap was only tag format normalization.
+- Files changed: backend/app/routers/notes.py, backend/app/models.py, backend/app/db_init.py, backend/app/services/clustering_service.py, backend/tests/test_S201.py (new, 3 tests), backend/tests/test_clustering.py (updated 3 assertions), scripts/smoke/S201.sh (new), scripts/ralph/prd-v3.json, docs/ralph-run-flow.md, docs/exec-plans/active/S201.md -> completed/
+- **Learnings for future iterations:**
+  - Lazy import patch target: get_note_tagger is lazily imported in notes.py, must patch at app.services.note_tagger.get_note_tagger not app.routers.notes.get_note_tagger
+  - Walrus operator avoids double function call in list comprehension: [n for t in raw_tags if (n := _norm_tag(t))]
+  - Content-hash dedup: nullable content_hash column avoids breaking existing notes; new notes get hash, old ones have NULL (won't match dedup query)
+  - Reviewer warning: AC7 (normalize_tag_slug for tags in suggestion metadata) is vacuously satisfied since ClusterSuggestionModel has no tags field
+  - All smoke tests should use port 7820 as default, not 8000
+---

@@ -166,12 +166,21 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 
 ---
 
+## Frontend PDF Viewer
+
+- **Protocol matching must include colon**: When checking if a URL is external (http, https, mailto, tel), use `url.startsWith("http:")` not `url.startsWith("http")`. Without the colon, protocol lookalikes (e.g., "httpx", "telnet") cause false positives on external URL detection.
+- **pdfjs AnnotationLayer CSS pointer-events**: The pdfjs AnnotationLayer CSS already sets `pointer-events: none` on the container and `pointer-events: all` on individual link elements. Do NOT add explicit pointer-events styles to the annotation div -- they conflict with pdfjs's built-in cascade and break link clicking.
+- **CSS variable sync on canvas and annotation divs**: When scaling PDF renders, sync the `--scale-factor` CSS variable to both the canvas element and the annotation layer div using `element.style.setProperty("--scale-factor", String(scale))`. This allows CSS rules (e.g., for highlight marks or link positioning) to reference `var(--scale-factor)` uniformly across both layers without duplicate scaling logic in JavaScript.
+
+---
+
 ## Frontend Rendering Consistency
 
 - **Async handler error handling violates I-10**: Empty catch blocks in async dialog/component handlers (e.g., `try { await mutate() } catch (e) { }`) hide errors from the user, violating I-10 (every feature needs error state). Always set an error state variable and render it as an inline error message: `const [error, setError] = useState(""); ... catch (e) { setError(e.message) }; ... {error && <p className="text-red-500">{error}</p>}`.
 - List/table views must NOT use MarkdownRenderer inline — block-level elements (h1, ul) inside a td break layout. Use a stripMarkdown() utility to strip heading markers, bold, italic, blockquote, and backtick symbols for single-line text previews. Card and detail views should use the full renderer.
 - stripMarkdown() is a pure function in src/lib/utils.ts. It strips `#`, `**`, `__`, `*`, `_`, `>` markers from preview text without rendering HTML.
 - Vite dev server does NOT hot-reload tailwind.config.cjs changes. Restart `npm run dev` after any config change. `npm run build` always produces correct output.
+- **Vitest node environment + window.open mocking**: In Vitest node env, `window` is not defined. To mock `window.open`, use `vi.stubGlobal("window", { open: vi.fn() })` before the test, then `vi.unstubAllGlobals()` in cleanup. The stub returns a plain object with only the mocked methods, allowing assertions like `expect(openSpy).toHaveBeenCalledWith(url, "_blank", "noopener,noreferrer")`.
 - **Vitest node environment + localStorage: vi.stubGlobal + dynamic import**: when vitest environment is "node" and a module reads localStorage at module load (e.g., Zustand store initialization), use `vi.stubGlobal("localStorage", mock)` BEFORE importing the module. Use dynamic `await import()` after stubbing to ensure the mock is in place when the module initializes. This prevents "localStorage is not defined" errors.
 - **Vitest node environment + Zustand store**: when vitest environment is "node", do NOT import React components that transitively depend on Zustand stores (localStorage is read at module load). Solution: extract pure logic functions to a separate utility file with no React/store imports (e.g., `src/lib/collectionUtils.ts`, `src/lib/tagUtils.ts`), and test only from that utility. Component test files must import from the utility, not the component.
 - **Vitest node env + DOM events pure utility pattern**: when a feature dispatches DOM events (e.g. `window.dispatchEvent(new CustomEvent(...))`), split into two functions: (a) a pure `buildEventDetail(args)` function returning the detail object -- testable in Vitest node env; (b) `dispatchEventXxx(args)` which calls `window.dispatchEvent` -- untestable in node env. Test only (a). Name the files `src/lib/xxxUtils.ts` and `src/lib/xxxUtils.test.ts`.

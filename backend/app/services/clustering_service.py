@@ -24,6 +24,7 @@ from app.models import (
     NoteCollectionModel,
     NoteModel,
 )
+from app.services.naming import normalize_collection_name
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +257,7 @@ class ClusteringService:
         collection_id = str(uuid.uuid4())
         collection = NoteCollectionModel(
             id=collection_id,
-            name=suggestion.suggested_name,
+            name=normalize_collection_name(suggestion.suggested_name),
             color="#6366F1",
             sort_order=0,
             created_at=datetime.now(UTC),
@@ -340,7 +341,8 @@ class ClusteringService:
                 continue
 
             collection_id = str(uuid.uuid4())
-            name = name_overrides.get(sid) or suggestion.suggested_name
+            raw_name = name_overrides.get(sid) or suggestion.suggested_name
+            name = normalize_collection_name(raw_name)
             collection = NoteCollectionModel(
                 id=collection_id,
                 name=name,

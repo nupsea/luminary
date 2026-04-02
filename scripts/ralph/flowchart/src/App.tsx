@@ -142,6 +142,9 @@ const shortTitle: Record<string, string[]> = {
   S197: ['S197 P37', 'Auto-Gap Analysis',  'Collection-based compare'],
   S198: ['S198 P38', 'Highlight Fixes',    'Text/PDF/large select'],
   S199: ['S199 P39', 'Naming Standards',   'UPPER cols, lower tags'],
+  S200: ['S200 P40', 'PDF Links & Render', 'Internal/external links'],
+  S201: ['S201 P41', 'Tag & Note Fixes',   'Auto-save + dedup + naming'],
+  S202: ['S202 P42', 'CI & Browser Fix',   'Sweep all gate errors'],
 }
 
 // Layout: Phase 1 cols x=60..1180, Phase 2 row y=580, Phase 3 row y=820
@@ -164,6 +167,9 @@ const storyPositions: Record<string, { x: number; y: number }> = {
   S197: { x: 1980, y: 1300 },
   S198: { x: 2300, y: 1300 },
   S199: { x: 2620, y: 1300 },
+  S200: { x: 60,   y: 1540 },
+  S201: { x: 380,  y: 1540 },
+  S202: { x: 700,  y: 1540 },
 }
 
 // Phase label nodes (left column, non-clickable)
@@ -173,6 +179,7 @@ const phaseLabels: Node[] = [
   { id: 'ph3', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 3</div><div style={{ fontSize: 10, opacity: 0.7 }}>UX Polish</div><div style={{ fontSize: 10, opacity: 0.7 }}>S176-S183</div></div>) }, position: { x: -190, y: 830 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
   { id: 'ph4', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 4</div><div style={{ fontSize: 10, opacity: 0.7 }}>Learner Experience</div><div style={{ fontSize: 10, opacity: 0.7 }}>S184-S190</div></div>) }, position: { x: -190, y: 1070 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
   { id: 'ph5', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 5</div><div style={{ fontSize: 10, opacity: 0.7 }}>Reading & Chat</div><div style={{ fontSize: 10, opacity: 0.7 }}>S191-S199</div></div>) }, position: { x: -190, y: 1310 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
+  { id: 'ph6', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 6</div><div style={{ fontSize: 10, opacity: 0.7 }}>Polish & Bug Fixes</div><div style={{ fontSize: 10, opacity: 0.7 }}>S200-S202</div></div>) }, position: { x: -190, y: 1550 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
 ]
 
 function storyNode(s: Story): Node {
@@ -235,6 +242,12 @@ const storyEdges: Edge[] = [
   { id: 'e-186-196', source: 'S186', target: 'S196', label: 'inline scope', labelStyle: { fontSize: 10 }, ...ph2Edge },
   // Phase 1 -> Phase 5
   { id: 'e-161-192', source: 'S161', target: 'S192', label: 'collections', labelStyle: { fontSize: 10 }, ...ph2Edge },
+  // Phase 6 internal
+  { id: 'e-200-202', source: 'S200', target: 'S202', label: 'CI sweep', labelStyle: { fontSize: 10 }, ...depEdge },
+  { id: 'e-201-202', source: 'S201', target: 'S202', label: 'CI sweep', labelStyle: { fontSize: 10 }, ...depEdge },
+  // Phase 5 -> Phase 6
+  { id: 'e-198-200', source: 'S198', target: 'S200', label: 'highlight fidelity', labelStyle: { fontSize: 10 }, ...ph2Edge },
+  { id: 'e-199-201', source: 'S199', target: 'S201', label: 'naming norms', labelStyle: { fontSize: 10 }, ...ph2Edge },
 ]
 
 // ── LEGENDS ─────────────────────────────────────────────────────
@@ -254,7 +267,7 @@ function RunLegend() {
   )
 }
 
-function StoryLegend({ total, done, p1Done, p2Done, p3Done, p4Done, p5Done }: { total: number; done: number; p1Done: number; p2Done: number; p3Done: number; p4Done: number; p5Done: number }) {
+function StoryLegend({ total, done, p1Done, p2Done, p3Done, p4Done, p5Done, p6Done }: { total: number; done: number; p1Done: number; p2Done: number; p3Done: number; p4Done: number; p5Done: number; p6Done: number }) {
   return (
     <div style={{ position: 'absolute', bottom: 16, right: 16, zIndex: 10, background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px', minWidth: 200 }}>
       <div style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Overall progress</div>
@@ -269,7 +282,7 @@ function StoryLegend({ total, done, p1Done, p2Done, p3Done, p4Done, p5Done }: { 
       <div style={{ background: '#0f172a', borderRadius: 4, height: 8, overflow: 'hidden', marginBottom: 10 }}>
         <div style={{ width: `${(done / total) * 100}%`, height: '100%', background: '#16a34a', borderRadius: 4 }} />
       </div>
-      {([['Phase 1', p1Done, 10, '#818cf8'], ['Phase 2', p2Done, 5, '#34d399'], ['Phase 3', p3Done, 8, '#fb923c'], ['Phase 4', p4Done, 7, '#f472b6'], ['Phase 5', p5Done, 9, '#38bdf8']] as [string, number, number, string][]).map(([label, cnt, tot, color]) => (
+      {([['Phase 1', p1Done, 10, '#818cf8'], ['Phase 2', p2Done, 5, '#34d399'], ['Phase 3', p3Done, 8, '#fb923c'], ['Phase 4', p4Done, 7, '#f472b6'], ['Phase 5', p5Done, 9, '#38bdf8'], ['Phase 6', p6Done, 3, '#f87171']] as [string, number, number, string][]).map(([label, cnt, tot, color]) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <div style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
           <span style={{ color: '#94a3b8', fontSize: 11, flex: 1 }}>{label}</span>
@@ -318,13 +331,15 @@ export default function App() {
   const p2 = stories.filter(s => { const n = parseInt(s.id.slice(1)); return n >= 171 && n <= 175 })
   const p3 = stories.filter(s => { const n = parseInt(s.id.slice(1)); return n >= 176 && n <= 183 })
   const p4 = stories.filter(s => { const n = parseInt(s.id.slice(1)); return n >= 184 && n <= 190 })
-  const p5 = stories.filter(s => parseInt(s.id.slice(1)) >= 191)
+  const p5 = stories.filter(s => { const n = parseInt(s.id.slice(1)); return n >= 191 && n <= 199 })
+  const p6 = stories.filter(s => parseInt(s.id.slice(1)) >= 200)
   const doneCnt = stories.filter(s => s.passes).length
   const p1Done = p1.filter(s => s.passes).length
   const p2Done = p2.filter(s => s.passes).length
   const p3Done = p3.filter(s => s.passes).length
   const p4Done = p4.filter(s => s.passes).length
   const p5Done = p5.filter(s => s.passes).length
+  const p6Done = p6.filter(s => s.passes).length
 
   const allStoryNodes = [...stories.map(storyNode), ...phaseLabels]
 
@@ -361,7 +376,7 @@ export default function App() {
             <Background color="#1e293b" gap={20} />
             <Controls style={{ background: '#1e293b', border: '1px solid #334155' }} />
             <MiniMap style={{ background: '#1e293b', border: '1px solid #334155' }} nodeColor={(n) => (n.style as { background?: string })?.background ?? '#1e3a5f'} />
-            <StoryLegend total={stories.length} done={doneCnt} p1Done={p1Done} p2Done={p2Done} p3Done={p3Done} p4Done={p4Done} p5Done={p5Done} />
+            <StoryLegend total={stories.length} done={doneCnt} p1Done={p1Done} p2Done={p2Done} p3Done={p3Done} p4Done={p4Done} p5Done={p5Done} p6Done={p6Done} />
           </ReactFlow>
         )}
       </div>
