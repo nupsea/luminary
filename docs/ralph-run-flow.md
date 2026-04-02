@@ -106,7 +106,7 @@ Each story SXXX produces or modifies these artifacts:
 | v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (all pass) -- UX polish and learner focus |
 | v3 Phase 4 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S184-S190 (all pass) -- Learner experience refinement |
 | v3 Phase 5 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S191-S199 (all pass) -- Reading experience and chat intelligence |
-| v3 Phase 6 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S200-S202 (pending) -- Polish and bug fixes |
+| v3 Phase 6 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S200-S204 (pending) -- Polish and bug fixes |
 
 ## V3 Phase 3 Story Status
 
@@ -154,3 +154,5 @@ Each story SXXX produces or modifies these artifacts:
 | S200 | PDF Viewer: working internal links, external links, and rendering fidelity | pass |
 | S201 | Fix tag auto-save on note creation and eliminate duplicate notes | pass |
 | S202 | Fix CI gate errors and browser console errors | pending |
+| S203 | PDF Viewer: in-page and cross-page text search | pending |
+| S204 | Notes created from highlighted text sync state across all surfaces | pending |

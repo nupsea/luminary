@@ -16,7 +16,7 @@
       "Phase 3 (UX Polish and Learner Focus, S176-S183): ruthlessly separates the learner layer from the diagnostic/admin layer. Notes get a reader-first layout with clickable tag navigation (S176). Monitoring becomes a Progress tab with all dev metrics hidden at /admin (S177). Study tab declutters with Smart Generate and merged health panels (S178). Flashcard generation becomes context-aware and best-practices-driven (S179). Chat settings move to a drawer with collapsed transparency panels (S180). Viz gets a collapsible View Options panel, select-all entity controls, and hides Call Graph for non-code documents (S181). YouTube transcripts gain full Read section parity (S182). Learning tab LibraryOverview slims to a single stats bar with document list as primary focus (S183).",
       "Phase 4 (Learner Experience Refinement, S184-S190): eliminates friction in the three highest-touch surfaces -- Study, Chat, and Notes. Flashcard navigation drops the deck concept in favour of a unified search-and-filter browser (S184). Study tab collapses to two CTAs with an Insights accordion (S185). Chat brings document scope back inline and removes confusion-signal noise (S186-S187). Flashcard generation gets deeper context and Bloom L3+ bias (S188). Auto-organize shows a holistic plan instead of individual suggestion cards (S189). Tag tree gains type-ahead search (S190).",
       "Phase 5 (Reading Experience and Chat Intelligence, S191-S197): elevates the reading and questioning loops into cohesive learning experiences. The Library gains a document action menu for one-click navigation to any tab scoped to a specific book (S191). DocumentReader replaces the one-liner tab with a live notes panel tied to a per-document auto-collection, creating an active-reading marginalia experience (S192). Glossary becomes a persistent, categorized study artifact stored in the database with regeneration and section linking (S193). References gain HTTP validation so only live, browsable links are shown -- dead links are pruned (S194). Chat recommendations become Bloom-progressive and summary-grounded, with deduplication history so the same question never appears twice (S195). The chat scope clear button stops destroying conversation context (S196). Gap analysis auto-selects the document's collection notes for frictionless compare-my-notes-with-book (S197).",
-      "Phase 6 (Polish and Bug Fixes, S200-S202): fixes real bugs encountered during daily use. PDF Viewer gets working internal and external links with rendering fidelity (S200). Note auto-tags are persisted on acceptance, duplicate notes are prevented, and auto-organize normalizes collection/tag names (S201). A CI and browser error sweep catches any regressions (S202)."
+      "Phase 6 (Polish and Bug Fixes, S200-S204): fixes real bugs encountered during daily use. PDF Viewer gets working internal and external links with rendering fidelity (S200). Note auto-tags are persisted on acceptance, duplicate notes are prevented, and auto-organize normalizes collection/tag names (S201). A CI and browser error sweep catches any regressions (S202). PDF Viewer gains in-page and cross-page text search (S203). Notes created from highlighted text in DocumentReader sync state across all surfaces immediately (S204)."
     ]
   },
   "architecture": {
@@ -1118,6 +1118,50 @@
         "No new TypeScript 'any' type assertions introduced in S200 or S201 files",
         "Empty catch blocks have explicit // fire-and-forget comments explaining why errors are suppressed",
         "scripts/smoke/S202.sh exits 0"
+      ]
+    },
+    {
+      "id": "S203",
+      "title": "PDF Viewer: in-page and cross-page text search",
+      "phase": "V3 Phase 6 - Polish and Bug Fixes",
+      "priority": 43,
+      "featureRef": "F-READER",
+      "passes": false,
+      "description": "CONTEXT: The PDF Viewer (PDFViewer.tsx) currently has no search capability. Users need to find specific terms or phrases within a PDF document -- both within the currently visible page and across all pages. This is a standard PDF reader feature that is missing. REQUIREMENTS: (1) In-page search: Add a search bar (toggled via Ctrl+F or a toolbar button) that highlights all occurrences of the search term on the currently rendered page. Use the pdfjs-dist text layer content to find matches and wrap them in highlight spans. Show a match count indicator (e.g. '3 of 12 on this page'). Pressing Enter or clicking next/prev arrows cycles through matches on the current page, scrolling each into view. (2) Cross-page search: When the user searches, also search across all pages of the PDF document (not just the visible ones). Use pdfjs getTextContent() on each page to extract text and find matches. Display the total match count across all pages (e.g. '3 of 47 total'). Allow next/prev navigation to jump across pages -- when the user moves past the last match on the current page, automatically scroll to the next page containing a match and highlight it. (3) UX details: The search bar should appear as an overlay at the top-right of the PDF viewer (similar to browser Ctrl+F). It should have a text input, match count label, prev/next buttons, and a close button. Pressing Escape closes the search bar and clears highlights. Search should be case-insensitive by default. (4) Performance: For large PDFs (100+ pages), do not extract text from all pages upfront. Instead, extract text lazily -- search visible pages first, then expand to nearby pages progressively. Cache extracted text per page so repeated searches are fast. FRONTEND CHANGES: (A) Create PdfSearchBar.tsx component with input, match counter, prev/next/close buttons. (B) PDFViewer.tsx: add search state (query, matches, currentMatchIndex), wire Ctrl+F keyboard shortcut to open search bar. (C) PDFViewer.tsx: implement findMatchesOnPage() using the text layer content, highlight matches with a CSS class. (D) PDFViewer.tsx: implement findMatchesAcrossPages() that extracts text from each page via getTextContent() and builds a full match index. (E) PDFViewer.tsx: implement navigateToMatch() that scrolls to the correct page and highlights the active match. (F) Cache page text content in a Map<number, string> to avoid re-extraction on repeated searches.",
+      "acceptanceCriteria": [
+        "Ctrl+F or toolbar search button opens a search overlay bar in the PDF viewer",
+        "Typing a search term highlights all occurrences on the currently visible page",
+        "Match count shows both current-page and total-document counts (e.g. '3 of 12 on page, 47 total')",
+        "Next/prev buttons cycle through matches on the current page",
+        "When navigating past the last match on a page, the viewer scrolls to the next page with a match",
+        "Pressing Escape closes the search bar and clears all highlights",
+        "Search is case-insensitive by default",
+        "Page text content is cached so repeated searches do not re-extract",
+        "Existing highlights (S147/S198) and link handling (S200) are not regressed",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S203.sh exits 0"
+      ]
+    },
+    {
+      "id": "S204",
+      "title": "Notes created from highlighted text sync state across all surfaces",
+      "phase": "V3 Phase 6 - Polish and Bug Fixes",
+      "priority": 44,
+      "featureRef": "F-NOTES",
+      "passes": false,
+      "description": "CONTEXT: Notes can be created from three places: (1) the Notes page directly, (2) the Library/DocumentReader via the NotesReaderPanel sidebar, and (3) by selecting/highlighting text in the DocumentReader and clicking 'Add Note' in the AnnotationPopover or selection context menu. When a note is created from place (1) or (2), TanStack Query invalidation and Zustand store updates ensure all surfaces reflect the new note immediately. However, when a note is created from highlighted text in the DocumentReader (place 3), there is a state synchronization gap: the note is persisted to the backend but the NotesReaderPanel sidebar, the Notes page, and the Knowledge Graph (Viz tab) do not reflect it until the user manually refreshes or navigates away and back. BUG DETAILS: The highlight-to-note flow (AnnotationPopover -> NoteCreationDialog or inline note creation) calls POST /notes to create the note but does not invalidate the TanStack Query caches for ['notes'], ['notes', documentId], or ['document-notes', documentId]. It also does not trigger the Zustand note store update. This means: (a) The NotesReaderPanel in the same DocumentReader session does not show the newly created note. (b) Switching to the Notes tab shows stale data until a background refetch fires. (c) The note's graph connections (entity extraction, tag index) are created async but the Viz tab does not know to refetch. FIX: (1) After a successful note creation from highlighted text, call queryClient.invalidateQueries() for all note-related query keys: ['notes'], ['notes', documentId], ['document-notes', documentId], and ['collections']. (2) If a Zustand note store exists with a local notes array, also append the new note to it immediately (optimistic update). (3) Ensure the note creation response from the backend includes the full NoteModel (with id, tags, collection_ids) so the frontend can update local state without an additional fetch. (4) Verify that the async graph tasks (entity extraction, tag index, vector embedding) still fire correctly after the response is returned -- the sync fix should not interfere with the fire-and-forget background tasks. FRONTEND CHANGES: (A) AnnotationPopover.tsx or the highlight note-creation handler: after POST /notes succeeds, call queryClient.invalidateQueries for note-related keys. (B) If NoteCreationDialog.tsx is used from the highlight flow, ensure its onSuccess callback includes the same invalidation. (C) NotesReaderPanel.tsx: verify it subscribes to the correct TanStack Query keys so invalidation triggers a refetch. (D) Notes.tsx: verify the query keys match so cross-tab state is consistent. BACKEND VERIFICATION: (E) Confirm POST /notes response includes the full NoteModel with all fields populated (not just the id). (F) Confirm async tasks (note_graph sync, vector embedding, tag index) are not blocked by the response -- they should be fire-and-forget via asyncio.create_task.",
+      "acceptanceCriteria": [
+        "Creating a note from highlighted text in DocumentReader immediately shows the note in the NotesReaderPanel sidebar without manual refresh",
+        "Creating a note from highlighted text and switching to Notes tab shows the note immediately",
+        "Creating a note from highlighted text and switching to Viz tab shows the note's entity connections after async processing completes",
+        "POST /notes response includes the full NoteModel with id, tags, and collection_ids populated",
+        "TanStack Query caches for ['notes'], ['notes', documentId], ['document-notes', documentId] are invalidated after highlight-based note creation",
+        "Async background tasks (entity extraction, tag index, vector embedding) still fire correctly after note creation from highlights",
+        "Notes created from the Notes page directly still work as before (no regression)",
+        "Notes created from NotesReaderPanel sidebar still work as before (no regression)",
+        "No duplicate notes created when saving from highlighted text (S201 debounce guard applies)",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S204.sh exits 0"
       ]
     }
   ],
