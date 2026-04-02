@@ -1,8 +1,9 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import * as pdfjsLib from "pdfjs-dist"
 import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
+import { Search } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionItem } from "./types"
@@ -14,6 +15,8 @@ import {
   shouldUseOutline,
 } from "./pdfTocUtils"
 import { createLinkService } from "./pdfLinkService"
+import { PdfSearchBar } from "./PdfSearchBar"
+import { type PageMatch, buildGlobalMatches, findMatchIndices, formatMatchCounts } from "./pdfSearchUtils"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
@@ -154,6 +157,84 @@ function applyPdfHighlights(
   }
 }
 
+/** Apply search-match highlights to text layer spans. Returns count of matches found. */
+function applySearchHighlights(
+  textLayerDiv: HTMLDivElement,
+  query: string,
+  activeMatchIndex: number,
+): number {
+  // Clear previous search highlights
+  textLayerDiv.querySelectorAll("mark[data-search-highlight]").forEach((m) => {
+    const parent = m.parentNode
+    if (parent) {
+      parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
+      parent.normalize()
+    }
+  })
+
+  if (!query) return 0
+
+  const spans = Array.from(textLayerDiv.querySelectorAll("span")) as HTMLSpanElement[]
+  if (spans.length === 0) return 0
+
+  // Build concatenated text (same approach as applyPdfHighlights)
+  const parts: { span: HTMLSpanElement; start: number; end: number }[] = []
+  let offset = 0
+  for (let i = 0; i < spans.length; i++) {
+    if (i > 0) offset += 1
+    const text = spans[i].textContent ?? ""
+    parts.push({ span: spans[i], start: offset, end: offset + text.length })
+    offset += text.length
+  }
+  const fullText = spans.map((s) => s.textContent ?? "").join(" ")
+
+  const matchIndices = findMatchIndices(fullText, query)
+  if (matchIndices.length === 0) return 0
+
+  const queryLen = query.length
+
+  // Process matches in reverse order so DOM mutations don't shift offsets
+  for (let mi = matchIndices.length - 1; mi >= 0; mi--) {
+    const matchStart = matchIndices[mi]
+    const matchEnd = matchStart + queryLen
+    const isActive = mi === activeMatchIndex
+
+    for (let pi = parts.length - 1; pi >= 0; pi--) {
+      const part = parts[pi]
+      if (part.end <= matchStart || part.start >= matchEnd) continue
+
+      const spanText = part.span.textContent ?? ""
+      const localStart = Math.max(0, matchStart - part.start)
+      const localEnd = Math.min(spanText.length, matchEnd - part.start)
+
+      const before = spanText.slice(0, localStart)
+      const matched = spanText.slice(localStart, localEnd)
+      const after = spanText.slice(localEnd)
+
+      const frag = document.createDocumentFragment()
+      if (before) frag.appendChild(document.createTextNode(before))
+      const mark = document.createElement("mark")
+      mark.setAttribute("data-search-highlight", "1")
+      mark.style.backgroundColor = isActive ? "rgba(249, 115, 22, 0.6)" : "rgba(250, 204, 21, 0.4)"
+      mark.style.borderRadius = "2px"
+      if (isActive) mark.setAttribute("data-active-search-match", "1")
+      mark.textContent = matched
+      frag.appendChild(mark)
+      if (after) frag.appendChild(document.createTextNode(after))
+
+      part.span.replaceChildren(frag)
+    }
+  }
+
+  // Scroll active match into view
+  const activeMark = textLayerDiv.querySelector("mark[data-active-search-match]")
+  if (activeMark) {
+    activeMark.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+
+  return matchIndices.length
+}
+
 const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
   yellow: "rgba(254, 240, 138, 0.5)",
   green: "rgba(187, 247, 208, 0.5)",
@@ -200,6 +281,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const highlightsVisibleRef = useRef(highlightsVisible)
     highlightsVisibleRef.current = highlightsVisible
 
+    // ── Search state ──────────────────────────────────────────────────
+    const [searchOpen, setSearchOpen] = useState(false)
+    const [searchQuery, setSearchQuery] = useState("")
+    const [globalMatches, setGlobalMatches] = useState<PageMatch[]>([])
+    const [globalMatchIndex, setGlobalMatchIndex] = useState(-1)
+    const pageTextCacheRef = useRef<Map<number, string>>(new Map())
+    // Track how many pages have been extracted so far (for progressive search)
+    const [extractedPageCount, setExtractedPageCount] = useState(0)
+
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
       ref,
@@ -223,6 +313,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setCurrentPage(1)
       setPageInput("1")
       setTotalPages(0)
+      // Clear search state and text cache for new document
+      pageTextCacheRef.current = new Map()
+      setExtractedPageCount(0)
+      closeSearch()
 
       const task = pdfjsLib.getDocument({
         url: `${API_BASE}/documents/${documentId}/file`,
@@ -517,9 +611,143 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (!isNaN(n)) goToPage(n)
     }
 
-    // Keyboard navigation
+    // ── Search helpers ────────────────────────────────────────────────
+
+    /** Extract text from a single PDF page and cache it. */
+    const extractPageText = useCallback(async (doc: PDFDocumentProxy, pageNum: number): Promise<string> => {
+      const cached = pageTextCacheRef.current.get(pageNum)
+      if (cached !== undefined) return cached
+      const page = await doc.getPage(pageNum)
+      try {
+        const tc = await page.getTextContent()
+        const text = tc.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" ")
+        pageTextCacheRef.current.set(pageNum, text)
+        return text
+      } finally {
+        page.cleanup()
+      }
+    }, [])
+
+    /** Progressively extract text from all pages and rebuild match list. */
+    const extractAllPages = useCallback(async (doc: PDFDocumentProxy, query: string) => {
+      const total = doc.numPages
+      // Extract in batches of 10 for progressive feedback
+      const batchSize = 10
+      for (let start = 1; start <= total; start += batchSize) {
+        const end = Math.min(start + batchSize - 1, total)
+        const promises: Promise<string>[] = []
+        for (let p = start; p <= end; p++) {
+          promises.push(extractPageText(doc, p))
+        }
+        await Promise.all(promises)
+        setExtractedPageCount(end)
+        // Rebuild matches after each batch
+        if (query) {
+          const matches = buildGlobalMatches(pageTextCacheRef.current, query)
+          setGlobalMatches(matches)
+          // Set initial match index to first match if not yet set
+          setGlobalMatchIndex((prev) => (prev < 0 && matches.length > 0 ? 0 : prev))
+        }
+      }
+    }, [extractPageText])
+
+    // Trigger text extraction when search opens or query changes
+    useEffect(() => {
+      if (!searchOpen || !searchQuery || !pdfDoc) {
+        setGlobalMatches([])
+        setGlobalMatchIndex(-1)
+        return
+      }
+
+      let cancelled = false
+      const q = searchQuery
+
+      // Rebuild from cache first (instant for already-extracted pages)
+      const cached = buildGlobalMatches(pageTextCacheRef.current, q)
+      setGlobalMatches(cached)
+      if (cached.length > 0) setGlobalMatchIndex(0)
+
+      // Then progressively extract remaining pages
+      void (async () => {
+        await extractAllPages(pdfDoc, q)
+        if (!cancelled) {
+          const all = buildGlobalMatches(pageTextCacheRef.current, q)
+          setGlobalMatches(all)
+          setGlobalMatchIndex((prev) => (prev < 0 && all.length > 0 ? 0 : prev))
+        }
+      })()
+
+      return () => { cancelled = true }
+    }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
+
+    // Apply search highlights whenever the page renders or match index changes
+    useEffect(() => {
+      const textDiv = textLayerRef.current
+      if (!textDiv || textLayerVersion === 0) return
+      if (!searchOpen || !searchQuery) {
+        // Clear search highlights
+        textDiv.querySelectorAll("mark[data-search-highlight]").forEach((m) => {
+          const parent = m.parentNode
+          if (parent) {
+            parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
+            parent.normalize()
+          }
+        })
+        return
+      }
+
+      // Determine which page-local match index to highlight as active
+      const pageMatches = globalMatches.filter(m => m.page === currentPage)
+      let activePageIdx = -1
+      if (globalMatchIndex >= 0 && globalMatchIndex < globalMatches.length) {
+        const current = globalMatches[globalMatchIndex]
+        if (current.page === currentPage) {
+          activePageIdx = pageMatches.findIndex(m => m.index === current.index)
+        }
+      }
+
+      applySearchHighlights(textDiv, searchQuery, activePageIdx)
+    }, [textLayerVersion, searchOpen, searchQuery, globalMatches, globalMatchIndex, currentPage])
+
+    function handleSearchNext() {
+      if (globalMatches.length === 0) return
+      const next = (globalMatchIndex + 1) % globalMatches.length
+      setGlobalMatchIndex(next)
+      const match = globalMatches[next]
+      if (match.page !== currentPage) goToPage(match.page)
+    }
+
+    function handleSearchPrev() {
+      if (globalMatches.length === 0) return
+      const prev = (globalMatchIndex - 1 + globalMatches.length) % globalMatches.length
+      setGlobalMatchIndex(prev)
+      const match = globalMatches[prev]
+      if (match.page !== currentPage) goToPage(match.page)
+    }
+
+    function closeSearch() {
+      setSearchOpen(false)
+      setSearchQuery("")
+      setGlobalMatches([])
+      setGlobalMatchIndex(-1)
+    }
+
+    // Keyboard navigation + Ctrl+F search shortcut
     useEffect(() => {
       function onKey(e: KeyboardEvent) {
+        // Ctrl+F / Cmd+F opens search
+        if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+          e.preventDefault()
+          setSearchOpen(true)
+          return
+        }
+        // Escape closes search (handled even from input)
+        if (e.key === "Escape" && searchOpen) {
+          closeSearch()
+          return
+        }
         if (
           e.target instanceof HTMLInputElement ||
           e.target instanceof HTMLTextAreaElement ||
@@ -531,7 +759,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       window.addEventListener("keydown", onKey)
       return () => window.removeEventListener("keydown", onKey)
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentPage, totalPages])
+    }, [currentPage, totalPages, searchOpen])
 
     if (loadStatus === "loading") {
       return <Skeleton className="h-full w-full min-h-[600px]" />
@@ -632,7 +860,22 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         </div>
 
         {/* Main viewer */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          {/* Search overlay */}
+          {searchOpen && (
+            <PdfSearchBar
+              query={searchQuery}
+              onQueryChange={setSearchQuery}
+              matchLabel={
+                searchQuery && extractedPageCount < totalPages
+                  ? `${formatMatchCounts(globalMatches, globalMatchIndex, currentPage).label} (scanning...)`
+                  : formatMatchCounts(globalMatches, globalMatchIndex, currentPage).label
+              }
+              onNext={handleSearchNext}
+              onPrev={handleSearchPrev}
+              onClose={closeSearch}
+            />
+          )}
           {/* Canvas scroll area */}
           <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4">
             <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
@@ -674,6 +917,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               disabled={currentPage >= totalPages}
             >
               Next
+            </button>
+            <button
+              className="px-2 py-1 text-sm border rounded hover:bg-accent"
+              onClick={() => setSearchOpen((v) => !v)}
+              title="Search in PDF (Ctrl+F)"
+              aria-label="Search in PDF"
+            >
+              <Search className="h-4 w-4 inline" />
             </button>
             <div className="flex items-center gap-1 ml-auto">
               <span className="text-xs text-muted-foreground">Zoom</span>
