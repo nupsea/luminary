@@ -41,6 +41,7 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Run tests: `uv run pytest` (from backend dir)
 - Run lint: `uv run ruff check .` (from backend dir)
 - **Smoke test full user journey**: Smoke scripts must exercise the complete workflow (trigger endpoint → query endpoint → action endpoint), not just the new endpoint in isolation. Example: `POST /trigger -> GET /results -> POST /batch-action`. This verifies integration and prevents breakage in downstream consumers.
+- **Smoke test default port is 7820**: All backend smoke tests should curl `http://localhost:7820` by default, not 8000. This aligns with the default Luminary dev server port configuration.
 - **Force-add .gitignored story deliverables**: `docs/`, `scripts/ralph/`, and other execution/tracking files are in `.gitignore`. Use `git add -f <path>` when committing story changes to prd-v3.json, progress.txt, or docs/exec-plans/ files. Without `-f`, these files stay untracked and are not included in the commit.
 - **Smoke scripts on macOS**: BSD `head` does not support `head -n -1`. Capture HTTP response body separately from status code using `curl -o $TMPFILE -w "%{http_code}"` and then `cat $TMPFILE` to read body. Don't use `head -n -1` in smoke scripts.
 - **macOS mktemp syntax**: `mktemp --suffix=.ext` is Linux-only. Use `mktemp /tmp/prefix_XXXXXX.ext` (template with extension after placeholder) for BSD compatibility.
@@ -64,9 +65,16 @@ Update this file (in-place) when new patterns are discovered — do NOT append c
 - Circular imports: use lazy import inside the method body — `from app.runtime.chat_graph import get_chat_graph  # noqa: PLC0415`
 - Lazy import for cross-service calls: `from app.services.summarizer import get_summarization_service  # noqa: PLC0415` inside the method body
 - Cross-router lazy import for shared helpers: when two routers share a helper (e.g., `_sync_tag_index` in notes.py used by tags.py), lazy-import it inside the method body: `from app.routers.notes import _sync_tag_index  # noqa: PLC0415`. Avoids circular imports at module level between routers.
+- **Lazy import patch target for service getters**: When a service getter function (e.g., `get_note_tagger`) is lazily imported in a method body (`from app.services.note_tagger import get_note_tagger  # noqa: PLC0415`), patch at the source module: `patch("app.services.note_tagger.get_note_tagger", ...)`. The patch resolves the name in `sys.modules['app.services.note_tagger']` at call time.
 - qa.py helpers (_split_response, _build_context, etc.) stay at module level — chat_graph.py imports them directly from app.services.qa
 - **Stdlib imports always top-level**: `re`, `zipfile`, `hashlib`, `json`, `datetime`, etc. are never circular risks. Import at module top-level only. The lazy-import pattern (noqa: PLC0415) is only for third-party or app modules that create circular-import risk.
 - **Six-layer rule: services must not import from routers**: Routers are the API layer; services are the business logic layer. If a service needs to call a router-layer side effect (e.g. `_sync_tag_index`), move the side-effectful work to the router endpoint. The service returns validated/prepared data; the router endpoint executes the side effects. This preserves layering: Types → Config → Repo → Service → Runtime → API.
+
+---
+
+## Python Idioms
+
+- **Walrus operator for dedup + transform in list comprehension**: When filtering a list and applying a transformation (e.g., normalize a tag), use `[n for t in raw_tags if (n := _norm_tag(t))]` to avoid calling the function twice per item (once for the condition, once in the body). The walrus operator `:=` assigns the result and returns it for the if clause.
 
 ---
 

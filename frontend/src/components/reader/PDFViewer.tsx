@@ -35,7 +35,7 @@ function applyPdfHighlights(
   })
   // Reset background on previously highlighted spans
   textLayerDiv.querySelectorAll("span[data-hl-original]").forEach((span) => {
-    ;(span as HTMLElement).style.backgroundColor = ""
+    ; (span as HTMLElement).style.backgroundColor = ""
     span.removeAttribute("data-hl-original")
   })
 
@@ -324,8 +324,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           const viewport = page.getViewport({ scale: zoom })
           canvas.width = viewport.width
           canvas.height = viewport.height
-          // Sync --scale-factor on canvas so CSS can reference it uniformly
-          canvas.style.setProperty("--scale-factor", String(viewport.scale))
 
           const ctx = canvas.getContext("2d")
           if (!ctx || cancelled) return
@@ -347,14 +345,21 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           if (textLayerDiv) {
             // Cancel any previous text layer
             activeTextLayer?.cancel()
+
             // Clear previous content
             textLayerDiv.replaceChildren()
 
             // Set the CSS variable that TextLayer needs for sizing
             textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
-            // Set explicit dimensions as fallback
+
+            // Set explicit dimensions and absolute positioning for text layer
+            textLayerDiv.style.position = "absolute"
+            textLayerDiv.style.top = "0"
+            textLayerDiv.style.left = "0"
             textLayerDiv.style.width = `${viewport.width}px`
             textLayerDiv.style.height = `${viewport.height}px`
+            textLayerDiv.style.pointerEvents = "none" // Allow clicks to pass through to annotation layer
+            textLayerDiv.style.zIndex = "10"
 
             const textContent = await page.getTextContent()
             if (cancelled) return
@@ -378,20 +383,52 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
           // Annotation Layer -- handles links (external browser links and internal page jumps)
           if (annotationLayerDiv && !cancelled) {
-            console.log(`[PDFViewer] rendering annotations for page ${pageNum}`, { annotationLayerDiv })
             annotationLayerDiv.replaceChildren()
             annotationLayerDiv.style.width = `${viewport.width}px`
             annotationLayerDiv.style.height = `${viewport.height}px`
-            // Sync --scale-factor so annotation layer CSS matches canvas/text layer
+            annotationLayerDiv.style.position = "absolute"
+            annotationLayerDiv.style.top = "0"
+            annotationLayerDiv.style.left = "0"
+            annotationLayerDiv.style.zIndex = "20"
+            annotationLayerDiv.style.pointerEvents = "auto"
+            annotationLayerDiv.style.display = "block"
             annotationLayerDiv.style.setProperty("--scale-factor", String(viewport.scale))
+            annotationLayerDiv.setAttribute("data-page-num", String(pageNum))
+
+            // Global styles for standard pdfjs annotation layer appearance
+            if (!document.getElementById("pdf-annotation-style")) {
+              const style = document.createElement("style")
+              style.id = "pdf-annotation-style"
+              style.textContent = `
+                .annotationLayer {
+                  position: absolute !important;
+                  top: 0 !important;
+                  left: 0 !important;
+                  opacity: 1 !important;
+                }
+                .annotationLayer section {
+                  display: block !important;
+                  position: absolute !important;
+                  box-sizing: border-box !important;
+                }
+                .annotationLayer .linkAnnotation > a {
+                  display: block !important;
+                  width: 100% !important;
+                  height: 100% !important;
+                  background-color: rgba(59, 130, 246, 0.05) !important; /* Very subtle blue tint */
+                  cursor: pointer !important;
+                }
+                .annotationLayer .linkAnnotation > a:hover {
+                  background-color: rgba(59, 130, 246, 0.15) !important; /* Slightly stronger blue on hover */
+                }
+              `
+              document.head.appendChild(style)
+            }
 
             try {
               const annotationsData = await page.getAnnotations()
-              console.log(`[PDFViewer] found ${annotationsData.length} annotations for page ${pageNum}`)
               if (cancelled) return
 
-              // Link service handles internal destinations (named, array, GoTo actions)
-              // and external URLs (http, https, mailto, tel).
               const linkService = createLinkService(pdfDoc, goToPage)
 
               const al = new AnnotationLayer({
@@ -400,19 +437,23 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 annotationCanvasMap: null,
                 annotationEditorUIManager: null,
                 page,
-                viewport: viewport.clone({ dontFlip: true }),
-              } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+                viewport,
+                l10n: {
+                  async getLanguage() { return "en-US" },
+                  async getDirection() { return "ltr" },
+                  async get(key: string, args: any, fallback: string) { return fallback },
+                  async translate(element: HTMLElement) { },
+                } as any,
+              } as any)
 
               await al.render({
                 annotations: annotationsData,
-                viewport: viewport.clone({ dontFlip: true }),
-                linkService: linkService as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-                div: annotationLayerDiv,
+                viewport,
+                linkService,
                 intent: "display",
-              } as any) // eslint-disable-line @typescript-eslint/no-explicit-any
-              console.log(`[PDFViewer] annotation layer rendered for page ${pageNum}`)
+              } as any)
             } catch (err) {
-              console.error(`[PDFViewer] failed to render annotations for page ${pageNum}`, err)
+              console.error("[PDFViewer] failed to render annotation layer", err)
             }
           }
         } finally {
@@ -420,7 +461,6 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         }
       }
 
-      console.log(`[PDFViewer] triggering renderPage for page ${currentPage}`)
       void renderPage(currentPage, canvasRef.current, textLayerRef.current, annotationLayerRef.current)
       if (currentPage < totalPages) {
         void renderPage(currentPage + 1, nextCanvasRef.current, null, null)
@@ -455,7 +495,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           }
         })
         textDiv.querySelectorAll("span[data-hl-original]").forEach((span) => {
-          ;(span as HTMLElement).style.backgroundColor = ""
+          ; (span as HTMLElement).style.backgroundColor = ""
           span.removeAttribute("data-hl-original")
         })
         return
@@ -529,13 +569,12 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 return (
                   <li key={`outline-${idx}`}>
                     <button
-                      className={`w-full text-left text-xs px-2 py-1 rounded truncate ${
-                        isActive
+                      className={`w-full text-left text-xs px-2 py-1 rounded truncate ${isActive
                           ? "bg-accent text-foreground font-medium"
                           : navigable
-                          ? "text-muted-foreground hover:bg-accent"
-                          : "text-muted-foreground/50 cursor-default"
-                      }`}
+                            ? "text-muted-foreground hover:bg-accent"
+                            : "text-muted-foreground/50 cursor-default"
+                        }`}
                       style={{ paddingLeft: `${(entry.level - 1) * 8 + 8}px` }}
                       onClick={() => navigable && goToPage(entry.page)}
                       title={navigable ? `p.${entry.page} — ${entry.title}` : entry.title}
@@ -570,9 +609,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                   return (
                     <li key={sec.id}>
                       <button
-                        className={`w-full text-left text-xs px-2 py-1 rounded hover:bg-accent truncate ${
-                          isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground"
-                        }`}
+                        className={`w-full text-left text-xs px-2 py-1 rounded hover:bg-accent truncate ${isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground"
+                          }`}
                         style={{ paddingLeft: `${(displayLevel - 1) * 8 + 8}px` }}
                         onClick={() => goToPage(targetPage)}
                         title={hasPageNums ? `p.${targetPage} -- ${sec.heading}` : `~p.${targetPage} -- ${sec.heading}`}
@@ -598,13 +636,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
               <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
               {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
-                  and ::selection styling. Class "textLayer" matches pdf_viewer.css.
-                  z-index 2 so highlights are visible but below annotation links. */}
-              <div ref={textLayerRef} className="textLayer" style={{ zIndex: 2 }} />
-              {/* Official pdfjs annotationLayer -- handles links and form fields.
-                  z-index 3 so link annotations sit above highlight marks in the text layer.
-                  pointer-events set to auto so links are clickable; non-link areas pass through. */}
-              <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 3 }} />
+                  and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
+              <div ref={textLayerRef} className="textLayer" />
+              {/* Official pdfjs annotationLayer -- handles links and form fields. */}
+              <div ref={annotationLayerRef} className="annotationLayer" style={{ zIndex: 20, pointerEvents: "auto" }} />
             </div>
             <canvas ref={nextCanvasRef} className="hidden" />
           </div>

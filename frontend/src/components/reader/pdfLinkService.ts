@@ -15,13 +15,14 @@ export interface PdfLinkService {
   externalLinkTarget: number
   externalLinkRel: string
   externalLinkEnabled: boolean
-  getDestinationHash: () => string
-  getAnchorUrl: () => string
-  setHash: () => void
-  executeNamedAction: () => void
-  cachePageRef: () => void
+  getDestinationHash: (dest: any) => string
+  getAnchorUrl: (hash: string) => string
+  setHash: (hash: string) => void
+  executeNamedAction: (action: string) => void
+  cachePageRef: (ref: any, pageIndex: number) => void
   addLinkAttributes: (link: HTMLAnchorElement, url: string, newWindow: boolean) => void
   navigateTo: (dest: unknown) => Promise<void>
+  goToDestination: (dest: unknown) => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -49,22 +50,37 @@ export function createLinkService(
   pdfDoc: PDFDocumentProxy,
   goToPage: (n: number) => void,
 ): PdfLinkService {
-  return {
+  const service: PdfLinkService = {
     externalLinkTarget: 2, // BLANK
     externalLinkRel: "noopener noreferrer nofollow",
     externalLinkEnabled: true,
-    getDestinationHash: () => "#",
-    getAnchorUrl: () => "#",
-    setHash: () => {},
-    executeNamedAction: () => {},
-    cachePageRef: () => {},
+    getDestinationHash: (dest: any) => "#",
+    getAnchorUrl: (hash: string) => "#",
+    setHash: (hash: string) => { },
+    executeNamedAction: (action: string) => { },
+    cachePageRef: (ref: any, pageIndex: number) => { },
 
     addLinkAttributes(link: HTMLAnchorElement, url: string, newWindow: boolean) {
-      if (url) link.href = url
-      // Always set target/rel for external protocols regardless of newWindow flag
-      if (newWindow || isExternalUrl(url)) {
-        link.target = "_blank"
-        link.rel = "noopener noreferrer nofollow"
+      if (url) {
+        link.href = url
+        // Always set target/rel for external protocols regardless of newWindow flag
+        if (newWindow || isExternalUrl(url)) {
+          link.target = "_blank"
+          link.rel = "noopener noreferrer nofollow"
+        }
+      } else {
+        // Internal link - ensure it's clickable and intercept click
+        link.href = "#"
+        // PDF.js often uses an onclick listener that calls goToDestination.
+        // We ensure that clicking our intercepted link also works.
+        link.onclick = (e) => {
+          e.preventDefault()
+          // pdfjs stores the destination in the link element's data
+          const dest = (link as any).pdfDest || (link as any).dataset.pdfDest
+          if (dest) {
+            void this.navigateTo(dest)
+          }
+        }
       }
     },
 
@@ -101,5 +117,10 @@ export function createLinkService(
         goToPage(pageNum)
       }
     },
+
+    async goToDestination(dest: unknown) {
+      return this.navigateTo(dest)
+    },
   }
+  return service
 }
