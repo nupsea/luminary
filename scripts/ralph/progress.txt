@@ -203,3 +203,14 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - Overlay z-index layering: canvas (0) < highlight overlay (5) < text layer (10) < annotation layer (20) -- text selection and link clicking work through the overlay
   - Reviewer warning: AnnotationPopover click wiring was a pre-existing gap (never connected to mark elements), not a regression from S205
 ---
+
+## 2026-04-03 - S206
+- What was implemented: Fixed flashcard search FTS5 returning no results. Three root causes addressed: (1) No backfill -- existing flashcards created before S184 were never inserted into flashcards_fts. Added startup backfill in db_init.py using LEFT JOIN on shadow content table. (2) No query sanitization -- FTS5 special characters (parentheses, quotes, colons, etc.) caused syntax errors. Added _sanitize_fts5_query() that strips operators and wraps tokens in double quotes with AND join. (3) No fallback -- if FTS5 MATCH returns 0 results (e.g. tokenization mismatch), added LIKE fallback on question/answer columns. Frontend: improved empty state message to show search-specific text when a query is active.
+- Files changed: backend/app/db_init.py (FTS5 backfill), backend/app/services/flashcard.py (_sanitize_fts5_query + search LIKE fallback), frontend/src/pages/Study.tsx (empty state message), backend/tests/test_S206.py (new, 13 tests), scripts/smoke/S206.sh (new), scripts/ralph/prd-v3.json (passes=true), docs/ralph-run-flow.md (pass), docs/exec-plans/completed/S206.md
+- **Learnings for future iterations:**
+  - FTS5 backfill must use LEFT JOIN on shadow content table (flashcards_fts_content WHERE c2 = f.id) for idempotency, not INSERT OR IGNORE (which doesn't work on FTS5 virtual tables)
+  - FTS5 query sanitization: strip special chars with regex, remove boolean keywords (AND/OR/NOT/NEAR), wrap remaining tokens in double quotes joined with AND -- this prevents syntax errors while preserving multi-word AND semantics
+  - LIKE fallback after FTS5 MATCH returning 0 results catches tokenization mismatches (e.g. hyphenated words split differently by FTS5 tokenizer vs user expectation)
+  - Reviewer warning: exec plan placed backfill in main.py lifespan; implementation placed it in db_init.py create_all_tables -- functionally equivalent, db_init.py is the established pattern
+  - Pre-existing test failure: test_parser.py::test_md_parse_detects_headings -- not related to S206
+---

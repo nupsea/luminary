@@ -852,6 +852,27 @@ def _is_near_duplicate(
 
 
 # ---------------------------------------------------------------------------
+# S206: Sanitize FTS5 query to prevent syntax errors from special characters
+# ---------------------------------------------------------------------------
+
+_FTS5_SPECIAL = re.compile(r'[(){}*:^~"\[\]<>]')
+
+
+def _sanitize_fts5_query(raw: str) -> str:
+    """Strip FTS5 operators and join tokens with AND for multi-word queries.
+
+    Returns empty string if nothing useful remains after sanitization.
+    """
+    cleaned = _FTS5_SPECIAL.sub(" ", raw)
+    # Remove FTS5 boolean operators that users might accidentally type
+    tokens = [t for t in cleaned.split() if t.upper() not in ("AND", "OR", "NOT", "NEAR")]
+    if not tokens:
+        return ""
+    # Wrap each token in double quotes for literal matching, join with AND
+    return " AND ".join(f'"{t}"' for t in tokens)
+
+
+# ---------------------------------------------------------------------------
 # S184: FTS5 sync helpers for flashcards_fts
 # ---------------------------------------------------------------------------
 
@@ -924,14 +945,28 @@ class FlashcardService:
         from app.models import NoteCollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
 
         stmt = select(FlashcardModel)
+        _fts_query_used = False
+        _raw_query = query.strip() if query else ""
 
-        if query and query.strip():
-            fts_sub = (
-                select(text("flashcard_id"))
-                .select_from(text("flashcards_fts"))
-                .where(text("flashcards_fts MATCH :q"))
-            )
-            stmt = stmt.where(FlashcardModel.id.in_(fts_sub)).params(q=query.strip())
+        if _raw_query:
+            sanitized = _sanitize_fts5_query(_raw_query)
+            if sanitized:
+                fts_sub = (
+                    select(text("flashcard_id"))
+                    .select_from(text("flashcards_fts"))
+                    .where(text("flashcards_fts MATCH :q"))
+                )
+                stmt = stmt.where(FlashcardModel.id.in_(fts_sub)).params(q=sanitized)
+                _fts_query_used = True
+            else:
+                # All tokens were FTS5 operators; use LIKE directly
+                like_pat = f"%{_raw_query}%"
+                stmt = stmt.where(
+                    or_(
+                        FlashcardModel.question.ilike(like_pat),
+                        FlashcardModel.answer.ilike(like_pat),
+                    )
+                )
 
         if document_id:
             stmt = stmt.where(FlashcardModel.document_id == document_id)
@@ -972,6 +1007,52 @@ class FlashcardService:
         # Count total matches
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await session.execute(count_stmt)).scalar_one()
+
+        # S206: LIKE fallback when FTS5 returns 0 results
+        if total == 0 and _fts_query_used and query:
+            like_pat = f"%{query.strip()}%"
+            stmt_fallback = select(FlashcardModel).where(
+                or_(
+                    FlashcardModel.question.ilike(like_pat),
+                    FlashcardModel.answer.ilike(like_pat),
+                )
+            )
+            # Re-apply non-query filters on fallback
+            if document_id:
+                stmt_fallback = stmt_fallback.where(FlashcardModel.document_id == document_id)
+            if collection_id:
+                member_sub2 = select(NoteCollectionMemberModel.note_id).where(
+                    NoteCollectionMemberModel.collection_id == collection_id
+                )
+                stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(member_sub2))
+            if tag:
+                tag_sub2 = select(NoteTagIndexModel.note_id).where(
+                    or_(
+                        NoteTagIndexModel.tag_full == tag,
+                        NoteTagIndexModel.tag_full.like(tag + "/%"),
+                    )
+                )
+                stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(tag_sub2))
+            if bloom_level_min is not None:
+                stmt_fallback = stmt_fallback.where(
+                    FlashcardModel.bloom_level.is_not(None),
+                    FlashcardModel.bloom_level >= bloom_level_min,
+                )
+            if bloom_level_max is not None:
+                stmt_fallback = stmt_fallback.where(
+                    FlashcardModel.bloom_level.is_not(None),
+                    FlashcardModel.bloom_level <= bloom_level_max,
+                )
+            if fsrs_state:
+                stmt_fallback = stmt_fallback.where(FlashcardModel.fsrs_state == fsrs_state)
+            if flashcard_type:
+                stmt_fallback = stmt_fallback.where(FlashcardModel.flashcard_type == flashcard_type)
+
+            count_fb = select(func.count()).select_from(stmt_fallback.subquery())
+            total = (await session.execute(count_fb)).scalar_one()
+            if total > 0:
+                stmt = stmt_fallback
+                logger.info("flashcard.search: FTS5 returned 0, LIKE fallback found %d", total)
 
         # Paginate
         stmt = stmt.order_by(FlashcardModel.created_at.desc())

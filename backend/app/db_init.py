@@ -416,4 +416,18 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 text("ALTER TABLE flashcards_rebuild RENAME TO flashcards")
             )
 
+        # S206: backfill flashcards_fts from existing flashcards (idempotent).
+        # Uses LEFT JOIN on shadow content table to skip cards already indexed.
+        await conn.execute(
+            text(
+                """
+                INSERT INTO flashcards_fts(flashcard_id, question, answer)
+                SELECT f.id, f.question, f.answer
+                FROM flashcards f
+                LEFT JOIN flashcards_fts_content c ON c.c2 = f.id
+                WHERE c.c2 IS NULL
+                """
+            )
+        )
+
     logger.info("Database tables and FTS5 index initialized")

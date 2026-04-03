@@ -2333,9 +2333,11 @@ export default function Study() {
                 ) : cards.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <p className="text-sm text-muted-foreground">
-                      No flashcards match your filters.
-                      {activeDocumentId && " Try generating cards with Smart Generate above."}
-                      {!activeDocumentId && " Select a document or adjust your search to find cards."}
+                      {debouncedQuery
+                        ? `No flashcards found for "${debouncedQuery}". Try a different search term.`
+                        : "No flashcards match your filters."}
+                      {!debouncedQuery && activeDocumentId && " Try generating cards with Smart Generate above."}
+                      {!debouncedQuery && !activeDocumentId && " Select a document or adjust your search to find cards."}
                     </p>
                   </div>
                 ) : (
