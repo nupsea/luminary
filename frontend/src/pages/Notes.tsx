@@ -26,7 +26,7 @@ import { CollectionTree } from "@/components/CollectionTree"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
 import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
-import { OrganizationPlanDialog } from "@/components/OrganizationPlanDialog"
+import { OrganizationPlanDialog, type NamingViolation } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
@@ -195,6 +195,12 @@ async function postCluster(): Promise<{ queued?: boolean; cached?: boolean; tota
   const res = await fetch(`${API_BASE}/notes/cluster`, { method: "POST" })
   if (!res.ok) throw new Error(`POST /notes/cluster failed: ${res.status}`)
   return res.json() as Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }>
+}
+
+async function fetchNamingViolations(): Promise<NamingViolation[]> {
+  const res = await fetch(`${API_BASE}/notes/cluster/normalize-check`, { method: "POST" })
+  if (!res.ok) throw new Error(`POST /notes/cluster/normalize-check failed: ${res.status}`)
+  return res.json() as Promise<NamingViolation[]>
 }
 
 // Individual accept/reject API helpers removed; OrganizationPlanDialog uses batch-accept.
@@ -711,11 +717,20 @@ export default function NotesPage() {
     staleTime: 30_000,
   })
 
+  // S207: naming violations state
+  const [namingViolations, setNamingViolations] = useState<NamingViolation[]>([])
+
   async function handleAutoOrganize() {
     setIsClusterQueued(true)
     try {
-      const result = await postCluster()
-      if (result.cached) {
+      // Fetch naming violations in parallel with clustering
+      const [clusterResult, violations] = await Promise.all([
+        postCluster(),
+        fetchNamingViolations().catch(() => [] as NamingViolation[]),
+      ])
+      setNamingViolations(violations)
+
+      if (clusterResult.cached) {
         // Already have pending suggestions -- show the plan immediately
         setIsClusterQueued(false)
         setShowOrgPlan(true)
@@ -1155,11 +1170,22 @@ export default function NotesPage() {
           open={showOrgPlan}
           onOpenChange={setShowOrgPlan}
           suggestions={clusterSuggestions}
+          namingViolations={namingViolations}
           onApplied={() => {
             void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
             void qc.invalidateQueries({ queryKey: ["collections"] })
             void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+            void qc.invalidateQueries({ queryKey: ["tags"] })
+            void qc.invalidateQueries({ queryKey: ["notes"] })
+            void qc.invalidateQueries({ queryKey: ["notes-groups"] })
             toast.success("Organization plan applied")
+          }}
+          onNamingFixesApplied={(result) => {
+            const parts: string[] = []
+            if (result.tags_renamed > 0) parts.push(`Renamed ${result.tags_renamed} tag${result.tags_renamed !== 1 ? "s" : ""}`)
+            if (result.tags_merged > 0) parts.push(`Merged ${result.tags_merged} tag${result.tags_merged !== 1 ? "s" : ""}`)
+            if (result.collections_renamed > 0) parts.push(`Renamed ${result.collections_renamed} collection${result.collections_renamed !== 1 ? "s" : ""}`)
+            if (parts.length > 0) toast.success(parts.join(". "))
           }}
           onDismissed={() => {
             void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })

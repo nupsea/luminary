@@ -430,4 +430,157 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
+        # S207: Retroactive naming normalization for tags and collections.
+        # Normalizes existing tag slugs and collection names to match conventions
+        # (tags: lower-case-hyphenated, collections: UPPER-CASE-HYPHENATED).
+        # Idempotent: skips rows already in normalized form.
+        import re  # noqa: PLC0415
+
+        def _norm_tag(slug: str) -> str:
+            s = slug.strip()
+            if not s:
+                return ""
+            segs = s.split("/")
+            parts = []
+            for raw in segs:
+                p = raw.strip()
+                if not p:
+                    continue
+                p = re.sub(r"[_\s]+", "-", p)
+                p = re.sub(r"-+", "-", p)
+                p = p.lower().strip("-")
+                if p:
+                    parts.append(p)
+            return "/".join(parts)
+
+        def _norm_coll(name: str) -> str:
+            s = name.strip()
+            if not s:
+                return ""
+            s = re.sub(r"[_\s]+", "-", s)
+            s = re.sub(r"-+", "-", s)
+            s = s.upper().strip("-")
+            return s
+
+        # Normalize canonical_tags
+        tag_rows = (await conn.execute(text("SELECT id FROM canonical_tags"))).fetchall()
+        for (old_slug,) in tag_rows:
+            new_slug = _norm_tag(old_slug)
+            if not new_slug or old_slug == new_slug:
+                continue
+            # Check if target already exists (merge case)
+            existing = (await conn.execute(
+                text("SELECT id FROM canonical_tags WHERE id = :nid"),
+                {"nid": new_slug},
+            )).fetchone()
+            if existing:
+                # Merge: move tag index rows, sum counts, delete old
+                tag_parent = (
+                    "/".join(new_slug.split("/")[:-1])
+                    if "/" in new_slug else ""
+                )
+                await conn.execute(
+                    text(
+                        "UPDATE note_tag_index "
+                        "SET tag_full = :new, tag_root = :root, "
+                        "tag_parent = :parent "
+                        "WHERE tag_full = :old"
+                    ),
+                    {
+                        "new": new_slug,
+                        "root": new_slug.split("/")[0],
+                        "parent": tag_parent,
+                        "old": old_slug,
+                    },
+                )
+                await conn.execute(
+                    text("DELETE FROM canonical_tags WHERE id = :old"),
+                    {"old": old_slug},
+                )
+                # Recount
+                cnt = (await conn.execute(
+                    text(
+                        "SELECT COUNT(DISTINCT note_id) "
+                        "FROM note_tag_index WHERE tag_full = :tf"
+                    ),
+                    {"tf": new_slug},
+                )).scalar() or 0
+                await conn.execute(
+                    text(
+                        "UPDATE canonical_tags "
+                        "SET note_count = :cnt WHERE id = :tid"
+                    ),
+                    {"cnt": cnt, "tid": new_slug},
+                )
+            else:
+                # Rename: update PK via delete+insert
+                row = (await conn.execute(
+                    text(
+                        "SELECT display_name, parent_tag, "
+                        "note_count, created_at "
+                        "FROM canonical_tags WHERE id = :oid"
+                    ),
+                    {"oid": old_slug},
+                )).fetchone()
+                if row:
+                    await conn.execute(
+                        text(
+                            "DELETE FROM canonical_tags "
+                            "WHERE id = :oid"
+                        ),
+                        {"oid": old_slug},
+                    )
+                    new_display = new_slug.split("/")[-1]
+                    new_parent = (
+                        "/".join(new_slug.split("/")[:-1])
+                        if "/" in new_slug else None
+                    )
+                    await conn.execute(
+                        text(
+                            "INSERT OR IGNORE INTO canonical_tags "
+                            "(id, display_name, parent_tag, "
+                            "note_count, created_at) "
+                            "VALUES (:id, :dn, :pt, :nc, :ca)"
+                        ),
+                        {
+                            "id": new_slug,
+                            "dn": new_display,
+                            "pt": new_parent,
+                            "nc": row[2],
+                            "ca": row[3],
+                        },
+                    )
+                    # Update tag index rows
+                    ren_parent = (
+                        "/".join(new_slug.split("/")[:-1])
+                        if "/" in new_slug else ""
+                    )
+                    await conn.execute(
+                        text(
+                            "UPDATE note_tag_index "
+                            "SET tag_full = :new, tag_root = :root, "
+                            "tag_parent = :parent "
+                            "WHERE tag_full = :old"
+                        ),
+                        {
+                            "new": new_slug,
+                            "root": new_slug.split("/")[0],
+                            "parent": ren_parent,
+                            "old": old_slug,
+                        },
+                    )
+
+        # Normalize collection names (skip auto-collections)
+        coll_rows = (await conn.execute(
+            text("SELECT id, name FROM note_collections WHERE auto_document_id IS NULL")
+        )).fetchall()
+        for coll_id, coll_name in coll_rows:
+            new_name = _norm_coll(coll_name)
+            if not new_name or coll_name == new_name:
+                continue
+            await conn.execute(
+                text("UPDATE note_collections SET name = :name WHERE id = :cid"),
+                {"name": new_name, "cid": coll_id},
+            )
+
     logger.info("Database tables and FTS5 index initialized")

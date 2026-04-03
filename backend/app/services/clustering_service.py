@@ -24,7 +24,7 @@ from app.models import (
     NoteCollectionModel,
     NoteModel,
 )
-from app.services.naming import normalize_collection_name
+from app.services.naming import normalize_collection_name, normalize_tag_slug
 
 logger = logging.getLogger(__name__)
 
@@ -392,6 +392,251 @@ class ClusteringService:
         suggestion.status = "rejected"
         await db.commit()
         return True
+
+    async def detect_naming_violations(self, db: AsyncSession) -> list[dict]:
+        """Scan canonical tags and collections for naming convention violations.
+
+        Returns a list of dicts:
+          {"type": "tag"|"collection", "id": str, "current_name": str,
+           "suggested_name": str, "action": "rename"|"merge",
+           "merge_target_id": str | None}
+        """
+        from app.models import CanonicalTagModel  # noqa: PLC0415
+
+        violations: list[dict] = []
+
+        # --- Tags ---
+        tag_rows = (
+            await db.execute(select(CanonicalTagModel))
+        ).scalars().all()
+
+        # Build normalized-slug -> list of (id, original) for duplicate detection
+        tag_norm_map: dict[str, list[str]] = {}
+        for tag in tag_rows:
+            normalized = normalize_tag_slug(tag.id)
+            if not normalized:
+                continue
+            tag_norm_map.setdefault(normalized, []).append(tag.id)
+
+        # Detect renames and merges
+        for normalized, originals in tag_norm_map.items():
+            if len(originals) == 1:
+                # Simple rename if different
+                original = originals[0]
+                if original != normalized:
+                    violations.append({
+                        "type": "tag",
+                        "id": original,
+                        "current_name": original,
+                        "suggested_name": normalized,
+                        "action": "rename",
+                        "merge_target_id": None,
+                    })
+            else:
+                # Multiple originals map to the same slug -> merge
+                # Keep the one that is already normalized, or the first one
+                primary = normalized if normalized in originals else originals[0]
+                for orig in originals:
+                    if orig == primary and orig == normalized:
+                        continue  # already correct
+                    if orig == primary and orig != normalized:
+                        # Primary needs rename too
+                        violations.append({
+                            "type": "tag",
+                            "id": orig,
+                            "current_name": orig,
+                            "suggested_name": normalized,
+                            "action": "rename",
+                            "merge_target_id": None,
+                        })
+                    else:
+                        violations.append({
+                            "type": "tag",
+                            "id": orig,
+                            "current_name": orig,
+                            "suggested_name": normalized,
+                            "action": "merge",
+                            "merge_target_id": primary if primary == normalized else normalized,
+                        })
+
+        # --- Collections ---
+        coll_rows = (
+            await db.execute(
+                select(NoteCollectionModel).where(
+                    NoteCollectionModel.auto_document_id.is_(None)
+                )
+            )
+        ).scalars().all()
+
+        for coll in coll_rows:
+            normalized = normalize_collection_name(coll.name)
+            if normalized and coll.name != normalized:
+                violations.append({
+                    "type": "collection",
+                    "id": coll.id,
+                    "current_name": coll.name,
+                    "suggested_name": normalized,
+                    "action": "rename",
+                    "merge_target_id": None,
+                })
+
+        return violations
+
+    async def apply_naming_fixes(
+        self,
+        fixes: list[dict],
+        db: AsyncSession,
+    ) -> dict:
+        """Apply naming fixes transactionally.
+
+        Each fix: {"type": "tag"|"collection", "id": str,
+                   "current_name": str, "suggested_name": str,
+                   "action": "rename"|"merge"}
+
+        Returns {"tags_renamed": int, "collections_renamed": int, "tags_merged": int}
+        """
+        from sqlalchemy import update  # noqa: PLC0415
+
+        from app.models import CanonicalTagModel, NoteTagIndexModel  # noqa: PLC0415
+
+        tags_renamed = 0
+        tags_merged = 0
+        collections_renamed = 0
+
+        for fix in fixes:
+            if fix["type"] == "tag":
+                old_slug = fix["id"]
+                new_slug = fix["suggested_name"]
+                action = fix.get("action", "rename")
+
+                if action == "merge":
+                    # Merge: update NoteTagIndexModel rows, delete old canonical tag,
+                    # ensure target canonical tag exists
+                    # Update tag index rows from old to new
+                    await db.execute(
+                        update(NoteTagIndexModel)
+                        .where(NoteTagIndexModel.tag_full == old_slug)
+                        .values(
+                            tag_full=new_slug,
+                            tag_root=new_slug.split("/")[0],
+                            tag_parent=(
+                                "/".join(new_slug.split("/")[:-1])
+                                if "/" in new_slug else ""
+                            ),
+                        )
+                    )
+                    # Delete old canonical tag
+                    old_tag = (
+                        await db.execute(
+                            select(CanonicalTagModel).where(CanonicalTagModel.id == old_slug)
+                        )
+                    ).scalar_one_or_none()
+                    if old_tag:
+                        await db.delete(old_tag)
+
+                    # Ensure target canonical tag exists; recount notes
+                    target_tag = (
+                        await db.execute(
+                            select(CanonicalTagModel).where(CanonicalTagModel.id == new_slug)
+                        )
+                    ).scalar_one_or_none()
+                    from sqlalchemy import func  # noqa: PLC0415
+                    note_count = (
+                        await db.execute(
+                            select(func.count())
+                            .select_from(NoteTagIndexModel)
+                            .where(NoteTagIndexModel.tag_full == new_slug)
+                        )
+                    ).scalar_one()
+                    if target_tag:
+                        target_tag.note_count = note_count
+                    else:
+                        db.add(CanonicalTagModel(
+                            id=new_slug,
+                            display_name=new_slug.split("/")[-1],
+                            parent_tag=new_slug.split("/")[0] if "/" in new_slug else None,
+                            note_count=note_count,
+                            created_at=datetime.now(UTC),
+                        ))
+
+                    # Create tag alias
+                    from app.models import TagAliasModel  # noqa: PLC0415
+                    existing_alias = (
+                        await db.execute(
+                            select(TagAliasModel).where(TagAliasModel.alias == old_slug)
+                        )
+                    ).scalar_one_or_none()
+                    if not existing_alias:
+                        db.add(TagAliasModel(alias=old_slug, canonical_tag_id=new_slug))
+
+                    tags_merged += 1
+                else:
+                    # Rename: update canonical tag PK (delete old, insert new),
+                    # update NoteTagIndexModel rows
+                    old_tag = (
+                        await db.execute(
+                            select(CanonicalTagModel).where(CanonicalTagModel.id == old_slug)
+                        )
+                    ).scalar_one_or_none()
+
+                    if old_tag:
+                        note_count = old_tag.note_count
+                        display_name = new_slug.split("/")[-1]
+                        parent_tag = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else None
+                        await db.delete(old_tag)
+                        await db.flush()
+                        db.add(CanonicalTagModel(
+                            id=new_slug,
+                            display_name=display_name,
+                            parent_tag=parent_tag,
+                            note_count=note_count,
+                            created_at=datetime.now(UTC),
+                        ))
+
+                    # Update tag index rows
+                    await db.execute(
+                        update(NoteTagIndexModel)
+                        .where(NoteTagIndexModel.tag_full == old_slug)
+                        .values(
+                            tag_full=new_slug,
+                            tag_root=new_slug.split("/")[0],
+                            tag_parent=(
+                                "/".join(new_slug.split("/")[:-1])
+                                if "/" in new_slug else ""
+                            ),
+                        )
+                    )
+
+                    # Create tag alias
+                    from app.models import TagAliasModel  # noqa: PLC0415
+                    existing_alias = (
+                        await db.execute(
+                            select(TagAliasModel).where(TagAliasModel.alias == old_slug)
+                        )
+                    ).scalar_one_or_none()
+                    if not existing_alias:
+                        db.add(TagAliasModel(alias=old_slug, canonical_tag_id=new_slug))
+
+                    tags_renamed += 1
+
+            elif fix["type"] == "collection":
+                coll_id = fix["id"]
+                new_name = fix["suggested_name"]
+                coll = (
+                    await db.execute(
+                        select(NoteCollectionModel).where(NoteCollectionModel.id == coll_id)
+                    )
+                ).scalar_one_or_none()
+                if coll:
+                    coll.name = new_name
+                    collections_renamed += 1
+
+        await db.commit()
+        return {
+            "tags_renamed": tags_renamed,
+            "collections_renamed": collections_renamed,
+            "tags_merged": tags_merged,
+        }
 
 
 @lru_cache

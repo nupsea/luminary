@@ -158,4 +158,4 @@ Each story SXXX produces or modifies these artifacts:
 | S204 | Notes created from highlighted text sync state across all surfaces | pass |
 | S205 | PDF text layer and search highlight rendering: fix font overlap and visual artifacts | pass |
 | S206 | Fix flashcard search: FTS5 query returns no results for keyword searches | pass |
-| S207 | Auto-organize: retroactive naming normalization and actionable suggestions | pending |
+| S207 | Auto-organize: retroactive naming normalization and actionable suggestions | pass |

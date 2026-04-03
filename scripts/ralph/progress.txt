@@ -214,3 +214,14 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - Reviewer warning: exec plan placed backfill in main.py lifespan; implementation placed it in db_init.py create_all_tables -- functionally equivalent, db_init.py is the established pattern
   - Pre-existing test failure: test_parser.py::test_md_parse_detects_headings -- not related to S206
 ---
+
+## 2026-04-03 - S207
+- What was implemented: Retroactive naming normalization and actionable suggestions in auto-organize flow. Backend: detect_naming_violations() scans CanonicalTagModel and NoteCollectionModel for naming convention violations (tags: lower-case-hyphenated, collections: UPPER-CASE-HYPHENATED), detects duplicates that normalize to same slug for merge. apply_naming_fixes() renames/merges transactionally, updating canonical_tags PK, note_tag_index rows, and creating tag_aliases. POST /notes/cluster/normalize-check and POST /notes/cluster/normalize-apply endpoints. Startup migration in db_init.py normalizes all existing tag and collection names idempotently. Frontend: OrganizationPlanDialog gains "Naming Fixes" section with per-row accept/reject checkboxes, showing before->after with merge badges. Notes.tsx handleAutoOrganize fetches naming violations in parallel with clustering, passes to dialog. Query invalidation for tags, collections, notes-groups on apply.
+- Files changed: backend/app/services/clustering_service.py (detect_naming_violations, apply_naming_fixes), backend/app/routers/notes.py (normalize-check, normalize-apply endpoints), backend/app/db_init.py (startup migration), frontend/src/components/OrganizationPlanDialog.tsx (naming fixes section), frontend/src/pages/Notes.tsx (fetch violations, pass to dialog), backend/tests/test_S207.py (7 tests), scripts/smoke/S207.sh, docs/exec-plans/completed/S207.md
+- **Learnings for future iterations:**
+  - normalize_tag_slug only replaces underscores/spaces with hyphens -- "machinelearning" (no separators) stays as-is; only "machine_learning" or "Machine-Learning" normalize to "machine-learning"
+  - Startup migration must use raw SQL in db_init.py conn context, not ORM models (which require AsyncSession)
+  - CanonicalTagModel PK is the slug itself (id = full slug), so renaming requires delete+insert pattern
+  - Reviewer warning: in-dialog applySummary state that's set right before dialog closes is dead UI -- use parent-level toast instead
+  - Pre-existing test failures: test_notes.py (aiosqlite event loop), test_parser.py (heading detection) -- not related to S207
+---

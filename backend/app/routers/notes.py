@@ -933,6 +933,57 @@ async def batch_accept_cluster_suggestions(
     return {"collection_ids": created_ids}
 
 
+# ---------------------------------------------------------------------------
+# S207: Naming normalization check & apply
+# ---------------------------------------------------------------------------
+
+
+class NamingViolation(BaseModel):
+    type: str  # "tag" or "collection"
+    id: str
+    current_name: str
+    suggested_name: str
+    action: str  # "rename" or "merge"
+    merge_target_id: str | None = None
+
+
+class NamingFixItem(BaseModel):
+    type: str
+    id: str
+    current_name: str
+    suggested_name: str
+    action: str = "rename"
+
+
+class NamingFixRequest(BaseModel):
+    fixes: list[NamingFixItem]
+
+
+# NOTE: These routes registered BEFORE /{suggestion_id} to prevent path collision
+@router.post("/cluster/normalize-check", response_model=list[NamingViolation])
+async def normalize_check(
+    session: AsyncSession = Depends(get_db),
+) -> list[NamingViolation]:
+    """Return naming violation suggestions for tags and collections."""
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    violations = await get_clustering_service().detect_naming_violations(session)
+    return [NamingViolation(**v) for v in violations]
+
+
+@router.post("/cluster/normalize-apply")
+async def normalize_apply(
+    req: NamingFixRequest,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Apply naming fixes transactionally."""
+    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
+
+    fixes_dicts = [f.model_dump() for f in req.fixes]
+    result = await get_clustering_service().apply_naming_fixes(fixes_dicts, session)
+    return result
+
+
 @router.post("/cluster/suggestions/{suggestion_id}/accept")
 async def accept_cluster_suggestion(
     suggestion_id: str,
