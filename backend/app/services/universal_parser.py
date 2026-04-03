@@ -121,6 +121,12 @@ class UniversalParser:
                 ),
                 "paper",
             ),
+            # 9. Markdown: # Header, ## Header
+            Signature(
+                "markdown_header",
+                re.compile(r"^#{1,6}\s+.+$", re.M),
+                "paper",  # Use 'paper' doc_type as a generic structure
+            ),
         ]
 
     def parse(self, file_path: Path, fmt: str = "txt") -> ParsedDocument | None:

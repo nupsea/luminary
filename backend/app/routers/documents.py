@@ -189,6 +189,9 @@ class ChunkItem(BaseModel):
     start_time: float | None = None  # seconds from start; null if not available
 
 
+class UrlIngestRequest(BaseModel):
+    url: str
+
 class YouTubeIngestRequest(BaseModel):
     url: str
 
@@ -694,10 +697,10 @@ async def ingest_kindle(
 
 @router.post("/ingest-url")
 async def ingest_url(
-    body: YouTubeIngestRequest,
+    body: UrlIngestRequest,
     settings: Settings = Depends(get_settings),
 ):
-    """Ingest a YouTube URL by downloading audio via yt-dlp and transcribing with Whisper."""
+    """Ingest a YouTube URL (yt-dlp) or a general web article (Trafilatura)."""
     from app.services.youtube_downloader import (  # noqa: PLC0415
         check_ffmpeg_available,
         check_ytdlp_available,
@@ -706,9 +709,75 @@ async def ingest_url(
         is_youtube_url,
     )
 
+    # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
     if not is_youtube_url(body.url):
-        raise HTTPException(status_code=400, detail="URL must be a YouTube watch URL")
+        from app.services.article_extractor import get_article_extractor  # noqa: PLC0415
+        
+        try:
+            extractor = get_article_extractor()
+            parsed = await extractor.extract(body.url)
+        except Exception as exc:
+            logger.error("Article extraction failed for %s: %s", body.url, exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        doc_id = str(uuid.uuid4())
+        data_dir = Path(settings.DATA_DIR).expanduser()
+        raw_dir = data_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir / f"{doc_id}.md"
+        dest.write_text(parsed.raw_text, encoding="utf-8")
+
+        async with get_session_factory()() as session:
+            doc = DocumentModel(
+                id=doc_id,
+                title=parsed.title,
+                format="md",
+                content_type="tech_article",
+                word_count=parsed.word_count,
+                page_count=1,
+                file_path=str(dest),
+                file_hash=None,
+                stage="parsing",
+                source_url=body.url,
+            )
+            session.add(doc)
+            await session.commit()
+
+        # Convert Section objects to dicts for JSON serialization
+        parsed_sections = [
+            {
+                "heading": s.heading,
+                "level": s.level,
+                "text": s.text,
+                "page_start": s.page_start,
+                "page_end": s.page_end,
+            }
+            for s in parsed.sections
+        ]
+
+        from app.workflows.ingestion import run_ingestion  # noqa: PLC0415
+        from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
+
+        _task = asyncio.create_task(run_ingestion(
+            doc_id, 
+            str(dest), 
+            "md", 
+            "tech_article",
+            parsed_document={
+                "title": parsed.title,
+                "format": "md",
+                "pages": 1,
+                "word_count": parsed.word_count,
+                "sections": parsed_sections,
+                "raw_text": parsed.raw_text
+            }
+        ))
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
+        logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
+        return {"document_id": doc_id, "status": "processing"}
+
+    # 2. YouTube: Existing logic
     if not check_ytdlp_available():
         raise HTTPException(
             status_code=503,
@@ -774,9 +843,10 @@ async def ingest_url(
         session.add(doc)
         await session.commit()
 
+    from app.workflows.ingestion import run_ingestion  # noqa: PLC0415
     from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
 
-    _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "wav", "audio"))
+    _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None))
     _background_tasks.add(_task)
     _task.add_done_callback(_background_tasks.discard)
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})

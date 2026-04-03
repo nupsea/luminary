@@ -52,12 +52,14 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
   audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
   epub: { label: "EPUB", className: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
   kindle_clippings: { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
+  tech_book: { label: "Tech Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
+  tech_article: { label: "Tech Article", className: "bg-teal-100 text-teal-700 hover:bg-teal-200" },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
 const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
 
-const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes"]
+const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "tech_book", "tech_article"]
 
 const ACTION_ICONS: Record<DocAction, typeof BookOpen> = {
   read: BookOpen,

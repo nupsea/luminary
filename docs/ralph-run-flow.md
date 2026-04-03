@@ -106,7 +106,7 @@ Each story SXXX produces or modifies these artifacts:
 | v3 Phase 3 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S176-S183 (all pass) -- UX polish and learner focus |
 | v3 Phase 4 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S184-S190 (all pass) -- Learner experience refinement |
 | v3 Phase 5 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S191-S199 (all pass) -- Reading experience and chat intelligence |
-| v3 Phase 6 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S200-S204 (all pass) -- Polish and bug fixes |
+| v3 Phase 6 | `scripts/ralph/prd-v3.json` | `ralph/luminary-v3` | S200-S207 -- Polish and bug fixes |
 
 ## V3 Phase 3 Story Status
 
@@ -156,3 +156,6 @@ Each story SXXX produces or modifies these artifacts:
 | S202 | Fix CI gate errors and browser console errors | pass |
 | S203 | PDF Viewer: in-page and cross-page text search | pass |
 | S204 | Notes created from highlighted text sync state across all surfaces | pass |
+| S205 | PDF text layer and search highlight rendering: fix font overlap and visual artifacts | pending |
+| S206 | Fix flashcard search: FTS5 query returns no results for keyword searches | pending |
+| S207 | Auto-organize: retroactive naming normalization and actionable suggestions | pending |

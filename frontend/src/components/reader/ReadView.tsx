@@ -250,16 +250,9 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
                 <Tag className="mb-3 font-semibold text-foreground">
                   {section.heading || "(Untitled section)"}
                 </Tag>
-                {hasHighlights ? (
-                  <div
-                    className="prose prose-sm dark:prose-invert max-w-none leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: highlighted }}
-                  />
-                ) : (
-                  <div className="leading-relaxed">
-                    <MarkdownRenderer>{section.content}</MarkdownRenderer>
-                  </div>
-                )}
+                <div className="leading-relaxed">
+                  <MarkdownRenderer>{highlighted}</MarkdownRenderer>
+                </div>
               </div>
             )
           })}

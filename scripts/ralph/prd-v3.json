@@ -16,7 +16,7 @@
       "Phase 3 (UX Polish and Learner Focus, S176-S183): ruthlessly separates the learner layer from the diagnostic/admin layer. Notes get a reader-first layout with clickable tag navigation (S176). Monitoring becomes a Progress tab with all dev metrics hidden at /admin (S177). Study tab declutters with Smart Generate and merged health panels (S178). Flashcard generation becomes context-aware and best-practices-driven (S179). Chat settings move to a drawer with collapsed transparency panels (S180). Viz gets a collapsible View Options panel, select-all entity controls, and hides Call Graph for non-code documents (S181). YouTube transcripts gain full Read section parity (S182). Learning tab LibraryOverview slims to a single stats bar with document list as primary focus (S183).",
       "Phase 4 (Learner Experience Refinement, S184-S190): eliminates friction in the three highest-touch surfaces -- Study, Chat, and Notes. Flashcard navigation drops the deck concept in favour of a unified search-and-filter browser (S184). Study tab collapses to two CTAs with an Insights accordion (S185). Chat brings document scope back inline and removes confusion-signal noise (S186-S187). Flashcard generation gets deeper context and Bloom L3+ bias (S188). Auto-organize shows a holistic plan instead of individual suggestion cards (S189). Tag tree gains type-ahead search (S190).",
       "Phase 5 (Reading Experience and Chat Intelligence, S191-S197): elevates the reading and questioning loops into cohesive learning experiences. The Library gains a document action menu for one-click navigation to any tab scoped to a specific book (S191). DocumentReader replaces the one-liner tab with a live notes panel tied to a per-document auto-collection, creating an active-reading marginalia experience (S192). Glossary becomes a persistent, categorized study artifact stored in the database with regeneration and section linking (S193). References gain HTTP validation so only live, browsable links are shown -- dead links are pruned (S194). Chat recommendations become Bloom-progressive and summary-grounded, with deduplication history so the same question never appears twice (S195). The chat scope clear button stops destroying conversation context (S196). Gap analysis auto-selects the document's collection notes for frictionless compare-my-notes-with-book (S197).",
-      "Phase 6 (Polish and Bug Fixes, S200-S204): fixes real bugs encountered during daily use. PDF Viewer gets working internal and external links with rendering fidelity (S200). Note auto-tags are persisted on acceptance, duplicate notes are prevented, and auto-organize normalizes collection/tag names (S201). A CI and browser error sweep catches any regressions (S202). PDF Viewer gains in-page and cross-page text search (S203). Notes created from highlighted text in DocumentReader sync state across all surfaces immediately (S204)."
+      "Phase 6 (Polish and Bug Fixes, S200-S207): fixes real bugs encountered during daily use. PDF Viewer gets working internal and external links with rendering fidelity (S200). Note auto-tags are persisted on acceptance, duplicate notes are prevented, and auto-organize normalizes collection/tag names (S201). A CI and browser error sweep catches any regressions (S202). PDF Viewer gains in-page and cross-page text search (S203). Notes created from highlighted text in DocumentReader sync state across all surfaces immediately (S204). PDF text layer and search highlight rendering fixed to eliminate font overlap and visual artifacts (S205). Flashcard search returns results for keyword queries against existing cards (S206). Auto-organize retroactively normalizes legacy tag and collection names and surfaces actionable suggestions (S207)."
     ]
   },
   "architecture": {
@@ -1162,6 +1162,79 @@
         "No duplicate notes created when saving from highlighted text (S201 debounce guard applies)",
         "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
         "scripts/smoke/S204.sh exits 0"
+      ]
+    },
+    {
+      "id": "S205",
+      "title": "PDF text layer and search highlight rendering: fix font overlap and visual artifacts",
+      "phase": "V3 Phase 6 - Polish and Bug Fixes",
+      "priority": 45,
+      "featureRef": "F-READER",
+      "passes": false,
+      "description": "CONTEXT: The PDF Viewer text layer (PDFViewer.tsx) and the search highlight system (applySearchHighlights, applyPdfHighlights in pdf-highlight-utils) both inject <mark> elements into the pdfjs text layer spans. Two visual bugs result: (1) Font overlap / doubled text: When highlights or search marks are applied, the injected <mark> elements can cause the text layer spans to reflow, shifting character positions so the transparent text layer no longer aligns pixel-perfectly with the canvas-rendered glyphs underneath. This produces a visible 'doubled' or 'blurred' effect where the text layer characters appear offset from the canvas characters, especially on zoom or after a search. The root cause is that pdfjs relies on precise transform/width/left CSS values on each span in the .textLayer; wrapping span content in <mark> tags can alter the computed width of the span, breaking alignment. (2) Search highlight + annotation highlight conflict: Both applySearchHighlights and applyPdfHighlights walk the same text layer spans and split/wrap content with <mark> elements. They do not coordinate -- a search highlight can overwrite an annotation highlight's <mark> on a partially-covered span, or vice versa. The result is lost highlighting or garbled markup. FIX APPROACH: (A) Instead of injecting <mark> elements inside the text layer spans (which disrupts pdfjs layout), render highlights as absolutely-positioned overlay divs in a dedicated highlight layer between the canvas and the text layer. For each match (search or annotation), calculate the bounding rect from the text layer span positions (using Range.getBoundingClientRect() or span offset calculations), then create an overlay div at that position with the appropriate background color. This is the same approach used by pdfjs FindController internally. (B) The text layer spans remain untouched -- no <mark> injection, no content splitting. This preserves pdfjs font metrics and eliminates overlap. (C) Create a highlight overlay container div positioned between the canvas (z-index base) and the text layer (z-index 10). Search highlights and annotation highlights both render into this container as absolutely-positioned colored rectangles. (D) Active search match gets a distinct color (orange) and scrollIntoView behavior. (E) Clear and rebuild the overlay on page change, zoom change, or new search query. FRONTEND CHANGES: (A) Refactor applyPdfHighlights to compute bounding rects from text layer spans without modifying span innerHTML. Create overlay divs in a highlight container. (B) Refactor applySearchHighlights similarly -- compute rects, render overlays, do not touch span content. (C) PDFViewer.tsx: add a highlight overlay div between canvas and textLayer with appropriate z-index (e.g. 5, between canvas at 0 and textLayer at 10). (D) Ensure text selection still works -- the text layer must remain on top with pointer-events for selection, while highlight overlays are purely visual underneath. (E) Test that zoom in/out recalculates overlay positions correctly. (F) Verify that the existing AnnotationPopover still appears on highlight click (the click target may need adjustment since marks are no longer in the text layer).",
+      "acceptanceCriteria": [
+        "PDF text is rendered without visible font doubling or overlap after highlights are applied",
+        "PDF text is rendered without visible font doubling or overlap after search highlights are applied",
+        "Zoom in/out does not cause text layer misalignment with canvas",
+        "Search highlights appear as colored overlays without modifying text layer span content",
+        "Annotation highlights appear as colored overlays without modifying text layer span content",
+        "Search highlights and annotation highlights can coexist on the same text region without visual conflict",
+        "Active search match is visually distinct (orange) from inactive matches (yellow)",
+        "Text selection in the PDF still works correctly over highlighted regions",
+        "AnnotationPopover still appears when clicking a highlighted region",
+        "Existing highlight persistence (S147/S198) and search (S203) functionality not regressed",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S205.sh exits 0"
+      ]
+    },
+    {
+      "id": "S206",
+      "title": "Fix flashcard search: FTS5 query returns no results for keyword searches",
+      "phase": "V3 Phase 6 - Polish and Bug Fixes",
+      "priority": 46,
+      "featureRef": "F-STUDY",
+      "passes": false,
+      "description": "CONTEXT: The flashcard search in the Study tab (GET /flashcards/search?query=...) uses an FTS5 virtual table (flashcards_fts) to match keywords against flashcard question and answer text. Users report that typing keywords for existing flashcards returns zero results. The FTS5 table schema is: flashcards_fts(question, answer, flashcard_id UNINDEXED). The service (flashcard.py search method, line ~928) builds a subquery: SELECT flashcard_id FROM flashcards_fts WHERE flashcards_fts MATCH :q. BUG ANALYSIS: (1) The FTS5 table may not be populated -- flashcard creation (FlashcardService.create or generate) may not INSERT into flashcards_fts when new cards are created. Check whether db_init.py populates flashcards_fts from existing flashcard rows, and whether the create/generate codepath inserts into flashcards_fts. If the FTS5 table is empty, all MATCH queries return nothing. (2) Even if FTS5 rows exist, the MATCH query may fail for simple keyword searches if the query contains special FTS5 syntax characters (parentheses, quotes, OR/AND/NOT) that the user did not intend. The query should be sanitized or wrapped in double quotes for literal matching. (3) The subquery selects 'flashcard_id' as a text column from the FTS5 result, but SQLAlchemy may not bind it correctly as a subquery parameter. BACKEND FIXES: (A) Verify flashcards_fts is populated. If not, add INSERT INTO flashcards_fts(question, answer, flashcard_id) in the flashcard creation codepath (both create and generate methods). Also add a backfill in db_init.py that populates flashcards_fts from existing FlashcardModel rows on startup (INSERT OR IGNORE). (B) Add UPDATE/DELETE triggers or explicit FTS5 sync when flashcards are updated or deleted. (C) Sanitize the FTS5 query: strip FTS5 operators, or wrap the user query in double quotes for phrase matching, or tokenize and join with AND for multi-word queries. (D) Add a fallback: if FTS5 MATCH returns 0 results, fall back to a LIKE query on FlashcardModel.question and FlashcardModel.answer so that partial matches still work. FRONTEND: (E) Verify that the search input value is sent correctly as the 'query' parameter (not URL-encoded incorrectly or trimmed to empty). (F) Show a 'No results found' message when the search returns empty, not a blank panel (invariant I-10).",
+      "acceptanceCriteria": [
+        "Searching for a keyword that exists in a flashcard question returns that flashcard",
+        "Searching for a keyword that exists in a flashcard answer returns that flashcard",
+        "Multi-word search queries return relevant results (AND semantics)",
+        "Newly created flashcards are immediately searchable without restart",
+        "Updated flashcard content is reflected in subsequent searches",
+        "Deleted flashcards do not appear in search results",
+        "Special characters in the search query do not cause FTS5 syntax errors",
+        "Empty search results show a 'No flashcards found' message (not blank)",
+        "Existing filter functionality (document, collection, tag, Bloom, FSRS state) still works with search query",
+        "Unit test: creating a flashcard and searching for a keyword in its question returns it",
+        "Unit test: FTS5 query with special characters does not raise an error",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S206.sh exits 0"
+      ]
+    },
+    {
+      "id": "S207",
+      "title": "Auto-organize: retroactive naming normalization and actionable suggestions",
+      "phase": "V3 Phase 6 - Polish and Bug Fixes",
+      "priority": 47,
+      "featureRef": "F-NOTES",
+      "passes": false,
+      "description": "CONTEXT: Despite S199 (naming conventions) and S201 (normalize on creation), legacy data still contains tag names like 'machine_learning', 'machinelearning' and collection names like 'Skill_Issue_...' that violate the adopted conventions (tags: lower-case-hyphenated, collections: UPPER-CASE-HYPHENATED). The auto-organize feature (ClusteringService + OrganizationPlanDialog) currently only proposes grouping notes into new collections based on HDBSCAN clustering -- it does NOT detect or fix naming violations in existing tags and collections. Users expect clicking auto-organize to also clean up naming inconsistencies. TWO PROBLEMS: (1) Retroactive normalization: Existing tags and collections created before S199 were never migrated. Tags like 'machine_learning' should become 'machine-learning'; collections like 'Skill_Issue_Analysis' should become 'SKILL-ISSUE-ANALYSIS'. A one-time migration is needed, plus the auto-organize flow should detect and suggest these renames going forward. (2) Auto-organize suggestions not visible: The OrganizationPlanDialog requires pending cluster suggestions to display anything. If HDBSCAN finds no new clusters (e.g. all notes are already organized), the dialog shows nothing -- there is no pathway for the user to see or act on naming fixes, duplicate merges, or other organizational improvements. The dialog should also surface naming normalization suggestions alongside clustering suggestions. BACKEND FIXES: (A) Add a new service method ClusteringService.detect_naming_violations() that scans all CanonicalTagModel rows and NoteCollectionModel rows, applies normalize_tag_slug / normalize_collection_name, and returns a list of rename suggestions where the current name differs from the normalized form. Include duplicate detection: if normalizing two different names produces the same slug (e.g. 'machinelearning' and 'machine_learning' both become 'machine-learning'), suggest a merge. (B) Add a new endpoint POST /notes/cluster/normalize-check that returns naming violation suggestions. (C) Add a new endpoint POST /notes/cluster/normalize-apply that accepts a list of rename/merge operations and executes them transactionally -- updating CanonicalTagModel.slug, NoteTagIndexModel.tag_full, NoteCollectionModel.name, and any Kuzu graph references. (D) Add a startup migration in db_init.py that normalizes all existing tag and collection names on boot (idempotent -- skip if already normalized). This handles the retroactive cleanup without requiring user action. (E) Ensure batch_accept_suggestions in ClusteringService applies normalize_collection_name and normalize_tag_slug (verify S201 fix is actually in place and working). FRONTEND FIXES: (F) OrganizationPlanDialog.tsx: after loading cluster suggestions, also call POST /notes/cluster/normalize-check. Display naming violation suggestions in a separate section above the clustering suggestions (e.g. 'Naming Fixes' section with before/after preview for each rename). (G) Allow the user to accept/reject individual naming fixes. Accepted fixes call POST /notes/cluster/normalize-apply. (H) If there are no cluster suggestions but there ARE naming violations, still show the dialog with the naming fixes section -- do not show an empty state. (I) Show a summary count after apply (e.g. 'Renamed 5 tags and 2 collections').",
+      "acceptanceCriteria": [
+        "Existing tags with underscores or missing hyphens are detected and suggested for rename (e.g. 'machine_learning' -> 'machine-learning')",
+        "Existing collections with underscores or lowercase are detected and suggested for rename (e.g. 'Skill_Issue_Analysis' -> 'SKILL-ISSUE-ANALYSIS')",
+        "Duplicate tags that normalize to the same slug are detected and suggested for merge",
+        "POST /notes/cluster/normalize-check returns a list of naming violation suggestions with before/after values",
+        "POST /notes/cluster/normalize-apply executes renames transactionally, updating tags, collections, and tag index rows",
+        "OrganizationPlanDialog shows a 'Naming Fixes' section with rename suggestions when naming violations exist",
+        "User can accept or reject individual naming fix suggestions",
+        "Dialog is not empty when there are naming fixes but no cluster suggestions",
+        "Startup migration normalizes all existing tag and collection names idempotently",
+        "After applying naming fixes, the Notes page reflects the corrected names without manual refresh",
+        "batch_accept_suggestions applies normalize_collection_name and normalize_tag_slug to new names",
+        "Unit test: detect_naming_violations returns suggestions for 'machine_learning' tag and 'Skill_Issue' collection",
+        "Unit test: normalize-apply renames a tag and updates NoteTagIndexModel rows",
+        "uv run ruff check . exits 0; uv run pytest exits 0; npx tsc --noEmit exits 0",
+        "scripts/smoke/S207.sh exits 0"
       ]
     }
   ],

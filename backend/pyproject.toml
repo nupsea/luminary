@@ -50,6 +50,8 @@ dependencies = [
     "tree-sitter-typescript>=0.23.2",
     "uvicorn[standard]>=0.41.0",
     "yt-dlp>=2026.3.13",
+    "trafilatura>=2.0.0",
+    "cloudscraper>=1.2.71",
 ]
 
 [tool.ruff]

@@ -16,6 +16,8 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
+import { API_BASE } from "@/lib/config"
+import { cn } from "@/lib/utils"
 
 interface MarkdownRendererProps {
   children: string
@@ -32,17 +34,26 @@ const NOTE_LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
  * unaffected since the sentinel `[note:` prefix is unique.
  */
 function preprocessLinks(content: string): string {
-  return content.replace(
+  let text = content.replace(
     NOTE_LINK_MARKER_RE,
     (_m, id, text) => `\`[note:${id}|${text}]\``
   )
+  // Resolve local mirrored images: __LUMINARY_IMG__/doc_id/filename -> API_BASE/images/local/doc_id/filename
+  text = text.replace(/__LUMINARY_IMG__\//g, `${API_BASE}/images/local/`)
+  return text
 }
 
 export function MarkdownRenderer({ children, className, validNoteIds }: MarkdownRendererProps) {
   const processed = preprocessLinks(children)
 
   return (
-    <div className={`prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`}>
+    <div className={cn(
+      "prose prose-base dark:prose-invert max-w-none font-serif leading-relaxed text-foreground/90",
+      "prose-headings:font-sans prose-headings:font-bold prose-headings:tracking-tight",
+      "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
+      "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+      className
+    )}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}

@@ -129,6 +129,20 @@ async def serve_image_raw(image_id: str) -> FileResponse:
     return FileResponse(str(abs_path), media_type="image/png")
 
 
+@router.get("/images/local/{doc_id}/{filename}")
+async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
+    """Serve a locally mirrored image for an article."""
+    settings = get_settings()
+    abs_path = Path(settings.DATA_DIR).expanduser() / "images" / doc_id / filename
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="Local image not found")
+
+    # Detect media type from extension
+    ext = filename.split(".")[-1].lower()
+    media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"] else "image/png"
+    return FileResponse(str(abs_path), media_type=media_type)
+
+
 @router.get("/documents/{document_id}/enrichment", response_model=list[EnrichmentJobItem])
 async def get_enrichment_jobs(document_id: str) -> list[EnrichmentJobItem]:
     """Return all enrichment jobs for a document (all job_types and statuses).

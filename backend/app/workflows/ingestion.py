@@ -1680,16 +1680,20 @@ ingestion_graph = _build_graph()
 
 
 async def run_ingestion(
-    document_id: str, file_path: str, format: str, content_type: str | None = None
+    document_id: str,
+    file_path: str,
+    format: str,
+    content_type: str | None = None,
+    parsed_document: dict[str, Any] | None = None,
 ) -> None:
     initial_state: IngestionState = {
         "document_id": document_id,
         "file_path": file_path,
         "format": format,
-        "parsed_document": None,
+        "parsed_document": parsed_document,
         "content_type": content_type,
         "chunks": None,
-        "status": "parsing",
+        "status": "parsing" if parsed_document is None else "classifying",
         "error": None,
         "section_summary_count": None,
         "audio_duration_seconds": None,
@@ -1699,7 +1703,10 @@ async def run_ingestion(
         "Ingestion task started",
         extra={"document_id": document_id, "format": format, "content_type": content_type},
     )
-    await _update_stage(document_id, "parsing")
+    if parsed_document is None:
+        await _update_stage(document_id, "parsing")
+    else:
+        await _update_stage(document_id, "classifying")
     with trace_chain(
         "ingestion.workflow",
         input_value=f"doc={document_id} format={format}",
