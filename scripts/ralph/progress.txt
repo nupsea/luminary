@@ -192,3 +192,14 @@ Patterns are now maintained in `scripts/ralph/patterns.md` -- read that file ins
   - The invalidation belongs in the parent component's onSaved callback (DocumentReader.tsx), not in NoteCreationDialog itself, because the dialog is reusable and shouldn't know about all consuming surfaces
   - Reviewer warning: smoke tests for frontend-only fixes can only verify backend contract and code presence, not UI cache invalidation behavior
 ---
+
+## 2026-04-03 - S205
+- What was implemented: Replaced inline `<mark>` element injection into pdfjs text layer spans with absolutely-positioned overlay divs rendered in a dedicated highlight container between the canvas (z-index 0) and text layer (z-index 10). New pdfHighlightOverlay.ts utility module provides computeHighlightRects (uses Range API to measure character positions without modifying spans), renderOverlayDivs (creates positioned colored divs), and clearOverlays. PDFViewer.tsx refactored: applyPdfHighlights and applySearchHighlights now target the overlay container instead of mutating text layer span innerHTML. Text layer spans remain untouched, preserving pdfjs font metrics and eliminating text doubling/overlap. Overlay container at z-index 5 with pointer-events:none allows text selection through highlights. Annotation highlights get pointer-events:auto with data-annotation-id for click handling.
+- Files changed: frontend/src/components/reader/pdfHighlightOverlay.ts (new, 3 exported functions), frontend/src/components/reader/pdfHighlightOverlay.test.ts (new, 8 tests), frontend/src/components/reader/PDFViewer.tsx (modified -- refactored highlight functions, added overlay ref and container div), scripts/smoke/S205.sh (new), scripts/ralph/prd-v3.json (passes=true), docs/ralph-run-flow.md (pass), docs/exec-plans/active/S205.md -> completed/
+- **Learnings for future iterations:**
+  - Range API (document.createRange + setStart/setEnd + getClientRects) can measure character positions in text nodes without modifying DOM content -- ideal for non-destructive highlighting
+  - mergeAdjacentRects reduces overlay div count by combining same-line rects within 2px tolerance
+  - mix-blend-mode: multiply on overlay divs produces a natural highlight appearance over rendered PDF text
+  - Overlay z-index layering: canvas (0) < highlight overlay (5) < text layer (10) < annotation layer (20) -- text selection and link clicking work through the overlay
+  - Reviewer warning: AnnotationPopover click wiring was a pre-existing gap (never connected to mark elements), not a regression from S205
+---

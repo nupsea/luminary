@@ -17,37 +17,62 @@ import {
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
 import { type PageMatch, buildGlobalMatches, findMatchIndices, formatMatchCounts } from "./pdfSearchUtils"
+import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
 
-/** Apply highlight overlays to PDF text layer spans by matching annotation selected_text. */
+/**
+ * Build span-offset parts from the text layer for highlight rect computation.
+ * Reused by both annotation and search highlight functions.
+ */
+function buildTextParts(textLayerDiv: HTMLDivElement) {
+  const spans = Array.from(textLayerDiv.querySelectorAll("span")) as HTMLSpanElement[]
+  if (spans.length === 0) return null
+  const parts: { span: HTMLSpanElement; start: number; end: number }[] = []
+  let offset = 0
+  for (let i = 0; i < spans.length; i++) {
+    if (i > 0) offset += 1 // space separator (matches browser selection toString())
+    const text = spans[i].textContent ?? ""
+    parts.push({ span: spans[i], start: offset, end: offset + text.length })
+    offset += text.length
+  }
+  const fullText = spans.map((s) => s.textContent ?? "").join(" ")
+  return { spans, parts, fullText }
+}
+
+/**
+ * Map a normalized-text index back to the original fullText offset.
+ * Handles whitespace collapse where multiple chars map to one space.
+ */
+function mapNormToFullOffset(fullText: string, normFull: string, normIdx: number): number {
+  let fi = 0
+  let ni = 0
+  while (ni < normIdx && fi < fullText.length) {
+    if (/\s/.test(fullText[fi])) {
+      fi++
+      if (ni < normFull.length && /\s/.test(normFull[ni])) ni++
+      while (fi < fullText.length && /\s/.test(fullText[fi])) fi++
+    } else {
+      fi++
+      ni++
+    }
+  }
+  return fi
+}
+
+/** Apply annotation highlight overlays using absolutely-positioned divs. */
 function applyPdfHighlights(
   textLayerDiv: HTMLDivElement,
+  overlayContainer: HTMLDivElement,
   annotations: AnnotationItem[],
   currentPage: number,
   sections: SectionItem[],
 ) {
-  // Clear any previous highlight marks
-  textLayerDiv.querySelectorAll("mark[data-pdf-highlight]").forEach((m) => {
-    const parent = m.parentNode
-    if (parent) {
-      parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
-      parent.normalize()
-    }
-  })
-  // Reset background on previously highlighted spans
-  textLayerDiv.querySelectorAll("span[data-hl-original]").forEach((span) => {
-    ; (span as HTMLElement).style.backgroundColor = ""
-    span.removeAttribute("data-hl-original")
-  })
+  clearOverlays(overlayContainer, "data-pdf-highlight")
 
   if (annotations.length === 0) return
 
-  // Filter annotations relevant to current page:
-  // 1. By explicit page_number field
-  // 2. By section page range
-  // 3. Fallback: try matching any annotation's text against page content
   const pageAnnotations = annotations.filter((ann) => {
     if (ann.page_number != null) return ann.page_number === currentPage
     const sec = sections.find((s) => s.id === ann.section_id)
@@ -56,178 +81,71 @@ function applyPdfHighlights(
       const end = sec.page_end || start
       return currentPage >= start && currentPage <= end
     }
-    return true // fallback: try matching
+    return true
   })
 
   if (pageAnnotations.length === 0) return
 
-  // Collect text spans
-  const spans = Array.from(textLayerDiv.querySelectorAll("span")) as HTMLSpanElement[]
-  if (spans.length === 0) return
+  const textData = buildTextParts(textLayerDiv)
+  if (!textData) return
+  const { spans, parts, fullText } = textData
 
-  // Build concatenated text with space separators between spans.
-  // Browser selection toString() inserts spaces between spans, so we must match
-  // with the same spacing.
-  const parts: { span: HTMLSpanElement; start: number; end: number }[] = []
-  let offset = 0
-  for (let i = 0; i < spans.length; i++) {
-    if (i > 0) offset += 1 // space separator
-    const text = spans[i].textContent ?? ""
-    parts.push({ span: spans[i], start: offset, end: offset + text.length })
-    offset += text.length
-  }
-  const fullText = spans.map((s) => s.textContent ?? "").join(" ")
+  const containerRect = overlayContainer.getBoundingClientRect()
 
   for (const ann of pageAnnotations) {
-    // Try exact match first, then normalized whitespace match
     let idx = fullText.indexOf(ann.selected_text)
     let searchText = ann.selected_text
     if (idx < 0) {
-      // Normalize both: collapse whitespace runs to single space
       const normFull = fullText.replace(/\s+/g, " ")
       const normSearch = ann.selected_text.replace(/\s+/g, " ")
       const normIdx = normFull.indexOf(normSearch)
       if (normIdx < 0) continue
-      // Map normalized index back to fullText offset
-      // Walk fullText counting chars while tracking normalized position
-      let fi = 0
-      let ni = 0
-      while (ni < normIdx && fi < fullText.length) {
-        if (/\s/.test(fullText[fi])) {
-          // Skip extra whitespace chars that got collapsed
-          fi++
-          if (ni < normFull.length && /\s/.test(normFull[ni])) ni++
-          while (fi < fullText.length && /\s/.test(fullText[fi])) fi++
-        } else {
-          fi++
-          ni++
-        }
-      }
-      idx = fi
-      // Use the length in fullText space
-      let endFi = fi
-      let endNi = ni
-      while (endNi < normIdx + normSearch.length && endFi < fullText.length) {
-        if (/\s/.test(fullText[endFi])) {
-          endFi++
-          if (endNi < normFull.length && /\s/.test(normFull[endNi])) endNi++
-          while (endFi < fullText.length && /\s/.test(fullText[endFi])) endFi++
-        } else {
-          endFi++
-          endNi++
-        }
-      }
-      searchText = fullText.slice(idx, endFi)
+      idx = mapNormToFullOffset(fullText, normFull, normIdx)
+      const endIdx = mapNormToFullOffset(fullText, normFull, normIdx + normSearch.length)
+      searchText = fullText.slice(idx, endIdx)
     }
 
     const matchEnd = idx + searchText.length
     const bgColor = PDF_HIGHLIGHT_COLORS[ann.color] ?? PDF_HIGHLIGHT_COLORS.yellow
 
-    for (const part of parts) {
-      if (part.end <= idx || part.start >= matchEnd) continue
-
-      // Fully inside
-      if (part.start >= idx && part.end <= matchEnd) {
-        part.span.style.backgroundColor = bgColor
-        part.span.setAttribute("data-hl-original", "1")
-        continue
-      }
-
-      // Partially inside -- wrap matching portion in <mark>
-      const spanText = part.span.textContent ?? ""
-      const localStart = Math.max(0, idx - part.start)
-      const localEnd = Math.min(spanText.length, matchEnd - part.start)
-
-      const before = spanText.slice(0, localStart)
-      const matched = spanText.slice(localStart, localEnd)
-      const after = spanText.slice(localEnd)
-
-      const frag = document.createDocumentFragment()
-      if (before) frag.appendChild(document.createTextNode(before))
-      const mark = document.createElement("mark")
-      mark.setAttribute("data-pdf-highlight", "1")
-      mark.style.backgroundColor = bgColor
-      mark.style.borderRadius = "2px"
-      mark.textContent = matched
-      frag.appendChild(mark)
-      if (after) frag.appendChild(document.createTextNode(after))
-
-      part.span.replaceChildren(frag)
-    }
+    const rects = computeHighlightRects(spans, parts, idx, matchEnd, containerRect)
+    renderOverlayDivs(overlayContainer, rects, bgColor, "data-pdf-highlight", ann.id)
   }
 }
 
-/** Apply search-match highlights to text layer spans. Returns count of matches found. */
+/** Apply search-match highlights as overlay divs. Returns count of matches found. */
 function applySearchHighlights(
   textLayerDiv: HTMLDivElement,
+  overlayContainer: HTMLDivElement,
   query: string,
   activeMatchIndex: number,
 ): number {
-  // Clear previous search highlights
-  textLayerDiv.querySelectorAll("mark[data-search-highlight]").forEach((m) => {
-    const parent = m.parentNode
-    if (parent) {
-      parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
-      parent.normalize()
-    }
-  })
+  clearOverlays(overlayContainer, "data-search-highlight")
 
   if (!query) return 0
 
-  const spans = Array.from(textLayerDiv.querySelectorAll("span")) as HTMLSpanElement[]
-  if (spans.length === 0) return 0
-
-  // Build concatenated text (same approach as applyPdfHighlights)
-  const parts: { span: HTMLSpanElement; start: number; end: number }[] = []
-  let offset = 0
-  for (let i = 0; i < spans.length; i++) {
-    if (i > 0) offset += 1
-    const text = spans[i].textContent ?? ""
-    parts.push({ span: spans[i], start: offset, end: offset + text.length })
-    offset += text.length
-  }
-  const fullText = spans.map((s) => s.textContent ?? "").join(" ")
+  const textData = buildTextParts(textLayerDiv)
+  if (!textData) return 0
+  const { spans, parts, fullText } = textData
 
   const matchIndices = findMatchIndices(fullText, query)
   if (matchIndices.length === 0) return 0
 
+  const containerRect = overlayContainer.getBoundingClientRect()
   const queryLen = query.length
 
-  // Process matches in reverse order so DOM mutations don't shift offsets
-  for (let mi = matchIndices.length - 1; mi >= 0; mi--) {
+  for (let mi = 0; mi < matchIndices.length; mi++) {
     const matchStart = matchIndices[mi]
     const matchEnd = matchStart + queryLen
     const isActive = mi === activeMatchIndex
 
-    for (let pi = parts.length - 1; pi >= 0; pi--) {
-      const part = parts[pi]
-      if (part.end <= matchStart || part.start >= matchEnd) continue
-
-      const spanText = part.span.textContent ?? ""
-      const localStart = Math.max(0, matchStart - part.start)
-      const localEnd = Math.min(spanText.length, matchEnd - part.start)
-
-      const before = spanText.slice(0, localStart)
-      const matched = spanText.slice(localStart, localEnd)
-      const after = spanText.slice(localEnd)
-
-      const frag = document.createDocumentFragment()
-      if (before) frag.appendChild(document.createTextNode(before))
-      const mark = document.createElement("mark")
-      mark.setAttribute("data-search-highlight", "1")
-      mark.style.backgroundColor = isActive ? "rgba(249, 115, 22, 0.6)" : "rgba(250, 204, 21, 0.4)"
-      mark.style.borderRadius = "2px"
-      if (isActive) mark.setAttribute("data-active-search-match", "1")
-      mark.textContent = matched
-      frag.appendChild(mark)
-      if (after) frag.appendChild(document.createTextNode(after))
-
-      part.span.replaceChildren(frag)
-    }
+    const color = isActive ? "rgba(249, 115, 22, 0.6)" : "rgba(250, 204, 21, 0.4)"
+    const rects = computeHighlightRects(spans, parts, matchStart, matchEnd, containerRect)
+    renderOverlayDivs(overlayContainer, rects, color, "data-search-highlight", undefined, isActive)
   }
 
   // Scroll active match into view
-  const activeMark = textLayerDiv.querySelector("mark[data-active-search-match]")
+  const activeMark = overlayContainer.querySelector("[data-active-search-match]")
   if (activeMark) {
     activeMark.scrollIntoView({ behavior: "smooth", block: "center" })
   }
@@ -268,6 +186,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const textLayerRef = useRef<HTMLDivElement>(null)
+    const highlightOverlayRef = useRef<HTMLDivElement>(null)
     const annotationLayerRef = useRef<HTMLDivElement>(null)
     const nextCanvasRef = useRef<HTMLCanvasElement>(null)
     const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -467,9 +386,16 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
             await tl.render()
             if (!cancelled) {
+              // Size the highlight overlay to match the text layer
+              const overlayDiv = highlightOverlayRef.current
+              if (overlayDiv) {
+                overlayDiv.style.width = `${viewport.width}px`
+                overlayDiv.style.height = `${viewport.height}px`
+                overlayDiv.replaceChildren() // clear stale overlays
+              }
               // Apply highlights immediately after text layer is ready
-              if (highlightsVisibleRef.current && annotationsRef.current.length > 0) {
-                applyPdfHighlights(textLayerDiv, annotationsRef.current, pageNum, sections)
+              if (highlightsVisibleRef.current && annotationsRef.current.length > 0 && overlayDiv) {
+                applyPdfHighlights(textLayerDiv, overlayDiv, annotationsRef.current, pageNum, sections)
               }
               setTextLayerVersion((v) => v + 1)
             }
@@ -578,26 +504,16 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       onPageChange?.(currentPage)
     }, [currentPage, onPageChange])
 
-    // Apply inline highlights on the text layer after it finishes rendering
+    // Apply annotation highlight overlays after the text layer renders
     useEffect(() => {
       const textDiv = textLayerRef.current
-      if (!textDiv || textLayerVersion === 0) return
+      const overlayDiv = highlightOverlayRef.current
+      if (!textDiv || !overlayDiv || textLayerVersion === 0) return
       if (!highlightsVisible || annotations.length === 0) {
-        // Clear any existing highlights when toggled off
-        textDiv.querySelectorAll("mark[data-pdf-highlight]").forEach((m) => {
-          const parent = m.parentNode
-          if (parent) {
-            parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
-            parent.normalize()
-          }
-        })
-        textDiv.querySelectorAll("span[data-hl-original]").forEach((span) => {
-          ; (span as HTMLElement).style.backgroundColor = ""
-          span.removeAttribute("data-hl-original")
-        })
+        clearOverlays(overlayDiv, "data-pdf-highlight")
         return
       }
-      applyPdfHighlights(textDiv, annotations, currentPage, sections)
+      applyPdfHighlights(textDiv, overlayDiv, annotations, currentPage, sections)
     }, [textLayerVersion, annotations, highlightsVisible, currentPage, sections])
 
     function goToPage(n: number) {
@@ -682,19 +598,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return () => { cancelled = true }
     }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
 
-    // Apply search highlights whenever the page renders or match index changes
+    // Apply search highlights as overlays whenever the page renders or match index changes
     useEffect(() => {
       const textDiv = textLayerRef.current
-      if (!textDiv || textLayerVersion === 0) return
+      const overlayDiv = highlightOverlayRef.current
+      if (!textDiv || !overlayDiv || textLayerVersion === 0) return
       if (!searchOpen || !searchQuery) {
-        // Clear search highlights
-        textDiv.querySelectorAll("mark[data-search-highlight]").forEach((m) => {
-          const parent = m.parentNode
-          if (parent) {
-            parent.replaceChild(document.createTextNode(m.textContent ?? ""), m)
-            parent.normalize()
-          }
-        })
+        clearOverlays(overlayDiv, "data-search-highlight")
         return
       }
 
@@ -708,7 +618,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         }
       }
 
-      applySearchHighlights(textDiv, searchQuery, activePageIdx)
+      applySearchHighlights(textDiv, overlayDiv, searchQuery, activePageIdx)
     }, [textLayerVersion, searchOpen, searchQuery, globalMatches, globalMatchIndex, currentPage])
 
     function handleSearchNext() {
@@ -881,6 +791,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
               {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
               <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
+              {/* Highlight overlay: absolutely-positioned colored divs between canvas and text layer.
+                  z-index 5 sits above canvas (0) but below text layer (10), so text selection works
+                  through the overlay while highlights are visible underneath. */}
+              <div
+                ref={highlightOverlayRef}
+                style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }}
+              />
               {/* Official pdfjs textLayer -- supports drag-to-select, endOfContent marker,
                   and ::selection styling. Class "textLayer" matches pdf_viewer.css. */}
               <div ref={textLayerRef} className="textLayer" />
