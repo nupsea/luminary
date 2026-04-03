@@ -755,8 +755,10 @@ async def ingest_url(
             for s in parsed.sections
         ]
 
-        from app.workflows.ingestion import run_ingestion  # noqa: PLC0415
-        from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
+        from app.workflows.ingestion import (
+            _background_tasks,  # noqa: PLC0415
+            run_ingestion,  # noqa: PLC0415
+        )
 
         _task = asyncio.create_task(run_ingestion(
             doc_id, 
@@ -843,8 +845,10 @@ async def ingest_url(
         session.add(doc)
         await session.commit()
 
-    from app.workflows.ingestion import run_ingestion  # noqa: PLC0415
-    from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
+    from app.workflows.ingestion import (
+        _background_tasks,  # noqa: PLC0415
+        run_ingestion,  # noqa: PLC0415
+    )
 
     _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None))
     _background_tasks.add(_task)

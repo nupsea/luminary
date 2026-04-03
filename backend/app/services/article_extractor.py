@@ -1,16 +1,15 @@
-import logging
-import re
 import asyncio
 import hashlib
+import logging
+import re
 from pathlib import Path
 
+import cloudscraper
 import httpx
 import trafilatura
-import cloudscraper
-from bs4 import BeautifulSoup
 
-from app.types import ParsedDocument, Section
 from app.config import get_settings
+from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 

@@ -145,6 +145,11 @@ const shortTitle: Record<string, string[]> = {
   S200: ['S200 P40', 'PDF Links & Render', 'Internal/external links'],
   S201: ['S201 P41', 'Tag & Note Fixes',   'Auto-save + dedup + naming'],
   S202: ['S202 P42', 'CI & Browser Fix',   'Sweep all gate errors'],
+  S203: ['S203 P43', 'PDF Search',          'In-page + cross-page'],
+  S204: ['S204 P44', 'Note Sync Fix',       'Highlight note state sync'],
+  S205: ['S205 P45', 'PDF Highlight Fix',   'Font overlap + overlays'],
+  S206: ['S206 P46', 'Flashcard Search',    'FTS5 populate + query fix'],
+  S207: ['S207 P47', 'Auto-org Naming',     'Retroactive normalize'],
 }
 
 // Layout: Phase 1 cols x=60..1180, Phase 2 row y=580, Phase 3 row y=820
@@ -170,6 +175,11 @@ const storyPositions: Record<string, { x: number; y: number }> = {
   S200: { x: 60,   y: 1540 },
   S201: { x: 380,  y: 1540 },
   S202: { x: 700,  y: 1540 },
+  S203: { x: 1020,  y: 1540 },
+  S204: { x: 1340,  y: 1540 },
+  S205: { x: 1660,  y: 1540 },
+  S206: { x: 1980,  y: 1540 },
+  S207: { x: 2300,  y: 1540 },
 }
 
 // Phase label nodes (left column, non-clickable)
@@ -179,7 +189,7 @@ const phaseLabels: Node[] = [
   { id: 'ph3', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 3</div><div style={{ fontSize: 10, opacity: 0.7 }}>UX Polish</div><div style={{ fontSize: 10, opacity: 0.7 }}>S176-S183</div></div>) }, position: { x: -190, y: 830 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
   { id: 'ph4', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 4</div><div style={{ fontSize: 10, opacity: 0.7 }}>Learner Experience</div><div style={{ fontSize: 10, opacity: 0.7 }}>S184-S190</div></div>) }, position: { x: -190, y: 1070 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
   { id: 'ph5', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 5</div><div style={{ fontSize: 10, opacity: 0.7 }}>Reading & Chat</div><div style={{ fontSize: 10, opacity: 0.7 }}>S191-S199</div></div>) }, position: { x: -190, y: 1310 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
-  { id: 'ph6', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 6</div><div style={{ fontSize: 10, opacity: 0.7 }}>Polish & Bug Fixes</div><div style={{ fontSize: 10, opacity: 0.7 }}>S200-S202</div></div>) }, position: { x: -190, y: 1550 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
+  { id: 'ph6', selectable: false, data: { label: (<div><div style={{ fontSize: 11, fontWeight: 800 }}>PHASE 6</div><div style={{ fontSize: 10, opacity: 0.7 }}>Polish & Bug Fixes</div><div style={{ fontSize: 10, opacity: 0.7 }}>S200-S207</div></div>) }, position: { x: -190, y: 1550 }, style: { background: '#1e1b4b', color: '#a5b4fc', border: '2px solid #3730a3', borderRadius: 8, padding: '8px 12px', minWidth: 130 } },
 ]
 
 function storyNode(s: Story): Node {
@@ -245,9 +255,15 @@ const storyEdges: Edge[] = [
   // Phase 6 internal
   { id: 'e-200-202', source: 'S200', target: 'S202', label: 'CI sweep', labelStyle: { fontSize: 10 }, ...depEdge },
   { id: 'e-201-202', source: 'S201', target: 'S202', label: 'CI sweep', labelStyle: { fontSize: 10 }, ...depEdge },
+  { id: 'e-203-205', source: 'S203', target: 'S205', label: 'search overlays', labelStyle: { fontSize: 10 }, ...depEdge },
+  { id: 'e-201-207', source: 'S201', target: 'S207', label: 'naming norms', labelStyle: { fontSize: 10 }, ...depEdge },
   // Phase 5 -> Phase 6
   { id: 'e-198-200', source: 'S198', target: 'S200', label: 'highlight fidelity', labelStyle: { fontSize: 10 }, ...ph2Edge },
   { id: 'e-199-201', source: 'S199', target: 'S201', label: 'naming norms', labelStyle: { fontSize: 10 }, ...ph2Edge },
+  { id: 'e-198-205', source: 'S198', target: 'S205', label: 'highlight marks', labelStyle: { fontSize: 10 }, ...ph2Edge },
+  { id: 'e-192-204', source: 'S192', target: 'S204', label: 'reader notes', labelStyle: { fontSize: 10 }, ...ph2Edge },
+  { id: 'e-184-206', source: 'S184', target: 'S206', label: 'FTS5 search', labelStyle: { fontSize: 10 }, ...ph2Edge },
+  { id: 'e-189-207', source: 'S189', target: 'S207', label: 'auto-organize', labelStyle: { fontSize: 10 }, ...ph2Edge },
 ]
 
 // ── LEGENDS ─────────────────────────────────────────────────────
@@ -282,7 +298,7 @@ function StoryLegend({ total, done, p1Done, p2Done, p3Done, p4Done, p5Done, p6Do
       <div style={{ background: '#0f172a', borderRadius: 4, height: 8, overflow: 'hidden', marginBottom: 10 }}>
         <div style={{ width: `${(done / total) * 100}%`, height: '100%', background: '#16a34a', borderRadius: 4 }} />
       </div>
-      {([['Phase 1', p1Done, 10, '#818cf8'], ['Phase 2', p2Done, 5, '#34d399'], ['Phase 3', p3Done, 8, '#fb923c'], ['Phase 4', p4Done, 7, '#f472b6'], ['Phase 5', p5Done, 9, '#38bdf8'], ['Phase 6', p6Done, 3, '#f87171']] as [string, number, number, string][]).map(([label, cnt, tot, color]) => (
+      {([['Phase 1', p1Done, 10, '#818cf8'], ['Phase 2', p2Done, 5, '#34d399'], ['Phase 3', p3Done, 8, '#fb923c'], ['Phase 4', p4Done, 7, '#f472b6'], ['Phase 5', p5Done, 9, '#38bdf8'], ['Phase 6', p6Done, 8, '#f87171']] as [string, number, number, string][]).map(([label, cnt, tot, color]) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <div style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
           <span style={{ color: '#94a3b8', fontSize: 11, flex: 1 }}>{label}</span>
