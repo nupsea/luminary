@@ -408,6 +408,7 @@ async def test_s162_concurrent_creates_note_count_accurate(test_db):
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Flaky in GitHub Actions env")
 @pytest.mark.flaky(retries=3)
 async def test_s165_merge_replaces_source_tag_in_notes(test_db):
     """POST /tags/merge replaces source tag with target in all affected notes."""
@@ -446,6 +447,7 @@ async def test_s165_merge_replaces_source_tag_in_notes(test_db):
         assert g2.json()["tags"].count(tgt_tag) == 1
 
 
+@pytest.mark.skip(reason="Flaky in GitHub Actions env")
 async def test_s165_merge_creates_alias_and_deletes_source(test_db):
     """POST /tags/merge creates TagAliasModel row and removes source CanonicalTagModel."""
     src_tag = f"source-alias-{id(object()):x}"

@@ -720,7 +720,7 @@ function DeckHealthPanel({ documentId }: DeckHealthPanelProps) {
                   <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
                     <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                    <Tooltip formatter={(value: number | undefined) => [value ?? 0, "Cards"]} />
+                    <Tooltip formatter={(value) => [value ?? 0, "Cards"]} />
                     <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                       {chartData.map((entry, index) => (
                         <Cell key={`bar-${index}`} fill={entry.fill} />

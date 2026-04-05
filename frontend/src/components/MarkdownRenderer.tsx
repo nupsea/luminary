@@ -16,6 +16,7 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
+import rehypeRaw from "rehype-raw"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
@@ -56,7 +57,7 @@ export function MarkdownRenderer({ children, className, validNoteIds }: Markdown
     )}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        rehypePlugins={[rehypeHighlight, rehypeRaw]}
         components={{
           code: ({ children: codeChildren, ...props }) => {
             const text = String(codeChildren)
