@@ -145,8 +145,8 @@ def test_groups_returns_correct_counts(client):
     suffix = uuid.uuid4().hex[:8]
     gname1 = f"GRP1_{suffix}"
     gname2 = f"GRP2_{suffix}"
-    tag1 = f"tag1_{suffix}"
-    tag2 = f"tag2_{suffix}"
+    tag1 = f"tag1-{suffix}"
+    tag2 = f"tag2-{suffix}"
 
     client.post("/notes", json={"content": "n1", "group_name": gname1, "tags": [tag1]})
     client.post("/notes", json={"content": "n2", "group_name": gname1, "tags": [tag1, tag2]})

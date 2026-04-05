@@ -850,7 +850,9 @@ async def ingest_url(
         run_ingestion,  # noqa: PLC0415
     )
 
-    _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None))
+    _task = asyncio.create_task(
+        run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
+    )
     _background_tasks.add(_task)
     _task.add_done_callback(_background_tasks.discard)
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
@@ -1248,7 +1250,8 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
-            doc.tags = body.tags
+            from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+            doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         if body.content_type is not None:
             doc.content_type = body.content_type
         await session.commit()
@@ -1269,13 +1272,15 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
-        doc.tags = body.tags
+        from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+        normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
+        doc.tags = normalized
         await session.commit()
     logger.info(
         "Patched document tags",
-        extra={"document_id": document_id, "tag_count": len(body.tags)},
+        extra={"document_id": document_id, "tag_count": len(normalized)},
     )
-    return {"document_id": document_id, "tags": body.tags}
+    return {"document_id": document_id, "tags": normalized}
 
 
 @router.delete("/{document_id}", status_code=204)

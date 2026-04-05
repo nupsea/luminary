@@ -34,12 +34,10 @@ import { clearOverlays, renderOverlayDivs, type OverlayRect } from "./pdfHighlig
 
 describe("renderOverlayDivs", () => {
   let container: any
-  let realCreateElement: typeof document.createElement
 
   beforeEach(() => {
     container = createMockElement("div")
     // Stub document.createElement to return mock elements
-    realCreateElement = globalThis.document?.createElement
     const stubDoc = {
       createElement(tag: string) {
         return createMockElement(tag)

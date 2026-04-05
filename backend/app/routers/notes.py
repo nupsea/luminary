@@ -357,6 +357,8 @@ async def create_note(
     session: AsyncSession = Depends(get_db),
 ) -> NoteResponse:
     """Create a new note."""
+    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
     # Dedup: if a note with identical (document_id, section_id, content_hash) was
     # created within the last 5 seconds, return the existing note instead.
     content_hash = hashlib.sha256(req.content.encode()).hexdigest()[:16]
@@ -381,7 +383,10 @@ async def create_note(
         section_id=req.section_id,
         content=req.content,
         content_hash=content_hash,
-        tags=req.tags,
+        tags=(
+            [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
+            if req.tags else req.tags
+        ),
         group_name=req.group_name,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -566,7 +571,8 @@ async def _apply_note_update(
     if req.content is not None:
         note.content = req.content
     if req.tags is not None:
-        note.tags = req.tags
+        from app.services.naming import normalize_tag_slug as _norm  # noqa: PLC0415
+        note.tags = [_norm(t) for t in req.tags if _norm(t)]
     if req.group_name is not None:
         note.group_name = req.group_name
     if req.section_id is not None:

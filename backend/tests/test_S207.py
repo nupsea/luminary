@@ -86,7 +86,7 @@ async def test_detect_naming_violations_tag_and_collection(test_db):
 
     assert len(coll_violations) >= 1
     coll_v = next(v for v in coll_violations if v["current_name"] == "Skill_Issue_Analysis")
-    assert coll_v["suggested_name"] == "SKILL-ISSUE-ANALYSIS"
+    assert coll_v["suggested_name"] == "skill-issue-analysis"
     assert coll_v["action"] == "rename"
 
 
@@ -322,7 +322,7 @@ async def test_detect_no_violations_when_normalized(test_db):
         ))
         session.add(NoteCollectionModel(
             id=str(uuid.uuid4()),
-            name="WELL-NAMED",
+            name="well-named",
             color="#6366F1",
             sort_order=0,
             created_at=datetime.now(UTC),

@@ -464,8 +464,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 l10n: {
                   async getLanguage() { return "en-US" },
                   async getDirection() { return "ltr" },
-                  async get(key: string, args: any, fallback: string) { return fallback }, // pdf.js l10n args type is untyped
-                  async translate(element: HTMLElement) { /* no-op */ },
+                  async get(_key: string, _args: any, fallback: string) { return fallback }, // pdf.js l10n args type is untyped
+                  async translate(_element: HTMLElement) { /* no-op */ },
                 } as any, // pdf.js IL10n interface not exported from pdfjs-dist types
               } as any) // pdf.js AnnotationLayerParameters not fully typed in pdfjs-dist
 

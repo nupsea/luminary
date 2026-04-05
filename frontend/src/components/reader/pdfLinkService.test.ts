@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { describe, expect, it, vi, beforeEach, type Mock } from "vitest"
 import { createLinkService } from "./pdfLinkService"
 
 // ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ function makeLink(): HTMLAnchorElement {
 // ---------------------------------------------------------------------------
 
 describe("navigateTo", () => {
-  let mockGoToPage: ReturnType<typeof vi.fn>
+  let mockGoToPage: Mock<(n: number) => void>
 
   beforeEach(() => {
     mockGoToPage = vi.fn()

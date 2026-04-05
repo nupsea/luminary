@@ -124,7 +124,7 @@ class UniversalParser:
             # 9. Markdown: # Header, ## Header
             Signature(
                 "markdown_header",
-                re.compile(r"^#{1,6}\s+.+$", re.M),
+                re.compile(r"^#{1,6}\s+(.+)$", re.M),
                 "paper",  # Use 'paper' doc_type as a generic structure
             ),
         ]
@@ -357,7 +357,10 @@ class UniversalParser:
             return self._segment_chat_grouped(text, matches)
         
         for i, m in enumerate(matches):
-            heading = m.group(0).strip()
+            if sig.id == "markdown_header":
+                heading = m.group(1).strip()
+            else:
+                heading = m.group(0).strip()
             start_pos = m.end()
             end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             body_chunk = text[start_pos:end_pos]

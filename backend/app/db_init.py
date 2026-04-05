@@ -432,7 +432,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # S207: Retroactive naming normalization for tags and collections.
         # Normalizes existing tag slugs and collection names to match conventions
-        # (tags: lower-case-hyphenated, collections: UPPER-CASE-HYPHENATED).
+        # (tags: lower-case-hyphenated, collections: lower-case-hyphenated).
         # Idempotent: skips rows already in normalized form.
         import re  # noqa: PLC0415
 
@@ -459,7 +459,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 return ""
             s = re.sub(r"[_\s]+", "-", s)
             s = re.sub(r"-+", "-", s)
-            s = s.upper().strip("-")
+            s = s.lower().strip("-")
             return s
 
         # Normalize canonical_tags
@@ -478,6 +478,16 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 tag_parent = (
                     "/".join(new_slug.split("/")[:-1])
                     if "/" in new_slug else ""
+                )
+                # Remove rows that would cause a UNIQUE constraint violation on (note_id, tag_full)
+                await conn.execute(
+                    text(
+                        "DELETE FROM note_tag_index "
+                        "WHERE tag_full = :old AND note_id IN ("
+                        "  SELECT note_id FROM note_tag_index WHERE tag_full = :new"
+                        ")"
+                    ),
+                    {"old": old_slug, "new": new_slug},
                 )
                 await conn.execute(
                     text(
@@ -555,6 +565,17 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                         "/".join(new_slug.split("/")[:-1])
                         if "/" in new_slug else ""
                     )
+                    # Remove rows that would cause a UNIQUE constraint violation 
+                    # on (note_id, tag_full)
+                    await conn.execute(
+                        text(
+                            "DELETE FROM note_tag_index "
+                            "WHERE tag_full = :old AND note_id IN ("
+                            "  SELECT note_id FROM note_tag_index WHERE tag_full = :new"
+                            ")"
+                        ),
+                        {"old": old_slug, "new": new_slug},
+                    )
                     await conn.execute(
                         text(
                             "UPDATE note_tag_index "
@@ -582,5 +603,42 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 text("UPDATE note_collections SET name = :name WHERE id = :cid"),
                 {"name": new_name, "cid": coll_id},
             )
+
+        # Normalize document tags (JSON column)
+        import json as _json  # noqa: PLC0415
+        doc_rows = (await conn.execute(
+            text("SELECT id, tags FROM documents WHERE tags IS NOT NULL AND tags != '[]'")
+        )).fetchall()
+        for doc_id, raw_tags in doc_rows:
+            try:
+                tags = _json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(tags, list):
+                continue
+            new_tags = [_norm_tag(t) for t in tags if isinstance(t, str) and _norm_tag(t)]
+            if tags != new_tags:
+                await conn.execute(
+                    text("UPDATE documents SET tags = :tags WHERE id = :did"),
+                    {"tags": _json.dumps(new_tags), "did": doc_id},
+                )
+
+        # Normalize note tags (JSON column)
+        note_rows = (await conn.execute(
+            text("SELECT id, tags FROM notes WHERE tags IS NOT NULL AND tags != '[]'")
+        )).fetchall()
+        for note_id, raw_tags in note_rows:
+            try:
+                tags = _json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(tags, list):
+                continue
+            new_tags = [_norm_tag(t) for t in tags if isinstance(t, str) and _norm_tag(t)]
+            if tags != new_tags:
+                await conn.execute(
+                    text("UPDATE notes SET tags = :tags WHERE id = :nid"),
+                    {"tags": _json.dumps(new_tags), "nid": note_id},
+                )
 
     logger.info("Database tables and FTS5 index initialized")

@@ -1,7 +1,7 @@
 """Naming convention utilities for tags and collections.
 
 Convention:
-  - Collection names: UPPER-CASE, words separated by hyphens (e.g. 'MY-NOTES')
+  - Collection names: lower-case, words separated by hyphens (e.g. 'my-notes')
   - Tag slugs: lower-case, words separated by hyphens, '/' preserved (e.g. 'science/biology')
 """
 
@@ -9,15 +9,15 @@ import re
 
 
 def normalize_collection_name(name: str) -> str:
-    """Normalize a collection name to UPPER-CASE with hyphen separators.
+    """Normalize a collection name to lower-case with hyphen separators.
 
     Algorithm: strip whitespace, replace underscores and spaces with hyphens,
-    collapse consecutive hyphens, convert to upper case, strip leading/trailing hyphens.
+    collapse consecutive hyphens, convert to lower case, strip leading/trailing hyphens.
 
     Examples:
-      'my notes'       -> 'MY-NOTES'
-      'machine_learning' -> 'MACHINE-LEARNING'
-      '  DDIA  Book  '  -> 'DDIA-BOOK'
+      'my notes'       -> 'my-notes'
+      'machine_learning' -> 'machine-learning'
+      '  DDIA  Book  '  -> 'ddia-book'
     """
     s = name.strip()
     if not s:
@@ -26,8 +26,8 @@ def normalize_collection_name(name: str) -> str:
     s = re.sub(r"[_\s]+", "-", s)
     # Collapse consecutive hyphens
     s = re.sub(r"-+", "-", s)
-    # Upper case
-    s = s.upper()
+    # Lower case
+    s = s.lower()
     # Strip leading/trailing hyphens
     s = s.strip("-")
     return s

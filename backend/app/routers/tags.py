@@ -309,9 +309,9 @@ async def merge_tags(
     CanonicalTagModel. All changes roll back if any step fails.
     """
     from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-
-    source_id = req.source_tag_id
-    target_id = req.target_tag_id
+    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+    source_id = normalize_tag_slug(req.source_tag_id)
+    target_id = normalize_tag_slug(req.target_tag_id)
 
     if source_id == target_id:
         raise HTTPException(status_code=422, detail="Source and target tags must differ")

@@ -54,11 +54,11 @@ export function createLinkService(
     externalLinkTarget: 2, // BLANK
     externalLinkRel: "noopener noreferrer nofollow",
     externalLinkEnabled: true,
-    getDestinationHash: (dest: any) => "#", // pdf.js destination type is untyped
-    getAnchorUrl: (hash: string) => "#",
-    setHash: (hash: string) => { /* no-op: required by pdf.js link service interface */ },
-    executeNamedAction: (action: string) => { /* no-op: required by pdf.js link service interface */ },
-    cachePageRef: (ref: any, pageIndex: number) => { /* no-op: required by pdf.js link service interface */ }, // pdf.js ref type is untyped
+    getDestinationHash: (_dest: any) => "#", // pdf.js destination type is untyped
+    getAnchorUrl: (_hash: string) => "#",
+    setHash: (_hash: string) => { /* no-op: required by pdf.js link service interface */ },
+    executeNamedAction: (_action: string) => { /* no-op: required by pdf.js link service interface */ },
+    cachePageRef: (_ref: any, _pageIndex: number) => { /* no-op: required by pdf.js link service interface */ }, // pdf.js ref type is untyped
 
     addLinkAttributes(link: HTMLAnchorElement, url: string, newWindow: boolean) {
       if (url) {

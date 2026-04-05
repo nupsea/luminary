@@ -24,13 +24,13 @@ from app.services.naming import normalize_collection_name, normalize_tag_slug
 
 class TestNormalizeCollectionName:
     def test_basic_spaces(self):
-        assert normalize_collection_name("my notes") == "MY-NOTES"
+        assert normalize_collection_name("my notes") == "my-notes"
 
     def test_underscores(self):
-        assert normalize_collection_name("machine_learning") == "MACHINE-LEARNING"
+        assert normalize_collection_name("machine_learning") == "machine-learning"
 
     def test_extra_whitespace(self):
-        assert normalize_collection_name("  DDIA  Book  ") == "DDIA-BOOK"
+        assert normalize_collection_name("  DDIA  Book  ") == "ddia-book"
 
     def test_empty_string(self):
         assert normalize_collection_name("") == ""
@@ -39,23 +39,23 @@ class TestNormalizeCollectionName:
         assert normalize_collection_name("   ") == ""
 
     def test_numbers(self):
-        assert normalize_collection_name("chapter 42") == "CHAPTER-42"
+        assert normalize_collection_name("chapter 42") == "chapter-42"
 
     def test_trailing_hyphens(self):
-        assert normalize_collection_name("--hello--") == "HELLO"
+        assert normalize_collection_name("--hello--") == "hello"
 
     def test_mixed_separators(self):
-        assert normalize_collection_name("foo_bar baz") == "FOO-BAR-BAZ"
+        assert normalize_collection_name("foo_bar baz") == "foo-bar-baz"
 
     def test_consecutive_hyphens(self):
-        assert normalize_collection_name("a---b") == "A-B"
+        assert normalize_collection_name("a---b") == "a-b"
 
     def test_already_normalized(self):
-        assert normalize_collection_name("MY-NOTES") == "MY-NOTES"
+        assert normalize_collection_name("my-notes") == "my-notes"
 
     def test_unicode_passthrough(self):
         # Non-ASCII characters pass through, only separators change
-        assert normalize_collection_name("cafe latte") == "CAFE-LATTE"
+        assert normalize_collection_name("cafe latte") == "cafe-latte"
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ async def test_post_collection_normalizes_name(test_db):
             json={"name": "my notes", "color": "#6366F1"},
         )
         assert resp.status_code == 201
-        assert resp.json()["name"] == "MY-NOTES"
+        assert resp.json()["name"] == "my-notes"
 
 
 @pytest.mark.asyncio
@@ -346,12 +346,12 @@ async def test_migrate_collections_merges_duplicates(test_db):
         data = resp.json()
         assert data["merged"] >= 1
 
-    # Verify: only one collection remains, named 'MY-NOTES', with all 4 members
+    # Verify: only one collection remains, named 'my-notes', with all 4 members
     async with factory() as session:
         result = await session.execute(text("SELECT id, name FROM note_collections"))
         rows = result.all()
         assert len(rows) == 1
-        assert rows[0][1] == "MY-NOTES"
+        assert rows[0][1] == "my-notes"
         winner_id = rows[0][0]
 
         # The winner should be col_a (more members)

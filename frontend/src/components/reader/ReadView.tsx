@@ -239,7 +239,6 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
             const Tag = HeadingTag(section.level)
             const sectionAnnotations = highlightsVisible ? annotations.filter((a) => a.section_id === section.section_id) : []
             const highlighted = applyHighlights(section.content, sectionAnnotations)
-            const hasHighlights = highlighted !== section.content
             return (
               <div
                 key={section.section_id}

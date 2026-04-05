@@ -4,7 +4,7 @@ clustering normalization.
 Three AC-driven unit/integration tests:
   1. suggest_tags returns normalized tag slugs
   2. duplicate note creation within 5s window returns existing note
-  3. batch_accept_suggestions stores UPPER-CASE collection names
+  3. batch_accept_suggestions stores lower-case collection names
 """
 
 import uuid
@@ -135,13 +135,13 @@ async def test_duplicate_note_dedup_within_5s(test_db):
 
 
 # ---------------------------------------------------------------------------
-# AC11: batch_accept_suggestions stores UPPER-CASE collection names
+# AC11: batch_accept_suggestions stores lower-case collection names
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_batch_accept_normalizes_collection_names(test_db):
-    """batch_accept_suggestions applies normalize_collection_name to UPPER-CASE."""
+    """batch_accept_suggestions applies normalize_collection_name to lower-case."""
     engine, factory, _ = test_db
 
     suggestion_id = str(uuid.uuid4())
@@ -183,7 +183,7 @@ async def test_batch_accept_normalizes_collection_names(test_db):
 
     assert len(result_ids) == 1
 
-    # Verify the collection name is UPPER-CASE normalized
+    # Verify the collection name is lower-case normalized
     async with factory() as session:
         row = (
             await session.execute(
@@ -193,4 +193,4 @@ async def test_batch_accept_normalizes_collection_names(test_db):
         ).fetchone()
 
     assert row is not None
-    assert row[0] == "MACHINE-LEARNING-NOTES"
+    assert row[0] == "machine-learning-notes"

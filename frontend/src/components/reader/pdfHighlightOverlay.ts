@@ -29,7 +29,7 @@ export interface OverlayRect {
  * @param containerRect - bounding rect of the overlay container
  */
 export function computeHighlightRects(
-  spans: HTMLSpanElement[],
+  _spans: HTMLSpanElement[],
   parts: { span: HTMLSpanElement; start: number; end: number }[],
   matchStart: number,
   matchEnd: number,

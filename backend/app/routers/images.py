@@ -139,7 +139,11 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
 
     # Detect media type from extension
     ext = filename.rsplit(".", maxsplit=1)[-1].lower()
-    media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"] else "image/png"
+    media_type = (
+        f"image/{ext}"
+        if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"]
+        else "image/png"
+    )
     return FileResponse(str(abs_path), media_type=media_type)
 
 

@@ -10,13 +10,13 @@ from app.services.naming import normalize_collection_name, normalize_tag_slug
 
 class TestNormalizeCollectionName:
     def test_spaces_to_hyphens(self):
-        assert normalize_collection_name("my notes") == "MY-NOTES"
+        assert normalize_collection_name("my notes") == "my-notes"
 
     def test_underscores_to_hyphens(self):
-        assert normalize_collection_name("machine_learning") == "MACHINE-LEARNING"
+        assert normalize_collection_name("machine_learning") == "machine-learning"
 
     def test_strip_whitespace(self):
-        assert normalize_collection_name("  DDIA  Book  ") == "DDIA-BOOK"
+        assert normalize_collection_name("  DDIA  Book  ") == "ddia-book"
 
     def test_empty_string(self):
         assert normalize_collection_name("") == ""
@@ -25,22 +25,22 @@ class TestNormalizeCollectionName:
         assert normalize_collection_name("   ") == ""
 
     def test_unicode(self):
-        assert normalize_collection_name("cafe latte") == "CAFE-LATTE"
+        assert normalize_collection_name("cafe latte") == "cafe-latte"
 
     def test_numbers(self):
-        assert normalize_collection_name("phase 3 notes") == "PHASE-3-NOTES"
+        assert normalize_collection_name("phase 3 notes") == "phase-3-notes"
 
     def test_trailing_hyphens(self):
-        assert normalize_collection_name("--hello--world--") == "HELLO-WORLD"
+        assert normalize_collection_name("--hello--world--") == "hello-world"
 
     def test_already_normalized(self):
-        assert normalize_collection_name("MY-NOTES") == "MY-NOTES"
+        assert normalize_collection_name("my-notes") == "my-notes"
 
     def test_mixed_separators(self):
-        assert normalize_collection_name("my_reading  notes") == "MY-READING-NOTES"
+        assert normalize_collection_name("my_reading  notes") == "my-reading-notes"
 
     def test_single_word(self):
-        assert normalize_collection_name("python") == "PYTHON"
+        assert normalize_collection_name("python") == "python"
 
 
 # ---------------------------------------------------------------------------

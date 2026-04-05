@@ -10,6 +10,8 @@ const CONTENT_TYPES: ContentType[] = [
   "audio",
   "epub",
   "kindle_clippings",
+  "tech_book",
+  "tech_article",
 ]
 
 const LABELS: Record<ContentType, string> = {
@@ -21,6 +23,8 @@ const LABELS: Record<ContentType, string> = {
   audio: "Audio",
   epub: "EPUB",
   kindle_clippings: "Kindle Highlights",
+  tech_book: "Tech Book",
+  tech_article: "Tech Article",
 }
 
 interface FilterBarProps {

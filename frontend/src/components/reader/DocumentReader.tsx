@@ -8,7 +8,7 @@ import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from 
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
-import type { AnnotationItem, DocumentDetail, SectionItem, SummaryMode, SummaryTabDef } from "./types"
+import type { AnnotationItem, DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
