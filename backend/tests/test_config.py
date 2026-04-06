@@ -10,7 +10,7 @@ def test_settings_defaults():
     try:
         settings = Settings()
         assert settings.LOG_LEVEL == "INFO"
-        assert settings.LITELLM_DEFAULT_MODEL == "ollama/mistral"
+        assert settings.LITELLM_DEFAULT_MODEL == "ollama/gemma4"
         assert settings.PHOENIX_ENABLED is True
     finally:
         if prev is not None:
