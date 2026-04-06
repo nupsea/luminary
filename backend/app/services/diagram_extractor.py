@@ -125,11 +125,9 @@ class DiagramExtractorService:
         """
         from sqlalchemy import select as _select  # noqa: PLC0415
 
-        from app.config import get_settings as _get_settings  # noqa: PLC0415
         from app.database import get_session_factory  # noqa: PLC0415
         from app.models import ImageModel  # noqa: PLC0415
-
-        settings = _get_settings()
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             result = await session.execute(
@@ -168,7 +166,7 @@ class DiagramExtractorService:
             async with _EXTRACT_SEM:
                 try:
                     response = await litellm.acompletion(
-                        model=settings.LITELLM_DEFAULT_MODEL,
+                        **get_litellm_kwargs(background=True),
                         messages=[{"role": "user", "content": prompt}],
                         temperature=0.0,
                     )

@@ -1,12 +1,17 @@
 /**
- * ReferencesPanel -- S138
+ * ReferencesPanel -- S138 + S194
  *
- * Shows LLM-suggested canonical web references for a document, grouped by section.
- * Renders in the DocumentReader right sidebar as the "References" tab.
+ * Shows web references for a document, grouped into three tiers:
+ *  1. Verified (is_valid=true) -- green check badge
+ *  2. Unchecked (is_valid=null) -- amber spinner during validation
+ *  3. Unavailable (is_valid=false) -- collapsed accordion, strikethrough, not clickable
+ *
+ * Auto-triggers validation on mount if any refs have is_valid=null.
  */
 
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, RefreshCw } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
+import { ExternalLink, RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 
 import { API_BASE } from "@/lib/config"
@@ -26,6 +31,8 @@ interface WebReferenceItem {
   excerpt: string
   source_quality: SourceQuality
   is_llm_suggested: boolean
+  is_valid: boolean | null
+  last_checked_at: string | null
   created_at: string
   is_outdated: boolean
 }
@@ -68,15 +75,44 @@ function QualityBadge({ quality }: { quality: SourceQuality }) {
 }
 
 // ---------------------------------------------------------------------------
+// Validation status badge
+// ---------------------------------------------------------------------------
+
+function ValidationBadge({ isValid, isValidating }: { isValid: boolean | null; isValidating: boolean }) {
+  if (isValid === true) {
+    return (
+      <span className="flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
+        <CheckCircle2 size={9} />
+        Verified
+      </span>
+    )
+  }
+  if (isValid === null) {
+    return (
+      <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+        {isValidating ? <Loader2 size={9} className="animate-spin" /> : <AlertCircle size={9} />}
+        {isValidating ? "Checking..." : "Unverified"}
+      </span>
+    )
+  }
+  // is_valid === false -- shown in unavailable section, no badge needed inline
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Single reference row
 // ---------------------------------------------------------------------------
 
 function ReferenceRow({
   ref: item,
   documentId,
+  isValidating,
+  unavailable,
 }: {
   ref: WebReferenceItem
   documentId: string
+  isValidating: boolean
+  unavailable?: boolean
 }) {
   const queryClient = useQueryClient()
 
@@ -94,25 +130,28 @@ function ReferenceRow({
   }
 
   return (
-    <div className="group flex flex-col gap-0.5 rounded-md border border-border p-2 text-xs">
+    <div className={`group flex flex-col gap-0.5 rounded-md border border-border p-2 text-xs ${unavailable ? "opacity-60" : ""}`}>
       <div className="flex items-start justify-between gap-2">
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex min-w-0 items-center gap-1 font-medium text-primary hover:underline"
-        >
-          <ExternalLink size={11} className="shrink-0" />
-          <span className="truncate">{item.title}</span>
-        </a>
+        {unavailable ? (
+          <span className="flex min-w-0 items-center gap-1 font-medium text-muted-foreground line-through">
+            <ExternalLink size={11} className="shrink-0" />
+            <span className="truncate">{item.title}</span>
+          </span>
+        ) : (
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-w-0 items-center gap-1 font-medium text-primary hover:underline"
+          >
+            <ExternalLink size={11} className="shrink-0" />
+            <span className="truncate">{item.title}</span>
+          </a>
+        )}
         <div className="flex shrink-0 items-center gap-1">
           <QualityBadge quality={item.source_quality} />
-          {item.is_llm_suggested && (
-            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-              Not verified
-            </span>
-          )}
-          {item.is_outdated && (
+          <ValidationBadge isValid={item.is_valid} isValidating={isValidating} />
+          {item.is_outdated && !unavailable && (
             <button
               onClick={() => void handleRefresh()}
               title="Re-run extraction for this section"
@@ -129,7 +168,7 @@ function ReferenceRow({
           Term: <span className="font-medium">{item.term}</span>
         </span>
       )}
-      {item.excerpt && (
+      {item.excerpt && !unavailable && (
         <p className="text-[11px] text-muted-foreground line-clamp-2">{item.excerpt}</p>
       )}
     </div>
@@ -145,16 +184,66 @@ interface ReferencesPanelProps {
 }
 
 export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
+  const queryClient = useQueryClient()
+  const [unavailableOpen, setUnavailableOpen] = useState(false)
+
+  // Fetch all refs including invalid
   const { data, isLoading, isError } = useQuery<DocumentReferencesResponse>({
     queryKey: ["doc-references", documentId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/references/documents/${documentId}`)
+      const res = await fetch(
+        `${API_BASE}/references/documents/${documentId}?include_invalid=true`,
+      )
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.json() as Promise<DocumentReferencesResponse>
     },
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   })
+
+  // Validation mutation
+  const validateMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `${API_BASE}/references/documents/${documentId}/validate`,
+        { method: "POST" },
+      )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json()
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
+    },
+  })
+
+  // Refresh mutation (re-extract + validate)
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `${API_BASE}/references/documents/${documentId}/refresh`,
+        { method: "POST" },
+      )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json()
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
+    },
+  })
+
+  // Auto-trigger validation on mount if any refs have is_valid=null
+  const references = data?.references ?? []
+  const hasUnchecked = references.some((r) => r.is_valid === null)
+
+  useEffect(() => {
+    if (hasUnchecked && !validateMutation.isPending) {
+      validateMutation.mutate()
+    }
+    // Only trigger once on mount when unchecked refs are detected
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasUnchecked])
+
+  const isValidating = validateMutation.isPending
 
   // Loading state
   if (isLoading) {
@@ -180,8 +269,6 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
     )
   }
 
-  const references = data?.references ?? []
-
   // Empty state
   if (references.length === 0) {
     return (
@@ -192,26 +279,82 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
     )
   }
 
-  // Group by section_id (null = document-level)
-  const groups = new Map<string | null, WebReferenceItem[]>()
-  for (const ref of references) {
-    const key = ref.section_id
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(ref)
-  }
+  // Split into tiers
+  const verified = references.filter((r) => r.is_valid === true)
+  const unchecked = references.filter((r) => r.is_valid === null)
+  const unavailable = references.filter((r) => r.is_valid === false)
 
   return (
     <div className="flex flex-col gap-4">
-      {Array.from(groups.entries()).map(([sectionId, refs]) => (
-        <div key={sectionId ?? "__doc_level__"} className="flex flex-col gap-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {sectionId ? `Section` : "Document-level"}
+      {/* Refresh button */}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => refreshMutation.mutate()}
+          disabled={refreshMutation.isPending}
+          className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={refreshMutation.isPending ? "animate-spin" : ""} />
+          Refresh references
+        </button>
+      </div>
+
+      {/* Verified tier */}
+      {verified.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h4 className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-green-700">
+            <CheckCircle2 size={11} />
+            Verified ({verified.length})
           </h4>
-          {refs.map((ref) => (
-            <ReferenceRow key={ref.id} ref={ref} documentId={documentId} />
+          {verified.map((ref) => (
+            <ReferenceRow key={ref.id} ref={ref} documentId={documentId} isValidating={false} />
           ))}
         </div>
-      ))}
+      )}
+
+      {/* Unchecked tier */}
+      {unchecked.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h4 className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+            {isValidating ? <Loader2 size={11} className="animate-spin" /> : <AlertCircle size={11} />}
+            {isValidating ? `Checking (${unchecked.length})` : `Unverified (${unchecked.length})`}
+          </h4>
+          {unchecked.map((ref) => (
+            <ReferenceRow key={ref.id} ref={ref} documentId={documentId} isValidating={isValidating} />
+          ))}
+        </div>
+      )}
+
+      {/* Unavailable tier (collapsed accordion) */}
+      {unavailable.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => setUnavailableOpen((o) => !o)}
+            className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          >
+            <span className={`transition-transform ${unavailableOpen ? "rotate-90" : ""}`}>
+              &#9654;
+            </span>
+            Unavailable ({unavailable.length})
+          </button>
+          {unavailableOpen &&
+            unavailable.map((ref) => (
+              <ReferenceRow
+                key={ref.id}
+                ref={ref}
+                documentId={documentId}
+                isValidating={false}
+                unavailable
+              />
+            ))}
+        </div>
+      )}
+
+      {/* Validation/refresh error */}
+      {(validateMutation.isError || refreshMutation.isError) && (
+        <p className="text-xs text-red-500">
+          {validateMutation.isError ? "Validation failed." : "Refresh failed."} Please try again.
+        </p>
+      )}
     </div>
   )
 }

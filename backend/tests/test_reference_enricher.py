@@ -245,15 +245,22 @@ async def test_no_http_calls_when_provider_none(test_db, monkeypatch):
             return_value=_make_mock_llm_response(mock_refs),
         ),
         patch("httpx.AsyncClient") as mock_httpx,
+        # S194: _validate_urls always runs; mock it to avoid real HTTP calls
+        patch.object(
+            ReferenceEnricherService,
+            "_validate_urls",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
     ):
-        # Ensure httpx.AsyncClient is not instantiated
+        # Ensure httpx.AsyncClient is not instantiated by _verify_urls
         mock_httpx.return_value.__aenter__ = AsyncMock(side_effect=AssertionError(
             "httpx.AsyncClient should not be called when provider=none"
         ))
         svc = ReferenceEnricherService()
         await svc.enrich(doc_id)
 
-    # Verify no httpx instantiation happened
+    # Verify no httpx instantiation happened (from _verify_urls)
     mock_httpx.assert_not_called()
 
     async with factory() as session:

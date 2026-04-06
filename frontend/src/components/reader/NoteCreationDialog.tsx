@@ -19,22 +19,11 @@ import {
 } from "@/components/ui/dialog"
 import type { SourceRef } from "./SelectionActionBar"
 import { API_BASE } from "@/lib/config"
+import type { Note } from "@/components/NoteEditorDialog"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface NoteCreationResult {
-  id: string
-  document_id: string | null
-  section_id: string | null
-  chunk_id: string | null
-  content: string
-  tags: string[]
-  group_name: string | null
-  created_at: string
-  updated_at: string
-}
 
 interface ExistingNote {
   id: string
@@ -50,7 +39,7 @@ interface NoteCreationDialogProps {
   sectionHeading?: string
   onClose: () => void
   /** Called with the saved Note so parent can open NoteEditorDialog on it */
-  onSaved: (note: NoteCreationResult) => void
+  onSaved: (note: Note) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +135,7 @@ export function NoteCreationDialog({
     const blockquote = buildBlockquote(selectedText, sourceRef, sectionHeading)
 
     try {
-      let result: NoteCreationResult
+      let result: Note
       if (mode === "existing" && selectedNoteId) {
         // Find the selected note and append the passage
         const existing = existingNotes.find((n) => n.id === selectedNoteId)
@@ -158,7 +147,7 @@ export function NoteCreationDialog({
           body: JSON.stringify({ content: mergedContent }),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        result = (await res.json()) as NoteCreationResult
+        result = (await res.json()) as Note
       } else {
         // POST new note
         const res = await fetch(`${API_BASE}/notes`, {
@@ -173,7 +162,7 @@ export function NoteCreationDialog({
           }),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        result = (await res.json()) as NoteCreationResult
+        result = (await res.json()) as Note
       }
       onSaved(result)
       onClose()

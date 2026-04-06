@@ -1,19 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MapPin } from "lucide-react"
 import {
+  BookOpen,
   BookPlus,
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
   FileText,
-  Loader2,
   Plus,
-  RefreshCw,
   Trash2,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -30,7 +28,6 @@ import { SortSelect } from "@/components/library/SortSelect"
 import { UploadDialog } from "@/components/library/UploadDialog"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { DocumentCard } from "@/components/library/DocumentCard"
-import { DocumentRow } from "@/components/library/DocumentRow"
 import type {
   ContentType,
   DocumentListItem,
@@ -38,10 +35,12 @@ import type {
   SortOption,
 } from "@/components/library/types"
 import { STATUS_LABELS, STATUS_VARIANTS, formatDate } from "@/components/library/utils"
-import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { DocumentReader } from "@/components/reader/DocumentReader"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
+import { buildStatPillNavigateDetail, computeAvgMastery, STAT_PILL_LABELS } from "@/lib/learningUtils"
+import { buildDocActionDetail } from "@/lib/docActionUtils"
+import type { DocAction } from "@/lib/docActionUtils"
 
 import { API_BASE } from "@/lib/config"
 const PAGE_SIZE = 20
@@ -120,137 +119,123 @@ async function deleteDocument(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// LibraryOverview — holistic summary across all ingested documents
+// LibraryStatsBar — compact single-row stats pills (S183)
+// Replaces the large LibraryOverview SSE panel.
 // ---------------------------------------------------------------------------
 
-function LibraryOverview() {
-  const [summary, setSummary] = useState<string>("")
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [notEnough, setNotEnough] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
-  const generated = useRef(false)
+interface DueCountResponse {
+  due_today: number
+}
 
-  async function generate(forceRefresh = false) {
-    if (generated.current && !forceRefresh) return
-    generated.current = true
-    setError(null)
-    setNotEnough(false)
-    setIsStreaming(true)
-    setSummary("")
-    try {
-      const res = await fetch(`${API_BASE}/summarize/all`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "executive", model: null, force_refresh: forceRefresh }),
-      })
-      if (!res.ok || !res.body) throw new Error("Failed")
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
-              if (typeof payload["token"] === "string") {
-                setSummary((s) => s + payload["token"])
-              }
-              if (payload["error"] === "not_enough_summaries") {
-                setNotEnough(true)
-                setIsStreaming(false)
-              } else if (payload["error"] === "llm_unavailable") {
-                setError(
-                  typeof payload["message"] === "string"
-                    ? payload["message"]
-                    : "Ollama is not running. Start it with: ollama serve",
-                )
-                setIsStreaming(false)
-              }
-              if (payload["done"] === true) {
-                setIsStreaming(false)
-              }
-            } catch {
-              // skip malformed SSE event
-            }
-          }
-        }
-      }
-    } catch {
-      generated.current = false
-      setIsStreaming(false)
-      setError("Failed to generate library overview.")
-    }
+interface SessionListItem {
+  accuracy_pct: number | null
+}
+
+interface SessionListResponse {
+  items: SessionListItem[]
+  total: number
+}
+
+async function fetchDueCount(): Promise<DueCountResponse> {
+  const res = await fetch(`${API_BASE}/study/due-count`)
+  if (!res.ok) throw new Error("Failed to fetch due count")
+  return res.json() as Promise<DueCountResponse>
+}
+
+async function fetchRecentSessions(): Promise<SessionListResponse> {
+  const res = await fetch(`${API_BASE}/study/sessions?page_size=20`)
+  if (!res.ok) throw new Error("Failed to fetch sessions")
+  return res.json() as Promise<SessionListResponse>
+}
+
+async function fetchNotesCount(): Promise<number> {
+  const res = await fetch(`${API_BASE}/notes`)
+  if (!res.ok) return 0
+  const data = (await res.json()) as unknown[]
+  return data.length
+}
+
+interface LibraryStatsBarProps {
+  totalDocuments: number
+  isDocumentsLoading: boolean
+}
+
+function LibraryStatsBar({ totalDocuments, isDocumentsLoading }: LibraryStatsBarProps) {
+  const { data: dueData, isLoading: isDueLoading } = useQuery({
+    queryKey: ["stats-due-count"],
+    queryFn: fetchDueCount,
+    staleTime: 60_000,
+  })
+
+  const { data: sessionsData, isLoading: isSessionsLoading } = useQuery({
+    queryKey: ["stats-sessions"],
+    queryFn: fetchRecentSessions,
+    staleTime: 60_000,
+  })
+
+  const { data: notesCount, isLoading: isNotesLoading } = useQuery({
+    queryKey: ["stats-notes-count"],
+    queryFn: fetchNotesCount,
+    staleTime: 60_000,
+  })
+
+  const avgMastery =
+    sessionsData && !isSessionsLoading
+      ? computeAvgMastery(sessionsData.items.map((s) => s.accuracy_pct))
+      : null
+
+  function handlePillClick(pill: "study" | "notes" | "progress") {
+    window.dispatchEvent(
+      new CustomEvent("luminary:navigate", { detail: buildStatPillNavigateDetail(pill) })
+    )
   }
 
+  const pillBase =
+    "flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer select-none"
+
   return (
-    <div className="rounded-lg border border-border bg-card">
-      <button
-        onClick={() => setCollapsed((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left"
-      >
-        <span className="text-sm font-semibold text-foreground">Library Overview</span>
-        <ChevronDown
-          size={14}
-          className={cn(
-            "text-muted-foreground transition-transform",
-            collapsed && "-rotate-90",
-          )}
-        />
+    <div className="flex flex-wrap items-center gap-2" aria-label="Library stats">
+      {/* Books count -- no navigation, just informational */}
+      <span className={pillBase} style={{ cursor: "default" }}>
+        {isDocumentsLoading ? (
+          <Skeleton className="h-3 w-8 inline-block" />
+        ) : (
+          <strong>{totalDocuments}</strong>
+        )}
+        <span className="text-muted-foreground">{STAT_PILL_LABELS.books}</span>
+      </span>
+
+      {/* Notes count -- navigates to Notes tab */}
+      <button className={pillBase} onClick={() => handlePillClick("notes")}>
+        {isNotesLoading ? (
+          <Skeleton className="h-3 w-8 inline-block" />
+        ) : (
+          <strong>{notesCount ?? 0}</strong>
+        )}
+        <span className="text-muted-foreground">{STAT_PILL_LABELS.notes}</span>
       </button>
-      {!collapsed && (
-        <div className="border-t border-border px-4 pb-4 pt-3">
-          {error && (
-            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              {error}
-            </div>
-          )}
-          {notEnough ? (
-            <p className="text-sm text-muted-foreground">
-              Ingest at least one document to get a library overview.
-            </p>
-          ) : isStreaming && !summary ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 size={14} className="animate-spin" />
-              Summarizing...
-            </div>
-          ) : summary ? (
-            <div className="space-y-2">
-              <div>
-                <MarkdownRenderer>{summary}</MarkdownRenderer>
-                {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
-              </div>
-              {!isStreaming && (
-                <button
-                  title="Regenerate summary (uses LLM — may take a moment)"
-                  onClick={() => void generate(true)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <RefreshCw size={12} />
-                  Regenerate
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <p className="text-sm text-muted-foreground">
-                Generate a holistic summary across all your documents.
-              </p>
-              <button
-                onClick={() => void generate()}
-                className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                Generate
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+
+      {/* Avg mastery -- navigates to Progress tab */}
+      <button className={pillBase} onClick={() => handlePillClick("progress")}>
+        {isSessionsLoading ? (
+          <Skeleton className="h-3 w-8 inline-block" />
+        ) : avgMastery !== null ? (
+          <strong>{avgMastery}%</strong>
+        ) : (
+          <strong className="text-muted-foreground">--</strong>
+        )}
+        <span className="text-muted-foreground">{STAT_PILL_LABELS.mastery}</span>
+      </button>
+
+      {/* Cards due -- navigates to Study tab */}
+      <button className={pillBase} onClick={() => handlePillClick("study")}>
+        {isDueLoading ? (
+          <Skeleton className="h-3 w-8 inline-block" />
+        ) : (
+          <strong>{dueData?.due_today ?? 0}</strong>
+        )}
+        <span className="text-muted-foreground">{STAT_PILL_LABELS.due}</span>
+      </button>
     </div>
   )
 }
@@ -403,8 +388,10 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <BookPlus size={48} className="mb-4 text-muted-foreground/50" />
-      <h2 className="mb-1 text-lg font-semibold text-foreground">No documents yet</h2>
-      <p className="mb-6 text-sm text-muted-foreground">Add your first document to get started.</p>
+      <h2 className="mb-1 text-lg font-semibold text-foreground">No books yet</h2>
+      <p className="mb-6 text-sm text-muted-foreground">
+        Ingest a PDF or YouTube video to get started.
+      </p>
       <button
         onClick={onAdd}
         className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -628,6 +615,9 @@ function WhereToStartPanel({
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
+  const setChatScope = useAppStore((s) => s.setChatScope)
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const libraryView = useAppStore((s) => s.libraryView)
   const setLibraryView = useAppStore((s) => s.setLibraryView)
   const queryClient = useQueryClient()
@@ -640,6 +630,9 @@ export default function Learning() {
   const docParam = searchParams.get("doc")
   const [savedSectionId, setSavedSectionId] = useState<string | undefined>(
     searchParams.get("section_id") ?? undefined,
+  )
+  const [savedChunkId, setSavedChunkId] = useState<string | undefined>(
+    searchParams.get("chunk_id") ?? undefined,
   )
   const [savedPage, setSavedPage] = useState<number | undefined>(() => {
     const raw = searchParams.get("page")
@@ -708,6 +701,24 @@ export default function Learning() {
     setActiveDocument(id)
   }
 
+  // S191: Document action menu handler
+  function handleDocAction(docId: string, action: DocAction) {
+    if (action === "read") {
+      handleDocumentClick(docId)
+      return
+    }
+    if (action === "chat") {
+      setChatSelectedDocId(docId)
+      setChatScope("single")
+    } else if (action === "notes") {
+      setNotesDocumentId(docId)
+    } else {
+      setActiveDocument(docId)
+    }
+    const detail = buildDocActionDetail(action, docId)
+    window.dispatchEvent(new CustomEvent("luminary:navigate", { detail }))
+  }
+
   function handleTagClick(tag: string) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -774,9 +785,11 @@ export default function Learning() {
     if (docParam) {
       // Snapshot deep-link params into state before clearing URL
       const sectionId = searchParams.get("section_id") ?? undefined
+      const chunkId = searchParams.get("chunk_id") ?? undefined
       const rawPage = searchParams.get("page")
       const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
       setSavedSectionId(sectionId)
+      setSavedChunkId(chunkId)
       setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
 
       setActiveDocument(docParam)
@@ -784,6 +797,7 @@ export default function Learning() {
         const next = new URLSearchParams(prev)
         next.delete("doc")
         next.delete("section_id")
+        next.delete("chunk_id")
         next.delete("page")
         return next
       })
@@ -809,8 +823,14 @@ export default function Learning() {
         <div className="flex-1 min-h-0">
           <DocumentReader
             documentId={activeDocumentId}
-            onBack={() => { setActiveDocument(null); setSavedSectionId(undefined); setSavedPage(undefined) }}
+            onBack={() => {
+              setActiveDocument(null)
+              setSavedSectionId(undefined)
+              setSavedChunkId(undefined)
+              setSavedPage(undefined)
+            }}
             initialSectionId={savedSectionId}
+            initialChunkId={savedChunkId}
             initialPage={savedPage}
           />
         </div>
@@ -909,41 +929,35 @@ export default function Learning() {
                 </div>
               )}
 
-              {/* Library overview — only on first page, no active filters */}
+              {/* Stats bar -- compact single-row pills (S183) */}
               {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
-                <LibraryOverview />
+                <LibraryStatsBar
+                  totalDocuments={total}
+                  isDocumentsLoading={isLoading}
+                />
               )}
 
-              {/* Recently accessed — hide when filters active */}
-              {recentItems && recentItems.length > 0 && selectedTypes.size === 0 && !tagFilter && page === 1 && (
-                <section>
-                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Recently accessed
-                  </h2>
-                  {libraryView === "grid" ? (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                      {recentItems.map((doc) => (
-                        <DocumentCard
-                          key={doc.id}
-                          doc={doc}
-                          onClick={handleDocumentClick}
-                          onTagClick={handleTagClick}
-                          onTagsChange={handleTagsChange}
-                          onDelete={!selectMode ? handleDeleteDocument : undefined}
-                          onContentTypeChange={handleContentTypeChange}
-                          selected={selectedIds.has(doc.id)}
-                          onSelect={selectMode ? handleSelect : undefined}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {recentItems.map((doc) => (
-                        <DocumentRow key={doc.id} doc={doc} onClick={handleDocumentClick} />
-                      ))}
-                    </div>
+              {/* Continue reading -- single highlighted row for most recently accessed doc (S183) */}
+              {recentItems && recentItems.length > 0 && selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
+                <div
+                  className="flex cursor-pointer select-none items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10"
+                  onClick={() => handleDocumentClick(recentItems[0].id)}
+                >
+                  <BookOpen size={15} className="shrink-0 text-primary" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-primary">
+                      Continue reading
+                    </span>
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {recentItems[0].title}
+                    </span>
+                  </div>
+                  {recentItems[0].reading_progress_pct > 0 && (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {Math.round(recentItems[0].reading_progress_pct * 100)}% read
+                    </span>
                   )}
-                </section>
+                </div>
               )}
 
               <section>
@@ -994,6 +1008,7 @@ export default function Learning() {
                         onTagsChange={handleTagsChange}
                         onDelete={!selectMode ? handleDeleteDocument : undefined}
                         onContentTypeChange={handleContentTypeChange}
+                        onAction={handleDocAction}
                         selected={selectedIds.has(doc.id)}
                         onSelect={selectMode ? handleSelect : undefined}
                       />

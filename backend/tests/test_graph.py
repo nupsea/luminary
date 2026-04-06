@@ -625,3 +625,123 @@ def test_get_prerequisite_edges_for_graph_wire_format(graph_svc: KuzuService):
     assert e["target"] == "e2"
     assert e["weight"] == pytest.approx(0.95)
     assert e["relation"] == "PREREQUISITE_OF"
+
+
+# ---------------------------------------------------------------------------
+# S172: Note nodes in Viz graph (include_notes param)
+# ---------------------------------------------------------------------------
+
+
+def _upsert_note_for_entity(
+    svc: KuzuService,
+    note_id: str,
+    preview: str,
+    entity_id: str,
+    rel_type: str = "WRITTEN_ABOUT",
+) -> None:
+    """Helper: upsert a Note node and connect it to an Entity via rel_type."""
+    conn = svc._conn
+    # Upsert Note node
+    r = conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": note_id})
+    if not r.has_next():
+        conn.execute(
+            "CREATE (:Note {id: $id, note_id: $nid, preview: $prev, created_at: '2026-01-01'})",
+            {"id": note_id, "nid": note_id, "prev": preview},
+        )
+    # Create edge
+    if rel_type == "WRITTEN_ABOUT":
+        conn.execute(
+            "MATCH (n:Note {id: $nid}), (e:Entity {id: $eid})"
+            " CREATE (n)-[:WRITTEN_ABOUT {confidence: 0.9}]->(e)",
+            {"nid": note_id, "eid": entity_id},
+        )
+    else:
+        conn.execute(
+            "MATCH (n:Note {id: $nid}), (e:Entity {id: $eid})"
+            " CREATE (n)-[:TAG_IS_CONCEPT {tag: 'test'}]->(e)",
+            {"nid": note_id, "eid": entity_id},
+        )
+
+
+def test_include_notes_returns_note_nodes(graph_svc: KuzuService):
+    """get_graph_for_document with include_notes=True returns Note nodes."""
+    graph_svc.upsert_entity("e1", "backpropagation", "CONCEPT")
+    graph_svc.upsert_document("d1", "Deep Learning", "book")
+    graph_svc.add_mention("e1", "d1")
+    _upsert_note_for_entity(graph_svc, "n1", "Notes on backprop training", "e1")
+
+    data = graph_svc.get_graph_for_document("d1", include_notes=True)
+    note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
+    assert len(note_nodes) == 1
+    nn = note_nodes[0]
+    assert nn["note_id"] == "n1"
+    assert nn["label"] == "Notes on backprop training"
+    # WRITTEN_ABOUT edge present
+    note_edges = [e for e in data["edges"] if e.get("relation") == "WRITTEN_ABOUT"]
+    assert len(note_edges) == 1
+    assert note_edges[0]["source"] == "n1"
+    assert note_edges[0]["target"] == "e1"
+
+
+def test_include_notes_false_excludes_notes(graph_svc: KuzuService):
+    """get_graph_for_document without include_notes returns no Note nodes."""
+    graph_svc.upsert_entity("e1", "gradient", "CONCEPT")
+    graph_svc.upsert_document("d1", "ML Book", "book")
+    graph_svc.add_mention("e1", "d1")
+    _upsert_note_for_entity(graph_svc, "n1", "Gradient notes", "e1")
+
+    data = graph_svc.get_graph_for_document("d1")  # include_notes=False by default
+    note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
+    assert len(note_nodes) == 0
+
+
+def test_isolated_note_excluded(graph_svc: KuzuService):
+    """A Note with no edges to entities in scope is NOT included."""
+    graph_svc.upsert_entity("e1", "neural nets", "CONCEPT")
+    graph_svc.upsert_entity("e2", "attention", "CONCEPT")
+    graph_svc.upsert_document("d1", "Deep Learning", "book")
+    graph_svc.add_mention("e1", "d1")
+    # n1 connects to e1 (in scope for d1)
+    _upsert_note_for_entity(graph_svc, "n1", "Neural net notes", "e1")
+    # n2 connects to e2 (NOT in scope for d1 since e2 not mentioned in d1)
+    _upsert_note_for_entity(graph_svc, "n2", "Attention notes", "e2")
+
+    data = graph_svc.get_graph_for_document("d1", include_notes=True)
+    note_ids = {n["note_id"] for n in data["nodes"] if n.get("type") == "note"}
+    assert "n1" in note_ids
+    assert "n2" not in note_ids
+
+
+def test_links_to_edges_included(graph_svc: KuzuService):
+    """LINKS_TO edges between notes in scope are included when include_notes=True."""
+    graph_svc.upsert_entity("e1", "optimization", "CONCEPT")
+    graph_svc.upsert_document("d1", "Optimization Book", "book")
+    graph_svc.add_mention("e1", "d1")
+    _upsert_note_for_entity(graph_svc, "n1", "Note on SGD", "e1")
+    _upsert_note_for_entity(graph_svc, "n2", "Note on Adam", "e1")
+    # Add LINKS_TO edge between n1 and n2
+    graph_svc._conn.execute(
+        "MATCH (a:Note {id: 'n1'}), (b:Note {id: 'n2'})"
+        " CREATE (a)-[:LINKS_TO {link_type: 'elaborates'}]->(b)"
+    )
+
+    data = graph_svc.get_graph_for_document("d1", include_notes=True)
+    links_to_edges = [e for e in data["edges"] if e.get("relation") == "LINKS_TO"]
+    assert len(links_to_edges) == 1
+    assert links_to_edges[0]["source"] == "n1"
+    assert links_to_edges[0]["target"] == "n2"
+
+
+def test_get_graph_for_documents_include_notes(graph_svc: KuzuService):
+    """get_graph_for_documents with include_notes=True includes Note nodes."""
+    graph_svc.upsert_entity("e1", "physics", "CONCEPT")
+    graph_svc.upsert_document("d1", "Physics Book", "book")
+    graph_svc.upsert_document("d2", "Physics Book 2", "book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e1", "d2")
+    _upsert_note_for_entity(graph_svc, "n1", "Physics note", "e1")
+
+    data = graph_svc.get_graph_for_documents(["d1", "d2"], include_notes=True)
+    note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
+    assert len(note_nodes) == 1
+    assert note_nodes[0]["note_id"] == "n1"

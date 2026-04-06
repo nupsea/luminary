@@ -207,3 +207,196 @@ async def test_document_list_includes_source_url(test_db):
     assert target is not None
     assert target["source_url"] == "https://www.youtube.com/watch?v=test123"
     assert target["video_title"] == "My YouTube Talk"
+
+
+# ---------------------------------------------------------------------------
+# S182: chunks endpoint and channel_name field tests
+# ---------------------------------------------------------------------------
+
+
+def test_document_model_has_youtube_url_and_channel_name():
+    """DocumentModel includes youtube_url and channel_name nullable columns."""
+    doc = DocumentModel(
+        id="test-id",
+        title="Test",
+        format="wav",
+        content_type="audio",
+        word_count=0,
+        page_count=0,
+        file_path="/tmp/test.wav",
+        stage="complete",
+        tags=[],
+        source_url="https://www.youtube.com/watch?v=abc",
+        video_title="Test",
+        channel_name="Test Channel",
+        youtube_url="https://www.youtube.com/watch?v=abc",
+    )
+    assert doc.channel_name == "Test Channel"
+    assert doc.youtube_url == "https://www.youtube.com/watch?v=abc"
+    # Nullable: can be None
+    doc2 = DocumentModel(
+        id="test-id-2",
+        title="Test2",
+        format="wav",
+        content_type="audio",
+        word_count=0,
+        page_count=0,
+        file_path="/tmp/test2.wav",
+        stage="complete",
+        tags=[],
+    )
+    assert doc2.channel_name is None
+    assert doc2.youtube_url is None
+
+
+async def test_get_document_chunks_returns_youtube_chunks(test_db):
+    """GET /documents/{id}/chunks returns chunks for a YouTube document."""
+    engine, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="YouTube Lecture",
+                format="wav",
+                content_type="audio",
+                word_count=300,
+                page_count=0,
+                file_path="/tmp/lecture.wav",
+                stage="complete",
+                tags=[],
+                source_url="https://www.youtube.com/watch?v=xyz",
+                video_title="YouTube Lecture",
+                channel_name="Lecture Channel",
+            )
+        )
+        from app.models import ChunkModel
+
+        for i in range(3):
+            session.add(
+                ChunkModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    text=f"Transcript chunk {i} text.",
+                    chunk_index=i,
+                    token_count=10,
+                )
+            )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get(f"/documents/{doc_id}/chunks")
+
+    assert resp.status_code == 200
+    chunks = resp.json()
+    assert len(chunks) == 3
+    # Returned in chunk_index order
+    assert chunks[0]["chunk_index"] == 0
+    assert chunks[1]["chunk_index"] == 1
+    assert chunks[2]["chunk_index"] == 2
+    assert "text" in chunks[0]
+    assert "Transcript chunk 0 text." in chunks[0]["text"]
+
+
+async def test_get_document_chunks_returns_404_for_missing_document(test_db):
+    """GET /documents/{id}/chunks returns 404 when document does not exist."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/documents/nonexistent-doc-id/chunks")
+
+    assert resp.status_code == 404
+
+
+async def test_get_document_chunks_returns_empty_for_no_chunks(test_db):
+    """GET /documents/{id}/chunks returns [] when document has no chunks yet."""
+    engine, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Processing Video",
+                format="wav",
+                content_type="audio",
+                word_count=0,
+                page_count=0,
+                file_path="/tmp/processing.wav",
+                stage="parsing",
+                tags=[],
+                source_url="https://www.youtube.com/watch?v=new",
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get(f"/documents/{doc_id}/chunks")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
+    """POST /documents/ingest-url stores channel_name from yt-dlp metadata."""
+    engine, factory, tmp_path = test_db
+
+    async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None):
+        pass
+
+    monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
+
+    async def _fake_download_audio(url: str, dest_stem: Path) -> None:
+        dest_stem.with_suffix(".wav").write_bytes(b"\x00" * 100)
+
+    with (
+        patch(
+            "app.services.youtube_downloader.check_ytdlp_available",
+            return_value=True,
+        ),
+        patch(
+            "app.services.youtube_downloader.check_ffmpeg_available",
+            return_value=True,
+        ),
+        patch(
+            "app.services.youtube_downloader.fetch_metadata",
+            new=AsyncMock(
+                return_value={
+                    "title": "My Lecture",
+                    "uploader": "Prof. Smith",
+                    "id": "lec001",
+                }
+            ),
+        ),
+        patch(
+            "app.services.youtube_downloader.download_audio",
+            new=AsyncMock(side_effect=_fake_download_audio),
+        ),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/documents/ingest-url",
+                json={"url": "https://www.youtube.com/watch?v=lec001"},
+            )
+
+    assert resp.status_code == 200, resp.text
+    doc_id = resp.json()["document_id"]
+
+    from sqlalchemy import select as sa_select
+
+    async with factory() as session:
+        result = await session.execute(
+            sa_select(DocumentModel).where(DocumentModel.id == doc_id)
+        )
+        doc = result.scalar_one_or_none()
+
+    assert doc is not None
+    assert doc.channel_name == "Prof. Smith"
+    assert doc.youtube_url == "https://www.youtube.com/watch?v=lec001"

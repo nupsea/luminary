@@ -25,7 +25,6 @@ import re
 import litellm
 from sqlalchemy import select, update
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel
 from app.services.entity_disambiguator import _strip_honorifics
@@ -171,14 +170,15 @@ class ConceptLinkerService:
         Returns safe defaults if LLM is unreachable or JSON parse fails.
         Raises litellm.ServiceUnavailableError (propagates to worker caller).
         """
-        settings = get_settings()
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         user_prompt = (
             f'Concept: "{concept_name}"\n\n'
             f"Passage A:\n{summary_a[:600]}\n\n"
             f"Passage B:\n{summary_b[:600]}"
         )
         response = await litellm.acompletion(
-            model=settings.LITELLM_DEFAULT_MODEL,
+            **get_litellm_kwargs(background=True),
             messages=[
                 {"role": "system", "content": _CONTRADICTION_SYSTEM},
                 {"role": "user", "content": user_prompt},

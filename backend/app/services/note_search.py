@@ -113,7 +113,7 @@ class NoteSearchService:
             from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
             svc = get_lancedb_service()
-            table = svc._get_note_table()
+            table = svc._get_or_create_note_table()
             if table.count_rows() == 0:
                 return []
             vector = get_embedding_service().encode([query])[0]

@@ -400,7 +400,7 @@ function EvalHistorySparkline({ history }: { history: EvalHistoryItem[] }) {
         <XAxis dataKey="run" label={{ value: "Run", position: "insideBottomRight", offset: -4, fontSize: 10 }} tick={{ fontSize: 10 }} />
         <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} />
         <Tooltip
-          formatter={(v: number | string | undefined, name: string | undefined) =>
+          formatter={(v, name) =>
             typeof v === "number" ? [v.toFixed(3), name ?? ""] : [(v ?? "—"), name ?? ""]
           }
         />
@@ -462,7 +462,7 @@ function RAGQualityChart({ evalRuns }: { evalRuns: EvalRun[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
         <XAxis dataKey="dataset" tick={{ fontSize: 11 }} />
         <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(v: number | string | undefined) => (typeof v === "number" ? v.toFixed(3) : (v ?? "—"))} />
+        <Tooltip formatter={(v) => (typeof v === "number" ? v.toFixed(3) : (v ?? "—"))} />
         <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
         <ReferenceLine y={0.65} stroke="#6366f1" strokeDasharray="4 4" label={{ value: "HR@5 target 0.65", position: "insideTopRight", fontSize: 10 }} />
         <ReferenceLine y={0.9} stroke="#22c55e" strokeDasharray="4 4" label={{ value: "Faith. target 0.9", position: "insideBottomRight", fontSize: 10 }} />

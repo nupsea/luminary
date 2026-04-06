@@ -2,8 +2,10 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { Check, Pencil, Trash2, X } from "lucide-react"
+import { BookOpen, Check, MessageSquare, Network, Pencil, MoreVertical, StickyNote, Trash2, X, Zap } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import type { DocAction } from "@/lib/docActionUtils"
+import { DOC_ACTIONS } from "@/lib/docActionUtils"
 import type { ContentType, DocumentListItem } from "./types"
 import {
   CONTENT_TYPE_ICONS,
@@ -50,12 +52,22 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
   audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
   epub: { label: "EPUB", className: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
   kindle_clippings: { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
+  tech_book: { label: "Tech Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
+  tech_article: { label: "Tech Article", className: "bg-teal-100 text-teal-700 hover:bg-teal-200" },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
 const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
 
-const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes"]
+const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "tech_book", "tech_article"]
+
+const ACTION_ICONS: Record<DocAction, typeof BookOpen> = {
+  read: BookOpen,
+  chat: MessageSquare,
+  study: Zap,
+  notes: StickyNote,
+  viz: Network,
+}
 
 interface DocumentCardProps {
   doc: DocumentListItem
@@ -64,6 +76,7 @@ interface DocumentCardProps {
   onTagsChange?: (id: string, tags: string[]) => void
   onDelete?: (id: string) => void
   onContentTypeChange?: (id: string, contentType: ContentType) => void
+  onAction?: (docId: string, action: DocAction) => void
   selected?: boolean
   onSelect?: (id: string, selected: boolean) => void
   selectMode?: boolean
@@ -76,6 +89,7 @@ export function DocumentCard({
   onTagsChange,
   onDelete,
   onContentTypeChange,
+  onAction,
   selected = false,
   onSelect,
   selectMode = false,
@@ -89,18 +103,23 @@ export function DocumentCard({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [typePopoverOpen, setTypePopoverOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const actionMenuRef = useRef<HTMLDivElement>(null)
 
   // Close popover on outside click
   useEffect(() => {
-    if (!typePopoverOpen) return
+    if (!typePopoverOpen && !actionMenuOpen) return
     function handleClick(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (typePopoverOpen && popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setTypePopoverOpen(false)
+      }
+      if (actionMenuOpen && actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+        setActionMenuOpen(false)
       }
     }
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
-  }, [typePopoverOpen])
+  }, [typePopoverOpen, actionMenuOpen])
 
   function handleCardClick(e: React.MouseEvent) {
     if (selectMode && onSelect) {
@@ -187,6 +206,44 @@ export function DocumentCard({
           <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
             {STATUS_LABELS[doc.learning_status]}
           </Badge>
+          {/* S191: Document action menu */}
+          {onAction && !selectMode && (
+            <div className="relative" ref={actionMenuRef}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setActionMenuOpen((v) => !v)
+                }}
+                className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+                title="Actions"
+              >
+                <MoreVertical size={14} />
+              </button>
+              {actionMenuOpen && (
+                <div
+                  className="absolute right-0 top-full z-30 mt-1 w-48 rounded-lg border border-border bg-background p-1 shadow-lg"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {DOC_ACTIONS.map(({ action, label }) => {
+                    const ActionIcon = ACTION_ICONS[action]
+                    return (
+                      <button
+                        key={action}
+                        onClick={() => {
+                          setActionMenuOpen(false)
+                          onAction(doc.id, action)
+                        }}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                      >
+                        <ActionIcon size={14} className="shrink-0 text-muted-foreground" />
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {onDelete && !selectMode && (
             <button
               onClick={(e) => {

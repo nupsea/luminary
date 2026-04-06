@@ -14,7 +14,6 @@ from datetime import UTC, datetime
 import litellm
 from sqlalchemy import select
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import SectionModel, SectionSummaryModel
 
@@ -114,15 +113,16 @@ class SectionSummarizerService:
         )
 
         semaphore = asyncio.Semaphore(concurrency)
-        model = get_settings().LITELLM_DEFAULT_MODEL
         total_inserted = 0
 
         async def _summarize_unit(unit_index: int, unit: dict) -> None:
+            from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
             nonlocal total_inserted
             async with semaphore:
                 try:
                     response = await litellm.acompletion(
-                        model=model,
+                        **get_litellm_kwargs(background=True),
                         messages=[
                             {"role": "system", "content": _SYSTEM_PROMPT},
                             {"role": "user", "content": unit["text"][:TEXT_HARD_CAP]},
@@ -162,7 +162,7 @@ class SectionSummarizerService:
             )
         except litellm.ServiceUnavailableError:
             logger.warning(
-                "section_summarizer: Ollama unreachable — skipping section summaries",
+                "section_summarizer: LLM unavailable — skipping section summaries",
                 extra={"doc_id": document_id},
             )
             return 0

@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import logging.config
+import os
 import shutil
+import signal
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,13 +18,15 @@ from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.database import get_db, get_engine
+from app.database import get_db, get_engine, get_session_factory
 from app.db_init import create_all_tables
 from app.models import SettingsModel
+from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.clips import router as clips_router
 from app.routers.code_executor import router as code_executor_router
+from app.routers.collections import router as collections_router
 from app.routers.documents import router as documents_router
 from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
@@ -41,6 +46,7 @@ from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
+from app.routers.tags import router as tags_router
 from app.telemetry import setup_tracing
 
 
@@ -58,10 +64,41 @@ def configure_logging(log_level: str = "INFO") -> None:
 logger = logging.getLogger(__name__)
 
 
+def _release_kuzu_lock(kuzu_path: Path) -> None:
+    """Kill any other processes holding an open file handle on the Kuzu database file."""
+    if not kuzu_path.exists():
+        return
+    try:
+        result = subprocess.run(
+            ["lsof", "-t", str(kuzu_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
+        current_pid = os.getpid()
+        for pid in pids:
+            if pid == current_pid:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                logger.warning(
+                    "Released Kuzu lock by terminating stale process", extra={"pid": pid}
+                )
+            except ProcessLookupError:
+                pass
+    except Exception:
+        logger.warning("Could not check/release Kuzu lock -- proceeding anyway")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
+
+    # Release any stale Kuzu lock before initialising the graph service
+    kuzu_path = Path(settings.DATA_DIR).expanduser() / "graph.kuzu"
+    _release_kuzu_lock(kuzu_path)
 
     # Initial DB setup
     engine = get_engine()
@@ -79,22 +116,23 @@ async def lifespan(app: FastAPI):
     (data_dir / "notes").mkdir(exist_ok=True)
     (data_dir / "audio").mkdir(exist_ok=True)
 
-    # Startup health check (Ollama)
+    # Startup health check (Ollama) — only warn when private/hybrid mode needs it
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
-                logger.info(
-                    "Ollama check: reachable at %s (status %s)",
-                    settings.OLLAMA_URL,
-                    resp.status_code,
-                )
+                logger.info("Ollama reachable at %s", settings.OLLAMA_URL)
     except Exception:
-        logger.warning(
-            "Ollama unreachable at startup — LLM features will be degraded. "
-            "Ensure Ollama is running at: %s",
-            settings.OLLAMA_URL,
-        )
+        from app.services.settings_service import _cache as _llm_cache  # noqa: PLC0415
+        _mode = _llm_cache.get("llm_mode", "private")
+        if _mode in ("private", "hybrid"):
+            logger.warning(
+                "Ollama unreachable at startup (mode=%s) — local LLM features will be degraded. "
+                "Ensure Ollama is running at: %s",
+                _mode, settings.OLLAMA_URL,
+            )
+        else:
+            logger.debug("Ollama not reachable at startup (mode=%s, not needed)", _mode)
 
     # ffmpeg check — required for video (MP4) ingestion.
     _ffmpeg_path = shutil.which("ffmpeg")
@@ -125,6 +163,17 @@ async def lifespan(app: FastAPI):
     _worker.register("concept_link", concept_link_handler)
     await _worker.start()
 
+    # Load persisted LLM settings into cache so cloud mode is active from first request,
+    # not only after the frontend hits GET /settings/llm.
+    try:
+        from app.services.settings_service import load_llm_settings  # noqa: PLC0415
+
+        async with get_session_factory()() as _settings_db:
+            await load_llm_settings(_settings_db)
+        logger.info("LLM settings loaded from DB")
+    except Exception:
+        logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
@@ -144,8 +193,10 @@ app.add_middleware(
 )
 
 
+app.include_router(admin_router)
 app.include_router(annotations_router)
 app.include_router(clips_router)
+app.include_router(collections_router)
 app.include_router(chat_meta_router)
 app.include_router(documents_router)
 app.include_router(evals_router)
@@ -167,6 +218,7 @@ app.include_router(mastery_router)
 app.include_router(study_router)
 app.include_router(code_executor_router)
 app.include_router(summarize_router)
+app.include_router(tags_router)
 
 
 @app.get("/health")

@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { CheckCircle2, Loader2, StickyNote, XCircle } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -11,6 +11,7 @@ export interface GapCardData {
   covered: string[]
   query_used?: string
   document_id?: string
+  auto_collection_id?: string
 }
 
 interface GapResultCardProps {
@@ -95,7 +96,25 @@ export function GapResultCard({ data, documentId }: GapResultCardProps) {
             {data.gaps.map((gap, i) => (
               <li key={i} className="flex items-start gap-1.5 text-sm">
                 <XCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
-                <span>{gap}</span>
+                <span className="flex-1">{gap}</span>
+                <button
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent("luminary:navigate", {
+                        detail: {
+                          tab: "notes",
+                          prefilledContent: `# ${gap}`,
+                          collectionId: data.auto_collection_id ?? undefined,
+                        },
+                      })
+                    )
+                  }}
+                  className="ml-1 shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  title="Take a note on this"
+                >
+                  <StickyNote size={12} />
+                  Note
+                </button>
               </li>
             ))}
           </ul>

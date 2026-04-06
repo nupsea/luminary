@@ -55,10 +55,11 @@ export function SourceCitationChips({ citations, navigateToCitation }: Props) {
           const titleAbbrev = c.document_title
             ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "..." : ""}`
             : "Doc"
-          const headingAbbrev = c.section_heading
-            ? ` / ${c.section_heading.slice(0, 30)}${c.section_heading.length > 30 ? "..." : ""}`
+          const headingOrSnippet = c.section_heading || c.section_preview_snippet || ""
+          const headingAbbrev = headingOrSnippet
+            ? ` / ${headingOrSnippet.slice(0, 30)}${headingOrSnippet.length > 30 ? "..." : ""}`
             : ""
-          const pageLabel = c.pdf_page_number ? ` p.${c.pdf_page_number}` : ""
+          const pageLabel = Number(c.pdf_page_number) > 0 ? ` p.${c.pdf_page_number}` : ""
           const tooltipLines = [
             c.document_title,
             c.section_heading,

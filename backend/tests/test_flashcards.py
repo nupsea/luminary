@@ -520,19 +520,19 @@ async def test_export_csv_returns_valid_csv(test_db):
 
 
 def test_flashcard_prompt_contains_taxonomy():
-    """FLASHCARD_SYSTEM must include comprehension and application quality guidance."""
+    """FLASHCARD_SYSTEM must include understanding and knowledge-type quality guidance."""
     from app.services.flashcard import FLASHCARD_SYSTEM
 
-    assert "comprehension" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'comprehension'"
-    assert "application" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'application'"
+    assert "understanding" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'understanding'"
+    assert "causal knowledge" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'causal knowledge'"
 
 
-def test_flashcard_prompt_forbids_hypothetical():
-    """FLASHCARD_SYSTEM must include AVOID block listing hypothetical questions."""
+def test_flashcard_prompt_forbids_deictic():
+    """FLASHCARD_SYSTEM must include AVOID block and ban source-referencing words."""
     from app.services.flashcard import FLASHCARD_SYSTEM
 
     assert "AVOID" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'AVOID'"
-    assert "hypothetical" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing 'hypothetical'"
+    assert "in this passage" in FLASHCARD_SYSTEM, "FLASHCARD_SYSTEM missing deictic ban"
 
 
 def test_build_text_samples_across_range():

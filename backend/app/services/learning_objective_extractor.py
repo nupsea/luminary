@@ -11,7 +11,6 @@ import uuid
 
 import litellm
 
-from app.config import get_settings
 from app.database import get_session_factory
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,8 @@ class LearningObjectiveExtractorService:
         Returns a list of objective strings (possibly empty).
         Never raises — returns [] on any failure.
         """
-        settings = get_settings()
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+
         prompt = (
             "Extract learning objectives from the following chapter introduction.\n"
             "Return a JSON array of strings. Maximum 5 items. Each item is one sentence.\n"
@@ -41,7 +41,7 @@ class LearningObjectiveExtractorService:
         )
         try:
             response = await litellm.acompletion(
-                model=settings.LITELLM_DEFAULT_MODEL,
+                **get_litellm_kwargs(background=True),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
             )

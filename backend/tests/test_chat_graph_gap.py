@@ -49,12 +49,32 @@ def _make_minimal_state(**overrides) -> ChatState:
 
 
 def _mock_get_session_factory(rows: list):
-    """Build a mock get_session_factory callable returning `rows` for any execute."""
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = rows
+    """Build a mock get_session_factory callable returning `rows` for any execute.
 
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(return_value=mock_result)
+    `rows` can be a flat list (single execute call returns that list via fetchall)
+    or a list of lists (sequential execute calls return different results via
+    side_effect -- first() for collection lookup, fetchall() for member lookup).
+    """
+    if rows and isinstance(rows[0], list):
+        # Multiple sequential execute results (S197: collection + members)
+        results = []
+        for row_set in rows:
+            mock_result = MagicMock()
+            mock_result.first.return_value = row_set[0] if row_set else None
+            mock_result.fetchall.return_value = row_set
+            results.append(mock_result)
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=results)
+    else:
+        # Single execute result (legacy tests)
+        mock_result = MagicMock()
+        mock_result.first.return_value = rows[0] if rows else None
+        mock_result.fetchall.return_value = rows
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
@@ -113,7 +133,11 @@ async def test_notes_gap_returns_gap_result_card():
     mock_detector = MagicMock()
     mock_detector.detect_gaps = AsyncMock(return_value=mock_report)
 
-    rows = [("note-1",), ("note-2",)]
+    # S197: two-step query -- auto-collection lookup then member lookup
+    rows = [
+        [("coll-1",)],  # collection query: returns one row
+        [("note-1",), ("note-2",), ("note-3",)],  # member query: 3 notes
+    ]
     with (
         patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
@@ -126,6 +150,7 @@ async def test_notes_gap_returns_gap_result_card():
     assert card["type"] == "gap_result"
     assert card["gaps"] == ["Chapter 3 themes not covered"]
     assert card["covered"] == ["Time travel concept"]
+    assert card["auto_collection_id"] == "coll-1"
     assert "error" not in card
 
 
@@ -155,13 +180,17 @@ async def test_notes_gap_no_document_returns_error_card():
 
 @pytest.mark.asyncio
 async def test_notes_gap_no_notes_returns_error_card():
+    """No auto-collection for the document returns a helpful card message."""
     state = _make_minimal_state(doc_ids=["doc-abc"], question="gaps in my notes")
-    with patch("app.database.get_session_factory", _mock_get_session_factory([])):
+    # No auto-collection found (first() returns None)
+    rows = [[]]  # empty first result -> first() returns None -> note_ids = []
+    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     answer = result["answer"]
     assert answer.startswith("__card__")
     card = json.loads(answer[8:])
     assert "error" in card
+    assert "No notes found" in card["error"]
     assert card["gaps"] == []
 
 
@@ -173,7 +202,11 @@ async def test_notes_gap_no_notes_returns_error_card():
 @pytest.mark.asyncio
 async def test_notes_gap_ollama_offline_returns_error_card():
     state = _make_minimal_state(doc_ids=["doc-abc"], question="compare notes with book")
-    rows = [("note-1",)]
+    # S197: need >= 3 notes to pass the count check and reach detect_gaps
+    rows = [
+        [("coll-1",)],  # auto-collection found
+        [("note-1",), ("note-2",), ("note-3",)],  # 3 members
+    ]
     mock_detector = MagicMock()
     mock_detector.detect_gaps = AsyncMock(
         side_effect=litellm.ServiceUnavailableError(
@@ -192,3 +225,79 @@ async def test_notes_gap_ollama_offline_returns_error_card():
     error_lower = card["error"].lower()
     assert "ollama" in error_lower or "running" in error_lower
     assert card["gaps"] == []
+
+
+# ---------------------------------------------------------------------------
+# 7. S197: notes_gap_node auto-fetches from auto-collection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_notes_gap_auto_fetches_from_auto_collection():
+    """Auto-collection note IDs are auto-fetched and passed to detect_gaps."""
+    state = _make_minimal_state(doc_ids=["doc-abc"], question="compare my notes with this book")
+    mock_report = {
+        "gaps": ["Missing concept A"],
+        "covered": ["Concept B"],
+        "query_used": "auto-collection gap query",
+    }
+    mock_detector = MagicMock()
+    mock_detector.detect_gaps = AsyncMock(return_value=mock_report)
+
+    rows = [
+        [("auto-coll-1",)],  # auto-collection found
+        [("n1",), ("n2",), ("n3",), ("n4",)],  # 4 members
+    ]
+    with (
+        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
+    ):
+        result = await notes_gap_node(state)
+
+    # Verify detect_gaps called with the auto-collection note IDs
+    mock_detector.detect_gaps.assert_awaited_once_with(
+        ["n1", "n2", "n3", "n4"], "doc-abc"
+    )
+    card = json.loads(result["answer"][8:])
+    assert card["auto_collection_id"] == "auto-coll-1"
+    assert card["gaps"] == ["Missing concept A"]
+
+
+# ---------------------------------------------------------------------------
+# 8. S197: no auto-collection returns helpful card
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_notes_gap_no_auto_collection_returns_card():
+    """When no auto-collection exists for the document, return a card message."""
+    state = _make_minimal_state(doc_ids=["doc-xyz"], question="compare my notes")
+    # No auto-collection: first() returns None
+    rows = [[]]
+    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+        result = await notes_gap_node(state)
+    card = json.loads(result["answer"][8:])
+    assert card["type"] == "gap_result"
+    assert "No notes found" in card["error"]
+    assert "Start taking notes" in card["error"]
+
+
+# ---------------------------------------------------------------------------
+# 9. S197: fewer than 3 notes returns count-based card
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_notes_gap_fewer_than_3_notes_returns_card():
+    """When auto-collection has fewer than 3 notes, return a count-based card."""
+    state = _make_minimal_state(doc_ids=["doc-abc"], question="compare my notes")
+    rows = [
+        [("coll-1",)],  # auto-collection found
+        [("n1",), ("n2",)],  # only 2 members
+    ]
+    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+        result = await notes_gap_node(state)
+    card = json.loads(result["answer"][8:])
+    assert card["type"] == "gap_result"
+    assert "2 note(s)" in card["error"]
+    assert "Take a few more" in card["error"]

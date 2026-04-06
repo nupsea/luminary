@@ -18,11 +18,60 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_PORT=7820
 FRONTEND_PORT=5173  # default; actual port detected from Vite output below
 
+_info() { echo -e "\033[0;33m[LUMINARY]\033[0m $*"; }
+
+# ---------------------------------------------------------------------------
+# Pre-flight checks
+# ---------------------------------------------------------------------------
+
+# Auto-install frontend deps if node_modules is missing
+if [ ! -d "$REPO_ROOT/frontend/node_modules" ]; then
+    _info "Installing frontend dependencies (first run)..."
+    (cd "$REPO_ROOT/frontend" && npm install)
+fi
+
+# On Intel Mac, several core packages (lancedb, onnxruntime, kuzu) have no
+# PyPI wheels for macosx_x86_64 + Python 3.13. Use Docker for the backend.
+USE_DOCKER_BACKEND=false
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
+    if ! command -v docker &>/dev/null; then
+        echo "ERROR: Intel Mac requires Docker to run the backend (see README → Platform Notes → macOS Intel)."
+        exit 1
+    fi
+    USE_DOCKER_BACKEND=true
+fi
+
 # ---------------------------------------------------------------------------
 # Start processes — each piped through awk for prefixed, coloured output
 # ---------------------------------------------------------------------------
-(cd "$REPO_ROOT/backend" && uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
-    | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
+DOCKER_CONTAINER=""
+if [[ "$USE_DOCKER_BACKEND" == "true" ]]; then
+    DOCKER_CONTAINER="luminary-backend-dev"
+    _info "Building backend Docker image (Intel Mac)..."
+    docker build -q -t luminary-backend "$REPO_ROOT/backend" >&2
+    # Remove any leftover container from a previous unclean exit
+    docker rm -f "$DOCKER_CONTAINER" 2>/dev/null || true
+    # Build env-file args: pass .luminary/.env if it exists so users can set
+    # GLINER_ENABLED, VISION_MODEL, API keys, etc. without touching the script.
+    DOCKER_ENV_FILE_ARG=""
+    if [[ -f "$REPO_ROOT/.luminary/.env" ]]; then
+        DOCKER_ENV_FILE_ARG="--env-file $REPO_ROOT/.luminary/.env"
+        _info "Loading settings from .luminary/.env"
+    fi
+    (docker run --rm \
+        --name "$DOCKER_CONTAINER" \
+        -p "${BACKEND_PORT}:${BACKEND_PORT}" \
+        -v "$REPO_ROOT/.luminary:/app/.luminary" \
+        -e OLLAMA_URL="http://host.docker.internal:11434" \
+        -e DATA_DIR="/app/.luminary" \
+        -e PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring \
+        $DOCKER_ENV_FILE_ARG \
+        luminary-backend 2>&1) \
+        | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
+else
+    (cd "$REPO_ROOT/backend" && DATA_DIR="$REPO_ROOT/.luminary" uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
+        | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
+fi
 BACKEND_PIPE_PID=$!
 
 # Tee Vite output so we can scrape the actual bound port
@@ -36,6 +85,10 @@ FRONTEND_PIPE_PID=$!
 # Cleanup on Ctrl-C / SIGTERM
 # ---------------------------------------------------------------------------
 _stop() {
+    if [[ -n "$DOCKER_CONTAINER" ]]; then
+        _info "Stopping Docker container ($DOCKER_CONTAINER)..."
+        docker stop "$DOCKER_CONTAINER" 2>/dev/null || true
+    fi
     kill "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     wait "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     rm -f "$VITE_LOG"
@@ -46,7 +99,6 @@ trap _stop INT TERM
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-_info() { echo -e "\033[0;33m[LUMINARY]\033[0m $*"; }
 
 # Poll a URL until it returns HTTP 200 or max_attempts seconds elapse.
 _wait_http() {

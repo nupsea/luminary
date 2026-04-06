@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, Globe, Loader2, Send, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -11,56 +11,94 @@ import { QuizQuestionCard } from "@/components/QuizQuestionCard"
 import { TeachBackResultCard } from "@/components/TeachBackResultCard"
 import type { TeachBackCardData } from "@/components/TeachBackResultCard"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
+import { buildModelOptions, buildScopeComboboxLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
-// ExploreConnectionsChips — graph-derived entity-pair suggestions (S109)
+// SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
 // ---------------------------------------------------------------------------
 
-interface ExplorationSuggestion {
-  text: string
-  entity_names: string[]
-}
-
-interface ExploreConnectionsChipsProps {
-  documentId: string
+interface SuggestionPillsProps {
+  documentId: string | null
   onSuggest: (text: string) => void
 }
 
-function ExploreConnectionsChips({ documentId, onSuggest }: ExploreConnectionsChipsProps) {
-  const { data, isLoading, isError } = useQuery<ExplorationSuggestion[]>({
-    queryKey: ["explorations", documentId],
+interface SuggestionItem {
+  id: string
+  text: string
+}
+
+interface SuggestionsResponse {
+  suggestions: SuggestionItem[]
+}
+
+function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
+  const qc = useQueryClient()
+
+  // Phase 1: Instant — fetch from DB cache (no LLM, sub-50ms)
+  const { data: cached } = useQuery<SuggestionsResponse>({
+    queryKey: ["chat-suggestions-cached", documentId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/chat/explorations?document_id=${encodeURIComponent(documentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch explorations")
-      return res.json() as Promise<ExplorationSuggestion[]>
+      const url = documentId
+        ? `${API_BASE}/chat/suggestions/cached?document_id=${encodeURIComponent(documentId)}`
+        : `${API_BASE}/chat/suggestions/cached`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Failed to fetch cached suggestions")
+      return res.json() as Promise<SuggestionsResponse>
     },
-    staleTime: 120_000,
+    staleTime: 30_000,
   })
 
-  if (isError) return null
-  if (isLoading) {
+  // Phase 2: Background refresh — LLM-generated (may take seconds)
+  const { data: fresh } = useQuery<SuggestionsResponse>({
+    queryKey: ["chat-suggestions", documentId],
+    queryFn: async () => {
+      const url = documentId
+        ? `${API_BASE}/chat/suggestions?document_id=${encodeURIComponent(documentId)}`
+        : `${API_BASE}/chat/suggestions`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Failed to fetch suggestions")
+      const result = res.json() as Promise<SuggestionsResponse>
+      // Once fresh data arrives, also update the cached query so next switch is instant
+      result.then((data) => {
+        qc.setQueryData(["chat-suggestions-cached", documentId], data)
+      }).catch(() => { /* fire-and-forget: cache update is best-effort */ })
+      return result
+    },
+    staleTime: 0,
+  })
+
+  // Use fresh data if available, otherwise cached
+  const data = fresh ?? cached
+  const hasSuggestions = data && data.suggestions.length > 0
+  const isInitialLoading = !cached && !fresh
+
+  if (isInitialLoading) {
     return (
       <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-        <span className="text-xs text-muted-foreground">Explore connections:</span>
         <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
         <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
       </div>
     )
   }
-  if (!data || data.length === 0) return null
+  if (!hasSuggestions) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border px-6 py-3">
-      <span className="text-xs text-muted-foreground">Explore connections:</span>
-      {data.map((s) => (
+    <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
+      {data.suggestions.map((s) => (
         <button
-          key={s.text}
-          onClick={() => onSuggest(s.text)}
+          key={s.id || s.text}
+          onClick={() => {
+            if (s.id) {
+              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { /* fire-and-forget: suggestion tracking is best-effort */ })
+            }
+            onSuggest(s.text)
+          }}
           className="truncate max-w-[240px] rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
         >
           {s.text}
@@ -76,7 +114,7 @@ interface DocListItem {
 }
 
 async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
+  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page=1&page_size=100`)
   if (!res.ok) return []
   const data = (await res.json()) as { items: DocListItem[] }
   return data.items ?? []
@@ -129,7 +167,7 @@ interface ChatMessage {
   id: string
   role: "user" | "assistant"
   text: string
-  type?: "text" | "card"
+  type?: "text" | "card" | "divider"
   cardData?: AnyCardData
   citations?: Citation[]
   confidence?: Confidence
@@ -139,12 +177,6 @@ interface ChatMessage {
   web_sources?: WebSource[]  // S142: web augmentation sources
   source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
   transparency?: TransparencyInfo       // S158: retrieval transparency panel
-}
-
-interface ConfusionSignal {
-  concept: string
-  count: number
-  last_asked: string
 }
 
 interface SessionPlanItem {
@@ -201,7 +233,7 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 // S158: per-message transparency panel with collapsible "How I Answered" section
 function TransparencyPanel({ transparency }: { transparency: TransparencyInfo }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(TRANSPARENCY_DEFAULT_OPEN)
   const badgeClass =
     TRANSPARENCY_BADGE_CLASS[transparency.confidence_level] ??
     TRANSPARENCY_BADGE_CLASS["low"]
@@ -214,17 +246,13 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
         >
           {transparency.confidence_level} confidence
         </span>
-        {transparency.confidence_level === "low" && (
-          <span className="text-xs italic text-muted-foreground">
-            This answer has low confidence -- verify in the source document
-          </span>
-        )}
         <button
           onClick={() => setOpen((v) => !v)}
-          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          className="text-muted-foreground hover:text-foreground transition-colors"
           aria-expanded={open}
+          title={open ? "Hide retrieval details" : "How I answered"}
         >
-          {open ? "Hide" : "How I answered"}
+          <Info size={13} />
         </button>
       </div>
       {open && (
@@ -235,8 +263,8 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
           </div>
           <div>
             <span className="font-medium text-foreground">Sources:</span>{" "}
-            {transparency.chunk_count} chunk{transparency.chunk_count !== 1 ? "s" : ""} from{" "}
-            {transparency.section_count} section{transparency.section_count !== 1 ? "s" : ""}
+            {transparency.chunk_count} chunk{transparency.chunk_count !== 1 ? "s" : ""}
+            {transparency.section_count > 0 ? ` from ${transparency.section_count} section${transparency.section_count !== 1 ? "s" : ""}` : ""}
           </div>
           {transparency.augmented && (
             <div className="italic">Context was extended after initial low confidence</div>
@@ -247,158 +275,104 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
   )
 }
 
-const EXAMPLE_QUESTIONS = [
-  "What are the main themes?",
-  "Summarize the key findings.",
-  "What conclusions are drawn?",
-]
+// ---------------------------------------------------------------------------
+// DocumentScopeCombobox -- inline document scope selector in Chat header (S186)
+// ---------------------------------------------------------------------------
 
-export function getContextualSuggestions(dueCount: number): string[] {
-  // The plan pill must always appear as the 4th item per S101 AC.
-  // When dueCount > 0 the due-review pill occupies slot 0, so we drop
-  // "Quiz me on the key concepts" to keep total at 4.
-  const pills: string[] = []
-  if (dueCount > 0) pills.push(`Review my ${dueCount} due flashcards`)
-  pills.push("Find gaps in my notes")
-  pills.push("Summarize this for me")
-  if (dueCount === 0) pills.push("Quiz me on the key concepts")
-  pills.push("__plan__Plan my session")
-  return pills.slice(0, 4)
+interface DocumentScopeComboboxProps {
+  docList: DocListItem[] | undefined
+  selectedDocId: string | null
+  onSelect: (docId: string | null) => void
 }
 
-interface ChatSuggestionsProps {
-  activeDocumentId: string
-  onSuggest: (text: string) => void
-  onPlan: () => void
-}
+function DocumentScopeCombobox({ docList, selectedDocId, onSelect }: DocumentScopeComboboxProps) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const containerRef = useRef<HTMLDivElement>(null)
 
-function ChatSuggestions({ activeDocumentId, onSuggest, onPlan }: ChatSuggestionsProps) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["due-pills", activeDocumentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/study/due?document_id=${encodeURIComponent(activeDocumentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch due cards")
-      return res.json() as Promise<unknown[]>
-    },
-    staleTime: 60_000,
-  })
-
-  if (isError) return null
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-        <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />
-        <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />
-      </div>
-    )
-  }
-
-  const dueCount = (data ?? []).length
-  const suggestions = getContextualSuggestions(dueCount)
-
-  return (
-    <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-      {suggestions.map((s) => {
-        const isPlan = s.startsWith("__plan__")
-        const displayText = isPlan ? s.slice(8) : s
-        return (
-          <button
-            key={s}
-            onClick={() => { if (isPlan) { onPlan() } else { onSuggest(s) } }}
-            className="truncate max-w-[200px] rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            {displayText}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-type AddButtonState = "idle" | "loading" | "done" | "error"
-
-function ConfusionBanner({
-  signal,
-  onDismiss,
-  onAdded,
-}: {
-  signal: ConfusionSignal
-  onDismiss: () => void
-  onAdded: () => void
-}) {
-  const [addState, setAddState] = useState<AddButtonState>("idle")
-  const [addError, setAddError] = useState<string | null>(null)
-
-  async function handleAdd() {
-    setAddState("loading")
-    setAddError(null)
-    try {
-      const res = await fetch(`${API_BASE}/flashcards/from-gaps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gaps: [signal.concept], document_id: "" }),
-      })
-      if (res.status === 503) {
-        setAddError("Ollama is unavailable. Start it with: ollama serve")
-        setAddState("error")
-        return
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
       }
-      if (!res.ok) {
-        setAddError("Failed to add flashcard. Please try again.")
-        setAddState("error")
-        return
-      }
-      setAddState("done")
-      onAdded()
-    } catch {
-      setAddError("Network error. Please try again.")
-      setAddState("error")
     }
-  }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [open])
+
+  const selectedTitle = docList?.find((d) => d.id === selectedDocId)?.title ?? null
+  const label = buildScopeComboboxLabel(selectedTitle)
+
+  const filtered = (docList ?? []).filter((d) =>
+    d.title.toLowerCase().includes(search.toLowerCase()),
+  )
 
   return (
-    <div className="mx-6 mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
-      <span className="text-xs text-amber-800 dark:text-amber-200">
-        You have asked about &ldquo;{signal.concept}&rdquo; {signal.count} times. Add it to your flashcards?
-      </span>
-      <div className="ml-3 flex shrink-0 items-center gap-2">
-        {addError ? (
-          <span className="text-xs text-red-600">{addError}</span>
-        ) : null}
-        {addState !== "done" && (
-          <button
-            onClick={() => void handleAdd()}
-            disabled={addState === "loading"}
-            className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900"
-          >
-            {addState === "loading" ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : addState === "error" ? (
-              "Retry"
-            ) : (
-              "Add to Flashcards"
-            )}
-          </button>
+    <div ref={containerRef} className="relative">
+      <button
+        onClick={() => { setOpen((prev) => !prev); setSearch("") }}
+        className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-accent transition-colors max-w-[240px]"
+        title={selectedTitle ?? "All documents"}
+      >
+        {selectedDocId ? (
+          <>
+            <BookOpen size={13} className="shrink-0 text-muted-foreground" />
+            <span className="truncate">{label}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onSelect(null) }}
+              className="ml-0.5 shrink-0 rounded p-0.5 hover:bg-accent"
+              aria-label="Clear document selection"
+            >
+              <X size={12} />
+            </button>
+          </>
+        ) : (
+          <>
+            <Globe size={13} className="shrink-0 text-muted-foreground" />
+            <span>{label}</span>
+            <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+          </>
         )}
-        <button
-          onClick={onDismiss}
-          className="rounded p-0.5 text-amber-600 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
-          aria-label="Dismiss"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-background shadow-lg">
+          <div className="border-b border-border px-2 py-1.5">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search documents..."
+              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+              autoFocus
+            />
+          </div>
+          <div className="max-h-48 overflow-auto py-1">
+            {docList === undefined ? (
+              <div className="px-3 py-2">
+                <Skeleton className="h-4 w-full" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">No documents yet</p>
+            ) : (
+              filtered.map((doc) => (
+                <button
+                  key={doc.id}
+                  onClick={() => { onSelect(doc.id); setOpen(false) }}
+                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors truncate ${doc.id === selectedDocId ? "bg-accent/50 font-medium" : "text-foreground"
+                    }`}
+                >
+                  {doc.title}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
-}
-
-function buildModelOptions(settings: LLMSettings | undefined): string[] {
-  if (!settings) return []
-  // Cloud mode: backend handles routing via get_effective_routing(); no model selector needed.
-  if (settings.processing_mode === "cloud") return []
-  const opts = settings.available_local_models
-  return opts.length > 0 ? opts : (settings.active_model ? [settings.active_model] : [])
 }
 
 export default function Chat() {
@@ -409,18 +383,29 @@ export default function Chat() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const messages = useAppStore((s) => s.chatMessages) as ChatMessage[]
+  const setMessagesRaw = useAppStore((s) => s.setChatMessages)
+  const setMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    if (typeof updater === "function") {
+      setMessagesRaw(updater(useAppStore.getState().chatMessages as ChatMessage[]))
+    } else {
+      setMessagesRaw(updater)
+    }
+  }
   const [input, setInput] = useState("")
-  const [scope, setScope] = useState<"single" | "all">("all")
+  const scope = useAppStore((s) => s.chatScope)
+  const setScope = useAppStore((s) => s.setChatScope)
   // selectedDocId: explicit in-tab selection; falls back to global activeDocumentId
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
+  const selectedDocId = useAppStore((s) => s.chatSelectedDocId)
+  const setSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
-  const [qaError, setQaError] = useState<string | null>(null)
-  const [dismissedSignals, setDismissedSignals] = useState<Set<string>>(new Set())
+  const qaError = useAppStore((s) => s.chatQaError)
+  const setQaError = useAppStore((s) => s.setChatQaError)
   const [webEnabled, setWebEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const mountTime = useRef(Date.now())
@@ -434,26 +419,33 @@ export default function Chat() {
 
   // Pre-populate from global store when user arrives from Learning tab
   useEffect(() => {
-    if (activeDocumentId) {
-      setSelectedDocId((prev) => prev ?? activeDocumentId)
+    if (activeDocumentId && !selectedDocId) {
+      setSelectedDocId(activeDocumentId)
     }
-  }, [activeDocumentId])
+  }, [activeDocumentId, selectedDocId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // S147: Pre-fill input from chatPreload set by SelectionActionBar "Ask in Chat" action
+  // S197: autoSubmit flag triggers immediate send
   useEffect(() => {
     if (chatPreload) {
+      const shouldAutoSubmit = chatPreload.autoSubmit
       setInput(chatPreload.text)
       if (chatPreload.documentId) {
         setSelectedDocId(chatPreload.documentId)
         setScope("single")
       }
       clearChatPreload()
-      setTimeout(() => {
-        textareaRef.current?.focus()
-        autoResize()
-      }, 50)
+      if (shouldAutoSubmit) {
+        // Defer send to next tick so state updates (scope, docId) are applied
+        setTimeout(() => void sendMessage(chatPreload.text), 100)
+      } else {
+        setTimeout(() => {
+          textareaRef.current?.focus()
+          autoResize()
+        }, 50)
+      }
     }
-  }, [chatPreload, clearChatPreload])
+  }, [chatPreload, clearChatPreload]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill input from ?q= query param (e.g. from Notes "Compare with Book" button)
   useEffect(() => {
@@ -468,16 +460,6 @@ export default function Chat() {
     queryFn: fetchLLMSettings,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
-  })
-
-  const { data: confusionSignals } = useQuery<ConfusionSignal[]>({
-    queryKey: ["confusion-signals"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/chat/confusion-signals`)
-      if (!res.ok) throw new Error("Failed to fetch confusion signals")
-      return res.json() as Promise<ConfusionSignal[]>
-    },
-    staleTime: 300_000,
   })
 
   const { data: webSearchSettings } = useQuery<WebSearchSettings>({
@@ -649,8 +631,8 @@ export default function Chat() {
                 errorCode === "llm_unavailable"
                   ? "Ollama is not running. Start it with: ollama serve"
                   : errorCode === "no_context"
-                  ? "No relevant content found. Make sure at least one document has been ingested."
-                  : fallbackMsg
+                    ? "No relevant content found. Make sure at least one document has been ingested."
+                    : fallbackMsg
               setIsStreaming(false)
               setMessages((m) => m.filter((msg) => msg.id !== assistantId))
               setQaError(errorMsg)
@@ -671,22 +653,25 @@ export default function Chat() {
                 m.map((msg) =>
                   msg.id === assistantId
                     ? {
-                        ...msg,
-                        // Replace streamed tokens with clean parsed answer from backend.
-                        // This removes any citation JSON fragments that leaked during streaming.
-                        text: finalAnswer !== undefined ? finalAnswer : msg.text,
-                        isStreaming: false,
-                        citations,
-                        confidence,
-                        not_found,
-                        image_ids,
-                        web_sources,
-                        source_citations,
-                      }
+                      ...msg,
+                      // Replace streamed tokens with clean parsed answer from backend.
+                      // This removes any citation JSON fragments that leaked during streaming.
+                      text: finalAnswer !== undefined ? finalAnswer : msg.text,
+                      isStreaming: false,
+                      citations,
+                      confidence,
+                      not_found,
+                      image_ids,
+                      web_sources,
+                      source_citations,
+                    }
                     : msg,
                 ),
               )
               setIsStreaming(false)
+              // S195: refresh suggestion pills after each answered question
+              const suggestDocId = scope === "single" ? (selectedDocId ?? activeDocumentId) : null
+              void qc.invalidateQueries({ queryKey: ["chat-suggestions", suggestDocId] })
             }
           } catch {
             // skip malformed SSE event
@@ -719,6 +704,7 @@ export default function Chat() {
     const params = new URLSearchParams()
     params.set("doc", c.document_id)
     if (c.section_id) params.set("section_id", c.section_id)
+    if (c.chunk_id) params.set("chunk_id", c.chunk_id)
     if (c.pdf_page_number) params.set("page", String(c.pdf_page_number))
     navigate(`/?${params.toString()}`)
   }
@@ -730,37 +716,68 @@ export default function Chat() {
     <div className="flex h-full flex-col">
       {/* Header controls */}
       <div className="flex items-center gap-4 border-b border-border px-6 py-3">
-        {/* Scope selector */}
-        <div className="flex items-center rounded-md border border-border">
-          <button
-            onClick={() => { if (scope !== "single") { setScope("single"); clearConversation() } }}
-            className={`rounded-l-md px-3 py-1.5 text-xs font-medium transition-colors ${scope === "single" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"}`}
-          >
-            This document
-          </button>
-          <button
-            onClick={() => { if (scope !== "all") { setScope("all"); clearConversation() } }}
-            className={`rounded-r-md px-3 py-1.5 text-xs font-medium transition-colors ${scope === "all" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"}`}
-          >
-            All my content
-          </button>
-        </div>
+        {/* S186: Inline document scope combobox */}
+        <DocumentScopeCombobox
+          docList={docList}
+          selectedDocId={selectedDocId}
+          onSelect={(docId) => {
+            if (docId === null) {
+              // S196: Clear -> revert to "All documents" -- preserve conversation
+              if (scope === "single") {
+                setScope("all")
+                setSelectedDocId(null)
+                if (messages.length > 0) {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `divider-${Date.now()}`,
+                      role: "assistant" as const,
+                      text: "Switched to All documents",
+                      type: "divider" as const,
+                    },
+                  ])
+                }
+              }
+            } else if (selectedDocId === null || scope === "all") {
+              // S196: Transition: all -> single -- insert divider, preserve conversation
+              const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
+              setScope("single")
+              setSelectedDocId(docId)
+              if (messages.length > 0) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `divider-${Date.now()}`,
+                    role: "assistant" as const,
+                    text: `Scope changed to ${docTitle}`,
+                    type: "divider" as const,
+                  },
+                ])
+              }
+            } else if (docId !== selectedDocId) {
+              // Transition: single -> single (different doc) -- insert divider, do NOT clear
+              const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
+              setSelectedDocId(docId)
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `divider-${Date.now()}`,
+                  role: "assistant",
+                  text: `Scope changed to ${docTitle}`,
+                  type: "divider" as const,
+                },
+              ])
+            }
+            // docId === selectedDocId -> no-op
+          }}
+        />
 
-        {/* Document picker — only visible in "This document" scope */}
-        {scope === "single" && (
-          <select
-            value={effectiveDocId ?? ""}
-            onChange={(e) => { setSelectedDocId(e.target.value || null); clearConversation() }}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[220px]"
-          >
-            <option value="">Select a document…</option>
-            {(docList ?? []).map((doc) => (
-              <option key={doc.id} value={doc.id}>{doc.title}</option>
-            ))}
-          </select>
+        {/* Web call counter -- shown when web is enabled and conversation is active */}
+        {webEnabled && messages.length > 0 && (
+          <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
         )}
 
-        {/* Clear conversation button — only shown when there are messages */}
+        {/* Clear conversation button -- only shown when there are messages */}
         {messages.length > 0 && !isStreaming && (
           <button
             onClick={clearConversation}
@@ -772,50 +789,28 @@ export default function Chat() {
           </button>
         )}
 
-        {/* Model selector */}
-        {llmLoading ? (
-          <Skeleton className="h-8 w-36" />
-        ) : modelOptions.length > 0 ? (
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            {modelOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        ) : null}
-
-        {/* Web search toggle (S142) */}
-        <div
-          title={
-            webSearchSettings?.enabled
-              ? "Toggle web augmentation (adds current web results to low-confidence answers)"
-              : "Configure a web search provider in Settings to enable web search"
-          }
+        {/* Settings gear icon -- opens ChatSettingsDrawer */}
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className={`${messages.length > 0 && !isStreaming ? "" : "ml-auto"} rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors`}
+          title="Chat settings"
         >
-          <button
-            disabled={!webSearchSettings?.enabled}
-            onClick={() => setWebEnabled((prev) => !prev)}
-            className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors ${
-              webEnabled
-                ? "border-blue-300 bg-blue-50 text-blue-700"
-                : "border-border text-muted-foreground hover:bg-accent"
-            } disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            <Globe size={12} />
-            Web
-          </button>
-        </div>
-
-        {/* Web call counter -- shown when web is enabled and conversation is active */}
-        {webEnabled && messages.length > 0 && (
-          <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
-        )}
+          <Settings size={15} />
+        </button>
       </div>
+
+      {/* Chat settings drawer -- model selector, web toggle */}
+      <ChatSettingsDrawer
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        model={model}
+        onModelChange={setModel}
+        modelOptions={modelOptions}
+        llmLoading={llmLoading}
+        webEnabled={webEnabled}
+        onWebToggle={() => setWebEnabled((prev) => !prev)}
+        webSearchSettings={webSearchSettings}
+      />
 
       {/* LLM settings unavailable warning */}
       {llmError && (
@@ -833,22 +828,6 @@ export default function Chat() {
           </button>
         </div>
       )}
-
-      {/* Confusion nudge banners -- one per un-dismissed signal with count >= 3 */}
-      {(confusionSignals ?? [])
-        .filter((s) => s.count >= 3 && !dismissedSignals.has(s.concept))
-        .map((signal) => (
-          <ConfusionBanner
-            key={signal.concept}
-            signal={signal}
-            onDismiss={() => {
-              setDismissedSignals((prev) => new Set([...prev, signal.concept]))
-            }}
-            onAdded={() => {
-              setDismissedSignals((prev) => new Set([...prev, signal.concept]))
-            }}
-          />
-        ))}
 
       {/* Message list */}
       <div className="flex-1 overflow-auto px-6 py-4">
@@ -873,64 +852,59 @@ export default function Chat() {
             ) : (
               <p className="text-sm text-muted-foreground">Ask a question to get started.</p>
             )}
-            <div className="flex flex-wrap justify-center gap-2">
-              {EXAMPLE_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => void sendMessage(q)}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
+              msg.type === "divider" ? (
+                <div key={msg.id} className="flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">{msg.text}</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              ) : (
                 <div
-                  className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                    msg.role === "user"
-                      ? "bg-slate-100 text-slate-900"
-                      : "border border-border bg-white text-foreground shadow-sm"
-                  }`}
+                  key={msg.id}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  {msg.type === "card" && msg.cardData !== undefined ? (
-                    msg.cardData.type === "quiz_question" ? (
-                      <QuizQuestionCard
-                        question={(msg.cardData as QuizCardData).question}
-                        contextHint={(msg.cardData as QuizCardData).context_hint}
-                        documentId={(msg.cardData as QuizCardData).document_id}
-                        error={(msg.cardData as QuizCardData).error}
-                        onSubmit={sendMessage}
-                      />
-                    ) : msg.cardData.type === "teach_back_result" ? (
-                      <TeachBackResultCard data={msg.cardData as TeachBackCardData} />
-                    ) : msg.cardData.type === "gap_result" ? (
-                      <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
+                  <div
+                    className={`max-w-[80%] rounded-lg px-4 py-3 ${msg.role === "user"
+                        ? "bg-slate-100 text-slate-900"
+                        : "border border-border bg-white text-foreground shadow-sm"
+                      }`}
+                  >
+                    {msg.type === "card" && msg.cardData !== undefined ? (
+                      msg.cardData.type === "quiz_question" ? (
+                        <QuizQuestionCard
+                          question={(msg.cardData as QuizCardData).question}
+                          contextHint={(msg.cardData as QuizCardData).context_hint}
+                          documentId={(msg.cardData as QuizCardData).document_id}
+                          error={(msg.cardData as QuizCardData).error}
+                          onSubmit={sendMessage}
+                        />
+                      ) : msg.cardData.type === "teach_back_result" ? (
+                        <TeachBackResultCard data={msg.cardData as TeachBackCardData} />
+                      ) : msg.cardData.type === "gap_result" ? (
+                        <GapResultCard data={msg.cardData as GapCardData} documentId={effectiveDocId ?? undefined} />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Unknown card type</p>
+                      )
+                    ) : msg.not_found ? (
+                      <p className="text-sm text-blue-600">
+                        This information was not found in the selected content.
+                      </p>
+                    ) : msg.role === "user" ? (
+                      <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
+                    ) : msg.isStreaming && msg.text === "" ? (
+                      // Skeleton shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
+                      // or before the first token of a streamed text response arrives.
+                      <div className="flex flex-col gap-2">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-4 w-64" />
+                        <Skeleton className="h-4 w-40" />
+                      </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground">Unknown card type</p>
-                    )
-                  ) : msg.not_found ? (
-                    <p className="text-sm text-blue-600">
-                      This information was not found in the selected content.
-                    </p>
-                  ) : msg.role === "user" ? (
-                    <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
-                  ) : msg.isStreaming && msg.text === "" ? (
-                    // Skeleton shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
-                    // or before the first token of a streamed text response arrives.
-                    <div className="flex flex-col gap-2">
-                      <Skeleton className="h-4 w-48" />
-                      <Skeleton className="h-4 w-64" />
-                      <Skeleton className="h-4 w-40" />
-                    </div>
-                  ) : (
-                    <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
+                      <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
                       [&_ol]:text-sm [&_ol]:my-1 [&_ol]:pl-5 [&_ol]:list-decimal
                       [&_ul]:text-sm [&_ul]:my-1 [&_ul]:pl-5 [&_ul]:list-disc
                       [&_li]:my-0.5
@@ -938,114 +912,109 @@ export default function Chat() {
                       [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
                       [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
                       [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
-                      <MarkdownRenderer>{msg.text}</MarkdownRenderer>
-                      {msg.isStreaming && <span className="animate-pulse">▍</span>}
-                    </div>
-                  )}
+                        <MarkdownRenderer>{msg.text}</MarkdownRenderer>
+                        {msg.isStreaming && <span className="animate-pulse">▍</span>}
+                      </div>
+                    )}
 
-                  {/* Citations and confidence — shown after streaming completes */}
-                  {!msg.isStreaming && msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        {msg.citations.map((c, i) => (
-                          <span
+                    {/* Citations and confidence — shown after streaming completes */}
+                    {!msg.isStreaming && msg.citations && msg.citations.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.citations.map((c, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                              title={c.excerpt}
+                            >
+                              {c.document_title
+                                ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
+                                : `p.${c.page}`}
+                              {c.version_mismatch && (
+                                <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
+                                  Version mismatch
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                        {msg.confidence && (
+                          <Badge variant={CONFIDENCE_BADGE[msg.confidence]}>
+                            {msg.confidence} confidence
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Web sources — shown after streaming completes (S142) */}
+                    {!msg.isStreaming && msg.web_sources && msg.web_sources.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <span className="text-xs font-medium text-muted-foreground">Web sources:</span>
+                        {msg.web_sources.map((s, i) => (
+                          <a
                             key={i}
-                            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                            title={c.excerpt}
+                            href={s.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-xs text-blue-600 hover:underline"
+                            title={s.title}
                           >
-                            {c.document_title
-                              ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
-                              : `p.${c.page}`}
-                            {c.version_mismatch && (
-                              <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
-                                Version mismatch
-                              </span>
-                            )}
-                          </span>
+                            [Web: {s.domain}] {s.title}
+                          </a>
                         ))}
                       </div>
-                      {msg.confidence && (
-                        <Badge variant={CONFIDENCE_BADGE[msg.confidence]}>
-                          {msg.confidence} confidence
-                        </Badge>
-                      )}
-                    </div>
-                  )}
+                    )}
 
-                  {/* Web sources — shown after streaming completes (S142) */}
-                  {!msg.isStreaming && msg.web_sources && msg.web_sources.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">Web sources:</span>
-                      {msg.web_sources.map((s, i) => (
-                        <a
-                          key={i}
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block truncate text-xs text-blue-600 hover:underline"
-                          title={s.title}
-                        >
-                          [Web: {s.domain}] {s.title}
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                    {/* Retrieval transparency panel: confidence badge + How I Answered (S158) */}
+                    {!msg.isStreaming && msg.transparency && (
+                      <TransparencyPanel transparency={msg.transparency} />
+                    )}
 
-                  {/* Retrieval transparency panel: confidence badge + How I Answered (S158) */}
-                  {!msg.isStreaming && msg.transparency && (
-                    <TransparencyPanel transparency={msg.transparency} />
-                  )}
+                    {/* Source citation chips — deep-links to exact section/page (S157) */}
+                    {!msg.isStreaming && (
+                      <SourceCitationChips
+                        citations={msg.source_citations ?? []}
+                        navigateToCitation={navigateToCitation}
+                      />
+                    )}
 
-                  {/* Source citation chips — deep-links to exact section/page (S157) */}
-                  {!msg.isStreaming && (
-                    <SourceCitationChips
-                      citations={msg.source_citations ?? []}
-                      navigateToCitation={navigateToCitation}
-                    />
-                  )}
-
-                  {/* Image thumbnails — shown when retrieval matched image descriptions (S134) */}
-                  {!msg.isStreaming && msg.image_ids && msg.image_ids.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {msg.image_ids.map((id) => (
-                        <img
-                          key={id}
-                          src={`${API_BASE}/images/${id}/raw`}
-                          alt="Diagram from document"
-                          className="h-24 w-auto rounded border border-border object-contain"
-                          loading="lazy"
-                          onError={(e) => {
-                            // Hide the broken image element if the file is missing on disk
-                            ;(e.currentTarget as HTMLImageElement).style.display = "none"
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
+                    {/* Image thumbnails — shown when retrieval matched image descriptions (S134) */}
+                    {!msg.isStreaming && msg.image_ids && msg.image_ids.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {msg.image_ids.map((id) => (
+                          <img
+                            key={id}
+                            src={`${API_BASE}/images/${id}/raw`}
+                            alt="Diagram from document"
+                            className="h-24 w-auto rounded border border-border object-contain"
+                            loading="lazy"
+                            onError={(e) => {
+                              // Hide the broken image element if the file is missing on disk
+                              ; (e.currentTarget as HTMLImageElement).style.display = "none"
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )
             ))}
             <div ref={bottomRef} />
           </div>
         )}
       </div>
 
-      {/* Contextual suggestion pills — only shown before conversation starts */}
-      {messages.length === 0 && activeDocumentId && (
-        <ChatSuggestions
-          activeDocumentId={activeDocumentId}
-          onSuggest={(text) => void sendMessage(text)}
-          onPlan={() => setShowPlanPanel(true)}
-        />
-      )}
-
-      {/* Graph-derived exploration chips — scope=single, document selected, chat empty (S109) */}
-      {messages.length === 0 && scope === "single" && effectiveDocId && (
-        <ExploreConnectionsChips
-          documentId={effectiveDocId}
-          onSuggest={(text) => void sendMessage(text)}
-        />
-      )}
+      {/* Contextual suggestion pills — driven by GET /chat/suggestions (S187) */}
+      {/* S196: Also show pills after a scope-change divider (last msg is divider) */}
+      {(messages.length === 0 || messages[messages.length - 1]?.type === "divider") &&
+        scope === "single" &&
+        effectiveDocId && (
+          <SuggestionPills
+            documentId={effectiveDocId}
+            onSuggest={(text) => void sendMessage(text)}
+          />
+        )}
 
       {/* Session plan slide-up panel — positioned above the input area */}
       <div

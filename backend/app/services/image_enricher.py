@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 
 import litellm
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,9 @@ def _is_decorative(pil_image: object) -> bool:
 
     img = pil_image  # type: ignore[assignment]
     img_rgb = img.convert("RGB")  # type: ignore[attr-defined]
-    pixels = list(img_rgb.getdata())
-    if len(set(pixels)) < 5:
+    pixels = np.array(img_rgb).reshape(-1, 3)
+    unique_count = len(np.unique(pixels, axis=0))
+    if unique_count < 5:
         return True
     w, h = img.size  # type: ignore[attr-defined]
     ratio = max(w, h) / max(min(w, h), 1)
@@ -57,27 +59,63 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
     """Call the vision LLM and return parsed JSON response.
 
     Falls back to {"image_type": "other", "description": raw_text, ...} if JSON parse fails.
-    Raises litellm.ServiceUnavailableError if the vision model is unreachable.
+    Raises litellm.ServiceUnavailableError / APIConnectionError if no model is reachable.
+
+    When VISION_MODEL is an Ollama model and Ollama is unreachable, automatically falls
+    back to LITELLM_DEFAULT_MODEL (e.g. a cloud model) if it is not Ollama-based.
     """
+    vision_model: str = settings.VISION_MODEL  # type: ignore[attr-defined]
+    default_model: str = settings.LITELLM_DEFAULT_MODEL  # type: ignore[attr-defined]
+
+    # Build list of models to try: primary first, then cloud fallback if primary is Ollama.
+    models_to_try: list[str] = [vision_model]
+    if vision_model.startswith("ollama/") and not default_model.startswith("ollama/"):
+        models_to_try.append(default_model)
+
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
 
-    response = await litellm.acompletion(
-        model=settings.VISION_MODEL,  # type: ignore[attr-defined]
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _VISION_PROMPT},
+    last_exc: Exception | None = None
+    for model in models_to_try:
+        try:
+            # Pass api_base for Ollama models so Docker's host.docker.internal
+            # routing is respected (OLLAMA_URL overrides LiteLLM's localhost default).
+            extra_kwargs: dict = {}
+            if model.startswith("ollama/"):
+                extra_kwargs["api_base"] = settings.OLLAMA_URL  # type: ignore[attr-defined]
+            response = await litellm.acompletion(
+                model=model,
+                messages=[
                     {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
-                    },
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _VISION_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64}"},
+                            },
+                        ],
+                    }
                 ],
-            }
-        ],
-        temperature=0.0,
-    )
+                temperature=0.0,
+                **extra_kwargs,
+            )
+            if model != vision_model:
+                logger.info(
+                    "_call_vision_llm: VISION_MODEL (%s) unreachable; used fallback model %s",
+                    vision_model, model,
+                )
+            break
+        except (litellm.APIConnectionError, litellm.ServiceUnavailableError) as exc:
+            last_exc = exc
+            logger.debug(
+                "_call_vision_llm: model %s unavailable (%s), trying next", model, exc
+            )
+            continue
+    else:
+        # All models exhausted — raise the last connection error so the job is marked failed.
+        assert last_exc is not None
+        raise last_exc
     raw = (response.choices[0].message.content or "").strip()
 
     # Strip optional markdown code fences
@@ -202,11 +240,14 @@ class ImageEnricherService:
                         "image_enricher: analyzed image_id=%s type=%s", img.id, image_type
                     )
 
-                except litellm.ServiceUnavailableError:
+                except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
                     logger.warning(
-                        "image_enricher: vision model unavailable for image_id=%s "
-                        "-- Ollama is unreachable, start with: ollama serve",
+                        "image_enricher: vision model(s) unreachable for image_id=%s "
+                        "(VISION_MODEL=%s). In cloud mode, set VISION_MODEL to a "
+                        "cloud vision model (e.g. anthropic/claude-3-5-sonnet-20241022) "
+                        "or leave Ollama running locally.",
                         img.id,
+                        settings.VISION_MODEL,
                     )
                     raise
                 except Exception as exc:

@@ -25,7 +25,7 @@ class MockLLMService:
         self.call_count = 0
 
     async def generate(
-        self, prompt: str, system: str = "", stream: bool = False, model=None
+        self, prompt: str, system: str = "", stream: bool = False, model=None, **kwargs
     ):
         self.call_count += 1
         if stream:
@@ -51,7 +51,7 @@ class CapturingLLMService(MockLLMService):
         self.captured_systems: list[str] = []
 
     async def generate(
-        self, prompt: str, system: str = "", stream: bool = False, model=None
+        self, prompt: str, system: str = "", stream: bool = False, model=None, **kwargs
     ):
         self.captured_prompts.append(prompt)
         self.captured_systems.append(system)

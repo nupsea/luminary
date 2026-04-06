@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight, GitCompareArrows } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -8,20 +8,22 @@ import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from 
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
-import type { AnnotationItem, DocumentDetail, SectionItem, SummaryMode, SummaryTabDef } from "./types"
+import type { AnnotationItem, DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { SelectionActionBar } from "./SelectionActionBar"
 import type { SourceRef } from "./SelectionActionBar"
 import { NoteCreationDialog } from "./NoteCreationDialog"
-import type { NoteCreationResult } from "./NoteCreationDialog"
-import { NoteEditorDialog } from "@/components/NoteEditorDialog"
+import { NoteEditorDialog, type Note } from "@/components/NoteEditorDialog"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { EPUBViewer } from "./EPUBViewer"
 import { ReadView } from "./ReadView"
+import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
+import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
+import { NotesReaderPanel } from "./NotesReaderPanel"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store"
@@ -211,65 +213,174 @@ type StreamingMap = Partial<Record<SummaryMode, boolean>>
 // ---------------------------------------------------------------------------
 
 interface GlossaryTerm {
+  id: string
   term: string
   definition: string
-  first_mention_page: number
+  first_mention_section_id: string | null
+  category: string | null
+  created_at: string | null
+  updated_at: string | null
 }
+
+const CATEGORY_COLORS: Record<string, string> = {
+  character: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+  place: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
+  concept: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+  technical: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  event: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+  general: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+}
+
+type GlossarySortKey = "term" | "category"
 
 interface GlossaryPanelProps {
   documentId: string
+  onScrollToSection?: (sectionId: string) => void
 }
 
-function GlossaryPanel({ documentId }: GlossaryPanelProps) {
+function GlossaryPanel({ documentId, onScrollToSection }: GlossaryPanelProps) {
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [filter, setFilter] = useState("")
+  const [sortKey, setSortKey] = useState<GlossarySortKey>("term")
+  const [error, setError] = useState("")
 
-  async function loadGlossary() {
+  // Load cached terms on mount
+  useEffect(() => {
+    let cancelled = false
+    async function fetchCached() {
+      try {
+        const res = await fetch(`${API_BASE}/explain/glossary/${documentId}/cached`)
+        if (res.ok) {
+          const data = (await res.json()) as GlossaryTerm[]
+          if (!cancelled) setTerms(data.length > 0 ? data : null)
+        }
+      } catch {
+        // ignore fetch error on initial load
+      } finally {
+        if (!cancelled) setInitialLoading(false)
+      }
+    }
+    void fetchCached()
+    return () => { cancelled = true }
+  }, [documentId])
+
+  async function generateGlossary() {
     setLoading(true)
+    setError("")
     try {
       const res = await fetch(`${API_BASE}/explain/glossary/${documentId}`, { method: "POST" })
       if (res.ok) {
         const data = (await res.json()) as GlossaryTerm[]
         setTerms(data)
+      } else {
+        const body = await res.json().catch(() => ({ detail: "Unknown error" })) as { detail?: string }
+        if (res.status === 503) {
+          setError("Ollama unavailable -- start it to generate glossary")
+        } else if (res.status === 422) {
+          setError(body.detail ?? "Glossary generation failed -- try again")
+        } else {
+          setError(body.detail ?? `Error ${res.status}`)
+        }
       }
     } catch {
-      // ignore
+      setError("Network error -- check your connection")
     } finally {
       setLoading(false)
     }
   }
 
-  const filtered = (terms ?? []).filter((t) =>
-    t.term.toLowerCase().includes(filter.toLowerCase()),
-  )
+  async function deleteTerm(termId: string) {
+    try {
+      const res = await fetch(`${API_BASE}/explain/glossary/${documentId}/terms/${termId}`, { method: "DELETE" })
+      if (res.ok || res.status === 204) {
+        setTerms((prev) => prev ? prev.filter((t) => t.id !== termId) : prev)
+      }
+    } catch {
+      // ignore
+    }
+  }
 
-  if (terms === null) {
+  const filterLower = filter.toLowerCase()
+  const filtered = (terms ?? [])
+    .filter((t) =>
+      t.term.toLowerCase().includes(filterLower) ||
+      t.definition.toLowerCase().includes(filterLower),
+    )
+    .sort((a, b) => {
+      if (sortKey === "category") {
+        return (a.category ?? "general").localeCompare(b.category ?? "general") || a.term.localeCompare(b.term)
+      }
+      return a.term.localeCompare(b.term)
+    })
+
+  if (initialLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-4 w-2/3" />
+      </div>
+    )
+  }
+
+  const hasTerms = terms !== null && terms.length > 0
+
+  if (!hasTerms) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">
           Extract domain-specific terms from this document.
         </p>
         <button
-          onClick={() => void loadGlossary()}
+          onClick={() => void generateGlossary()}
           disabled={loading}
           className="flex items-center gap-1.5 self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {loading && <Loader2 size={14} className="animate-spin" />}
           {loading ? "Extracting..." : "Generate Glossary"}
         </button>
+        {error && <p className="text-sm text-red-500">{error}</p>}
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-3">
-      <input
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder="Filter terms..."
-        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
+      <div className="flex items-center gap-2">
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Search terms and definitions..."
+          className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <button
+          onClick={() => void generateGlossary()}
+          disabled={loading}
+          title="Regenerate glossary"
+          className="flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+        >
+          {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+          Regenerate
+        </button>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>Sort:</span>
+        <button
+          onClick={() => setSortKey("term")}
+          className={cn("px-1.5 py-0.5 rounded", sortKey === "term" ? "bg-primary text-primary-foreground" : "hover:bg-muted")}
+        >
+          Term
+        </button>
+        <button
+          onClick={() => setSortKey("category")}
+          className={cn("px-1.5 py-0.5 rounded", sortKey === "category" ? "bg-primary text-primary-foreground" : "hover:bg-muted")}
+        >
+          Category
+        </button>
+      </div>
+      {error && <p className="text-sm text-red-500">{error}</p>}
       {filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {filter ? "No matching terms." : "No terms extracted."}
@@ -280,15 +391,44 @@ function GlossaryPanel({ documentId }: GlossaryPanelProps) {
             <tr className="border-b border-border text-left text-muted-foreground">
               <th className="pb-1.5 pr-3 font-medium">Term</th>
               <th className="pb-1.5 pr-3 font-medium">Definition</th>
-              <th className="pb-1.5 font-medium">Page</th>
+              <th className="pb-1.5 pr-3 font-medium">Category</th>
+              <th className="pb-1.5 font-medium">Section</th>
+              <th className="pb-1.5 w-6"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filtered.map((t, i) => (
-              <tr key={i}>
+            {filtered.map((t) => (
+              <tr key={t.id}>
                 <td className="py-1.5 pr-3 font-medium text-foreground align-top">{t.term}</td>
                 <td className="py-1.5 pr-3 text-foreground/80 align-top">{t.definition}</td>
-                <td className="py-1.5 text-muted-foreground align-top">{t.first_mention_page > 0 ? `p.${t.first_mention_page}` : "—"}</td>
+                <td className="py-1.5 pr-3 align-top">
+                  {t.category && (
+                    <span className={cn("inline-block rounded px-1.5 py-0.5 text-[10px] font-medium", CATEGORY_COLORS[t.category] ?? CATEGORY_COLORS.general)}>
+                      {t.category}
+                    </span>
+                  )}
+                </td>
+                <td className="py-1.5 pr-1 align-top">
+                  {t.first_mention_section_id && onScrollToSection ? (
+                    <button
+                      onClick={() => onScrollToSection(t.first_mention_section_id!)}
+                      className="text-primary hover:underline text-[10px]"
+                    >
+                      Go
+                    </button>
+                  ) : (
+                    <span className="text-muted-foreground">--</span>
+                  )}
+                </td>
+                <td className="py-1.5 align-top">
+                  <button
+                    onClick={() => void deleteTerm(t.id)}
+                    className="text-muted-foreground hover:text-red-500 transition-colors sm:opacity-0 sm:group-hover:opacity-100"
+                    title="Remove term"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -411,27 +551,43 @@ function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: ChapterGoals
 // Summary + Glossary panel (right side)
 // ---------------------------------------------------------------------------
 
-type PanelTab = SummaryMode | "glossary" | "references"
+type PanelTab = SummaryMode | "glossary" | "references" | "notes"
 
 interface SummaryPanelProps {
   documentId: string
   contentType: string
+  activeSectionId?: string | null
+  onScrollToSection?: (sectionId: string) => void
+  onNoteCountKnown: (count: number) => void
 }
 
-function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
+function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSection, onNoteCountKnown }: SummaryPanelProps) {
   const summaryTabs: SummaryTabDef[] =
     contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
   const allTabs = [
+    { mode: "notes" as PanelTab, label: "Notes" },
     ...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })),
     { mode: "glossary" as PanelTab, label: "Glossary" },
     { mode: "references" as PanelTab, label: "References" },
   ]
 
-  const [activeTab, setActiveTab] = useState<PanelTab>(allTabs[0].mode)
+  const [activeTab, setActiveTab] = useState<PanelTab>("notes")
+  const defaultTabResolved = useRef(false)
   const [summaries, setSummaries] = useState<SummaryMap>({})
   const [streaming, setStreaming] = useState<StreamingMap>({})
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [cacheLoading, setCacheLoading] = useState(true)
+
+  // AC5: switch default tab to Key Points if no notes exist
+  const handleNoteCountKnown = useCallback((count: number) => {
+    onNoteCountKnown(count)
+    if (!defaultTabResolved.current) {
+      defaultTabResolved.current = true
+      if (count === 0) {
+        setActiveTab("executive")
+      }
+    }
+  }, [onNoteCountKnown])
 
   // Load pre-generated summaries from DB on mount — no LLM call needed
   useEffect(() => {
@@ -523,7 +679,7 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
     }
   }
 
-  const isSidePanel = activeTab === "glossary" || activeTab === "references"
+  const isSidePanel = activeTab === "glossary" || activeTab === "references" || activeTab === "notes"
   const currentSummary = !isSidePanel ? summaries[activeTab as SummaryMode] : undefined
   const isStreaming = !isSidePanel ? (streaming[activeTab as SummaryMode] ?? false) : false
 
@@ -549,15 +705,17 @@ function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
 
       {/* Content area */}
       <div className="flex-1 overflow-auto">
-        {summaryError && activeTab !== "references" && (
+        {summaryError && activeTab !== "references" && activeTab !== "notes" && (
           <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {summaryError}
           </div>
         )}
-        {activeTab === "references" ? (
+        {activeTab === "notes" ? (
+          <NotesReaderPanel documentId={documentId} activeSectionId={activeSectionId ?? null} onScrollToSection={onScrollToSection} onNoteCountKnown={handleNoteCountKnown} />
+        ) : activeTab === "references" ? (
           <ReferencesPanel documentId={documentId} />
         ) : activeTab === "glossary" ? (
-          <GlossaryPanel documentId={documentId} />
+          <GlossaryPanel documentId={documentId} onScrollToSection={onScrollToSection} />
         ) : cacheLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />
@@ -1448,16 +1606,18 @@ interface DocumentReaderProps {
   documentId: string
   onBack: () => void
   initialSectionId?: string
+  initialChunkId?: string
   initialPage?: number  // S148: PDF page to navigate to on mount (from citation deep-link)
 }
 
-export function DocumentReader({ documentId, onBack, initialSectionId, initialPage }: DocumentReaderProps) {
+export function DocumentReader({ documentId, onBack, initialSectionId, initialChunkId, initialPage }: DocumentReaderProps) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { data: doc, isLoading } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
   })
+
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
@@ -1480,6 +1640,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
+  // S197: noteCount for "Compare my notes" button visibility
+  const [noteCount, setNoteCount] = useState(0)
   // S151: in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
@@ -1497,7 +1659,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   const [selectionNoteText, setSelectionNoteText] = useState("")
   const [selectionNoteSourceRef, setSelectionNoteSourceRef] = useState<SourceRef | null>(null)
   const [selectionNoteHeading, setSelectionNoteHeading] = useState<string | undefined>(undefined)
-  const [editingCreatedNote, setEditingCreatedNote] = useState<NoteCreationResult | null>(null)
+  const [editingCreatedNote, setEditingCreatedNote] = useState<Note | null>(null)
   const [selectionFlashcardOpen, setSelectionFlashcardOpen] = useState(false)
   const [selectionFlashcardText, setSelectionFlashcardText] = useState("")
   const [selectionFlashcardSourceRef, setSelectionFlashcardSourceRef] = useState<SourceRef | null>(null)
@@ -1558,23 +1720,44 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
   // Scroll to initialSectionId once document sections are loaded (S114)
   useEffect(() => {
     if (!initialSectionId || !doc) return
-    const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
+    // Wait a tick for DOM to update after doc is available
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }, 100)
+    return () => clearTimeout(timer)
   }, [initialSectionId, doc])
 
-  // Auto-switch to PDF view for PDF documents; Book view for EPUB
+  // S151: Explicit scroll when switching to Read tab via citation link
+  useEffect(() => {
+    if (leftTab === "read" && readSectionId) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`read-sec-${readSectionId}`)
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+      }, 150)
+      return () => clearTimeout(timer)
+    }
+  }, [leftTab, readSectionId])
+
+  // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
   useEffect(() => {
     if (!doc) return
     if (doc.format === "pdf") {
       setPdfViewVisited(true)
       setLeftTab("pdfview")
+      if (initialSectionId) setReadSectionId(initialSectionId)
+    } else if (initialSectionId || initialChunkId || initialPage) {
+      if (initialSectionId) setReadSectionId(initialSectionId)
+      setLeftTab("read")
     } else if (doc.format === "epub") {
       setBookViewVisited(true)
       setLeftTab("bookview")
     }
-  }, [doc?.format]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
@@ -1870,44 +2053,27 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
     setSheetOpen(true)
   }
 
-  // S147: walk up DOM from startContainer looking for [data-section-id] attribute
+  // S147/S198: walk up DOM from startContainer looking for [data-section-id] attribute
   function resolveSourceRef(startContainer: Node): SourceRef {
-    let node: Node | null = startContainer
-    while (node) {
-      if (node instanceof HTMLElement && node.dataset.sectionId) {
-        return {
-          sectionId: node.dataset.sectionId,
-          documentId,
-          documentTitle: doc?.title ?? "",
-        }
-      }
-      node = node.parentNode
+    // DOM walk: works for section list view, ReadView, and any view with data-section-id
+    const sectionId = resolveFromDom(startContainer)
+    if (sectionId) {
+      return { sectionId, documentId, documentTitle: doc?.title ?? "" }
     }
+
     // Fallback for PDF view: map currentPage to section by page range
     if (leftTab === "pdfview" && doc?.sections && doc.sections.length > 0) {
-      const hasPageNums = doc.sections.some((s) => s.page_start > 0)
-      let sec: SectionItem | undefined
-      if (hasPageNums) {
-        // Find section whose page range contains the current page
-        sec = doc.sections.find((s) => {
-          const start = s.page_start
-          const end = s.page_end || start
-          return start > 0 && pdfCurrentPage >= start && pdfCurrentPage <= end
-        })
-        // If no exact match, find the last section that starts before current page
-        if (!sec) {
-          for (let i = doc.sections.length - 1; i >= 0; i--) {
-            if (doc.sections[i].page_start > 0 && doc.sections[i].page_start <= pdfCurrentPage) {
-              sec = doc.sections[i]
-              break
-            }
-          }
-        }
+      const pdfSectionId = resolvePdfFallback(doc.sections, pdfCurrentPage, doc.page_count)
+      if (pdfSectionId) {
+        return { sectionId: pdfSectionId, documentId, documentTitle: doc?.title ?? "" }
       }
-      // Ultimate fallback: use first section
-      if (!sec) sec = doc.sections[0]
-      return { sectionId: sec.id, documentId, documentTitle: doc?.title ?? "" }
     }
+
+    // Fallback for read view: use first section when DOM walk failed
+    if (leftTab === "read" && doc?.sections && doc.sections.length > 0) {
+      return { sectionId: doc.sections[0].id, documentId, documentTitle: doc?.title ?? "" }
+    }
+
     return { sectionId: undefined, documentId, documentTitle: doc?.title ?? "" }
   }
 
@@ -2016,8 +2182,8 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Back button */}
-      <div className="border-b border-border px-6 py-3">
+      {/* Back button + Compare my notes (S197) */}
+      <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <button
           onClick={onBack}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -2025,6 +2191,20 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           <ArrowLeft size={14} />
           Back to library
         </button>
+        {noteCount >= 3 && (
+          <button
+            onClick={() => {
+              setChatPreload({ text: "compare my notes with this book", documentId, autoSubmit: true })
+              window.dispatchEvent(
+                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } })
+              )
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <GitCompareArrows size={14} />
+            Compare my notes
+          </button>
+        )}
       </div>
 
       {/* Two-panel layout */}
@@ -2159,25 +2339,39 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
           </div>
 
           {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
-          {doc.format === "pdf" && pdfViewVisited && (
-            <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-              <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={initialPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={setPdfCurrentPage} />
-            </div>
-          )}
+          {doc.format === "pdf" && pdfViewVisited && (() => {
+            let targetPdfPage = initialPage
+            if (!targetPdfPage && initialSectionId) {
+              const sec = doc.sections.find((s) => s.id === initialSectionId)
+              if (sec && sec.page_start > 0) targetPdfPage = sec.page_start
+            }
+            return (
+              <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
+                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={setPdfCurrentPage} />
+              </div>
+            )
+          })()}
 
           {/* S149: Book View — lazy-mounted for EPUB documents */}
-          {doc.format === "epub" && bookViewVisited && (
+          {bookViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer documentId={documentId} />
             </div>
           )}
 
-          {/* Read View — full document content as markdown */}
-          {leftTab === "read" && (
-            <div className="flex-1 overflow-hidden">
-              <ReadView documentId={documentId} initialSectionId={readSectionId} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} />
-            </div>
-          )}
+          {/* Read View — full document content as markdown, or transcript for YouTube */}
+          <div className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}>
+            {isYouTube ? (
+              <YouTubeTranscriptView doc={doc} initialSectionId={readSectionId} initialChunkId={initialChunkId} />
+            ) : (
+              <ReadView
+                documentId={documentId}
+                initialSectionId={readSectionId}
+                annotations={docAnnotations ?? []}
+                highlightsVisible={highlightsVisible}
+              />
+            )}
+          </div>
 
           {/* S147: SelectionActionBar — fires on selections in both section list and PDF viewer */}
           <SelectionActionBar
@@ -2386,6 +2580,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
                                 onSaved={() => {
                                   setOpenNoteEditor(null)
                                   void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+                                  void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+                                  void qc.invalidateQueries({ queryKey: ["notes"] })
+                                  void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+                                  void qc.invalidateQueries({ queryKey: ["collections"] })
                                 }}
                                 onCancel={() => setOpenNoteEditor(null)}
                               />
@@ -2413,7 +2611,21 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
             sectionId={activeSectionGoals}
             onStudyClick={handleStudyClick}
           />
-          <SummaryPanel documentId={documentId} contentType={doc.content_type} />
+          <SummaryPanel
+            documentId={documentId}
+            contentType={doc.content_type}
+            activeSectionId={readSectionId}
+            onNoteCountKnown={setNoteCount}
+            onScrollToSection={(sectionId) => {
+              if (leftTab !== "read") {
+                setReadSectionId(sectionId)
+                setLeftTab("read")
+              } else {
+                const el = document.getElementById(`read-sec-${sectionId}`)
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            }}
+          />
         </div>
       </div>
 
@@ -2454,8 +2666,12 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
         sourceRef={selectionNoteSourceRef}
         sectionHeading={selectionNoteHeading}
         onClose={() => setSelectionNoteOpen(false)}
-        onSaved={(note) => {
+        onSaved={(note: Note) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          void qc.invalidateQueries({ queryKey: ["collections"] })
           setEditingCreatedNote(note)
         }}
       />
@@ -2466,6 +2682,10 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialPa
         onClose={() => setEditingCreatedNote(null)}
         onSaved={(_updated) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          void qc.invalidateQueries({ queryKey: ["collections"] })
           setEditingCreatedNote(null)
         }}
       />

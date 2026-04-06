@@ -218,7 +218,7 @@ async def test_teach_back_ollama_offline():
     card = json.loads(result["answer"][8:])
     assert card["type"] == "teach_back_result"
     assert "error" in card
-    assert "ollama serve" in card["error"].lower()
+    assert "check settings" in card["error"].lower()
 
 
 # ---------------------------------------------------------------------------

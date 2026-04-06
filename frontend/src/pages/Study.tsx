@@ -26,6 +26,7 @@ import {
   Plus,
   Trash2,
   X,
+  Zap,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import {
@@ -65,6 +66,16 @@ async function fetchDocList(): Promise<DocListItem[]> {
 }
 
 import { API_BASE } from "@/lib/config"
+import {
+  BLOOM_LEVEL_LABELS,
+  FSRS_STATE_LABELS,
+  INSIGHTS_SECTIONS,
+  buildSearchParams,
+  buildSmartGenerateParams,
+  computeMasteryPct,
+  selectSmartMode,
+} from "@/lib/studyUtils"
+import type { FlashcardSearchFilters } from "@/lib/studyUtils"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,6 +99,8 @@ interface Flashcard {
   bloom_level: number | null
   // S154: cloze deletion text with {{term}} markers; null for non-cloze cards
   cloze_text: string | null
+  // S188: section heading for source grounding display
+  section_heading: string | null
 }
 
 interface SectionItem {
@@ -95,17 +108,6 @@ interface SectionItem {
   heading: string
   level: number
   section_order: number
-}
-
-interface EntityPair {
-  name_a: string
-  name_b: string
-  relation_label: string
-  confidence: number
-}
-
-interface EntityPairsResponse {
-  pairs: EntityPair[]
 }
 
 interface DocumentSections {
@@ -167,6 +169,20 @@ interface DeckHealthReport {
   hotspot_sections: HealthSection[]
 }
 
+// S184: Collection type for filter dropdown
+interface CollectionItem {
+  id: string
+  name: string
+}
+
+// S184: Search response type
+interface FlashcardSearchResponse {
+  items: Flashcard[]
+  total: number
+  page: number
+  page_size: number
+}
+
 // S153: Bloom's taxonomy coverage audit types
 interface BloomGap {
   section_id: string
@@ -220,18 +236,19 @@ interface SessionCardDetail {
 // API
 // ---------------------------------------------------------------------------
 
-async function fetchFlashcards(
-  documentId: string,
-  sectionId?: string | null,
-  bloomLevelMin?: number | null,
-): Promise<Flashcard[]> {
-  const params = new URLSearchParams()
-  if (sectionId) params.set("section_id", sectionId)
-  if (bloomLevelMin != null) params.set("bloom_level_min", String(bloomLevelMin))
+async function fetchFlashcardSearch(filters: FlashcardSearchFilters): Promise<FlashcardSearchResponse> {
+  const params = buildSearchParams(filters)
   const query = params.toString()
-  const res = await fetch(`${API_BASE}/flashcards/${documentId}${query ? `?${query}` : ""}`)
+  const res = await fetch(`${API_BASE}/flashcards/search${query ? `?${query}` : ""}`)
+  if (!res.ok) return { items: [], total: 0, page: 1, page_size: 20 }
+  return res.json() as Promise<FlashcardSearchResponse>
+}
+
+async function fetchCollections(): Promise<CollectionItem[]> {
+  const res = await fetch(`${API_BASE}/collections/tree`)
   if (!res.ok) return []
-  return res.json() as Promise<Flashcard[]>
+  const tree = await res.json() as { id: string; name: string }[]
+  return tree.map((c) => ({ id: c.id, name: c.name }))
 }
 
 async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
@@ -305,14 +322,6 @@ class GenerateError extends Error {
     super(message)
     this.status = status
   }
-}
-
-async function fetchEntityPairs(documentId: string): Promise<EntityPairsResponse> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/entity-pairs?document_id=${encodeURIComponent(documentId)}`
-  )
-  if (!res.ok) return { pairs: [] }
-  return res.json() as Promise<EntityPairsResponse>
 }
 
 async function generateFromGraph(req: {
@@ -467,6 +476,10 @@ function FlashcardCard({
 
   return (
     <Card className="flex flex-col gap-3">
+      {/* S188: Section heading label */}
+      {card.section_heading && !editing && (
+        <p className="text-xs text-muted-foreground">{card.section_heading}</p>
+      )}
       {/* Question */}
       <div className="flex items-start justify-between gap-2">
         {editing ? (
@@ -596,93 +609,6 @@ function FlashcardCard({
 }
 
 // ---------------------------------------------------------------------------
-// FilterBar
-// ---------------------------------------------------------------------------
-
-const FLASHCARD_TYPE_OPTIONS = [
-  "(All)",
-  "cloze",  // S154: fill-in-the-blank
-  "definition",
-  "syntax_recall",
-  "concept_explanation",
-  "analogy",
-  "code_completion",
-  "api_signature",
-  "trace",
-  "pattern_recognition",
-  "design_decision",
-  "complexity",
-  "implementation",
-]
-
-interface FilterBarProps {
-  filterType: string | null
-  filterBloomMin: number
-  filterBloomMax: number
-  onTypeChange: (v: string | null) => void
-  onBloomMinChange: (v: number) => void
-  onBloomMaxChange: (v: number) => void
-  onClear: () => void
-}
-
-function FilterBar({
-  filterType,
-  filterBloomMin,
-  filterBloomMax,
-  onTypeChange,
-  onBloomMinChange,
-  onBloomMaxChange,
-  onClear,
-}: FilterBarProps) {
-  const hasFilter = filterType !== null || filterBloomMin !== 1 || filterBloomMax !== 6
-  return (
-    <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/20 p-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Type</label>
-        <select
-          value={filterType ?? "(All)"}
-          onChange={(e) => onTypeChange(e.target.value === "(All)" ? null : e.target.value)}
-          className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          {FLASHCARD_TYPE_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>{opt === "(All)" ? "All types" : opt.replace(/_/g, " ")}</option>
-          ))}
-        </select>
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Bloom level (min)</label>
-        <input
-          type="number"
-          min={1}
-          max={6}
-          value={filterBloomMin}
-          onChange={(e) => onBloomMinChange(Math.min(Number(e.target.value), filterBloomMax))}
-          className="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Bloom level (max)</label>
-        <input
-          type="number"
-          min={1}
-          max={6}
-          value={filterBloomMax}
-          onChange={(e) => onBloomMaxChange(Math.max(Number(e.target.value), filterBloomMin))}
-          className="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-      {hasFilter && (
-        <button
-          onClick={onClear}
-          className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          Clear filters
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // DeckHealthPanel (S153) -- Bloom's taxonomy coverage audit
 // ---------------------------------------------------------------------------
@@ -794,7 +720,7 @@ function DeckHealthPanel({ documentId }: DeckHealthPanelProps) {
                   <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
                     <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                    <Tooltip formatter={(value: number | undefined) => [value ?? 0, "Cards"]} />
+                    <Tooltip formatter={(value) => [value ?? 0, "Cards"]} />
                     <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                       {chartData.map((entry, index) => (
                         <Cell key={`bar-${index}`} fill={entry.fill} />
@@ -876,7 +802,7 @@ function HealthReportPanel({ documentId }: HealthReportPanelProps) {
     mutationFn: () => archiveMastered(documentId),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["health", documentId] })
-      qc.invalidateQueries({ queryKey: ["flashcards", documentId] })
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(`Archived ${data.archived} mastered cards`)
     },
     onError: () => {
@@ -1109,31 +1035,54 @@ function WeakAreasPanel({ documentId, onSelectSection }: WeakAreasPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
-// GeneratePanel
+// InsightsAccordion (S185) -- merged DeckHealthPanel + HealthReportPanel + StrugglingPanel
+// Uses INSIGHTS_SECTIONS constant for section enumeration (load-bearing for tests).
 // ---------------------------------------------------------------------------
 
-interface GeneratePanelProps {
+interface InsightsAccordionProps {
   documentId: string
-  sections: SectionItem[]
-  onGenerate: (req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) => void
-  onRegenerate: (req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) => void
-  onGenerateFromGraph: (k: number) => void
-  // S154: cloze generation (section-scoped)
-  onGenerateCloze: (sectionId: string, count: number) => void
-  isGenerating: boolean
-  isClozeGenerating: boolean
-  preselectedSection?: string | null
+  cards: Flashcard[]
 }
+
+function InsightsAccordion({ documentId, cards }: InsightsAccordionProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const totalCards = cards.length
+  const masteredPct = Math.round(computeMasteryPct(cards))
+
+  return (
+    <section className="flex flex-col gap-2 rounded-md border border-border bg-card p-4">
+      <button
+        className="flex items-center justify-between text-left"
+        onClick={() => setIsOpen((v) => !v)}
+      >
+        <span className="text-base font-semibold text-foreground">
+          Insights ({totalCards} card{totalCards !== 1 ? "s" : ""}, {masteredPct}% mastered)
+        </span>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+
+      {isOpen && (
+        <div className="flex flex-col gap-4 pt-2">
+          {/* Sections driven by INSIGHTS_SECTIONS constant */}
+          {INSIGHTS_SECTIONS.includes("health_report") && (
+            <HealthReportPanel documentId={documentId} />
+          )}
+          {INSIGHTS_SECTIONS.includes("bloom_audit") && (
+            <DeckHealthPanel documentId={documentId} />
+          )}
+          {INSIGHTS_SECTIONS.includes("struggling") && (
+            <StrugglingPanel documentId={documentId} />
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// GenerateButton (S185) -- single Generate Cards button with chevron disclosure
+// Replaces GeneratePanel + SmartGeneratePanel. Uses buildSmartGenerateParams.
+// ---------------------------------------------------------------------------
 
 const COUNT_OPTIONS = [5, 10, 20, 50]
 const DIFFICULTY_OPTIONS = [
@@ -1142,290 +1091,242 @@ const DIFFICULTY_OPTIONS = [
   { value: "hard", label: "Hard" },
 ]
 
-const PAIRS_K_OPTIONS = [3, 5, 10]
+const SMART_MODE_LABEL: Record<string, string> = {
+  basic: "basic cards",
+  feynman: "Feynman-style questions",
+  cloze: "cloze cards",
+}
 
-function GeneratePanel({
+const GENERATE_MODE_OPTIONS = [
+  { value: "basic", label: "Basic" },
+  { value: "graph", label: "Graph (entities)" },
+  { value: "cloze", label: "Cloze" },
+  { value: "technical", label: "Technical" },
+]
+
+interface GenerateButtonProps {
+  documentId: string
+  sections: SectionItem[]
+  cards: Flashcard[]
+  onGenerate: (req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+    difficulty: "easy" | "medium" | "hard"
+  }) => void
+  onGenerateFromGraph: (k: number) => void
+  onGenerateCloze: (sectionId: string, count: number) => void
+  isGenerating: boolean
+  isClozeGenerating: boolean
+}
+
+function GenerateButton({
   documentId,
   sections,
+  cards,
   onGenerate,
-  onRegenerate,
   onGenerateFromGraph,
   onGenerateCloze,
   isGenerating,
   isClozeGenerating,
-  preselectedSection,
-}: GeneratePanelProps) {
-  const [mode, setMode] = useState<"text" | "entities" | "cloze">("text")
-  const [count, setCount] = useState(10)
+}: GenerateButtonProps) {
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [scope, setScope] = useState<"full" | "section">("full")
   const [sectionHeading, setSectionHeading] = useState<string | null>(null)
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium")
-  const [pairsK, setPairsK] = useState(5)
-  // S154: cloze tab state
+  const [mode, setMode] = useState<"basic" | "graph" | "cloze" | "technical">("basic")
+  const [count, setCount] = useState(10)
   const [clozeSectionId, setClozeSectionId] = useState<string | null>(null)
-  const [clozeCount, setClozeCount] = useState(5)
 
-  // Sync scope/heading when a gap section is clicked from outside
-  useEffect(() => {
-    if (preselectedSection != null) {
-      setScope("section")
-      setSectionHeading(preselectedSection)
+  const masteryPct = computeMasteryPct(cards)
+  const isAnyGenerating = isGenerating || isClozeGenerating
+
+  function handleSmartGenerate() {
+    const params = buildSmartGenerateParams(masteryPct, documentId)
+    if (params.smart_mode === "feynman") {
+      onGenerateFromGraph(5)
+    } else if (params.smart_mode === "cloze") {
+      const firstSection = sections[0]
+      if (firstSection) {
+        onGenerateCloze(firstSection.id, 5)
+      } else {
+        onGenerate({ scope: "full", section_heading: null, count: 10, difficulty: "medium" })
+      }
+    } else {
+      onGenerate({
+        scope: params.scope,
+        section_heading: params.section_heading,
+        count: params.count,
+        difficulty: params.difficulty,
+      })
     }
-  }, [preselectedSection])
+  }
 
-  const {
-    data: pairsData,
-    isLoading: pairsLoading,
-    isError: pairsError,
-  } = useQuery<EntityPairsResponse>({
-    queryKey: ["entity-pairs", documentId],
-    queryFn: () => fetchEntityPairs(documentId),
-    enabled: mode === "entities",
-    staleTime: 60_000,
-  })
-  const entityPairs = pairsData?.pairs ?? []
+  function handleAdvancedGenerate() {
+    if (mode === "graph" || mode === "technical") {
+      onGenerateFromGraph(5)
+    } else if (mode === "cloze") {
+      if (clozeSectionId) {
+        onGenerateCloze(clozeSectionId, count)
+      }
+    } else {
+      onGenerate({ scope, section_heading: sectionHeading, count, difficulty })
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
-      {/* Mode toggle */}
-      <div className="flex gap-0 rounded-md border border-border bg-background w-fit">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1">
         <button
-          onClick={() => setMode("text")}
-          className={`px-3 py-1.5 text-sm font-medium rounded-l-md transition-colors ${
-            mode === "text"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+          onClick={handleSmartGenerate}
+          disabled={isAnyGenerating || !documentId}
+          className="flex items-center gap-2 rounded-l bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          From Text
+          {isAnyGenerating ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Zap size={14} />
+          )}
+          Generate Cards
         </button>
         <button
-          onClick={() => setMode("entities")}
-          className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-            mode === "entities"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+          onClick={() => setOptionsOpen((v) => !v)}
+          disabled={!documentId}
+          className="flex items-center rounded-r border-l border-primary-foreground/20 bg-primary px-2 py-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          aria-label="Toggle generate options"
         >
-          From Entities
-        </button>
-        <button
-          onClick={() => setMode("cloze")}
-          className={`px-3 py-1.5 text-sm font-medium rounded-r-md transition-colors ${
-            mode === "cloze"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Cloze
+          {optionsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
+      {!isAnyGenerating && (
+        <span className="text-xs text-muted-foreground">
+          Adaptive: {SMART_MODE_LABEL[selectSmartMode(masteryPct)] ?? "basic cards"}
+        </span>
+      )}
+      {isAnyGenerating && (
+        <span className="text-xs text-muted-foreground">
+          Generating {SMART_MODE_LABEL[selectSmartMode(masteryPct)]}...
+        </span>
+      )}
 
-      {mode === "text" ? (
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Count */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Count</label>
-            <select
-              value={count}
-              onChange={(e) => setCount(Number(e.target.value))}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {COUNT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n} cards
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Difficulty */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {DIFFICULTY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Scope */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Scope</label>
-            <select
-              value={scope}
-              onChange={(e) => {
-                const v = e.target.value as "full" | "section"
-                setScope(v)
-                if (v === "full") setSectionHeading(null)
-              }}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="full">Full document</option>
-              <option value="section">By section</option>
-            </select>
-          </div>
-
-          {/* Section picker */}
-          {scope === "section" && sections.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Section</label>
-              <select
-                value={sectionHeading ?? ""}
-                onChange={(e) => setSectionHeading(e.target.value || null)}
-                className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">Select section...</option>
-                {sections.map((s) => (
-                  <option key={s.id} value={s.heading}>
-                    {s.heading}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => onGenerate({ scope, section_heading: sectionHeading, count, difficulty })}
-              disabled={isGenerating || (scope === "section" && !sectionHeading)}
-              className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isGenerating && <Loader2 size={14} className="animate-spin" />}
-              Generate
-            </button>
-            <button
-              onClick={() => onRegenerate({ scope, section_heading: sectionHeading, count, difficulty })}
-              disabled={isGenerating || (scope === "section" && !sectionHeading)}
-              className="flex items-center gap-2 rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              title="Delete all current cards and generate new ones"
-            >
-              Regenerate
-            </button>
-          </div>
-        </div>
-      ) : mode === "entities" ? (
-        <div className="flex flex-col gap-4">
-          {/* Top pairs count */}
+      {/* Disclosure panel: advanced options */}
+      {optionsOpen && (
+        <div className="flex flex-col gap-3 rounded-md border border-border bg-muted/30 p-3 mt-1">
           <div className="flex flex-wrap items-end gap-3">
+            {/* Mode */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Top pairs</label>
+              <label className="text-xs font-medium text-muted-foreground">Mode</label>
               <select
-                value={pairsK}
-                onChange={(e) => setPairsK(Number(e.target.value))}
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
                 className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                {PAIRS_K_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    {n} pairs
-                  </option>
+                {GENERATE_MODE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             </div>
+
+            {/* Scope (only for basic mode) */}
+            {mode === "basic" && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Scope</label>
+                <select
+                  value={scope}
+                  onChange={(e) => {
+                    const v = e.target.value as "full" | "section"
+                    setScope(v)
+                    if (v === "full") setSectionHeading(null)
+                  }}
+                  className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="full">Full document</option>
+                  <option value="section">By section</option>
+                </select>
+              </div>
+            )}
+
+            {/* Section picker for basic + section scope */}
+            {mode === "basic" && scope === "section" && sections.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Section</label>
+                <select
+                  value={sectionHeading ?? ""}
+                  onChange={(e) => setSectionHeading(e.target.value || null)}
+                  className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Select section...</option>
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.heading}>{s.heading}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Section picker for cloze mode (required) */}
+            {mode === "cloze" && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Section <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={clozeSectionId ?? ""}
+                  onChange={(e) => setClozeSectionId(e.target.value || null)}
+                  className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Select a section...</option>
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.id}>{s.heading}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Difficulty (basic mode only) */}
+            {mode === "basic" && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Difficulty</label>
+                <select
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
+                  className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {DIFFICULTY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Count */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Count</label>
+              <select
+                value={count}
+                onChange={(e) => setCount(Number(e.target.value))}
+                className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {COUNT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n} cards</option>
+                ))}
+              </select>
+            </div>
+
             <button
-              onClick={() => onGenerateFromGraph(pairsK)}
-              disabled={isGenerating}
+              onClick={handleAdvancedGenerate}
+              disabled={
+                isAnyGenerating ||
+                (mode === "basic" && scope === "section" && !sectionHeading) ||
+                (mode === "cloze" && !clozeSectionId)
+              }
               className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {isGenerating && <Loader2 size={14} className="animate-spin" />}
-              Generate from Entities
+              {isAnyGenerating && <Loader2 size={14} className="animate-spin" />}
+              Generate
             </button>
           </div>
-
-          {/* Entity pairs preview */}
-          <div className="flex flex-col gap-2">
-            <span className="text-xs font-medium text-muted-foreground">Entity pair preview</span>
-            {pairsLoading ? (
-              <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
-                <Loader2 size={14} className="animate-spin" />
-                Loading entity pairs...
-              </div>
-            ) : pairsError ? (
-              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                Could not load entity pairs.
-              </div>
-            ) : entityPairs.length === 0 ? (
-              <div className="rounded border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-                No entity relationships found for this document. Try ingesting the document first.
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {entityPairs.map((pair, i) => (
-                  <li
-                    key={i}
-                    className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium text-foreground">{pair.name_a}</span>
-                    <span className="text-muted-foreground">--</span>
-                    <span className="italic text-muted-foreground">{pair.relation_label}</span>
-                    <span className="text-muted-foreground">--</span>
-                    <span className="font-medium text-foreground">{pair.name_b}</span>
-                    <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
-                      {Math.round(pair.confidence * 100)}%
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </div>
-      ) : mode === "cloze" ? (
-        /* S154: Cloze (fill-in-the-blank) generation tab */
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Section picker — required for cloze (endpoint is section-scoped) */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">
-              Section <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={clozeSectionId ?? ""}
-              onChange={(e) => setClozeSectionId(e.target.value || null)}
-              className="max-w-[240px] rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">Select a section...</option>
-              {sections.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.heading}
-                </option>
-              ))}
-            </select>
-            {!clozeSectionId && (
-              <span className="text-xs text-muted-foreground">Select a section to generate cloze cards.</span>
-            )}
-          </div>
-
-          {/* Count */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Count</label>
-            <select
-              value={clozeCount}
-              onChange={(e) => setClozeCount(Number(e.target.value))}
-              className="rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {COUNT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n} cards
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            onClick={() => clozeSectionId && onGenerateCloze(clozeSectionId, clozeCount)}
-            disabled={isClozeGenerating || !clozeSectionId}
-            className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {isClozeGenerating && <Loader2 size={14} className="animate-spin" />}
-            Generate Cloze Cards
-          </button>
-        </div>
-      ) : null}
+      )}
     </div>
   )
 }
@@ -1510,8 +1411,11 @@ function StrugglingPanel({ documentId }: StrugglingPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
-// GoalsPanel
+// GoalsPanel (exported so Progress tab can render it without Study tab re-implementing)
 // ---------------------------------------------------------------------------
+
+export { fetchGoals, createGoal, deleteGoalApi, fetchReadiness }
+export type { LearningGoal, ReadinessResult, AtRiskCard, DocListItem }
 
 function RetentionBadge({ pct }: { pct: number }) {
   const color =
@@ -1606,11 +1510,11 @@ function GoalRow({ goal, docTitle, onDelete, isDeleting }: GoalRowProps) {
   )
 }
 
-interface GoalsPanelProps {
+export interface GoalsPanelProps {
   docs: DocListItem[]
 }
 
-function GoalsPanel({ docs }: GoalsPanelProps) {
+export function GoalsPanel({ docs }: GoalsPanelProps) {
   const qc = useQueryClient()
   const [title, setTitle] = useState("")
   const [docId, setDocId] = useState("")
@@ -1937,8 +1841,6 @@ export default function Study() {
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const queryClient = useQueryClient()
   const [studying, setStudying] = useState(false)
-  // Track section pre-selected by clicking a gap item
-  const [selectedGapSection, setSelectedGapSection] = useState<string | null>(null)
   const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
   const [studySubTab, setStudySubTab] = useState<"flashcards" | "history">("flashcards")
   const [filterType, setFilterType] = useState<string | null>(null)
@@ -1959,6 +1861,26 @@ export default function Study() {
     staleTime: 30_000,
   })
 
+  // S184: search state
+  const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
+  const [filterDocId, setFilterDocId] = useState<string | null>(null)
+  const [filterCollectionId, setFilterCollectionId] = useState<string | null>(null)
+  const [filterTag, setFilterTag] = useState<string | null>(null)
+  const [filterFsrsState, setFilterFsrsState] = useState<string | null>(null)
+  const [searchPage, setSearchPage] = useState(1)
+
+  // S184: 300ms debounce for search query
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Reset page when any filter changes
+  useEffect(() => {
+    setSearchPage(1)
+  }, [debouncedQuery, filterDocId, filterCollectionId, filterTag, filterBloomMin, filterBloomMax, filterFsrsState, filterType])
+
   useEffect(() => {
     logger.info("[Study] mounted")
   }, [])
@@ -1974,15 +1896,31 @@ export default function Study() {
     setStudySectionFilter(null)
   }, [studySectionFilter, setStudySectionFilter])
 
-  // Flashcard list — include section/bloom filters when set (S143)
-  const { data: cards = [], isLoading: cardsLoading, isError: cardsError } = useQuery<Flashcard[]>({
-    queryKey: ["flashcards", activeDocumentId, activeSectionFilter?.sectionId, activeSectionFilter?.bloomLevelMin],
-    queryFn: () => fetchFlashcards(
-      activeDocumentId!,
-      activeSectionFilter?.sectionId,
-      activeSectionFilter?.bloomLevelMin,
-    ),
-    enabled: !!activeDocumentId,
+  // S184: Unified flashcard search query
+  const searchFilters: FlashcardSearchFilters = {
+    query: debouncedQuery || undefined,
+    document_id: filterDocId ?? activeDocumentId ?? undefined,
+    collection_id: filterCollectionId ?? undefined,
+    tag: filterTag ?? undefined,
+    bloom_level_min: filterBloomMin > 1 ? filterBloomMin : undefined,
+    bloom_level_max: filterBloomMax < 6 ? filterBloomMax : undefined,
+    fsrs_state: filterFsrsState ?? undefined,
+    flashcard_type: filterType ?? undefined,
+    page: searchPage,
+    page_size: 20,
+  }
+  const { data: searchResult, isLoading: cardsLoading, isError: cardsError } = useQuery<FlashcardSearchResponse>({
+    queryKey: ["flashcards-search", debouncedQuery, filterDocId, activeDocumentId, filterCollectionId, filterTag, filterBloomMin, filterBloomMax, filterFsrsState, filterType, searchPage],
+    queryFn: () => fetchFlashcardSearch(searchFilters),
+  })
+  const cards = searchResult?.items ?? []
+  const totalCards = searchResult?.total ?? 0
+
+  // S184: Collections list for filter dropdown
+  const { data: collectionList = [] } = useQuery<CollectionItem[]>({
+    queryKey: ["collections-list"],
+    queryFn: fetchCollections,
+    staleTime: 60_000,
   })
 
   useEffect(() => {
@@ -2007,7 +1945,7 @@ export default function Study() {
       generateFromGraph({ document_id: activeDocumentId!, k }),
     onSuccess: (newCards) => {
       setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(
         `Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""} from entity pairs`
       )
@@ -2036,7 +1974,7 @@ export default function Study() {
       }),
     onSuccess: (newCards) => {
       setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(`Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""}`)
     },
     onError: (err: unknown) => {
@@ -2055,7 +1993,7 @@ export default function Study() {
       generateClozeFlashcards(sectionId, count),
     onSuccess: (newCards) => {
       setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success(`Generated ${newCards.length} cloze card${newCards.length !== 1 ? "s" : ""}`)
     },
     onError: (err: unknown) => {
@@ -2073,7 +2011,7 @@ export default function Study() {
     mutationFn: ({ id, data }: { id: string; data: { question?: string; answer?: string } }) =>
       updateFlashcard(id, data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success("Flashcard updated")
     },
     onError: () => toast.error("Failed to update flashcard"),
@@ -2083,7 +2021,7 @@ export default function Study() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteFlashcard(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success("Flashcard deleted")
     },
     onError: () => toast.error("Failed to delete flashcard"),
@@ -2093,31 +2031,10 @@ export default function Study() {
   const deleteAllMutation = useMutation({
     mutationFn: () => deleteAllFlashcards(activeDocumentId!),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
     },
     onError: () => toast.error("Failed to clear flashcards"),
   })
-
-  async function handleRegenerate(req: {
-    scope: "full" | "section"
-    section_heading: string | null
-    count: number
-    difficulty: "easy" | "medium" | "hard"
-  }) {
-    if (!activeDocumentId) return
-    const confirmed = window.confirm(
-      "This will delete all current flashcards for this document and generate new ones. Continue?"
-    )
-    if (!confirmed) return
-
-    setGenerateErrorKind(null)
-    try {
-      await deleteAllMutation.mutateAsync()
-      await generateMutation.mutateAsync(req)
-    } catch (err) {
-      logger.error("Regenerate failed", { err })
-    }
-  }
 
   function handleExportCsv() {
     if (!activeDocumentId) return
@@ -2131,7 +2048,7 @@ export default function Study() {
         documentId={activeDocumentId}
         onExit={() => {
           setStudying(false)
-          void queryClient.invalidateQueries({ queryKey: ["flashcards", activeDocumentId] })
+          void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
           if (activeDocumentId) {
             void queryClient.invalidateQueries({ queryKey: ["section-heatmap", activeDocumentId] })
           }
@@ -2142,253 +2059,373 @@ export default function Study() {
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-6">
-      {/* Document selector */}
+      {/* S185: Top CTA row -- Start Studying + Generate Cards (max 2 CTAs above the fold) */}
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-muted-foreground shrink-0">Document</label>
-        <select
-          value={activeDocumentId ?? ""}
-          onChange={(e) => setActiveDocument(e.target.value || null)}
-          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-xs"
+        <button
+          onClick={() => setStudying(true)}
+          disabled={cards.length === 0}
+          className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          <option value="">Select a document…</option>
+          <PlayCircle size={14} />
+          Start Studying
+        </button>
+        {activeDocumentId && (
+          <GenerateButton
+            documentId={activeDocumentId}
+            sections={sections}
+            cards={cards}
+            onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
+            onGenerateFromGraph={(k) => {
+              setGenerateErrorKind(null)
+              generateFromGraphMutation.mutate(k)
+            }}
+            onGenerateCloze={(sectionId, count) => {
+              setGenerateErrorKind(null)
+              generateClozeMutation.mutate({ sectionId, count })
+            }}
+            isGenerating={
+              generateMutation.isPending ||
+              deleteAllMutation.isPending ||
+              generateFromGraphMutation.isPending
+            }
+            isClozeGenerating={generateClozeMutation.isPending}
+          />
+        )}
+      </div>
+
+      {/* Inline generate error banners */}
+      {generateErrorKind === "ollama_offline" && (
+        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="flex-1">
+            Ollama is not running. To generate flashcards, run:{" "}
+            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
+          </span>
+          <button
+            onClick={() => void navigator.clipboard.writeText("ollama serve")}
+            className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+            title="Copy command"
+          >
+            <Copy size={11} />
+            Copy
+          </button>
+        </div>
+      )}
+      {generateErrorKind === "server_error" && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Flashcard generation failed. Please try again.
+        </div>
+      )}
+
+      {/* S184: Search bar */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-md">
+          <input
+            type="text"
+            placeholder="Search flashcards..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-md border border-border bg-background pl-3 pr-8 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        {/* Document filter dropdown */}
+        <select
+          value={filterDocId ?? activeDocumentId ?? ""}
+          onChange={(e) => {
+            const v = e.target.value || null
+            setFilterDocId(v)
+            setActiveDocument(v)
+          }}
+          className="rounded-md border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-xs"
+        >
+          <option value="">All documents</option>
           {docList.map((doc) => (
             <option key={doc.id} value={doc.id}>{doc.title}</option>
           ))}
         </select>
       </div>
 
-      {!activeDocumentId ? (
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">Select a document above to get started.</p>
+      {/* S184: Active filter chips */}
+      {(filterDocId || filterCollectionId || filterTag || filterFsrsState || filterType || filterBloomMin > 1 || filterBloomMax < 6) && (
+        <div className="flex flex-wrap gap-2">
+          {filterDocId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Doc: {docList.find((d) => d.id === filterDocId)?.title ?? filterDocId}
+              <button onClick={() => { setFilterDocId(null); setActiveDocument(null) }} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterFsrsState && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              State: {FSRS_STATE_LABELS[filterFsrsState] ?? filterFsrsState}
+              <button onClick={() => setFilterFsrsState(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterType && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Type: {filterType}
+              <button onClick={() => setFilterType(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterTag && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Tag: {filterTag}
+              <button onClick={() => setFilterTag(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {filterCollectionId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Collection: {collectionList.find((c) => c.id === filterCollectionId)?.name ?? filterCollectionId}
+              <button onClick={() => setFilterCollectionId(null)} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          {(filterBloomMin > 1 || filterBloomMax < 6) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Bloom: {BLOOM_LEVEL_LABELS[filterBloomMin] ?? filterBloomMin} - {BLOOM_LEVEL_LABELS[filterBloomMax] ?? filterBloomMax}
+              <button onClick={() => { setFilterBloomMin(1); setFilterBloomMax(6) }} className="hover:text-primary/70"><X size={12} /></button>
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setFilterDocId(null); setActiveDocument(null)
+              setFilterCollectionId(null); setFilterTag(null)
+              setFilterFsrsState(null); setFilterType(null)
+              setFilterBloomMin(1); setFilterBloomMax(6)
+              setSearchQuery("")
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            Clear all
+          </button>
         </div>
-      ) : (
-      <>
-      {/* Sub-tab toggle */}
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
-        <button
-          onClick={() => setStudySubTab("flashcards")}
-          className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-            studySubTab === "flashcards"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+      )}
+
+      {/* S184: Quick filter row */}
+      <div className="flex flex-wrap gap-2">
+        <select
+          value={filterCollectionId ?? ""}
+          onChange={(e) => setFilterCollectionId(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
         >
-          Flashcards
-        </button>
-        <button
-          onClick={() => setStudySubTab("history")}
-          className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-            studySubTab === "history"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+          <option value="">Any collection</option>
+          {collectionList.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Filter by tag..."
+          value={filterTag ?? ""}
+          onChange={(e) => setFilterTag(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground w-32"
+        />
+        <select
+          value={filterFsrsState ?? ""}
+          onChange={(e) => setFilterFsrsState(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
         >
-          History
-        </button>
+          <option value="">Any state</option>
+          {Object.entries(FSRS_STATE_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+        <select
+          value={filterType ?? ""}
+          onChange={(e) => setFilterType(e.target.value || null)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          <option value="">Any type</option>
+          <option value="definition">Definition</option>
+          <option value="concept">Concept</option>
+          <option value="application">Application</option>
+          <option value="analysis">Analysis</option>
+          <option value="evaluation">Evaluation</option>
+          <option value="cloze">Cloze</option>
+          <option value="trace">Trace</option>
+          <option value="concept_explanation">Concept explanation</option>
+        </select>
+        <select
+          value={filterBloomMin}
+          onChange={(e) => setFilterBloomMin(Number(e.target.value))}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          {Object.entries(BLOOM_LEVEL_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>Min: {v}</option>
+          ))}
+        </select>
+        <select
+          value={filterBloomMax}
+          onChange={(e) => setFilterBloomMax(Number(e.target.value))}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          {Object.entries(BLOOM_LEVEL_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>Max: {v}</option>
+          ))}
+        </select>
       </div>
 
-      {studySubTab === "history" ? (
+      {/* Sub-tab toggle (only when a document is active) */}
+      {activeDocumentId && (
+        <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
+          <button
+            onClick={() => setStudySubTab("flashcards")}
+            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+              studySubTab === "flashcards"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Flashcards
+          </button>
+          <button
+            onClick={() => setStudySubTab("history")}
+            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
+              studySubTab === "history"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            History
+          </button>
+        </div>
+      )}
+
+      {activeDocumentId && studySubTab === "history" ? (
         <section className="flex flex-col gap-4">
           <h2 className="text-lg font-semibold text-foreground">Session History</h2>
           <SessionHistoryTab />
         </section>
       ) : (
-      <>
-      {/* S143: Section filter banner */}
-      {activeSectionFilter && (
-        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-          <span className="text-foreground">
-            Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
-          </span>
-          <button
-            onClick={() => setActiveSectionFilter(null)}
-            className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-            title="Clear section filter"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {/* Flashcards section */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-foreground">Flashcards</h2>
-
-        <GeneratePanel
-          documentId={activeDocumentId}
-          sections={sections}
-          onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
-          onRegenerate={handleRegenerate}
-          onGenerateFromGraph={(k) => {
-            setGenerateErrorKind(null)
-            generateFromGraphMutation.mutate(k)
-          }}
-          onGenerateCloze={(sectionId, count) => {
-            setGenerateErrorKind(null)
-            generateClozeMutation.mutate({ sectionId, count })
-          }}
-          isGenerating={
-            generateMutation.isPending ||
-            deleteAllMutation.isPending ||
-            generateFromGraphMutation.isPending
-          }
-          isClozeGenerating={generateClozeMutation.isPending}
-          preselectedSection={selectedGapSection}
-        />
-
-        {/* Inline generate error banners */}
-        {generateErrorKind === "ollama_offline" && (
-          <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <span className="flex-1">
-              Ollama is not running. To generate flashcards, run:{" "}
-              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
-            </span>
-            <button
-              onClick={() => void navigator.clipboard.writeText("ollama serve")}
-              className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-              title="Copy command"
-            >
-              <Copy size={11} />
-              Copy
-            </button>
-          </div>
-        )}
-        {generateErrorKind === "server_error" && (
-          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            Flashcard generation failed. Please try again.
-          </div>
-        )}
-
-        {/* Filter bar — only shown when there are cards with type/level data */}
-        {cards.length > 0 && (
-          <FilterBar
-            filterType={filterType}
-            filterBloomMin={filterBloomMin}
-            filterBloomMax={filterBloomMax}
-            onTypeChange={setFilterType}
-            onBloomMinChange={setFilterBloomMin}
-            onBloomMaxChange={setFilterBloomMax}
-            onClear={() => { setFilterType(null); setFilterBloomMin(1); setFilterBloomMax(6) }}
-          />
-        )}
-
-        {cardsLoading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-            <Loader2 size={24} className="animate-spin" />
-            <span className="text-sm">Loading your cards...</span>
-          </div>
-        ) : cardsError ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            Failed to load flashcards. Please try refreshing.
-          </div>
-        ) : cards.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <p className="text-sm text-muted-foreground">
-              No flashcards yet. Generate some above.
-            </p>
-          </div>
-        ) : (() => {
-          const filteredCards = cards.filter((c) => {
-            const typeMatch = filterType === null || c.flashcard_type === filterType
-            const bloomMatch =
-              c.bloom_level == null ||
-              (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
-            return typeMatch && bloomMatch
-          })
-          if (filteredCards.length === 0) {
-            return (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <p className="text-sm text-muted-foreground">
-                  No cards match the selected type/level filters. Try adjusting the filter.
-                </p>
-              </div>
-            )
-          }
-          return (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {filteredCards.map((card) => (
-                <FlashcardCard
-                  key={card.id}
-                  card={card}
-                  onUpdate={(id, data) => updateMutation.mutate({ id, data })}
-                  onDelete={(id) => deleteMutation.mutate(id)}
-                  isUpdating={updateMutation.isPending}
-                  isDeleting={deleteMutation.isPending}
-                />
-              ))}
-            </div>
-          )
-        })()}
-
-        {/* Bottom bar */}
-        {cards.length > 0 && (
-          <div className="flex items-center gap-3 border-t border-border pt-4">
-            <span className="text-sm text-muted-foreground">
-              {(() => {
-                const filteredCount = cards.filter((c) => {
-                  const typeMatch = filterType === null || c.flashcard_type === filterType
-                  const bloomMatch =
-                    c.bloom_level == null ||
-                    (c.bloom_level >= filterBloomMin && c.bloom_level <= filterBloomMax)
-                  return typeMatch && bloomMatch
-                }).length
-                const total = cards.length
-                return filteredCount === total
-                  ? `${total} card${total !== 1 ? "s" : ""}`
-                  : `${filteredCount} of ${total} card${total !== 1 ? "s" : ""}`
-              })()}
-            </span>
-            <div className="ml-auto flex gap-2">
+        <>
+          {/* S143: Section filter banner */}
+          {activeSectionFilter && (
+            <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+              <span className="text-foreground">
+                Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
+              </span>
               <button
-                onClick={handleExportCsv}
-                className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={() => setActiveSectionFilter(null)}
+                className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                title="Clear section filter"
               >
-                <Download size={14} />
-                Export CSV
-              </button>
-              <button
-                onClick={() => setStudying(true)}
-                className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                <PlayCircle size={14} />
-                Start Studying
+                <X size={14} />
               </button>
             </div>
-          </div>
-        )}
-      </section>
+          )}
 
-      {/* Deck Health panel (S153) -- Bloom's taxonomy coverage audit */}
-      <DeckHealthPanel documentId={activeDocumentId} />
+          {/* S184: Card grid -- always visible (search is global) */}
+          <section className="flex flex-col gap-4">
+                {cardsLoading ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+                    <Loader2 size={24} className="animate-spin" />
+                    <span className="text-sm">Loading your cards...</span>
+                  </div>
+                ) : cardsError ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Failed to load flashcards. Please try refreshing.
+                  </div>
+                ) : cards.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      {debouncedQuery
+                        ? `No flashcards found for "${debouncedQuery}". Try a different search term.`
+                        : "No flashcards match your filters."}
+                      {!debouncedQuery && activeDocumentId && " Try generating cards with Smart Generate above."}
+                      {!debouncedQuery && !activeDocumentId && " Select a document or adjust your search to find cards."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {cards.map((card) => (
+                      <FlashcardCard
+                        key={card.id}
+                        card={card}
+                        onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                        onDelete={(id) => deleteMutation.mutate(id)}
+                        isUpdating={updateMutation.isPending}
+                        isDeleting={deleteMutation.isPending}
+                      />
+                    ))}
+                  </div>
+                )}
 
-      {/* Health Report panel (S160) -- orphaned/mastered/stale/uncovered/hotspot */}
-      <HealthReportPanel documentId={activeDocumentId} />
+                {/* Bottom bar */}
+                {cards.length > 0 && (
+                  <div className="flex items-center gap-3 border-t border-border pt-4">
+                    <span className="text-sm text-muted-foreground">
+                      {totalCards} card{totalCards !== 1 ? "s" : ""} total
+                      {totalCards > 20 && ` (page ${searchPage} of ${Math.ceil(totalCards / 20)})`}
+                    </span>
+                    {totalCards > 20 && (
+                      <div className="flex gap-1">
+                        <button
+                          disabled={searchPage <= 1}
+                          onClick={() => setSearchPage((p) => Math.max(1, p - 1))}
+                          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+                        >
+                          Prev
+                        </button>
+                        <button
+                          disabled={searchPage >= Math.ceil(totalCards / 20)}
+                          onClick={() => setSearchPage((p) => p + 1)}
+                          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+                    <div className="ml-auto flex gap-2">
+                      {activeDocumentId && (
+                        <button
+                          onClick={handleExportCsv}
+                          className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          <Download size={14} />
+                          Export CSV
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setStudying(true)}
+                        className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                      >
+                        <PlayCircle size={14} />
+                        Start Studying
+                      </button>
+                    </div>
+                  </div>
+                )}
+          </section>
 
-      {/* Weak Areas panel */}
-      <WeakAreasPanel
-        documentId={activeDocumentId}
-        onSelectSection={(heading) => {
-          setSelectedGapSection(heading)
-          // Scroll to top to reveal pre-scoped GeneratePanel
-          window.scrollTo({ top: 0, behavior: "smooth" })
-        }}
-      />
+          {/* Document-specific panels (only when a document is active) */}
+          {activeDocumentId && (
+            <>
+              {/* Deck Status accordion (S178/S185 merged) */}
+              <InsightsAccordion documentId={activeDocumentId} cards={cards} />
 
-      {/* Struggling Cards panel */}
-      <StrugglingPanel documentId={activeDocumentId} />
+              {/* Weak Areas panel */}
+              <WeakAreasPanel
+                documentId={activeDocumentId}
+                onSelectSection={(_heading) => {
+                  window.scrollTo({ top: 0, behavior: "smooth" })
+                }}
+              />
 
-      {/* Learning Goals panel */}
-      <GoalsPanel docs={docList} />
-
-      {/* Progress dashboard (S23b) — Recharts loaded lazily via dynamic import */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-foreground">Progress</h2>
-        <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>
-          <ProgressDashboard documentId={activeDocumentId} />
-        </Suspense>
-      </section>
-      </>
-      )}
-      </>
+              {/* Progress dashboard (S23b) */}
+              <section className="flex flex-col gap-4">
+                <h2 className="text-lg font-semibold text-foreground">Progress</h2>
+                <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>
+                  <ProgressDashboard documentId={activeDocumentId} />
+                </Suspense>
+              </section>
+            </>
+          )}
+        </>
       )}
     </div>
   )

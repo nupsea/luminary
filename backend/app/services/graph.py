@@ -3,6 +3,7 @@
 Schema:
   Nodes: Entity(id, name, type, frequency, aliases), Document(id, title, content_type)
          DiagramNode(id, name, node_type, source_image_id, document_id, frequency) -- S136
+         Note(id, note_id, preview, created_at) -- S163
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
          RELATED_TO(Entity->Entity, relation_label, confidence),
@@ -21,6 +22,9 @@ Schema:
          REFERENCES_DM(DiagramNode->DiagramNode, document_id)        -- S136
          LEADS_TO(DiagramNode->DiagramNode, document_id, condition)  -- S136
          DEPICTS(DiagramNode->Entity, document_id)                   -- S136
+         WRITTEN_ABOUT(Note->Entity, confidence)                     -- S163
+         TAG_IS_CONCEPT(Note->Entity, tag)                           -- S163
+         DERIVED_FROM(Note->Document)                                -- S163
 
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
@@ -32,6 +36,7 @@ contradiction_note (STRING), prefer_source (STRING "a"|"b"|"").
 """
 
 import logging
+import threading
 from pathlib import Path
 
 import kuzu
@@ -56,6 +61,8 @@ class KuzuService:
         db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
         self._db = kuzu.Database(db_path)
         self._conn = kuzu.Connection(self._db)
+        # Kuzu connection is not thread-safe. Serialise all _conn.execute() calls.
+        self._lock = threading.Lock()
         self._create_schema()
         logger.info("KuzuService initialized", extra={"db_path": db_path})
 
@@ -118,6 +125,18 @@ class KuzuService:
             " source_doc_id STRING, target_doc_id STRING,"
             " confidence FLOAT, contradiction INT64,"
             " contradiction_note STRING, prefer_source STRING)",
+            # Note graph (S163) -- Note nodes + edges to Entity and Document
+            "CREATE NODE TABLE IF NOT EXISTS Note("
+            "id STRING PRIMARY KEY, note_id STRING, preview STRING, created_at STRING)",
+            "CREATE REL TABLE IF NOT EXISTS WRITTEN_ABOUT("
+            "FROM Note TO Entity, confidence FLOAT)",
+            "CREATE REL TABLE IF NOT EXISTS TAG_IS_CONCEPT("
+            "FROM Note TO Entity, tag STRING)",
+            "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM("
+            "FROM Note TO Document)",
+            # Zettelkasten links (S171) -- explicit typed note-to-note connections
+            "CREATE REL TABLE IF NOT EXISTS LINKS_TO("
+            "FROM Note TO Note, link_type STRING)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)
@@ -931,15 +950,44 @@ class KuzuService:
             logger.warning("get_entities_for_documents failed", exc_info=True)
             return []
 
+    def get_cross_document_entities(self, limit: int = 10) -> list[str]:
+        """Return entity names that appear in 2+ documents, ordered by doc count desc.
+
+        Used for all-scope chat suggestions (cross-document themes).
+        Returns empty list on any Kuzu error (non-fatal).
+        """
+        try:
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
+                " WHERE e.type IN ['PERSON', 'PLACE', 'CONCEPT']"
+                " WITH e.name AS name, count(DISTINCT d.id) AS doc_count"
+                " WHERE doc_count >= 2"
+                " RETURN name"
+                f" ORDER BY doc_count DESC LIMIT {int(limit)}",
+            )
+            names: list[str] = []
+            while result.has_next():
+                row = result.get_next()
+                if row[0]:
+                    names.append(row[0])
+            return names
+        except Exception:
+            logger.debug("get_cross_document_entities failed", exc_info=True)
+            return []
+
     # -------------------------------------------------------------------------
     # Query
     # -------------------------------------------------------------------------
 
-    def get_graph_for_document(self, document_id: str) -> dict:
+    def get_graph_for_document(
+        self, document_id: str, include_notes: bool = False
+    ) -> dict:
         """Return nodes and edges for a single document.
 
         Includes Entity nodes (with CO_OCCURS + tech-relation edges) and
         DiagramNode rows (with diagram edges) merged into a single graph.
+        Pass include_notes=True to also include Note nodes connected to entities
+        via WRITTEN_ABOUT or TAG_IS_CONCEPT edges (S172).
         """
         result = self._conn.execute(
             "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
@@ -973,17 +1021,25 @@ class KuzuService:
         nodes.extend(diagram_nodes)
         edges.extend(self.get_diagram_edges_for_document(document_id))
 
+        # Include Note nodes connected to entities in scope (S172)
+        if include_notes and entity_ids:
+            note_nodes, note_edges = self._get_note_nodes_for_entities(entity_ids)
+            nodes.extend(note_nodes)
+            edges.extend(note_edges)
+
         return {"nodes": nodes, "edges": edges}
 
     def get_graph_for_documents(
         self,
         document_ids: list[str],
         include_same_concept: bool = False,
+        include_notes: bool = False,
     ) -> dict:
         """Return merged nodes and edges for multiple documents.
 
         Includes Entity nodes and DiagramNode rows from all specified documents.
         Pass include_same_concept=True to include SAME_CONCEPT cross-book edges (S141).
+        Pass include_notes=True to include Note nodes connected to entities in scope (S172).
         """
         if not document_ids:
             return {"nodes": [], "edges": []}
@@ -1035,7 +1091,152 @@ class KuzuService:
                         "contradiction": e["contradiction"],
                     })
 
+        # Include Note nodes connected to entities in scope (S172)
+        if include_notes and entity_ids:
+            note_nodes, note_edges = self._get_note_nodes_for_entities(entity_ids)
+            for nn in note_nodes:
+                if nn["id"] not in nodes_map:
+                    nodes_map[nn["id"]] = nn
+            edges.extend(note_edges)
+
         return {"nodes": list(nodes_map.values()), "edges": edges}
+
+    def _get_note_nodes_for_entities(
+        self, entity_ids: set[str]
+    ) -> tuple[list[dict], list[dict]]:
+        """Return Note nodes and their edges for entities in scope (S172).
+
+        Returns (note_nodes, note_edges) where:
+          - note_nodes: list of {id, note_id, label, type='note', size, outgoing_link_count}
+          - note_edges: WRITTEN_ABOUT + TAG_IS_CONCEPT + LINKS_TO edges in graph wire format
+
+        Only notes with at least one WRITTEN_ABOUT or TAG_IS_CONCEPT edge to an entity
+        in entity_ids are included. Isolated notes (no entity edges in scope) are excluded.
+
+        Acquires self._lock for all Kuzu calls (thread-safety per patterns.md).
+        Returns ([], []) on any error (non-fatal).
+        """
+        if not entity_ids:
+            return [], []
+
+        # Build placeholder list for entity_ids (Kuzu does not support list params)
+        placeholders = ", ".join(f"$eid{i}" for i in range(len(entity_ids)))
+        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
+
+        note_nodes: list[dict] = []
+        note_edges: list[dict] = []
+
+        try:
+            with self._lock:
+                # Kuzu does not support type() function in this version.
+                # Run separate queries for WRITTEN_ABOUT and TAG_IS_CONCEPT.
+                note_data: dict[str, dict] = {}
+
+                # Query 1a: WRITTEN_ABOUT edges
+                wa_result = self._conn.execute(
+                    f"MATCH (n:Note)-[r:WRITTEN_ABOUT]->(e:Entity)"
+                    f" WHERE e.id IN [{placeholders}]"
+                    f" RETURN n.note_id, n.preview, e.id, r.confidence",
+                    params,
+                )
+                while wa_result.has_next():
+                    row = wa_result.get_next()
+                    nid, preview, eid, confidence = row
+                    if nid not in note_data:
+                        note_data[nid] = {"preview": preview or "", "entity_edges": []}
+                    note_data[nid]["entity_edges"].append({
+                        "entity_id": eid,
+                        "rel_type": "WRITTEN_ABOUT",
+                        "confidence": float(confidence or 0.5),
+                    })
+
+                # Query 1b: TAG_IS_CONCEPT edges
+                tic_result = self._conn.execute(
+                    f"MATCH (n:Note)-[:TAG_IS_CONCEPT]->(e:Entity)"
+                    f" WHERE e.id IN [{placeholders}]"
+                    f" RETURN n.note_id, n.preview, e.id",
+                    params,
+                )
+                while tic_result.has_next():
+                    row = tic_result.get_next()
+                    nid, preview, eid = row
+                    if nid not in note_data:
+                        note_data[nid] = {"preview": preview or "", "entity_edges": []}
+                    note_data[nid]["entity_edges"].append({
+                        "entity_id": eid,
+                        "rel_type": "TAG_IS_CONCEPT",
+                        "confidence": 1.0,
+                    })
+
+                if not note_data:
+                    return [], []
+
+                note_ids = list(note_data.keys())
+                note_id_placeholders = ", ".join(f"$nid{i}" for i in range(len(note_ids)))
+                note_params = {f"nid{i}": nid for i, nid in enumerate(note_ids)}
+
+                # Query 2: LINKS_TO edges between notes in scope
+                links_result = self._conn.execute(
+                    f"MATCH (n1:Note)-[l:LINKS_TO]->(n2:Note)"
+                    f" WHERE n1.note_id IN [{note_id_placeholders}]"
+                    f" AND n2.note_id IN [{note_id_placeholders}]"
+                    f" RETURN n1.note_id, n2.note_id, l.link_type",
+                    note_params,
+                )
+                links_to_edges: list[dict] = []
+                while links_result.has_next():
+                    row = links_result.get_next()
+                    src_nid, tgt_nid, link_type = row
+                    links_to_edges.append({
+                        "source": src_nid,
+                        "target": tgt_nid,
+                        "link_type": link_type or "",
+                    })
+
+            # Build note_nodes from collected data
+            # Compute outgoing_link_count from entity_edges + LINKS_TO edges per note
+            links_out: dict[str, int] = {}
+            for le in links_to_edges:
+                links_out[le["source"]] = links_out.get(le["source"], 0) + 1
+
+            for nid, nd in note_data.items():
+                entity_edge_count = len(nd["entity_edges"])
+                total_out = entity_edge_count + links_out.get(nid, 0)
+                preview = nd["preview"]
+                note_nodes.append({
+                    "id": nid,
+                    "note_id": nid,
+                    "label": preview[:40] if preview else nid[:40],
+                    "type": "note",
+                    "size": max(8, int((total_out ** 0.5) * 5)),
+                    "outgoing_link_count": total_out,
+                    "source_image_id": "",
+                })
+                # Add WRITTEN_ABOUT / TAG_IS_CONCEPT edges
+                for ee in nd["entity_edges"]:
+                    note_edges.append({
+                        "source": nid,
+                        "target": ee["entity_id"],
+                        "weight": ee["confidence"],
+                        "relation": ee["rel_type"],
+                    })
+
+            # Add LINKS_TO edges
+            note_id_set = set(note_data.keys())
+            for le in links_to_edges:
+                if le["source"] in note_id_set and le["target"] in note_id_set:
+                    note_edges.append({
+                        "source": le["source"],
+                        "target": le["target"],
+                        "weight": 1.0,
+                        "relation": "LINKS_TO",
+                    })
+
+            return note_nodes, note_edges
+
+        except Exception:
+            logger.warning("_get_note_nodes_for_entities failed (non-fatal)", exc_info=True)
+            return [], []
 
     def _get_co_occurrence_edges(self, entity_ids: set[str], document_id: str) -> list[dict]:
         """Return CO_OCCURS edges among the given entity IDs for a document."""

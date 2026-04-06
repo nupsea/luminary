@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,11 @@ class DocumentModel(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Human-readable title returned by yt-dlp metadata (YouTube video title).
     video_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    # YouTube channel/uploader name returned by yt-dlp metadata.
+    channel_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Canonical YouTube video URL -- set during YouTube ingestion, same value as source_url.
+    # Separate field so API consumers can identify YouTube docs without heuristic URL parsing.
+    youtube_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Approximate publication year parsed from document front matter (Copyright YYYY).
     # Nullable: most documents will not have explicit year information.
     publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -125,6 +130,16 @@ class FlashcardModel(Base):
     bloom_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
     cloze_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # S169: 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
+    # for collection-based generation. Null for non-collection cards.
+    source_content_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # S173: note_id FK for note-sourced cards; enables per-note coverage tracking
+    note_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S179: chunk classifier label (concept/definition/example/analogy/narrative/transition);
+    # null for note/gap/context-sourced cards that bypass the classifier
+    chunk_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # S188: section heading denormalized at generation time for source grounding display
+    section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -191,6 +206,12 @@ class NoteModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S201: short hash of content for dedup (sha256[:16])
+    content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S173: archived flag -- excluded from default GET /notes list; set by archive-stale
+    archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -498,6 +519,9 @@ class WebReferenceModel(Base):
     # official_docs | spec | wiki | tutorial | blog | unknown
     source_quality: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
     is_llm_suggested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # S194: URL validation status — None = unchecked, True = reachable, False = dead link
+    is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -562,6 +586,177 @@ class ReadingPositionModel(Base):
     )
 
 
+class NoteCollectionModel(Base):
+    """A named collection of notes supporting up to 2 levels of nesting.
+
+    parent_collection_id is null for top-level collections.
+    Max depth: child collections may not themselves have children (enforced at API layer).
+    """
+
+    __tablename__ = "note_collections"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="#6366F1")
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Self-FK for 2-level hierarchy; null = top-level collection
+    parent_collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # S192: auto-collection for a document (one per document, nullable for manual collections)
+    auto_document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class NoteCollectionMemberModel(Base):
+    """Pivot table: maps notes to collections (many-to-many).
+
+    A note may belong to multiple collections.
+    Duplicate (note_id, collection_id) pairs are silently ignored via ON CONFLICT DO NOTHING.
+    """
+
+    __tablename__ = "note_collection_members"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    note_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    collection_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        UniqueConstraint("note_id", "collection_id", name="uq_note_collection_member"),
+    )
+
+
+class NoteTagIndexModel(Base):
+    """Shadow/denorm table: one row per (note, tag) pair for O(1) tag prefix lookup.
+
+    note_id has no FK (shadow table -- avoids FK overhead and cascade complexity).
+    tag_full: full tag path e.g. 'science/biology/genetics'
+    tag_root: first segment e.g. 'science'
+    tag_parent: all-but-last segment e.g. 'science/biology', empty string if top-level
+    Composite PK on (note_id, tag_full) enforces uniqueness without a surrogate key.
+    """
+
+    __tablename__ = "note_tag_index"
+
+    note_id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_full: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_root: Mapped[str] = mapped_column(String, nullable=False)
+    tag_parent: Mapped[str] = mapped_column(String, nullable=False, default="")
+
+
+class CanonicalTagModel(Base):
+    """Registry of canonical tag slugs with slash-convention hierarchy.
+
+    id is the full slug (PK), e.g. 'science/biology'.
+    parent_tag is the parent slug e.g. 'science', or None for top-level tags.
+    note_count is denormalized -- kept accurate by _sync_tag_index.
+    """
+
+    __tablename__ = "canonical_tags"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # full slug
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    parent_tag: Mapped[str | None] = mapped_column(String, nullable=True)
+    note_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class TagAliasModel(Base):
+    """Maps a deprecated/aliased tag slug to its canonical replacement.
+
+    Created when tags are merged (source -> target).
+    """
+
+    __tablename__ = "tag_aliases"
+
+    alias: Mapped[str] = mapped_column(String, primary_key=True)
+    canonical_tag_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+
+
+class TagMergeSuggestionModel(Base):
+    """Suggested tag pair merges from SmartTagNormalizerService.
+
+    status: 'pending' | 'accepted' | 'rejected'
+    suggested_canonical_id: whichever of tag_a or tag_b has higher note_count (the merge target).
+    """
+
+    __tablename__ = "tag_merge_suggestions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_a_id: Mapped[str] = mapped_column(String, nullable=False)
+    tag_b_id: Mapped[str] = mapped_column(String, nullable=False)
+    similarity: Mapped[float] = mapped_column(Float, nullable=False)
+    suggested_canonical_id: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class ClusterSuggestionModel(Base):
+    """A cluster of semantically similar notes suggested as a collection.
+
+    note_ids: JSON list of note id strings.
+    confidence_score: mean pairwise cosine similarity of cluster members (0.0 - 1.0).
+    status: 'pending' | 'accepted' | 'rejected'
+    """
+
+    __tablename__ = "cluster_suggestions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    suggested_name: Mapped[str] = mapped_column(String, nullable=False)
+    note_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class NoteLinkModel(Base):
+    """Explicit note-to-note Zettelkasten-style link (S171).
+
+    Each row represents a directed typed connection from source_note_id to target_note_id.
+    Bidirectionality is achieved by querying both directions in GET /notes/{id}/links.
+    FK cascades ensure rows are removed when either note is deleted.
+    UniqueConstraint prevents duplicate (source, target, link_type) triples.
+    """
+
+    __tablename__ = "note_links"
+    __table_args__ = (
+        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_note_link"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    source_note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # elaborates | contradicts | see-also | supports | questions
+    link_type: Mapped[str] = mapped_column(String(20), nullable=False, default="see-also")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class NoteSourceModel(Base):
+    """Pivot table: maps notes to source documents (many-to-many).
+
+    NoteModel.document_id (single nullable FK) is kept for backward compatibility.
+    New multi-document source linkage is stored here.
+    Composite PK (note_id, document_id) enforces uniqueness without a surrogate key.
+    note_id has FK+cascade; document_id is a plain string (matching NoteModel.document_id
+    pattern -- no FK to documents to avoid constraint failures when documents are deleted
+    asynchronously or in test scenarios).
+    """
+
+    __tablename__ = "note_sources"
+
+    note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True
+    )
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class PredictionEventModel(Base):
     """Records each Predict-then-Run attempt by the user.
 
@@ -585,5 +780,45 @@ class PredictionEventModel(Base):
     correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
     language: Mapped[str] = mapped_column(String(50), nullable=False, default="python")
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class ChatSuggestionHistoryModel(Base):
+    """Tracks shown/asked chat suggestion pills for Bloom-progressive dedup (S195)."""
+
+    __tablename__ = "chat_suggestion_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    suggestion_text: Mapped[str] = mapped_column(Text, nullable=False)
+    bloom_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    was_asked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    shown_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GlossaryTermModel(Base):
+    """Persistent glossary term extracted from a document via LLM."""
+
+    __tablename__ = "glossary_terms"
+    __table_args__ = (
+        UniqueConstraint("document_id", "term", name="uq_glossary_doc_term"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    term: Mapped[str] = mapped_column(String, nullable=False)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    first_mention_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )

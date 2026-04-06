@@ -559,12 +559,11 @@ async def _decompose_comparison(question: str) -> dict | None:
     Returns {"sides": [list of subject names], "topic": str} or None on failure.
     Handles 2-way, 3-way, and any N-way comparisons.
     """
-    from app.config import get_settings  # noqa: PLC0415
+    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
     try:
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {
                     "role": "system",
@@ -926,7 +925,22 @@ async def notes_node(state: ChatState) -> dict:
         logger.info("notes_node: no note results for query=%r", q[:50])
         return {"chunks": [], "section_context": None}
 
-    note_lines = ["[From your notes] " + r.content for r in results]
+    # Enrich top-3 notes with Kuzu entity names (S163)
+    note_lines = []
+    for i, r in enumerate(results):
+        line = "[From your notes] " + r.content
+        if i < 3:
+            try:
+                from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
+
+                entities = await get_note_graph_service().get_entities_for_note(r.note_id)
+                if entities:
+                    entity_names = ", ".join(e["name"] for e in entities[:5])
+                    line += f" [Entities: {entity_names}]"
+            except Exception:
+                pass  # Entity enrichment is non-blocking
+        note_lines.append(line)
+
     section_context = "\n\n".join(note_lines)
     logger.info("notes_node: found %d notes, ctx_len=%d", len(results), len(section_context))
     return {"chunks": [], "section_context": section_context}
@@ -967,17 +981,32 @@ async def notes_gap_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
+    # S197: auto-fetch notes from the document's auto-collection
+    auto_collection_id: str | None = None
     try:
         from sqlalchemy import select  # noqa: PLC0415
 
         from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import NoteModel  # noqa: PLC0415
+        from app.models import NoteCollectionMemberModel, NoteCollectionModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
-            rows = (await session.execute(
-                select(NoteModel.id).where(NoteModel.document_id == document_id)
-            )).fetchall()
-            note_ids = [r[0] for r in rows]
+            # Step 1: find auto-collection for this document
+            coll_row = (await session.execute(
+                select(NoteCollectionModel.id).where(
+                    NoteCollectionModel.auto_document_id == document_id
+                )
+            )).first()
+            if coll_row:
+                auto_collection_id = coll_row[0]
+                # Step 2: fetch note IDs from collection members
+                member_rows = (await session.execute(
+                    select(NoteCollectionMemberModel.note_id).where(
+                        NoteCollectionMemberModel.collection_id == auto_collection_id
+                    )
+                )).fetchall()
+                note_ids = [r[0] for r in member_rows]
+            else:
+                note_ids = []
     except Exception:
         logger.warning("notes_gap_node: note fetch failed", exc_info=True)
         card = {
@@ -989,12 +1018,28 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     if not note_ids:
-        logger.info("notes_gap_node: no notes for document %s -- returning error card", document_id)
+        logger.info("notes_gap_node: no notes for document %s -- returning card", document_id)
         card = {
             "type": "gap_result",
             "error": (
-                "No notes linked to this document. "
-                "Create notes for this document first, then ask again."
+                "No notes found for this document. "
+                "Start taking notes in the reader to use gap analysis."
+            ),
+            "gaps": [],
+            "covered": [],
+        }
+        return {"answer": "__card__" + json.dumps(card), "chunks": []}
+
+    if len(note_ids) < 3:
+        logger.info(
+            "notes_gap_node: only %d notes for document %s -- suggesting more",
+            len(note_ids), document_id,
+        )
+        card = {
+            "type": "gap_result",
+            "error": (
+                f"You have only {len(note_ids)} note(s) for this document. "
+                "Take a few more notes while reading, then try gap analysis again."
             ),
             "gaps": [],
             "covered": [],
@@ -1007,13 +1052,15 @@ async def notes_gap_node(state: ChatState) -> dict:
         from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
 
         report = await get_gap_detector().detect_gaps(note_ids, document_id)
-        card = {
+        card: dict = {
             "type": "gap_result",
             "gaps": report["gaps"],
             "covered": report["covered"],
             "query_used": report["query_used"],
             "document_id": document_id,
         }
+        if auto_collection_id:
+            card["auto_collection_id"] = auto_collection_id
         logger.info(
             "notes_gap_node: gaps=%d covered=%d", len(report["gaps"]), len(report["covered"])
         )
@@ -1021,7 +1068,7 @@ async def notes_gap_node(state: ChatState) -> dict:
 
     except Exception as exc:
         if isinstance(exc, (_litellm.ServiceUnavailableError, _litellm.APIConnectionError)):
-            error_msg = "Ollama is not running. Start it with: ollama serve"
+            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
         else:
             error_msg = "Gap analysis failed. Please try again."
         logger.warning("notes_gap_node: detect_gaps failed: %s", exc, exc_info=True)
@@ -1089,11 +1136,10 @@ async def socratic_node(state: ChatState) -> dict:
     )
 
     try:
-        from app.config import get_settings  # noqa: PLC0415
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": f"Passages:\n{passages}"},
@@ -1119,14 +1165,15 @@ async def socratic_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
-        logger.warning("socratic_node: Ollama unreachable")
+    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+        logger.warning("socratic_node: LLM unavailable")
         card = {
             "type": "quiz_question",
             "question": "Quiz unavailable",
             "context_hint": "",
             "document_id": document_id or "",
-            "error": "Ollama is unreachable. Start it with: ollama serve",
+            "error": "LLM unavailable. Check Settings.",
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
@@ -1200,11 +1247,10 @@ async def teach_back_node(state: ChatState) -> dict:
     }
 
     try:
-        from app.config import get_settings  # noqa: PLC0415
+        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {"role": "system", "content": _TEACH_BACK_SYSTEM},
                 {"role": "user", "content": user_msg},
@@ -1235,8 +1281,9 @@ async def teach_back_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
-        logger.warning("teach_back_node: Ollama unreachable")
+    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
+            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+        logger.warning("teach_back_node: LLM unavailable")
         card = {
             "type": "teach_back_result",
             "correct": [],
@@ -1244,7 +1291,7 @@ async def teach_back_node(state: ChatState) -> dict:
             "gaps": [],
             "encouragement": "",
             "document_id": document_id or "",
-            "error": "Ollama is unreachable. Start it with: ollama serve",
+            "error": "LLM unavailable. Check Settings.",
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
@@ -1511,8 +1558,14 @@ async def synthesize_node(state: ChatState) -> dict:
             doc_title = doc_titles_map.get(doc_id, "")
             section_heading = c.get("section_heading", "")
 
-            # Dedup key: section_id when present; else chunk_id (each uncategorised chunk unique)
-            dedup_key = section_id if section_id else cid
+            # Dedup key: (section_id, page) for PDFs so different pages in the same
+            # section produce separate citations; section_id alone for non-PDFs.
+            if pdf_page is not None and section_id:
+                dedup_key = f"{section_id}:{pdf_page}"
+            elif section_id:
+                dedup_key = section_id
+            else:
+                dedup_key = cid
             if dedup_key in seen_dedup_keys:
                 continue
             seen_dedup_keys.add(dedup_key)
@@ -1557,12 +1610,30 @@ async def synthesize_node(state: ChatState) -> dict:
         "augmented": transparency_augmented,
     }
 
+    # Estimate retrieval confidence from chunk scores so confidence_gate_node
+    # can make an informed routing decision.  Before this fix the gate always
+    # saw the initial "low" default (synthesize_node prepares the prompt but
+    # does not call the LLM, so LLM-derived confidence is not available yet).
+    retrieval_confidence = "low"
+    if chunks_dicts:
+        scores = sorted(
+            (c.get("score", 0) for c in chunks_dicts), reverse=True,
+        )
+        top3_avg = sum(scores[:3]) / min(len(scores), 3)
+        # RRF with k=60: max score ~0.033 (rank 1 in both sources).
+        # 0.025+ = strong matches in both sources; 0.015+ = decent single-source.
+        if top3_avg >= 0.025:
+            retrieval_confidence = "high"
+        elif top3_avg >= 0.015:
+            retrieval_confidence = "medium"
+
     # Return prompt fields for stream_answer() to call the LLM streaming directly.
     # This enables true token-by-token streaming: the first SSE token event is sent
     # as the LLM generates it, not after all tokens are buffered.
     return {
         "_llm_prompt": prompt,
         "_system_prompt": system_prompt,
+        "confidence": retrieval_confidence,
         "source_citations": source_citations_out,
         "transparency": transparency_info,
     }

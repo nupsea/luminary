@@ -6,24 +6,27 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, Activity, StickyNote } from "lucide-react"
+import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom"
+import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
+import { useAppStore } from "./store"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { SearchDialog } from "./components/SearchDialog"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
-// performance. Viz and Monitoring were already lazy — Chat, Learning, Notes, Study added in S84.
+// performance. Viz and Monitoring were already lazy -- Chat, Learning, Notes, Study added in S84.
+// S177: Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
 const Chat = lazy(() => import("./pages/Chat"))
 const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
 const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
-const Monitoring = lazy(() => import("./pages/Monitoring"))
+const Progress = lazy(() => import("./pages/Progress"))
+const Admin = lazy(() => import("./pages/Admin"))
 
 import { API_BASE } from "@/lib/config"
 
@@ -49,8 +52,8 @@ async function prefetchDueCards(): Promise<unknown> {
   return res.json()
 }
 
-async function prefetchMonitoringOverview(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/monitoring/overview`)
+async function prefetchProgressData(): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/study/due-count`)
   if (!res.ok) throw new Error("prefetch failed")
   return res.json()
 }
@@ -113,11 +116,11 @@ const NAV_ITEMS: NavItemDef[] = [
   },
   { to: "/notes", icon: StickyNote, label: "Notes" },
   {
-    to: "/monitoring",
-    icon: Activity,
-    label: "Monitoring",
-    prefetchKey: ["monitoring-overview"],
-    prefetchFn: prefetchMonitoringOverview,
+    to: "/progress",
+    icon: TrendingUp,
+    label: "Progress",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchProgressData,
   },
 ]
 
@@ -126,7 +129,15 @@ const NAV_ITEMS: NavItemDef[] = [
 // ---------------------------------------------------------------------------
 
 function GlobalLoadingBar() {
-  const isFetching = useIsFetching()
+  const isFetching = useIsFetching({
+    predicate: (query) => {
+      // Exclude slow background queries from showing the loading bar
+      const key = query.queryKey[0] as string
+      if (key === "chat-suggestions" || key === "chat-suggestions-cached") return false
+      if (key === "chat-explorations") return false
+      return true
+    },
+  })
 
   useEffect(() => {
     logger.debug("[Loading bar]", { fetchingCount: isFetching })
@@ -211,7 +222,20 @@ function Sidebar() {
             <Icon size={20} />
           </NavLink>
         ))}
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-2">
+          {/* Dev Tools link -- hidden from nav, accessible via this small icon at the bottom */}
+          <NavLink
+            to="/admin"
+            title="Dev Tools"
+            className={({ isActive }) =>
+              cn(
+                "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
+                isActive && "bg-accent text-sidebar-foreground",
+              )
+            }
+          >
+            <Wrench size={14} />
+          </NavLink>
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
         </div>
       </nav>
@@ -227,9 +251,58 @@ function Sidebar() {
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const setActiveTag = useAppStore((s) => s.setActiveTag)
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setNotePreload = useAppStore((s) => s.setNotePreload)
 
   // S118: review reminder notifications
   useReviewNotification()
+
+  // S167/S176: cross-tab navigation from tag graph node click or tag chip click
+  useEffect(() => {
+    function onLuminaryNavigate(e: Event) {
+      const detail = (e as CustomEvent<{
+        tab: string
+        tagFilter?: string
+        filter?: { tag?: string }
+        documentId?: string
+        prefilledContent?: string
+        collectionId?: string
+      }>).detail
+      if (detail.tab === "notes") {
+        // S197: prefilled note from gap analysis "Take a note" action
+        if (detail.prefilledContent) {
+          setNotePreload({ content: detail.prefilledContent, collectionId: detail.collectionId })
+        }
+        // Support both legacy shape (detail.tagFilter) and new shape (detail.filter.tag)
+        const tagPath = detail.filter?.tag ?? detail.tagFilter ?? null
+        setActiveTag(tagPath)
+        navigate("/notes")
+      } else if (detail.tab === "learning") {
+        // S176: source document subtitle click from NoteReaderSheet
+        const target = detail.documentId ? `/?doc=${detail.documentId}` : "/"
+        navigate(target)
+      } else if (detail.tab === "chat") {
+        // S191: document action menu -> Chat about this
+        // Store updates (chatSelectedDocId, chatScope) happen at dispatch site
+        navigate("/chat")
+      } else if (detail.tab === "study") {
+        // S183/S191: cards due pill or document action menu
+        if (detail.documentId) setActiveDocument(detail.documentId)
+        navigate("/study")
+      } else if (detail.tab === "viz") {
+        // S191: document action menu -> View in graph
+        if (detail.documentId) setActiveDocument(detail.documentId)
+        navigate("/viz")
+      } else if (detail.tab === "progress") {
+        // S183: avg mastery pill click from LibraryStatsBar
+        navigate("/progress")
+      }
+    }
+    window.addEventListener("luminary:navigate", onLuminaryNavigate)
+    return () => window.removeEventListener("luminary:navigate", onLuminaryNavigate)
+  }, [navigate, setActiveTag, setActiveDocument, setNotePreload])
 
   // Startup prefetch: documents list + LLM settings
   useEffect(() => {
@@ -285,7 +358,11 @@ function AppShell() {
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
-          <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Monitoring /></Suspense>} />
+          <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
+          {/* /admin is NOT linked from the nav; accessible via the "Dev Tools" footer link */}
+          <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
+          {/* Legacy redirect: /monitoring -> /progress */}
+          <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
         </Routes>
       </main>
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />

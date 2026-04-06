@@ -119,10 +119,13 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
   // Scroll to initial section
   useEffect(() => {
     if (!initialSectionId || !sections) return
-    const el = document.getElementById(`read-sec-${initialSectionId}`)
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`read-sec-${initialSectionId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }, 200) // Slightly longer to ensure layout calculation is done
+    return () => clearTimeout(timer)
   }, [initialSectionId, sections])
 
   // Set initial active section once data loads
@@ -236,7 +239,6 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
             const Tag = HeadingTag(section.level)
             const sectionAnnotations = highlightsVisible ? annotations.filter((a) => a.section_id === section.section_id) : []
             const highlighted = applyHighlights(section.content, sectionAnnotations)
-            const hasHighlights = highlighted !== section.content
             return (
               <div
                 key={section.section_id}
@@ -247,16 +249,9 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
                 <Tag className="mb-3 font-semibold text-foreground">
                   {section.heading || "(Untitled section)"}
                 </Tag>
-                {hasHighlights ? (
-                  <div
-                    className="prose prose-sm dark:prose-invert max-w-none leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: highlighted }}
-                  />
-                ) : (
-                  <div className="leading-relaxed">
-                    <MarkdownRenderer>{section.content}</MarkdownRenderer>
-                  </div>
-                )}
+                <div className="leading-relaxed">
+                  <MarkdownRenderer>{highlighted}</MarkdownRenderer>
+                </div>
               </div>
             )
           })}

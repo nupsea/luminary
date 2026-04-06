@@ -12,6 +12,8 @@ export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
   audio: Volume2,
   epub: BookText,
   kindle_clippings: BookText,
+  tech_book: BookOpen,
+  tech_article: StickyNote,
 }
 
 export function isYouTubeDoc(doc: { source_url?: string | null }): boolean {

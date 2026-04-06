@@ -55,8 +55,16 @@ const CONTENT_TYPE_OPTIONS = [
   },
 ]
 
-type ContentTypeValue = "book" | "conversation" | "notes" | "audio" | "video" | "epub"
-type DialogTab = "upload" | "paste" | "youtube"
+type ContentTypeValue =
+  | "book"
+  | "conversation"
+  | "notes"
+  | "audio"
+  | "video"
+  | "epub"
+  | "tech_book"
+  | "tech_article"
+type DialogTab = "upload" | "paste" | "url"
 type Mode = "idle" | "uploading" | "processing" | "success" | "error"
 
 interface StatusResponse {
@@ -96,7 +104,7 @@ function isKindleClippings(filename: string): boolean {
   return /clippings/i.test(filename)
 }
 
-async function submitYouTubeUrl(url: string): Promise<string> {
+async function submitUrl(url: string): Promise<string> {
   const res = await fetch(`${API_BASE}/documents/ingest-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -104,7 +112,7 @@ async function submitYouTubeUrl(url: string): Promise<string> {
   })
   if (!res.ok) {
     const data = (await res.json()) as { detail?: string }
-    throw new Error(data.detail ?? "YouTube ingestion failed")
+    throw new Error(data.detail ?? "Ingestion failed")
   }
   const data = (await res.json()) as { document_id: string }
   return data.document_id
@@ -123,8 +131,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [pasteText, setPasteText] = useState("")
   const [pasteType, setPasteType] = useState<ContentTypeValue | null>(null)
   const [typeError, setTypeError] = useState(false)
-  const [youtubeUrl, setYoutubeUrl] = useState("")
-  const [youtubeUrlError, setYoutubeUrlError] = useState("")
+  const [url, setUrl] = useState("")
+  const [urlError, setUrlError] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Upload progress state
@@ -172,8 +180,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setPasteText("")
     setPasteType(null)
     setTypeError(false)
-    setYoutubeUrl("")
-    setYoutubeUrlError("")
+    setUrl("")
+    setUrlError("")
     setTab("upload")
     setMode("idle")
     setProgress(0)
@@ -386,34 +394,30 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     await doSubmit(file, pasteLabel.trim(), pasteType)
   }
 
-  async function handleYouTubeSubmit() {
-    const url = youtubeUrl.trim()
-    if (!url) {
-      setYoutubeUrlError("Enter a YouTube URL")
+  async function handleUrlSubmit() {
+    const urlValue = url.trim()
+    if (!urlValue) {
+      setUrlError("Enter a URL")
       return
     }
-    if (!url.includes("youtube.com/watch") && !url.includes("youtu.be/")) {
-      setYoutubeUrlError("Must be a YouTube watch URL (youtube.com/watch?v= or youtu.be/)")
-      return
-    }
-    setYoutubeUrlError("")
+    setUrlError("")
     const startTime = Date.now()
     uploadStartRef.current = startTime
     setMode("uploading")
     setProgress(0)
-    setStageLabel("Downloading audio from YouTube...")
-    setDocTitle(url)
-    logger.info("[Upload] youtube start", { url })
+    setStageLabel("Fetching content...")
+    setDocTitle(urlValue)
+    logger.info("[Upload] url start", { url: urlValue })
     try {
-      const docId = await submitYouTubeUrl(url)
-      toast.loading("Processing YouTube video...", { id: docId })
+      const docId = await submitUrl(urlValue)
+      toast.loading("Processing...", { id: docId })
       setMode("processing")
       setProgress(5)
-      setStageLabel("Transcribing...")
-      startPolling(docId, url, startTime)
+      setStageLabel("Ingesting...")
+      startPolling(docId, urlValue, startTime)
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "YouTube ingestion failed."
-      logger.error("[Upload] youtube failed", { error_message: errMsg, url })
+      const errMsg = err instanceof Error ? err.message : "Ingestion failed."
+      logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
       setMode("error")
       setErrorMessage(errMsg)
       toast.error(errMsg)
@@ -426,8 +430,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       await handleUploadSubmit()
     } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim() && pasteType) {
       await handlePasteSubmit()
-    } else if (tab === "youtube" && youtubeUrl.trim()) {
-      await handleYouTubeSubmit()
+    } else if (tab === "url" && url.trim()) {
+      await handleUrlSubmit()
     } else {
       setMode("idle")
     }
@@ -575,7 +579,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           <>
             {/* Tabs */}
             <div className="mb-4 flex gap-1 rounded-md bg-muted p-1">
-              {(["upload", "paste", "youtube"] as const).map((t) => (
+              {(["upload", "paste", "url"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -586,39 +590,39 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {t === "upload" ? "Upload File" : t === "paste" ? "Paste Text" : "YouTube URL"}
+                  {t === "upload" ? "Upload File" : t === "paste" ? "Paste Text" : "Web URL"}
                 </button>
               ))}
             </div>
 
-            {tab === "youtube" ? (
+            {tab === "url" ? (
               <div className="space-y-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-foreground">
-                    YouTube URL <span className="text-red-500">*</span>
+                    URL <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="url"
-                    value={youtubeUrl}
+                    value={url}
                     onChange={(e) => {
-                      setYoutubeUrl(e.target.value)
-                      setYoutubeUrlError("")
+                      setUrl(e.target.value)
+                      setUrlError("")
                     }}
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="https://example.com/article or YouTube URL"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  {youtubeUrlError && (
-                    <p className="mt-1 text-xs text-red-600">{youtubeUrlError}</p>
+                  {urlError && (
+                    <p className="mt-1 text-xs text-red-600">{urlError}</p>
                   )}
-                  {!youtubeUrl && !youtubeUrlError && (
+                  {!url && !urlError && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Audio is downloaded and transcribed locally. No file is uploaded to any service.
+                      Articles are extracted to Markdown. YouTube videos are transcribed. All processing is local.
                     </p>
                   )}
                 </div>
                 <button
-                  onClick={() => void handleYouTubeSubmit()}
-                  disabled={!youtubeUrl.trim()}
+                  onClick={() => void handleUrlSubmit()}
+                  disabled={!url.trim()}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Ingest

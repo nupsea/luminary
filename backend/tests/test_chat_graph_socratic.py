@@ -207,7 +207,7 @@ async def test_socratic_ollama_offline():
     card = json.loads(result["answer"][8:])
     assert card["type"] == "quiz_question"
     assert "error" in card
-    assert "ollama serve" in card["error"].lower()
+    assert "check settings" in card["error"].lower()
 
 
 # ---------------------------------------------------------------------------

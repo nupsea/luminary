@@ -199,7 +199,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
     Returns:
         intent string (one of the five valid intents)
     """
-    from app.config import get_settings  # noqa: PLC0415
+    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
     scope_hint = (
         "The user is asking about their ENTIRE document library (all content)."
@@ -207,9 +207,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
         else "The user is asking about a SINGLE specific document."
     )
     try:
-        model = get_settings().LITELLM_DEFAULT_MODEL
         response = await litellm.acompletion(
-            model=model,
+            **get_litellm_kwargs(),
             messages=[
                 {
                     "role": "system",
@@ -241,7 +240,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
         return "factual"
     except Exception:
         logger.warning(
-            "intent LLM fallback failed (Ollama offline?), defaulting to 'factual'",
+            "intent LLM classification failed (LLM unavailable or model error),"
+            " defaulting to 'factual'",
             exc_info=True,
         )
         return "factual"

@@ -112,6 +112,8 @@ class DocumentListItem(BaseModel):
     audio_duration_seconds: float | None
     source_url: str | None = None
     video_title: str | None = None
+    channel_name: str | None = None
+    youtube_url: str | None = None
     enrichment_status: str | None = None  # None if no enrichment job; else latest job status
     # S143: None = no objectives extracted; 0.0 = objectives exist but none covered
     objective_progress_pct: float | None = None
@@ -174,7 +176,21 @@ class DocumentDetail(BaseModel):
     audio_duration_seconds: float | None = None
     source_url: str | None = None
     video_title: str | None = None
+    channel_name: str | None = None
+    youtube_url: str | None = None
 
+
+class ChunkItem(BaseModel):
+    id: str
+    chunk_index: int
+    text: str
+    section_id: str | None = None
+    speaker: str | None = None
+    start_time: float | None = None  # seconds from start; null if not available
+
+
+class UrlIngestRequest(BaseModel):
+    url: str
 
 class YouTubeIngestRequest(BaseModel):
     url: str
@@ -417,6 +433,8 @@ async def list_documents(
                 audio_duration_seconds=doc.audio_duration_seconds,
                 source_url=doc.source_url,
                 video_title=doc.video_title,
+                channel_name=doc.channel_name,
+                youtube_url=doc.youtube_url,
                 enrichment_status=enrichment_status,
                 objective_progress_pct=objective_progress_pct,
             )
@@ -679,10 +697,10 @@ async def ingest_kindle(
 
 @router.post("/ingest-url")
 async def ingest_url(
-    body: YouTubeIngestRequest,
+    body: UrlIngestRequest,
     settings: Settings = Depends(get_settings),
 ):
-    """Ingest a YouTube URL by downloading audio via yt-dlp and transcribing with Whisper."""
+    """Ingest a YouTube URL (yt-dlp) or a general web article (Trafilatura)."""
     from app.services.youtube_downloader import (  # noqa: PLC0415
         check_ffmpeg_available,
         check_ytdlp_available,
@@ -691,9 +709,77 @@ async def ingest_url(
         is_youtube_url,
     )
 
+    # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
     if not is_youtube_url(body.url):
-        raise HTTPException(status_code=400, detail="URL must be a YouTube watch URL")
+        from app.services.article_extractor import get_article_extractor  # noqa: PLC0415
+        
+        try:
+            extractor = get_article_extractor()
+            parsed = await extractor.extract(body.url)
+        except Exception as exc:
+            logger.error("Article extraction failed for %s: %s", body.url, exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        doc_id = str(uuid.uuid4())
+        data_dir = Path(settings.DATA_DIR).expanduser()
+        raw_dir = data_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir / f"{doc_id}.md"
+        dest.write_text(parsed.raw_text, encoding="utf-8")
+
+        async with get_session_factory()() as session:
+            doc = DocumentModel(
+                id=doc_id,
+                title=parsed.title,
+                format="md",
+                content_type="tech_article",
+                word_count=parsed.word_count,
+                page_count=1,
+                file_path=str(dest),
+                file_hash=None,
+                stage="parsing",
+                source_url=body.url,
+            )
+            session.add(doc)
+            await session.commit()
+
+        # Convert Section objects to dicts for JSON serialization
+        parsed_sections = [
+            {
+                "heading": s.heading,
+                "level": s.level,
+                "text": s.text,
+                "page_start": s.page_start,
+                "page_end": s.page_end,
+            }
+            for s in parsed.sections
+        ]
+
+        from app.workflows.ingestion import (
+            _background_tasks,  # noqa: PLC0415
+            run_ingestion,  # noqa: PLC0415
+        )
+
+        _task = asyncio.create_task(run_ingestion(
+            doc_id, 
+            str(dest), 
+            "md", 
+            "tech_article",
+            parsed_document={
+                "title": parsed.title,
+                "format": "md",
+                "pages": 1,
+                "word_count": parsed.word_count,
+                "sections": parsed_sections,
+                "raw_text": parsed.raw_text
+            }
+        ))
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
+        logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
+        return {"document_id": doc_id, "status": "processing"}
+
+    # 2. YouTube: Existing logic
     if not check_ytdlp_available():
         raise HTTPException(
             status_code=503,
@@ -719,6 +805,7 @@ async def ingest_url(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     video_title = meta.get("title") or "YouTube Video"
+    channel_name = meta.get("uploader") or meta.get("channel") or None
     doc_id = str(uuid.uuid4())
 
     data_dir = Path(settings.DATA_DIR).expanduser()
@@ -752,13 +839,20 @@ async def ingest_url(
             stage="parsing",
             source_url=body.url,
             video_title=video_title,
+            channel_name=channel_name,
+            youtube_url=body.url,
         )
         session.add(doc)
         await session.commit()
 
-    from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
+    from app.workflows.ingestion import (
+        _background_tasks,  # noqa: PLC0415
+        run_ingestion,  # noqa: PLC0415
+    )
 
-    _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "wav", "audio"))
+    _task = asyncio.create_task(
+        run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
+    )
     _background_tasks.add(_task)
     _task.add_done_callback(_background_tasks.discard)
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
@@ -820,7 +914,44 @@ async def get_document(document_id: str):
         audio_duration_seconds=doc.audio_duration_seconds,
         source_url=doc.source_url,
         video_title=doc.video_title,
+        channel_name=doc.channel_name,
+        youtube_url=doc.youtube_url,
     )
+
+
+@router.get("/{document_id}/chunks", response_model=list[ChunkItem])
+async def get_document_chunks(document_id: str) -> list[ChunkItem]:
+    """Return all chunks for a document in chunk_index order.
+
+    Works for any document type -- no format filter applied.
+    Used by the YouTube transcript viewer and any other chunk-level consumer.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        chunks_result = await session.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        chunks = chunks_result.scalars().all()
+
+    return [
+        ChunkItem(
+            id=c.id,
+            chunk_index=c.chunk_index,
+            text=c.text,
+            section_id=c.section_id,
+            speaker=c.speaker,
+            start_time=None,  # ChunkModel has no start_time; reserved for future use
+        )
+        for c in chunks
+    ]
 
 
 @router.get("/{document_id}/audio")
@@ -1119,7 +1250,8 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
-            doc.tags = body.tags
+            from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+            doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         if body.content_type is not None:
             doc.content_type = body.content_type
         await session.commit()
@@ -1140,13 +1272,15 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
-        doc.tags = body.tags
+        from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+        normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
+        doc.tags = normalized
         await session.commit()
     logger.info(
         "Patched document tags",
-        extra={"document_id": document_id, "tag_count": len(body.tags)},
+        extra={"document_id": document_id, "tag_count": len(normalized)},
     )
-    return {"document_id": document_id, "tags": body.tags}
+    return {"document_id": document_id, "tags": normalized}
 
 
 @router.delete("/{document_id}", status_code=204)

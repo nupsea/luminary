@@ -22,10 +22,9 @@ dist/
 .env.*
 !.env.example
 
-# Data directories
+# Data directories (project-local runtime data)
+.luminary/
 .lance/
-*.db
-DATA_DIR/
 
 # OS
 .DS_Store

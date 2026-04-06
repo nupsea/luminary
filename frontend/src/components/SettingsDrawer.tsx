@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Cloud, Settings, Shield, X } from "lucide-react"
+import { Cloud, GitMerge, Settings, Shield, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -13,7 +13,7 @@ import { API_BASE } from "@/lib/config"
 
 interface LLMSettings {
   // New DB-backed fields
-  mode: "private" | "cloud"
+  mode: "private" | "cloud" | "hybrid"
   provider: string
   model: string
   has_openai_key: boolean
@@ -23,6 +23,14 @@ interface LLMSettings {
   processing_mode: string
   active_model: string
   available_local_models: string[]
+}
+
+interface ModelOption {
+  id: string
+  name: string
+  cost_input?: number
+  cost_output?: number
+  cost_note?: string
 }
 
 interface StorageInfo {
@@ -64,6 +72,21 @@ async function fetchStorage(): Promise<StorageInfo> {
   return res.json() as Promise<StorageInfo>
 }
 
+async function fetchModels(provider: string): Promise<ModelOption[]> {
+  const res = await fetch(`${API_BASE}/settings/llm/models?provider=${provider}`)
+  if (!res.ok) return []
+  return res.json() as Promise<ModelOption[]>
+}
+
+function formatModelOption(m: ModelOption): string {
+  let label = m.name
+  if (m.cost_input != null && m.cost_output != null) {
+    label += ` — $${m.cost_input}/$${m.cost_output}/1M`
+  }
+  if (m.cost_note) label += ` (${m.cost_note})`
+  return label
+}
+
 // ---------------------------------------------------------------------------
 // SettingsDrawer
 // ---------------------------------------------------------------------------
@@ -88,11 +111,20 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     enabled: open,
   })
 
-  const [localMode, setLocalMode] = useState<"private" | "cloud">("private")
+  const [localMode, setLocalMode] = useState<"private" | "cloud" | "hybrid">("private")
   const [localProvider, setLocalProvider] = useState("openai")
   const [localModel, setLocalModel] = useState("gpt-4o-mini")
+  const [useCustomModel, setUseCustomModel] = useState(false)
   const [apiKey, setApiKey] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+
+  const isCloudMode = localMode === "cloud" || localMode === "hybrid"
+  const { data: availableModels = [], isLoading: modelsLoading } = useQuery({
+    queryKey: ["llm-models", localProvider],
+    queryFn: () => fetchModels(localProvider),
+    enabled: isCloudMode && open,
+    staleTime: 5 * 60 * 1000,
+  })
 
   const [pullModel, setPullModel] = useState("")
   const [pullLines, setPullLines] = useState<string[]>([])
@@ -106,6 +138,11 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       setLocalModel(llm.model)
     }
   }, [llm])
+
+  // Reset custom-model toggle when provider changes
+  useEffect(() => {
+    setUseCustomModel(false)
+  }, [localProvider])
 
   async function handleSave() {
     setIsSaving(true)
@@ -209,7 +246,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           <section>
             <h3 className="mb-3 text-sm font-semibold text-foreground">LLM Mode</h3>
 
-            <div className="mb-4 grid grid-cols-2 gap-3">
+            <div className="mb-4 grid grid-cols-3 gap-2">
               <label
                 className={cn(
                   "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
@@ -231,7 +268,32 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                   <span className="text-sm font-semibold text-foreground">Private</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Your data never leaves your device. Uses local Ollama.
+                  All processing on-device via Ollama.
+                </p>
+              </label>
+
+              <label
+                className={cn(
+                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
+                  localMode === "hybrid"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="llmMode"
+                  value="hybrid"
+                  checked={localMode === "hybrid"}
+                  onChange={() => setLocalMode("hybrid")}
+                  className="sr-only"
+                />
+                <div className="flex items-center gap-2">
+                  <GitMerge size={16} className="text-purple-500" />
+                  <span className="text-sm font-semibold text-foreground">Hybrid</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Cloud for chat; Ollama for background tasks.
                 </p>
               </label>
 
@@ -256,12 +318,12 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                   <span className="text-sm font-semibold text-foreground">Cloud</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Faster responses using OpenAI, Anthropic, or Google.
+                  All features use OpenAI, Anthropic, or Google.
                 </p>
               </label>
             </div>
 
-            {localMode === "cloud" && (
+            {(localMode === "cloud" || localMode === "hybrid") && (
               <div className="space-y-3">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -279,16 +341,48 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  <label className="mb-1 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                     Model
+                    {modelsLoading && <span className="text-muted-foreground">Loading...</span>}
                   </label>
-                  <input
-                    type="text"
-                    value={localModel}
-                    onChange={(e) => setLocalModel(e.target.value)}
-                    placeholder="gpt-4o-mini"
-                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
+                  {availableModels.length > 0 && !useCustomModel ? (
+                    <select
+                      value={availableModels.some(m => m.id === localModel) ? localModel : ""}
+                      onChange={(e) => setLocalModel(e.target.value)}
+                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {!availableModels.some(m => m.id === localModel) && (
+                        <option value="" disabled>— Select a model —</option>
+                      )}
+                      {availableModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {formatModelOption(m)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={localModel}
+                      onChange={(e) => setLocalModel(e.target.value)}
+                      placeholder="e.g. gpt-4o-mini"
+                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  )}
+                  {availableModels.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setUseCustomModel(!useCustomModel)}
+                      className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      {useCustomModel ? "← Pick from list" : "Enter custom model ID"}
+                    </button>
+                  )}
+                  {availableModels.length === 0 && !modelsLoading && isCloudMode && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Save an API key first to see available models.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -311,7 +405,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               </div>
             )}
 
-            {localMode === "private" && (
+            {(localMode === "private" || localMode === "hybrid") && (
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">Pull a model</p>
                 <div className="flex gap-2">
@@ -424,7 +518,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             <p className="text-xs text-muted-foreground">
               {localMode === "private"
                 ? "No content leaves your machine. All processing happens on-device using Ollama and local embedding models."
-                : "API calls are sent to the configured cloud provider. Your documents are included in requests."}
+                : localMode === "hybrid"
+                  ? "Chat and explanations use the cloud provider. Background ingestion tasks (summaries, flashcards, enrichment) use local Ollama to preserve your quota."
+                  : "API calls are sent to the configured cloud provider. Your documents are included in requests."}
             </p>
           </section>
         </div>
@@ -456,8 +552,14 @@ export function LLMModeBadge({ onClick }: LLMModeBadgeProps) {
   }, [data, setLlmMode])
 
   const mode = data?.mode ?? "private"
-  const dotColor = mode === "cloud" ? "bg-blue-500" : "bg-green-500"
-  const label = mode === "cloud" ? `Cloud: ${data?.model ?? ""}` : "Private"
+  const dotColor =
+    mode === "cloud" ? "bg-blue-500" : mode === "hybrid" ? "bg-purple-500" : "bg-green-500"
+  const label =
+    mode === "cloud"
+      ? `Cloud: ${data?.model ?? ""}`
+      : mode === "hybrid"
+        ? `Hybrid: ${data?.model ?? ""}`
+        : "Private"
 
   return (
     <button

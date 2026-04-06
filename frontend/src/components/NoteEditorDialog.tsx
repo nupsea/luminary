@@ -8,6 +8,12 @@
  * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when not yet saved).
  * Tags section is editable: chips with X to remove, inline input to add.
  *
+ * Collections section (S164):
+ *   - Scrollable checkbox list of all collections (GET /collections/tree, flattened)
+ *   - Pre-checked based on note's collection_ids
+ *   - Check: POST /collections/{id}/notes immediately (no Save required)
+ *   - Uncheck: DELETE /collections/{id}/notes/{note_id} immediately
+ *
  * After save:
  *   - isFetchingTags=true shows 'Suggesting tags...' with Loader2
  *   - If suggest-tags returns novel tags: dashed-border chips shown
@@ -17,9 +23,11 @@
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Loader2, Tag, X } from "lucide-react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Link, Loader2, Tag } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { TagAutocomplete } from "@/components/TagAutocomplete"
+import { LinkAutocomplete } from "@/components/LinkAutocomplete"
 import {
   Dialog,
   DialogContent,
@@ -28,22 +36,48 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeleton"
 
 import { API_BASE } from "@/lib/config"
+import { flattenCollectionTree } from "@/lib/collectionUtils"
+import type { CollectionTreeItem } from "@/lib/collectionUtils"
+import { detectLinkTrigger, insertLinkAtTrigger } from "@/lib/noteLinkUtils"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface Note {
+export interface Note {
   id: string
   document_id: string | null
   chunk_id: string | null
   content: string
   tags: string[]
   group_name: string | null
+  collection_ids: string[]
+  // S175: multi-document source linkage
+  source_document_ids: string[]
   created_at: string
   updated_at: string
+}
+
+interface DocumentItem {
+  id: string
+  title: string
+  status: string
+}
+
+interface NoteLinkItem {
+  id: string
+  note_id: string
+  preview: string
+  link_type: string
+  created_at: string
+}
+
+interface NoteLinksResponse {
+  outgoing: NoteLinkItem[]
+  incoming: NoteLinkItem[]
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +86,7 @@ interface Note {
 
 async function patchNote(
   id: string,
-  data: { content?: string; tags?: string[]; group_name?: string },
+  data: { content?: string; tags?: string[]; group_name?: string; source_document_ids?: string[] },
 ): Promise<Note> {
   const res = await fetch(`${API_BASE}/notes/${id}`, {
     method: "PATCH",
@@ -61,6 +95,13 @@ async function patchNote(
   })
   if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
   return res.json() as Promise<Note>
+}
+
+async function fetchDocuments(): Promise<DocumentItem[]> {
+  const res = await fetch(`${API_BASE}/documents`)
+  if (!res.ok) return []
+  const docs = (await res.json()) as DocumentItem[]
+  return docs.filter((d) => d.status === "ready")
 }
 
 async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
@@ -77,6 +118,62 @@ async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<str
   }
 }
 
+async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
+  const res = await fetch(`${API_BASE}/collections/tree`)
+  if (!res.ok) return []
+  return res.json() as Promise<CollectionTreeItem[]>
+}
+
+async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note_ids: [noteId] }),
+  })
+  if (!res.ok) throw new Error(`POST /collections/${collectionId}/notes failed`)
+}
+
+async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes/${noteId}`, {
+    method: "DELETE",
+  })
+  if (!res.ok && res.status !== 204)
+    throw new Error(`DELETE /collections/${collectionId}/notes/${noteId} failed`)
+}
+
+async function fetchNoteLinks(noteId: string): Promise<NoteLinksResponse> {
+  const res = await fetch(`${API_BASE}/notes/${noteId}/links`)
+  if (!res.ok) return { outgoing: [], incoming: [] }
+  return res.json() as Promise<NoteLinksResponse>
+}
+
+async function createNoteLink(
+  noteId: string,
+  targetNoteId: string,
+  linkType: string,
+): Promise<NoteLinkItem> {
+  const res = await fetch(`${API_BASE}/notes/${noteId}/links`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target_note_id: targetNoteId, link_type: linkType }),
+  })
+  if (!res.ok) throw new Error(`POST /notes/${noteId}/links failed: ${res.status}`)
+  return res.json() as Promise<NoteLinkItem>
+}
+
+async function deleteNoteLink(
+  noteId: string,
+  targetNoteId: string,
+  linkType: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok && res.status !== 204)
+    throw new Error(`DELETE /notes/${noteId}/links/${targetNoteId} failed`)
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -90,27 +187,84 @@ interface NoteEditorDialogProps {
 export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogProps) {
   const [content, setContent] = useState(note?.content ?? "")
   const [editTags, setEditTags] = useState<string[]>(note?.tags ?? [])
-  const [tagInput, setTagInput] = useState("")
   const [isSaved, setIsSaved] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [noSuggestionsMsg, setNoSuggestionsMsg] = useState(false)
   const [savedNote, setSavedNote] = useState<Note | null>(null)
+  // Collection IDs that this note belongs to (tracked locally for immediate UI updates).
+  const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(
+    new Set(note?.collection_ids ?? []),
+  )
+  // S175: source document IDs (multi-select)
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>(
+    note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []),
+  )
+  // Link autocomplete state
+  const [linkQuery, setLinkQuery] = useState<string | null>(null)
   const qc = useQueryClient()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Collections list
+  const { data: collectionTree, isLoading: collectionsLoading } = useQuery({
+    queryKey: ["collections-tree"],
+    queryFn: fetchCollectionTree,
+    staleTime: 30_000,
+    enabled: note !== null,
+  })
+  const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
+
+  // S175: documents list for source picker
+  const { data: documents, isLoading: docsLoading } = useQuery({
+    queryKey: ["documents-list"],
+    queryFn: fetchDocuments,
+    staleTime: 60_000,
+    enabled: note !== null,
+  })
+
+  // Note links query (S171)
+  const { data: noteLinks, isLoading: linksLoading } = useQuery({
+    queryKey: ["note-links", note?.id],
+    queryFn: () => fetchNoteLinks(note!.id),
+    staleTime: 10_000,
+    enabled: note !== null,
+  })
+
+  const deleteLinkMut = useMutation({
+    mutationFn: ({ targetId, linkType }: { targetId: string; linkType: string }) =>
+      deleteNoteLink(note!.id, targetId, linkType),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["note-links", note?.id] })
+    },
+  })
+
+  const createLinkMut = useMutation({
+    mutationFn: ({ targetId, linkType }: { targetId: string; linkType: string }) =>
+      createNoteLink(note!.id, targetId, linkType),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["note-links", note?.id] })
+    },
+  })
 
   // Re-initialise state when note changes (new note selected)
   useEffect(() => {
     if (note) {
       setContent(note.content)
       setEditTags(note.tags ?? [])
-      setTagInput("")
       setIsSaved(false)
       setSuggestedTags([])
       setSavedNote(null)
       setIsFetchingTags(false)
       setNoSuggestionsMsg(false)
+      setCheckedCollectionIds(new Set(note.collection_ids ?? []))
+      setSelectedDocIds(
+        note.source_document_ids?.length > 0
+          ? note.source_document_ids
+          : note.document_id
+            ? [note.document_id]
+            : [],
+      )
       saveMut.reset()
     }
     // saveMut.reset is stable; note drives initialisation
@@ -126,11 +280,12 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
 
   function handleClose() {
     abortRef.current?.abort()
+    setLinkQuery(null)
     onClose()
   }
 
   const saveMut = useMutation({
-    mutationFn: () => patchNote(note!.id, { content, tags: editTags }),
+    mutationFn: () => patchNote(note!.id, { content, tags: editTags, source_document_ids: selectedDocIds }),
     onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       setSavedNote(updated)
@@ -171,14 +326,23 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     },
   })
 
-  function commitTagInput() {
-    const trimmed = tagInput.trim().replace(/,+$/, "").trim()
-    if (trimmed && !editTags.includes(trimmed)) {
-      setEditTags((prev) => [...prev, trimmed])
-      setIsSaved(false)
-    }
-    setTagInput("")
-  }
+  // Immediately fire collection membership changes (no Save required).
+  const collectionToggleMut = useMutation({
+    mutationFn: ({ collectionId, add }: { collectionId: string; add: boolean }) =>
+      add
+        ? addNoteToCollection(collectionId, note!.id)
+        : removeNoteFromCollection(collectionId, note!.id),
+    onSuccess: (_data, { collectionId, add }) => {
+      setCheckedCollectionIds((prev) => {
+        const next = new Set(prev)
+        if (add) next.add(collectionId)
+        else next.delete(collectionId)
+        return next
+      })
+      void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+    },
+  })
 
   const isOpen = note !== null
   const unchanged =
@@ -223,58 +387,183 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             <div className="shrink-0 border-b border-border px-4 py-2">
               <span className="text-xs font-medium text-muted-foreground">Write</span>
             </div>
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={(e) => {
-                setContent(e.target.value)
-                setIsSaved(false)
-              }}
-              className="flex-1 resize-none bg-background px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-              placeholder="Write your note in Markdown..."
-            />
+            <div className="relative flex-1 min-h-0">
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={(e) => {
+                  setContent(e.target.value)
+                  setIsSaved(false)
+                  const query = detectLinkTrigger(e.target.value, e.target.selectionStart)
+                  setLinkQuery(query)
+                }}
+                onBlur={() => {
+                  // Delay so onMouseDown on LinkAutocomplete item fires first
+                  setTimeout(() => setLinkQuery(null), 200)
+                }}
+                className="h-full w-full resize-none bg-background px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                placeholder="Write your note in Markdown... Type [[ to link a note"
+              />
+              {linkQuery !== null && (
+                <LinkAutocomplete
+                  query={linkQuery}
+                  onSelect={(id, preview, selectedLinkType) => {
+                    if (!textareaRef.current) return
+                    const { newValue, newCursorPos } = insertLinkAtTrigger(
+                      content,
+                      textareaRef.current.selectionStart,
+                      id,
+                      preview,
+                    )
+                    setContent(newValue)
+                    setLinkQuery(null)
+                    // Also create the structured link row (fire-and-forget, ignore 409)
+                    if (note?.id) {
+                      createLinkMut.mutate({ targetId: id, linkType: selectedLinkType })
+                    }
+                    // Restore cursor position
+                    setTimeout(() => {
+                      textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos)
+                      textareaRef.current?.focus()
+                    }, 0)
+                  }}
+                  onClose={() => setLinkQuery(null)}
+                />
+              )}
+            </div>
             {/* Editable tags section below write pane */}
             <div className="shrink-0 border-t border-border px-4 py-2">
-              <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                {note?.group_name && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {note.group_name}
-                  </span>
-                )}
-                {editTags.map((t) => (
-                  <span
-                    key={t}
-                    className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                  >
-                    <Tag size={9} />
-                    {t}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditTags((prev) => prev.filter((x) => x !== t))
-                        setIsSaved(false)
-                      }}
-                      className="ml-0.5 hover:text-foreground"
-                      aria-label={`Remove tag ${t}`}
-                    >
-                      <X size={9} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <input
-                type="text"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === ",") {
-                    e.preventDefault()
-                    commitTagInput()
-                  }
+              <TagAutocomplete
+                tags={editTags}
+                onChange={(newTags) => {
+                  setEditTags(newTags)
                 }}
-                placeholder="Add tag..."
-                className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+                onUnsavedChange={() => setIsSaved(false)}
               />
+            </div>
+
+            {/* Source documents section (S175) */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Source documents</p>
+              {docsLoading ? (
+                <div className="flex flex-col gap-1">
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <Skeleton key={i} className="h-5 w-full rounded" />
+                  ))}
+                </div>
+              ) : (documents ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">Ingest a book to link notes to it</p>
+              ) : (
+                <div className="max-h-32 overflow-y-auto flex flex-col gap-0.5">
+                  {(documents ?? []).map((doc) => (
+                    <label
+                      key={doc.id}
+                      className="flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDocIds.includes(doc.id)}
+                        onChange={(e) => {
+                          setSelectedDocIds((prev) =>
+                            e.target.checked
+                              ? [...prev, doc.id]
+                              : prev.filter((id) => id !== doc.id),
+                          )
+                          setIsSaved(false)
+                        }}
+                        className="h-3 w-3 rounded border-border"
+                      />
+                      <span className="flex-1 truncate">{doc.title}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Collections section */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Collections</p>
+              {collectionsLoading ? (
+                <div className="flex flex-col gap-1">
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <Skeleton key={i} className="h-5 w-full rounded" />
+                  ))}
+                </div>
+              ) : allCollections.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No collections yet</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5">
+                  {allCollections.map((col) => (
+                    <label
+                      key={col.id}
+                      className="flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checkedCollectionIds.has(col.id)}
+                        onChange={(e) => {
+                          collectionToggleMut.mutate({
+                            collectionId: col.id,
+                            add: e.target.checked,
+                          })
+                        }}
+                        className="h-3 w-3 rounded border-border"
+                      />
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: col.color }}
+                      />
+                      <span className="flex-1 truncate">{col.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Links section (S171) */}
+            <div className="shrink-0 border-t border-border px-4 py-2">
+              <p className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                <Link size={11} />
+                Links
+              </p>
+              {linksLoading ? (
+                <Skeleton className="h-4 w-24 rounded" />
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {(noteLinks?.outgoing ?? []).length === 0 &&
+                    (noteLinks?.incoming ?? []).length === 0 && (
+                      <p className="text-xs text-muted-foreground">No links yet. Type [[ to link.</p>
+                    )}
+                  {(noteLinks?.outgoing ?? []).length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-muted-foreground">Outgoing</span>
+                      {noteLinks!.outgoing.map((link) => (
+                        <div key={link.id} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs bg-indigo-50 border border-indigo-200">
+                          <span className="rounded-full bg-indigo-200 px-1 text-[10px] text-indigo-700">{link.link_type}</span>
+                          <span className="flex-1 truncate text-foreground">{link.preview}</span>
+                          <button
+                            onClick={() => deleteLinkMut.mutate({ targetId: link.note_id, linkType: link.link_type })}
+                            className="text-muted-foreground hover:text-destructive"
+                            title="Remove link"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(noteLinks?.incoming ?? []).length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-muted-foreground">Backlinks</span>
+                      {noteLinks!.incoming.map((link) => (
+                        <div key={link.id} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs bg-muted border border-border">
+                          <span className="rounded-full bg-muted-foreground/20 px-1 text-[10px] text-muted-foreground">{link.link_type}</span>
+                          <span className="flex-1 truncate text-foreground">{link.preview}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -285,7 +574,15 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             </div>
             <div className="flex-1 overflow-auto px-4 py-3 text-sm">
               {content ? (
-                <MarkdownRenderer>{content}</MarkdownRenderer>
+                <MarkdownRenderer
+                  validNoteIds={
+                    noteLinks !== undefined
+                      ? new Set(noteLinks.outgoing.map((l) => l.note_id))
+                      : undefined
+                  }
+                >
+                  {content}
+                </MarkdownRenderer>
               ) : (
                 <p className="text-muted-foreground">Nothing to preview yet.</p>
               )}

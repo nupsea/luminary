@@ -67,10 +67,16 @@ def test_generate_endpoint_201(client):
         r = client.post("/notes", json={"content": content, "tags": [tag]})
         assert r.status_code == 201
 
-    mock_llm = AsyncMock(
-        return_value='[{"question": "What can the Cheshire Cat do?", '
+    # Two-pass LLM: 1st call = concept extraction, 2nd call = card generation
+    concept_resp = (
+        '{"domain": "Wonderland", "concepts": '
+        '[{"concept": "Cheshire Cat vanishing", "type": "concept"}]}'
+    )
+    card_resp = (
+        '[{"question": "What can the Cheshire Cat do?", '
         '"answer": "Vanish leaving its smile", "source_excerpt": "..."}]'
     )
+    mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
     with patch("app.services.llm.LLMService.generate", mock_llm):
         resp = client.post(
             "/notes/flashcards/generate",
@@ -96,10 +102,16 @@ def test_generate_from_notes_by_ids(client):
         assert r.status_code == 201
         note_ids.append(r.json()["id"])
 
-    mock_llm = AsyncMock(
-        return_value='[{"question": "Who is always late?", '
+    # Two-pass LLM: 1st call = concept extraction, 2nd call = card generation
+    concept_resp = (
+        '{"domain": "Wonderland", "concepts": '
+        '[{"concept": "White Rabbit punctuality", "type": "concept"}]}'
+    )
+    card_resp = (
+        '[{"question": "Who is always late?", '
         '"answer": "The White Rabbit", "source_excerpt": "..."}]'
     )
+    mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
     with patch("app.services.llm.LLMService.generate", mock_llm):
         resp = client.post(
             "/notes/flashcards/generate",
@@ -133,14 +145,19 @@ def test_alice_notes_flashcards(all_books_ingested):
             assert r.status_code == 201
             note_ids.append(r.json()["id"])
 
-        mock_llm = AsyncMock(
-            return_value=(
-                '[{"question": "Who did Alice follow?", '
-                '"answer": "The White Rabbit", "source_excerpt": "Alice followed..."}, '
-                '{"question": "What remains after the Cheshire Cat vanishes?", '
-                '"answer": "Its grin", "source_excerpt": "grin remains"}]'
-            )
+        # Two-pass LLM: 1st call = concept extraction, 2nd call = card generation
+        concept_resp = (
+            '{"domain": "Wonderland", "concepts": '
+            '[{"concept": "White Rabbit", "type": "character"}, '
+            '{"concept": "Cheshire Cat grin", "type": "concept"}]}'
         )
+        card_resp = (
+            '[{"question": "Who did Alice follow?", '
+            '"answer": "The White Rabbit", "source_excerpt": "Alice followed..."}, '
+            '{"question": "What remains after the Cheshire Cat vanishes?", '
+            '"answer": "Its grin", "source_excerpt": "grin remains"}]'
+        )
+        mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
         with patch("app.services.llm.LLMService.generate", mock_llm):
             resp = c.post(
                 "/notes/flashcards/generate",

@@ -59,31 +59,39 @@ brew install ollama
 ollama pull mistral
 ```
 
+## Platform Notes
+
+### macOS Intel (x86_64)
+
+Three core packages — `lancedb`, `onnxruntime`, and `kuzu` — have dropped Intel macOS wheels and have no source distributions on PyPI. None are buildable without major effort on Python 3.13. **Docker is the only practical path.**
+
+Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) then run:
+
+```bash
+make luminary
+```
+
+`make luminary` detects Intel Mac automatically, builds the backend into a Linux container (first run takes a few minutes), and wires it to your local Ollama. The frontend still runs natively.
+
+> All other platforms (Linux x86_64/ARM64, macOS Apple Silicon, Windows x86_64) install with no extra steps.
+
 ## Quickstart
 
 ```bash
 git clone <repo-url>
-cd learning-mate
+cd luminary
 
-# Terminal 1 -- Ollama must be running before the backend starts
-ollama serve
+# Install frontend deps (first time only)
+cd frontend && npm install && cd ..
 
-# Terminal 2 -- backend (installs Python deps via uv on first run)
-make backend
+# Start Ollama (required for Chat and Summarization)
+ollama serve &
 
-# Terminal 3 -- frontend (installs npm deps on first run)
-make frontend
-
-# Open in browser
-http://localhost:5173
+# Launch everything with a single command
+make luminary
 ```
 
-Or start backend + frontend together (Ollama must already be running):
-
-```bash
-ollama serve &   # if not already running
-make dev
-```
+`make luminary` starts the backend and frontend, waits for both to be ready, then prints the URL. Open [http://localhost:5173](http://localhost:5173) when it reports ready.
 
 For colorized, per-process log output with DEBUG-level ingestion tracing:
 
@@ -92,6 +100,28 @@ make logs
 ```
 
 Backend lines appear in cyan `[BACKEND]`, frontend in green `[FRONTEND]`. Ctrl-C stops both.
+
+## Make Commands
+
+| Command | Description |
+|---|---|
+| `make luminary` | **Recommended.** Start backend + frontend, wait for readiness, print URL |
+| `make dev` | Start backend + frontend together (no readiness wait) |
+| `make backend` | Start backend only (port 8000) |
+| `make frontend` | Start frontend only (port 5173) |
+| `make logs` | Colorized dev log output with DEBUG tracing |
+| `make lint` | Run ruff (Python) + tsc type-check (TypeScript) |
+| `make test` | Backend unit + integration tests |
+| `make test-full` | Full corpus integration tests (slow, real ML models) |
+| `make test-concurrent` | Concurrent session tests |
+| `make test-perf` | Performance/latency tests |
+| `make test-e2e` | E2E upload tests (requires running backend) |
+| `make test-book-e2e` | Book ingestion E2E tests |
+| `make test-book-content` | Book content retrieval tests |
+| `make test-books-all` | Ingest all 3 corpus books, then run all book tests |
+| `make smoke` | Smoke tests against backend on :8000 |
+| `make eval` | RAGAS quality evals with threshold assertions |
+| `make ci` | Full CI: sync deps → lint → layer check → tests → build |
 
 ## Running Tests
 

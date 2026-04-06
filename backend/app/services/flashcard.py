@@ -1,18 +1,27 @@
 """Flashcard generation service — LLM-based QA flashcard generation."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 import litellm
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChunkModel, DocumentModel, FlashcardModel, NoteModel, SectionModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    FlashcardModel,
+    NoteCollectionMemberModel,
+    NoteCollectionModel,
+    NoteModel,
+    SectionModel,
+)
 from app.services.llm import get_llm_service
 from app.telemetry import trace_chain
 
@@ -20,27 +29,29 @@ logger = logging.getLogger(__name__)
 
 FLASHCARD_SYSTEM = (
     "You are a learning assistant creating flashcards for active recall. "
-    "Generate questions that test understanding of the content. "
-    "Prefer questions that: (1) ask the learner to explain a concept in their own words"
-    " (comprehension), "
-    "(2) apply a concept to a new situation (application), "
-    "(3) distinguish between similar concepts (analysis), "
-    "or (4) evaluate a claim or argument (evaluation). "
-    "AVOID: trivia questions about exact wording, hypothetical questions not grounded"
-    " in the content, "
-    "questions whose answer is not in the text, yes/no questions. "
-    "CRITICAL — questions must be fully self-contained. "
-    "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
-    "'in this book', 'in this document', or any similar reference to the source material. "
-    "A flashcard question must make complete sense on its own without seeing the original text. "
-    "CRITICAL — question framing must match the answer exactly: "
-    "if the answer describes a state, mood, behaviour, or activity, ask about that"
-    " state/mood/behaviour/activity. "
-    "Do NOT use category words (occupation, profession, role, identity, trait) when"
-    " the answer is actually describing what someone is doing or feeling. "
-    "Before writing each question, ask yourself: would a reader who does not already"
-    " know the answer interpret this question as asking exactly what the answer provides? "
-    "If not, reword the question until it does. "
+    "Generate questions that test understanding, not surface recall. "
+    "Match the question structure to the type of knowledge being tested: "
+    "causal knowledge -> ask why or what causes; "
+    "comparative knowledge -> ask how two things differ or what distinguishes them; "
+    "process or role knowledge -> ask what role X plays in Y or how X enables Y; "
+    "definitional knowledge -> ask what X is or what characterises X; "
+    "speculative or argued knowledge -> ask what the argument or evidence for X is. "
+    "AVOID: list-regurgitation questions whose answer is just an enumeration of items; "
+    "trivia about exact wording; yes/no questions; "
+    "questions whose answer is not derivable from the provided text. "
+    "CRITICAL -- NEVER use deictic or source-referencing words in a question: "
+    "'in this passage', 'in this text', 'in this excerpt', 'in this book', "
+    "'in this document', 'according to the text', 'as described', 'as stated', "
+    "'this scenario', 'the scenario', 'this situation', 'this case', 'this context', "
+    "'this example', 'the author', 'the writer'. "
+    "These make no sense on a flashcard viewed without the source. "
+    "Instead, name the specific concept, entity, technology, or idea directly in the question. "
+    "CRITICAL -- question framing must match the answer exactly: "
+    "if the answer explains a cause, the question must ask for that cause; "
+    "if the answer describes a role, the question must ask for that role. "
+    "The answer must be a concise explanation in 1-3 sentences -- never a bare list of items. "
+    "Before writing each question, verify: does someone without the source text understand "
+    "exactly what is being asked, and does the answer directly satisfy the question? "
     "Output a JSON array starting with [ and ending with ]. "
     "Write no explanation, preamble, or markdown fences."
 )
@@ -50,9 +61,76 @@ FLASHCARD_USER_TMPL = (
     "Difficulty guidelines: {difficulty_guidelines}\n"
     "{extra_instructions}"
     "Each card must be answerable from the provided text only.\n"
-    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
+    "Format: "
+    '[{{"question": "...", "answer": "...", "source_excerpt": "...",'
+    ' "bloom_level": N}}]\n'
+    "bloom_level is an integer 1-6 "
+    "(1=remember, 2=understand, 3=apply, "
+    "4=analyze, 5=evaluate, 6=create).\n"
     "The \"answer\" field may use Markdown (bold, lists) for clarity.\n\n"
     "Text:\n{text}\n\n"
+    "JSON array:"
+)
+
+NOTES_CONCEPT_EXTRACT_SYSTEM = (
+    "You are a learning analyst. Given a learner's notes, your job is two steps. "
+    "STEP 1 -- DOMAIN: Identify the primary subject domain of the notes in a single short phrase. "
+    "The domain is what the learner is actively trying to understand or remember. "
+    "It is never the setting, date, location, or context in which the notes were written. "
+    "STEP 2 -- CONCEPTS: Extract atomic, learnable concepts that are directly about that domain. "
+    "A concept must be an insight, claim, argument, principle, or relationship within the domain. "
+    "STRICT GROUNDING: extract only what is explicitly stated or directly implied by the notes. "
+    "Never introduce knowledge from outside the notes. "
+    "REJECT any concept that is about: "
+    "the physical setting (weather, environment, location, surroundings); "
+    "people or events incidental to the subject; "
+    "bare enumerations with no explanatory content; "
+    "meta-commentary about the notes. "
+    "For each accepted concept, assign a type: "
+    "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
+    "Output ONLY a JSON object with keys \"domain\" (string) and "
+    "\"concepts\" (array of {\"concept\": \"...\", \"type\": \"...\"}). "
+    "No explanation, no preamble, no markdown fences."
+)
+
+NOTES_CONCEPT_EXTRACT_TMPL = (
+    "Identify the domain and extract up to {max_concepts} learnable concepts from these notes.\n\n"
+    "Notes:\n{text}\n\n"
+    "JSON object:"
+)
+
+NOTES_CARD_FROM_CONCEPTS_SYSTEM = (
+    "You are a flashcard designer. You receive a subject domain, a list of typed concepts, "
+    "and the original notes they were drawn from. "
+    "DOMAIN GATE: only generate cards for concepts that are directly about the stated domain. "
+    "Skip any concept outside the domain even if it appears in the notes. "
+    "GROUNDING GATE: only generate a card if the answer can be written using the notes alone. "
+    "If the notes do not contain sufficient information, skip that concept. "
+    "Never hallucinate or use external knowledge. "
+    "The question structure MUST match the knowledge type: "
+    "causal-claim -> ask why X leads to Y, or what causes X; "
+    "comparison -> ask how X and Y differ, or what distinguishes X from Y; "
+    "process-role -> ask what X collectively enables or achieves within Y "
+    "(not: list the components of X); "
+    "factual-definition -> ask what X is or what characterises X; "
+    "speculative-claim -> ask what the argument or reasoning behind X is. "
+    "The question must name the specific concept directly. "
+    "NEVER use context-dependent words: 'this scenario', 'the scenario', 'this situation', "
+    "'this case', 'this context', 'this example', 'the author', 'the text', 'these notes', "
+    "'the man', 'the person', 'the writer'. "
+    "The question must stand alone -- understandable without the notes. "
+    "The answer must be derived from the notes in 1-3 sentences. "
+    "For process-role: explain what the collective activity achieves or why it matters -- "
+    "never enumerate the individual components as the answer. "
+    'Output ONLY a JSON array: [{{"question": "...", "answer": "...", "source_excerpt": ""}}]. '
+    "No explanation, no preamble, no markdown fences."
+)
+
+NOTES_CARD_FROM_CONCEPTS_TMPL = (
+    "Subject domain: {domain}\n"
+    "Difficulty: {difficulty}. {difficulty_guidelines}\n\n"
+    "Concepts:\n{concepts_json}\n\n"
+    "Notes:\n{text}\n\n"
     "JSON array:"
 )
 
@@ -86,6 +164,132 @@ _BOOK_CONTENT_GUIDELINE = (
 
 # Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)
 _CHUNK_CHAR_LIMIT = 10_000
+
+# S188: Bloom L3+ instruction appended to the genre system prompt
+_BLOOM_L3_INSTRUCTION = (
+    "\nBLOOM LEVEL TARGETING: Generate questions at Bloom's Taxonomy Level 3 or higher "
+    "(application, analysis, synthesis, evaluation). At least 50% of questions must require "
+    "the learner to apply, analyze, or evaluate -- not merely recall or describe. "
+    "For each card, include a \"bloom_level\" integer (1-6) indicating the cognitive level. "
+    "ANSWER CITATION: Each answer must reference the section or chapter where the concept "
+    "appears (e.g., 'In Chapter XII...', 'In the section on X...'). "
+)
+
+
+async def _get_section_context_for_chunks(
+    chunks: list[ChunkModel],
+    session: AsyncSession,
+) -> dict[str, tuple[str, str | None]]:
+    """Return a map of section_id -> (section_heading, parent_heading).
+
+    Used to enrich prompt text with section/chapter context.
+    """
+    section_ids = list({c.section_id for c in chunks if c.section_id})
+    if not section_ids:
+        return {}
+
+    result = await session.execute(
+        select(SectionModel).where(SectionModel.id.in_(section_ids))
+    )
+    sections = {s.id: s for s in result.scalars().all()}
+
+    # Resolve parent headings (one level up = chapter)
+    parent_ids = [s.parent_section_id for s in sections.values() if s.parent_section_id]
+    parents: dict[str, SectionModel] = {}
+    if parent_ids:
+        parent_result = await session.execute(
+            select(SectionModel).where(SectionModel.id.in_(parent_ids))
+        )
+        parents = {s.id: s for s in parent_result.scalars().all()}
+
+    context_map: dict[str, tuple[str, str | None]] = {}
+    for sid, sec in sections.items():
+        parent_heading = (
+            parents[sec.parent_section_id].heading
+            if sec.parent_section_id and sec.parent_section_id in parents
+            else None
+        )
+        context_map[sid] = (sec.heading, parent_heading)
+    return context_map
+
+
+async def _get_entity_names_for_document(
+    document_id: str,
+    types: list[str] | None = None,
+    limit: int = 5,
+) -> list[str]:
+    """Query Kuzu for top entity names for a document, filtered by type.
+
+    Returns up to *limit* names. Non-fatal: returns [] on error.
+    """
+    try:
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+
+        graph_svc = get_graph_service()
+        by_type = await asyncio.to_thread(
+            graph_svc.get_entities_by_type_for_document, document_id
+        )
+        names: list[str] = []
+        target_types = types or ["PERSON", "PLACE"]
+        for t in target_types:
+            names.extend(by_type.get(t, []))
+        # Deduplicate while preserving order, take top N
+        seen: set[str] = set()
+        unique: list[str] = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                unique.append(n)
+        return unique[:limit]
+    except Exception:
+        logger.debug(
+            "Entity lookup failed for %s; skipping enrichment",
+            document_id, exc_info=True,
+        )
+        return []
+
+
+def _build_enriched_text(
+    chunks: list[ChunkModel],
+    section_ctx: dict[str, tuple[str, str | None]],
+) -> tuple[str, str]:
+    """Build combined text with section heading prefixes for context.
+
+    Returns (enriched_text, first_chunk_id).
+    """
+    if not chunks:
+        return "", ""
+
+    parts: list[str] = []
+    total = 0
+    for c in chunks:
+        if total >= _CHUNK_CHAR_LIMIT:
+            break
+        prefix = ""
+        if c.section_id and c.section_id in section_ctx:
+            heading, parent = section_ctx[c.section_id]
+            if parent:
+                prefix = f"[{parent} > {heading}]\n"
+            else:
+                prefix = f"[{heading}]\n"
+        part = prefix + c.text
+        parts.append(part)
+        total += len(part)
+
+    return "\n\n".join(parts), chunks[0].id
+
+
+def _resolve_section_heading(
+    chunk: ChunkModel,
+    section_ctx: dict[str, tuple[str, str | None]],
+) -> str | None:
+    """Build a display-friendly section heading for a card from its chunk's section context."""
+    if not chunk.section_id or chunk.section_id not in section_ctx:
+        return None
+    heading, parent = section_ctx[chunk.section_id]
+    if parent:
+        return f"{parent} - {heading}"
+    return heading
 
 
 async def _fetch_chunks(
@@ -225,6 +429,43 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
 
     combined = f"{beginning}\n\n[...]\n\n{middle}\n\n[...]\n\n{end}"
     return combined, chunks[0].id
+
+
+def _parse_concept_extract(raw: str) -> tuple[str, list[dict]]:
+    """Parse the concept-extraction response: {"domain": "...", "concepts": [...]}.
+
+    Returns (domain, concepts). Falls back gracefully if the LLM deviates from the format.
+    """
+    raw = raw.strip()
+    # Strip markdown fences if present.
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        raw = raw.rsplit("```", 1)[0].strip()
+    # Try to find the outermost JSON object.
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        try:
+            obj = json.loads(raw[start:end])
+            domain = str(obj.get("domain", "")).strip()
+            concepts = [
+                c for c in obj.get("concepts", [])
+                if isinstance(c, dict) and c.get("concept")
+            ]
+            return domain, concepts
+        except (json.JSONDecodeError, ValueError):
+            pass
+    # Fallback: try to extract a bare array (old format compatibility).
+    start = raw.find("[")
+    end = raw.rfind("]") + 1
+    if start != -1 and end > start:
+        try:
+            concepts = json.loads(raw[start:end])
+            return "", [c for c in concepts if isinstance(c, dict) and c.get("concept")]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    logger.warning("Concept extract parse failed: %r", raw[:200])
+    return "", []
 
 
 def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
@@ -423,7 +664,404 @@ def _parse_cloze_llm_response(raw: str) -> list[dict]:
     return valid
 
 
+# ---------------------------------------------------------------------------
+# S179: Chunk classifier and genre-aware prompt helpers
+# ---------------------------------------------------------------------------
+
+_ANALOGY_PATTERNS = re.compile(
+    r"\b(like a|similar to|imagine|think of it as|is like|just as|as if|as though"
+    r"|analogous to|metaphor|by analogy)\b",
+    re.IGNORECASE,
+)
+_EXAMPLE_PATTERNS = re.compile(
+    r"\b(for example|for instance|e\.g\.|consider this|such as|to illustrate"
+    r"|as an example|as a case)\b",
+    re.IGNORECASE,
+)
+_DEFINITION_PATTERNS = re.compile(
+    r"(is defined as|refers to|means that|is the process of|is a term|"
+    r"can be defined|:\s*a\s+\w|:\s*the\s+\w)",
+    re.IGNORECASE,
+)
+_CONCEPT_PATTERNS = re.compile(
+    r"\b(therefore|as a result|the key idea|the principle|this means|the reason"
+    r"|this enables|this causes|the mechanism|the implication|the effect|"
+    r"crucially|fundamentally|essentially)\b",
+    re.IGNORECASE,
+)
+_TRANSITION_PATTERNS = re.compile(
+    r"\b(in the next|in the following|as we saw|moving on|in summary|"
+    r"to recap|we have seen|in this chapter)\b",
+    re.IGNORECASE,
+)
+
+_TECH_TITLE_KEYWORDS = re.compile(
+    r"\b(programming|systems|distributed|database|algorithm|machine learning"
+    r"|software|engineering|computer|kubernetes|docker|linux|network|security"
+    r"|data structures|operating system)\b",
+    re.IGNORECASE,
+)
+
+_CHUNK_CLASSIFICATION_LABELS = frozenset(
+    {"concept", "definition", "example", "analogy", "narrative", "transition"}
+)
+_ELIGIBLE_LABELS = frozenset({"concept", "definition"})
+
+
+def _classify_chunk(text: str) -> str:
+    """Classify a chunk of text into one of six categories.
+
+    Rules applied in order -- first match wins:
+      definition > concept > analogy > example > transition > narrative
+    """
+    if _DEFINITION_PATTERNS.search(text):
+        return "definition"
+    if _CONCEPT_PATTERNS.search(text):
+        return "concept"
+    if _ANALOGY_PATTERNS.search(text):
+        return "analogy"
+    if _EXAMPLE_PATTERNS.search(text):
+        return "example"
+    if len(text.strip()) < 80 or _TRANSITION_PATTERNS.search(text):
+        return "transition"
+    return "narrative"
+
+
+def _filter_chunks_by_classification(
+    chunks: list[ChunkModel],
+) -> list[tuple[ChunkModel, str]]:
+    """Return (chunk, label) pairs for chunks eligible for flashcard generation.
+
+    Eligible: concept or definition chunks, plus any immediately adjacent
+    example/analogy chunk that elaborates a concept/definition chunk.
+    """
+    if not chunks:
+        return []
+
+    labels = [_classify_chunk(c.text) for c in chunks]
+    eligible_indices: set[int] = set()
+
+    for i, label in enumerate(labels):
+        if label in _ELIGIBLE_LABELS:
+            eligible_indices.add(i)
+            # Adjacent elaborators
+            if i > 0 and labels[i - 1] in ("example", "analogy"):
+                eligible_indices.add(i - 1)
+            if i < len(chunks) - 1 and labels[i + 1] in ("example", "analogy"):
+                eligible_indices.add(i + 1)
+
+    return [(chunks[i], labels[i]) for i in sorted(eligible_indices)]
+
+
+def _infer_genre(doc: "DocumentModel | None") -> str:  # type: ignore[name-defined]
+    """Infer document genre for system prompt tuning."""
+    if doc is None:
+        return "narrative"
+    content_type = (doc.content_type or "").lower()
+    title = (doc.title or "").lower()
+    if content_type == "book":
+        if _TECH_TITLE_KEYWORDS.search(title):
+            return "technical"
+        return "non-fiction"
+    if content_type in ("pdf", "web"):
+        return "academic"
+    return "narrative"
+
+
+def _build_genre_system_prompt(genre: str) -> str:
+    """Build a genre-aware flashcard generation system prompt."""
+    genre_hint = (
+        f"This is a {genre} document. "
+        if genre != "narrative"
+        else ""
+    )
+    quality_rules = (
+        "QUALITY RULES for concept-focused questions:\n"
+        "- Do NOT write questions whose answer is a proper noun drawn from an analogy or "
+        "illustrative story used to explain a concept (e.g., do not ask 'What animal did the "
+        "author compare X to?').\n"
+        "- Questions must be answerable by someone who understands the underlying concept but "
+        "has NOT read the specific analogy or illustration.\n"
+        "- Prefer 'Explain X in your own words' and 'What is the practical implication of Y' "
+        "over 'According to the text, what does Z do'.\n"
+        "- Frame questions in terms of WHY or HOW, not WHAT was mentioned in an example.\n"
+    )
+    return (
+        genre_hint
+        + "You are a learning assistant creating flashcards for active recall. "
+        "Generate questions that test understanding of core concepts and principles. "
+        "Prefer questions that: (1) ask the learner to explain a concept in their own words, "
+        "(2) apply a concept to a new situation, "
+        "(3) distinguish between similar concepts, "
+        "or (4) evaluate a claim or argument. "
+        "AVOID: trivia questions about exact wording, hypothetical questions not grounded "
+        "in the content, questions whose answer is not in the text, yes/no questions. "
+        "CRITICAL -- questions must be fully self-contained. "
+        "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
+        "'in this book', 'in this document', or any similar reference to the source material. "
+        "A flashcard question must make complete sense on its own without seeing the original"
+        " text. "
+        + quality_rules
+        + "Output a JSON array starting with [ and ending with ]. "
+        "Write no explanation, preamble, or markdown fences."
+    )
+
+
+
+async def _fetch_existing_embeddings(
+    deck: str, session: AsyncSession
+) -> "tuple[list[str], list] | tuple[list, None]":
+    """Fetch all existing questions in *deck* and embed them in one batch.
+
+    Returns (questions, vectors) or ([], None) when the deck is empty or embedding fails.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    from app.services.embedder import get_embedding_service  # noqa: PLC0415
+
+    result = await session.execute(
+        select(FlashcardModel.question).where(FlashcardModel.deck == deck)
+    )
+    existing_questions = [row[0] for row in result.all()]
+    if not existing_questions:
+        return [], None
+
+    embedder = get_embedding_service()
+    try:
+        vecs = await asyncio.to_thread(embedder.encode, existing_questions)
+        return existing_questions, np.array(vecs)
+    except Exception:
+        logger.warning(
+            "Embedding dedup: failed to encode existing questions; skipping dedup", exc_info=True
+        )
+        return [], None
+
+
+def _is_near_duplicate(
+    candidate_vec: "Any",
+    existing_vecs: "Any",
+    threshold: float = 0.85,
+) -> bool:
+    """Return True if candidate_vec is within *threshold* cosine similarity of any existing_vec."""
+    import numpy as np  # noqa: PLC0415
+
+    candidate_norm = candidate_vec / (np.linalg.norm(candidate_vec) + 1e-10)
+    existing_norms = existing_vecs / (np.linalg.norm(existing_vecs, axis=1, keepdims=True) + 1e-10)
+    sims = existing_norms @ candidate_norm
+    return bool(np.any(sims >= threshold))
+
+
+# ---------------------------------------------------------------------------
+# S206: Sanitize FTS5 query to prevent syntax errors from special characters
+# ---------------------------------------------------------------------------
+
+_FTS5_SPECIAL = re.compile(r'[(){}*:^~"\[\]<>]')
+
+
+def _sanitize_fts5_query(raw: str) -> str:
+    """Strip FTS5 operators and join tokens with AND for multi-word queries.
+
+    Returns empty string if nothing useful remains after sanitization.
+    """
+    cleaned = _FTS5_SPECIAL.sub(" ", raw)
+    # Remove FTS5 boolean operators that users might accidentally type
+    tokens = [t for t in cleaned.split() if t.upper() not in ("AND", "OR", "NOT", "NEAR")]
+    if not tokens:
+        return ""
+    # Wrap each token in double quotes for literal matching, join with AND
+    return " AND ".join(f'"{t}"' for t in tokens)
+
+
+# ---------------------------------------------------------------------------
+# S184: FTS5 sync helpers for flashcards_fts
+# ---------------------------------------------------------------------------
+
+
+async def _sync_flashcard_fts(card: FlashcardModel, session: AsyncSession) -> None:
+    """Insert or update a flashcard's question+answer in the FTS5 index.
+
+    FTS5 UNINDEXED columns don't support OR REPLACE semantics.
+    Delete any existing row first (via shadow table rowid lookup per I-4),
+    then insert the new row.
+    """
+    # Delete existing row if any (idempotent)
+    row = (
+        await session.execute(
+            text("SELECT rowid FROM flashcards_fts_content WHERE c2 = :fid"),
+            {"fid": card.id},
+        )
+    ).first()
+    if row:
+        await session.execute(
+            text("DELETE FROM flashcards_fts WHERE rowid = :rid"),
+            {"rid": row[0]},
+        )
+    # Insert fresh row
+    await session.execute(
+        text(
+            "INSERT INTO flashcards_fts(flashcard_id, question, answer) "
+            "VALUES (:fid, :q, :a)"
+        ),
+        {"fid": card.id, "q": card.question, "a": card.answer},
+    )
+
+
+async def _delete_flashcard_fts(card_id: str, session: AsyncSession) -> None:
+    """Delete a flashcard from the FTS5 index using shadow table rowid lookup (I-4 safe)."""
+    row = (
+        await session.execute(
+            text("SELECT rowid FROM flashcards_fts_content WHERE c2 = :fid"),
+            {"fid": card_id},
+        )
+    ).first()
+    if row:
+        await session.execute(
+            text("DELETE FROM flashcards_fts WHERE rowid = :rid"),
+            {"rid": row[0]},
+        )
+
+
 class FlashcardService:
+    async def search(
+        self,
+        session: AsyncSession,
+        query: str | None = None,
+        document_id: str | None = None,
+        collection_id: str | None = None,
+        tag: str | None = None,
+        bloom_level_min: int | None = None,
+        bloom_level_max: int | None = None,
+        fsrs_state: str | None = None,
+        flashcard_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[FlashcardModel], int]:
+        """Search flashcards with optional FTS query and structured filters (S184).
+
+        All filters combine with AND. Returns (cards, total_count).
+        """
+        from sqlalchemy import or_  # noqa: PLC0415
+
+        from app.models import NoteCollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
+
+        stmt = select(FlashcardModel)
+        _fts_query_used = False
+        _raw_query = query.strip() if query else ""
+
+        if _raw_query:
+            sanitized = _sanitize_fts5_query(_raw_query)
+            if sanitized:
+                fts_sub = (
+                    select(text("flashcard_id"))
+                    .select_from(text("flashcards_fts"))
+                    .where(text("flashcards_fts MATCH :q"))
+                )
+                stmt = stmt.where(FlashcardModel.id.in_(fts_sub)).params(q=sanitized)
+                _fts_query_used = True
+            else:
+                # All tokens were FTS5 operators; use LIKE directly
+                like_pat = f"%{_raw_query}%"
+                stmt = stmt.where(
+                    or_(
+                        FlashcardModel.question.ilike(like_pat),
+                        FlashcardModel.answer.ilike(like_pat),
+                    )
+                )
+
+        if document_id:
+            stmt = stmt.where(FlashcardModel.document_id == document_id)
+
+        if collection_id:
+            member_sub = select(NoteCollectionMemberModel.note_id).where(
+                NoteCollectionMemberModel.collection_id == collection_id
+            )
+            stmt = stmt.where(FlashcardModel.note_id.in_(member_sub))
+
+        if tag:
+            tag_sub = select(NoteTagIndexModel.note_id).where(
+                or_(
+                    NoteTagIndexModel.tag_full == tag,
+                    NoteTagIndexModel.tag_full.like(tag + "/%"),
+                )
+            )
+            stmt = stmt.where(FlashcardModel.note_id.in_(tag_sub))
+
+        if bloom_level_min is not None:
+            stmt = stmt.where(
+                FlashcardModel.bloom_level.is_not(None),
+                FlashcardModel.bloom_level >= bloom_level_min,
+            )
+
+        if bloom_level_max is not None:
+            stmt = stmt.where(
+                FlashcardModel.bloom_level.is_not(None),
+                FlashcardModel.bloom_level <= bloom_level_max,
+            )
+
+        if fsrs_state:
+            stmt = stmt.where(FlashcardModel.fsrs_state == fsrs_state)
+
+        if flashcard_type:
+            stmt = stmt.where(FlashcardModel.flashcard_type == flashcard_type)
+
+        # Count total matches
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await session.execute(count_stmt)).scalar_one()
+
+        # S206: LIKE fallback when FTS5 returns 0 results
+        if total == 0 and _fts_query_used and query:
+            like_pat = f"%{query.strip()}%"
+            stmt_fallback = select(FlashcardModel).where(
+                or_(
+                    FlashcardModel.question.ilike(like_pat),
+                    FlashcardModel.answer.ilike(like_pat),
+                )
+            )
+            # Re-apply non-query filters on fallback
+            if document_id:
+                stmt_fallback = stmt_fallback.where(FlashcardModel.document_id == document_id)
+            if collection_id:
+                member_sub2 = select(NoteCollectionMemberModel.note_id).where(
+                    NoteCollectionMemberModel.collection_id == collection_id
+                )
+                stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(member_sub2))
+            if tag:
+                tag_sub2 = select(NoteTagIndexModel.note_id).where(
+                    or_(
+                        NoteTagIndexModel.tag_full == tag,
+                        NoteTagIndexModel.tag_full.like(tag + "/%"),
+                    )
+                )
+                stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(tag_sub2))
+            if bloom_level_min is not None:
+                stmt_fallback = stmt_fallback.where(
+                    FlashcardModel.bloom_level.is_not(None),
+                    FlashcardModel.bloom_level >= bloom_level_min,
+                )
+            if bloom_level_max is not None:
+                stmt_fallback = stmt_fallback.where(
+                    FlashcardModel.bloom_level.is_not(None),
+                    FlashcardModel.bloom_level <= bloom_level_max,
+                )
+            if fsrs_state:
+                stmt_fallback = stmt_fallback.where(FlashcardModel.fsrs_state == fsrs_state)
+            if flashcard_type:
+                stmt_fallback = stmt_fallback.where(FlashcardModel.flashcard_type == flashcard_type)
+
+            count_fb = select(func.count()).select_from(stmt_fallback.subquery())
+            total = (await session.execute(count_fb)).scalar_one()
+            if total > 0:
+                stmt = stmt_fallback
+                logger.info("flashcard.search: FTS5 returned 0, LIKE fallback found %d", total)
+
+        # Paginate
+        stmt = stmt.order_by(FlashcardModel.created_at.desc())
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await session.execute(stmt)
+        cards = list(result.scalars().all())
+
+        return cards, total
+
     async def generate(
         self,
         document_id: str,
@@ -449,7 +1087,14 @@ class FlashcardService:
         doc = doc_result.scalar_one_or_none()
         content_type = doc.content_type if doc else "unknown"
 
-        # When the caller supplies selected text, use it directly.
+        # S179: infer genre for genre-aware system prompt
+        genre = _infer_genre(doc)
+        system_prompt = _build_genre_system_prompt(genre)
+
+        # When the caller supplies selected text, use it directly (bypass classifier).
+        chunk_classification: str | None = None
+        section_ctx: dict[str, tuple[str, str | None]] = {}
+        resolved_section_heading: str | None = None
         if context and context.strip():
             combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
             # Still need a chunk_id (NOT NULL) — grab the first chunk for the document.
@@ -465,13 +1110,73 @@ class FlashcardService:
             if not chunks:
                 return []
 
-            combined_text, first_chunk_id = _build_text(chunks)
+            # S188: look up section headings for context enrichment
+            section_ctx = await _get_section_context_for_chunks(chunks, session)
+
+            # S179: classify chunks and filter to concept/definition (+ adjacent elaborators)
+            classified = _filter_chunks_by_classification(chunks)
+            if classified:
+                eligible_chunks = [c for c, _ in classified]
+                chunk_classification = classified[0][1]  # dominant label of first chunk
+                logger.info(
+                    "flashcard.generate: %d/%d chunks eligible after classification (genre=%s)",
+                    len(eligible_chunks),
+                    len(chunks),
+                    genre,
+                )
+            else:
+                # Safety net: no chunks classified as concept/definition -- use all chunks
+                eligible_chunks = chunks
+                logger.info(
+                    "flashcard.generate: no concept/definition chunks found, using all %d chunks",
+                    len(chunks),
+                )
+
+            # S188: build enriched text with section heading prefixes
+            if section_ctx:
+                combined_text, first_chunk_id = _build_enriched_text(eligible_chunks, section_ctx)
+            else:
+                combined_text, first_chunk_id = _build_text(eligible_chunks)
             if not combined_text:
                 return []
 
+            # S188: resolve section heading for cards (first chunk's section)
+            first_sec = eligible_chunks[0].section_id if eligible_chunks else None
+            if first_sec and first_sec in section_ctx:
+                resolved_section_heading = _resolve_section_heading(
+                    eligible_chunks[0], section_ctx
+                )
+
+        # S188: enrich system prompt with Bloom L3+ targeting and citation instruction
+        system_prompt += _BLOOM_L3_INSTRUCTION
+
+        # S188: for books, inject entity names into the system prompt
         extra_instructions = ""
         if content_type == "book":
             extra_instructions = _BOOK_CONTENT_GUIDELINE
+            entity_names = await _get_entity_names_for_document(
+                document_id, types=["PERSON", "PLACE"], limit=5
+            )
+            if entity_names:
+                names_str = ", ".join(entity_names)
+                extra_instructions += (
+                    f"Key characters and places in this work: {names_str}. "
+                    "Reference these names directly in questions when relevant.\n"
+                )
+
+        # S188: for technical docs, include code block excerpts
+        is_tech = content_type in ("code", "tech_book", "tech_article")
+        has_context = context and context.strip()
+        if is_tech and not has_context:
+            code_chunks = [c for c in eligible_chunks if c.has_code]
+            if code_chunks:
+                code_excerpts = "\n\n".join(
+                    c.text[:1000] for c in code_chunks[:3]
+                )
+                extra_instructions += (
+                    f"Code blocks from the document:\n{code_excerpts}\n"
+                    "Include code examples in questions where appropriate.\n"
+                )
 
         prompt = FLASHCARD_USER_TMPL.format(
             count=count,
@@ -492,20 +1197,69 @@ class FlashcardService:
             if section_heading:
                 span.set_attribute("flashcard.section_heading", section_heading)
 
-            raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
+            raw = await llm.generate(prompt, system=system_prompt, stream=False)
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
         now = datetime.now(UTC)
-        flashcards: list[FlashcardModel] = []
+
+        # Pre-compute existing embeddings once (avoids re-embedding on every card).
+        # Also embed all candidate questions in one batch, then filter duplicates in-memory.
+        import numpy as np  # noqa: PLC0415
+
+        from app.services.embedder import get_embedding_service  # noqa: PLC0415
+
+        _existing_qs, existing_vecs = await _fetch_existing_embeddings("default", session)
+
+        # Collect valid candidates first, then dedup in a single embed batch
+        candidates: list[dict] = []
         for item in cards_data:
             if not isinstance(item, dict):
                 continue
+            q = str(item.get("question", "")).strip()
+            a = str(item.get("answer", "")).strip()
+            if q and a:
+                candidates.append(item)
+
+        # Batch-embed all candidate questions in one call
+        if candidates and existing_vecs is not None:
+            try:
+                embedder = get_embedding_service()
+                cand_texts = [str(c.get("question", "")).strip() for c in candidates]
+                cand_vecs = await asyncio.to_thread(embedder.encode, cand_texts)
+                cand_vecs = np.array(cand_vecs)
+            except Exception:
+                logger.warning(
+                    "Embedding dedup: candidate encode failed; skipping dedup", exc_info=True
+                )
+                cand_vecs = None
+        else:
+            cand_vecs = None
+
+        # Build accepted set, checking each candidate against existing + previously accepted
+        pool_vecs = existing_vecs  # grows as we accept cards
+        flashcards: list[FlashcardModel] = []
+        for i, item in enumerate(candidates):
             question = str(item.get("question", "")).strip()
             answer = str(item.get("answer", "")).strip()
             source_excerpt = str(item.get("source_excerpt", "")).strip()
-            if not question or not answer:
-                continue
+            # Dedup check using pre-computed vectors
+            if cand_vecs is not None and pool_vecs is not None:
+                if _is_near_duplicate(cand_vecs[i], pool_vecs):
+                    logger.info(
+                        "flashcard.generate: skipping near-duplicate question: %r",
+                        question[:80],
+                    )
+                    continue
+                # Add accepted card's vector to pool so intra-batch duplicates are also caught
+                pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
+            # S188: extract bloom_level from LLM response if present
+            card_bloom_level = item.get("bloom_level")
+            if isinstance(card_bloom_level, int) and 1 <= card_bloom_level <= 6:
+                pass  # valid
+            else:
+                card_bloom_level = None
+
             card = FlashcardModel(
                 id=str(uuid.uuid4()),
                 document_id=document_id,
@@ -521,8 +1275,12 @@ class FlashcardService:
                 reps=0,
                 lapses=0,
                 created_at=now,
+                chunk_classification=chunk_classification,
+                bloom_level=card_bloom_level,
+                section_heading=resolved_section_heading,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:
@@ -574,11 +1332,9 @@ class FlashcardService:
         if not combined_text:
             return []
 
-        prompt = FLASHCARD_USER_TMPL.format(
-            count=count,
-            difficulty=difficulty,
-            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
-            extra_instructions="",
+        # Pass 1: extract typed concepts from the notes.
+        extract_prompt = NOTES_CONCEPT_EXTRACT_TMPL.format(
+            max_concepts=max(count, 8),
             text=combined_text,
         )
 
@@ -590,7 +1346,26 @@ class FlashcardService:
             span.set_attribute("flashcard.requested_count", count)
             span.set_attribute("flashcard.difficulty", difficulty)
 
-            raw = await llm.generate(prompt, system=FLASHCARD_SYSTEM, stream=False)
+            raw_concepts = await llm.generate(
+                extract_prompt, system=NOTES_CONCEPT_EXTRACT_SYSTEM, stream=False
+            )
+            domain, concepts = _parse_concept_extract(raw_concepts)
+            concepts = concepts[:count]
+
+            if not concepts:
+                return []
+
+            # Pass 2: generate one typed card per concept, grounded against original text.
+            card_prompt = NOTES_CARD_FROM_CONCEPTS_TMPL.format(
+                domain=domain,
+                difficulty=difficulty,
+                difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+                concepts_json=json.dumps(concepts, ensure_ascii=False),
+                text=combined_text,
+            )
+            raw = await llm.generate(
+                card_prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM, stream=False
+            )
             cards_data = _parse_llm_response(raw, "notes")
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
@@ -622,6 +1397,7 @@ class FlashcardService:
                 created_at=now,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:
@@ -630,6 +1406,134 @@ class FlashcardService:
                 await session.refresh(card)
 
         return flashcards
+
+    async def generate_from_collection(
+        self,
+        collection_id: str,
+        count_per_note: int,
+        difficulty: Literal["easy", "medium", "hard"],
+        session: AsyncSession,
+        force_regenerate: bool = False,
+    ) -> dict:
+        """Generate flashcards for every note in a collection with hash-based deduplication.
+
+        Each note is processed sequentially (I-1: no asyncio.gather with shared session).
+        Returns {created: int, skipped: int, deck: str}.
+        """
+        llm = get_llm_service()
+
+        # 1. Fetch collection name
+        coll_result = await session.execute(
+            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+        )
+        collection = coll_result.scalar_one_or_none()
+        if collection is None:
+            raise ValueError(f"Collection {collection_id!r} not found")
+
+        deck_name = collection.name
+
+        # 2. Fetch member note_ids
+        member_result = await session.execute(
+            select(NoteCollectionMemberModel.note_id).where(
+                NoteCollectionMemberModel.collection_id == collection_id
+            )
+        )
+        note_ids = [row[0] for row in member_result.all()]
+
+        created = 0
+        skipped = 0
+
+        # 3. Process each note sequentially
+        for note_id in note_ids:
+            note_result = await session.execute(
+                select(NoteModel).where(NoteModel.id == note_id)
+            )
+            note = note_result.scalar_one_or_none()
+            if note is None or not note.content:
+                continue
+
+            content_hash = hashlib.sha256(
+                note.content[:500].encode()
+            ).hexdigest()[:16]
+
+            if not force_regenerate:
+                count_result = await session.execute(
+                    select(func.count()).select_from(FlashcardModel).where(
+                        FlashcardModel.deck == deck_name,
+                        FlashcardModel.source == "note",
+                        FlashcardModel.source_content_hash == content_hash,
+                    )
+                )
+                existing = count_result.scalar_one()
+                if existing > 0:
+                    skipped += 1
+                    continue
+
+            combined_text = note.content[:_CHUNK_CHAR_LIMIT]
+            # Pass 1: extract typed concepts.
+            raw_concepts = await llm.generate(
+                NOTES_CONCEPT_EXTRACT_TMPL.format(
+                    max_concepts=max(count_per_note, 8),
+                    text=combined_text,
+                ),
+                system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+                stream=False,
+            )
+            domain, concepts = _parse_concept_extract(raw_concepts)
+            concepts = concepts[:count_per_note]
+            if not concepts:
+                continue
+
+            # Pass 2: generate one typed card per concept, grounded against original text.
+            raw = await llm.generate(
+                NOTES_CARD_FROM_CONCEPTS_TMPL.format(
+                    domain=domain,
+                    difficulty=difficulty,
+                    difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+                    concepts_json=json.dumps(concepts, ensure_ascii=False),
+                    text=combined_text,
+                ),
+                system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+                stream=False,
+            )
+            cards_data = _parse_llm_response(raw, note_id)
+
+            now = datetime.now(UTC)
+            for item in cards_data:
+                if not isinstance(item, dict):
+                    continue
+                question = str(item.get("question", "")).strip()
+                answer = str(item.get("answer", "")).strip()
+                source_excerpt = str(item.get("source_excerpt", "")).strip()
+                if not question or not answer:
+                    continue
+                card = FlashcardModel(
+                    id=str(uuid.uuid4()),
+                    document_id=None,
+                    chunk_id=None,
+                    source="note",
+                    deck=deck_name,
+                    source_content_hash=content_hash,
+                    note_id=note_id,
+                    question=question,
+                    answer=answer,
+                    source_excerpt=source_excerpt,
+                    difficulty=difficulty,
+                    fsrs_state="new",
+                    fsrs_stability=0.0,
+                    fsrs_difficulty=0.0,
+                    due_date=now,
+                    reps=0,
+                    lapses=0,
+                    created_at=now,
+                )
+                session.add(card)
+                await _sync_flashcard_fts(card, session)
+                created += 1
+
+            await session.commit()
+
+        return {"created": created, "skipped": skipped, "deck": deck_name}
 
     async def generate_from_gaps(
         self,
@@ -691,6 +1595,7 @@ class FlashcardService:
         ids: list[str] = []
         for card in cards:
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             ids.append(card.id)
         if cards:
             await session.commit()
@@ -762,6 +1667,7 @@ class FlashcardService:
         ids: list[str] = []
         for card in cards:
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             ids.append(card.id)
         if cards:
             await session.commit()
@@ -879,6 +1785,7 @@ class FlashcardService:
 
         for card in all_cards:
             session.add(card)
+            await _sync_flashcard_fts(card, session)
         if all_cards:
             await session.commit()
             for card in all_cards:
@@ -992,6 +1899,7 @@ class FlashcardService:
                 bloom_level=bloom_level,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:
@@ -1093,6 +2001,7 @@ class FlashcardService:
                 cloze_text=cloze_text,
             )
             session.add(card)
+            await _sync_flashcard_fts(card, session)
             flashcards.append(card)
 
         if flashcards:

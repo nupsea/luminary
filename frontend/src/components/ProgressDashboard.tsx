@@ -252,7 +252,7 @@ export function ProgressDashboard({ documentId }: ProgressDashboardProps) {
                   width={36}
                 />
                 <RechartsTooltip
-                  formatter={(value: string | number | undefined) => [
+                  formatter={(value) => [
                     value !== undefined ? `${value}%` : "",
                     "Recall",
                   ]}

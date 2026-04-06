@@ -18,14 +18,18 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookOpen, Check, FileText, FolderOpen, Network, Pencil, Plus, Tag, Trash2, X } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import { CollectionTree } from "@/components/CollectionTree"
+import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
+import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
+import { OrganizationPlanDialog, type NamingViolation } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { NoteEditorDialog } from "@/components/NoteEditorDialog"
+import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -38,6 +42,7 @@ import {
 } from "@/components/ui/table"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
+import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
@@ -55,13 +60,16 @@ interface Note {
   content: string
   tags: string[]
   group_name: string | null
+  collection_ids: string[]
+  // S175: multi-document source linkage
+  source_document_ids: string[]
   created_at: string
   updated_at: string
 }
 
 interface GroupInfo { name: string; count: number }
 interface TagInfo { name: string; count: number }
-interface GroupsData { groups: GroupInfo[]; tags: TagInfo[] }
+interface GroupsData { groups: GroupInfo[]; tags: TagInfo[]; total_notes: number }
 
 interface DocumentItem {
   id: string
@@ -84,11 +92,17 @@ interface Clip {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchNotes(documentId?: string, group?: string, tag?: string): Promise<Note[]> {
+async function fetchNotes(
+  documentId?: string,
+  group?: string,
+  tag?: string,
+  collectionId?: string,
+): Promise<Note[]> {
   const params = new URLSearchParams()
   if (documentId) params.set("document_id", documentId)
   if (group) params.set("group", group)
   if (tag) params.set("tag", tag)
+  if (collectionId) params.set("collection_id", collectionId)
   const res = await fetch(`${API_BASE}/notes?${params.toString()}`)
   if (!res.ok) throw new Error(`GET /notes failed: ${res.status}`)
   return res.json() as Promise<Note[]>
@@ -96,7 +110,7 @@ async function fetchNotes(documentId?: string, group?: string, tag?: string): Pr
 
 async function fetchGroups(): Promise<GroupsData> {
   const res = await fetch(`${API_BASE}/notes/groups`)
-  if (!res.ok) return { groups: [], tags: [] }
+  if (!res.ok) return { groups: [], tags: [], total_notes: 0 }
   return res.json() as Promise<GroupsData>
 }
 
@@ -107,36 +121,9 @@ async function fetchDocumentList(): Promise<DocumentItem[]> {
   return Array.isArray(data) ? data : (data.items ?? [])
 }
 
-async function createNote(payload: {
-  content: string
-  tags: string[]
-  document_id: string | null
-}): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
-
 async function deleteNote(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
   if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
-}
-
-async function patchNote(
-  id: string,
-  data: { content?: string; tags?: string[]; group_name?: string },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
-  return res.json() as Promise<Note>
 }
 
 async function fetchClips(documentId?: string): Promise<Clip[]> {
@@ -178,16 +165,46 @@ async function createNoteFromClip(clip: Clip, docTitle: string): Promise<{ id: s
   return res.json() as Promise<{ id: string }>
 }
 
-async function fetchSuggestedTags(id: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, { method: "POST" })
-    if (!res.ok) return []
-    const data = (await res.json()) as { tags: string[] }
-    return data.tags ?? []
-  } catch {
-    return []
-  }
+// ---------------------------------------------------------------------------
+// Cluster suggestion types + API helpers
+// ---------------------------------------------------------------------------
+
+interface ClusterNotePreview {
+  note_id: string
+  excerpt: string
 }
+
+interface ClusterSuggestion {
+  id: string
+  suggested_name: string
+  note_ids: string[]
+  note_count: number
+  confidence_score: number
+  status: string
+  created_at: string
+  previews: ClusterNotePreview[]
+}
+
+async function fetchClusterSuggestions(): Promise<ClusterSuggestion[]> {
+  const res = await fetch(`${API_BASE}/notes/cluster/suggestions`)
+  if (!res.ok) throw new Error(`GET /notes/cluster/suggestions failed: ${res.status}`)
+  return res.json() as Promise<ClusterSuggestion[]>
+}
+
+async function postCluster(): Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }> {
+  const res = await fetch(`${API_BASE}/notes/cluster`, { method: "POST" })
+  if (!res.ok) throw new Error(`POST /notes/cluster failed: ${res.status}`)
+  return res.json() as Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }>
+}
+
+async function fetchNamingViolations(): Promise<NamingViolation[]> {
+  const res = await fetch(`${API_BASE}/notes/cluster/normalize-check`, { method: "POST" })
+  if (!res.ok) throw new Error(`POST /notes/cluster/normalize-check failed: ${res.status}`)
+  return res.json() as Promise<NamingViolation[]>
+}
+
+// Individual accept/reject API helpers removed; OrganizationPlanDialog uses batch-accept.
+// Backend endpoints preserved for backward compatibility.
 
 interface NoteSearchItem {
   note_id: string
@@ -481,139 +498,6 @@ function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navi
 }
 
 // ---------------------------------------------------------------------------
-// CreateNoteForm
-// ---------------------------------------------------------------------------
-
-interface CreateNoteFormProps {
-  documents: DocumentItem[]
-  onClose: () => void
-  onCreated: () => void
-}
-
-function CreateNoteForm({ documents, onClose, onCreated }: CreateNoteFormProps) {
-  const [content, setContent] = useState("")
-  const [tagsRaw, setTagsRaw] = useState("")
-  const [docId, setDocId] = useState<string>("")
-  const [createTab, setCreateTab] = useState<"write" | "preview">("write")
-  const createTaRef = useRef<HTMLTextAreaElement>(null)
-  const qc = useQueryClient()
-
-  const adjustCreateHeight = useCallback(() => {
-    const ta = createTaRef.current
-    if (!ta) return
-    ta.style.height = "auto"
-    ta.style.height = `${ta.scrollHeight}px`
-  }, [])
-
-  const createMut = useMutation({
-    mutationFn: () =>
-      createNote({
-        content,
-        tags: tagsRaw
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
-        document_id: docId || null,
-      }),
-    onSuccess: (created: Note) => {
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-      onCreated()
-      onClose()
-      // Fire-and-forget: suggest tags and silently patch the new note
-      void fetchSuggestedTags(created.id).then(async (suggestions) => {
-        if (suggestions.length > 0) {
-          try {
-            await patchNote(created.id, { tags: suggestions })
-            void qc.invalidateQueries({ queryKey: ["notes"] })
-          } catch {
-            // Non-fatal -- note exists without tags
-          }
-        }
-      })
-    },
-  })
-
-  return (
-    <div className="mb-4 rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-      <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs w-fit">
-        <button
-          onClick={() => setCreateTab("write")}
-          className={`rounded px-2.5 py-1 font-medium transition-colors ${
-            createTab === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Write
-        </button>
-        <button
-          onClick={() => setCreateTab("preview")}
-          className={`rounded px-2.5 py-1 font-medium transition-colors ${
-            createTab === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Preview
-        </button>
-      </div>
-      {createTab === "write" ? (
-        <textarea
-          ref={createTaRef}
-          value={content}
-          onChange={(e) => { setContent(e.target.value); adjustCreateHeight() }}
-          placeholder="Write your note in Markdown..."
-          className="min-h-[200px] w-full resize-none overflow-hidden rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      ) : (
-        <div className="min-h-[200px] rounded border border-border bg-background px-3 py-2">
-          {content ? (
-            <MarkdownRenderer>{content}</MarkdownRenderer>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
-          )}
-        </div>
-      )}
-      <input
-        type="text"
-        value={tagsRaw}
-        onChange={(e) => setTagsRaw(e.target.value)}
-        placeholder="Tags (comma-separated, optional)"
-        className="w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
-      <select
-        value={docId}
-        onChange={(e) => setDocId(e.target.value)}
-        className="w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      >
-        <option value="">No document</option>
-        {documents.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.title}
-          </option>
-        ))}
-      </select>
-      {createMut.isError && (
-        <p className="text-xs text-red-600">Failed to save note. Please try again.</p>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={() => createMut.mutate()}
-          disabled={!content.trim() || createMut.isPending}
-          className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Check size={11} />
-          Save
-        </button>
-        <button
-          onClick={onClose}
-          className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // NoteCard — card view; editing is delegated to NoteEditorDialog
 // ---------------------------------------------------------------------------
 
@@ -688,18 +572,26 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Tags */}
+      {/* Tags -- breadcrumb style: root in text-primary, /child in text-muted-foreground */}
       {note.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {note.tags.map((t) => (
-            <span
-              key={t}
-              className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-            >
-              <Tag size={9} />
-              {t}
-            </span>
-          ))}
+          {note.tags.map((t) => {
+            const parts = t.split("/")
+            return (
+              <button
+                key={t}
+                onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
+                className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                title={`Filter by tag: ${t}`}
+              >
+                <Tag size={9} className="text-muted-foreground" />
+                <span className="text-primary">{parts[0]}</span>
+                {parts.length > 1 && (
+                  <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -718,21 +610,42 @@ type FilterState =
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
-  const [showCreate, setShowCreate] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)
+  const [showCreateCollection, setShowCreateCollection] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
+  const [isClusterQueued, setIsClusterQueued] = useState(false)
+  const [showOrgPlan, setShowOrgPlan] = useState(false)
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
   const mountTime = useRef(Date.now())
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
+  const activeCollectionId = useAppStore((s) => s.activeCollectionId)
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const activeTag = useAppStore((s) => s.activeTag)
+  const setActiveTag = useAppStore((s) => s.setActiveTag)
+  const notesDocumentId = useAppStore((s) => s.notesDocumentId)
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
+  const notePreload = useAppStore((s) => s.notePreload)
+  const setNotePreload = useAppStore((s) => s.setNotePreload)
   const navigate = useNavigate()
 
   useEffect(() => {
     logger.info("[Notes] mounted")
   }, [])
+
+  // S197: consume notePreload from store (set by gap analysis "Take a note" action)
+  useEffect(() => {
+    if (notePreload) {
+      setIsCreating(true)
+      // preload is consumed by NoteReaderSheet via props; clear store after opening
+      // Use a microtask to ensure the sheet opens first
+      queueMicrotask(() => setNotePreload(null))
+    }
+  }, [notePreload, setNotePreload])
 
   const { data: groups } = useQuery({
     queryKey: ["notes-groups"],
@@ -745,8 +658,28 @@ export default function NotesPage() {
     staleTime: 60_000,
   })
 
+  // S165: Fetch tree to resolve ID to name in header
+  const { data: tree } = useQuery({
+    queryKey: ["collections-tree"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/collections/tree`)
+      return (await res.json()) as any[]
+    },
+    staleTime: 30_000,
+  })
+
+  const getCollectionName = (id: string) => {
+    if (!tree) return id.slice(0, 8) + "..."
+    const flat = (items: any[]): any[] => items.flatMap(i => [i, ...flat(i.children || [])])
+    const found = flat(tree).find(i => i.id === id)
+    return found ? found.name : id.slice(0, 8) + "..."
+  }
+
   const groupParam = filter.type === "group" ? filter.name : undefined
-  const tagParam = filter.type === "tag" ? filter.name : undefined
+  // activeTag from store takes precedence over sidebar filter tag
+  const tagParam = activeTag ?? (filter.type === "tag" ? filter.name : undefined)
+  // When a collection is active, clear group/tag params and use collection filter instead.
+  const collectionParam = activeCollectionId ?? undefined
 
   const {
     data: notes,
@@ -754,8 +687,8 @@ export default function NotesPage() {
     isError: notesError,
     refetch,
   } = useQuery({
-    queryKey: ["notes", groupParam, tagParam],
-    queryFn: () => fetchNotes(undefined, groupParam, tagParam),
+    queryKey: ["notes", groupParam, tagParam, collectionParam, notesDocumentId],
+    queryFn: () => fetchNotes(notesDocumentId ?? undefined, groupParam, tagParam, collectionParam),
     gcTime: 60_000,
   })
 
@@ -773,6 +706,51 @@ export default function NotesPage() {
 
   const isSearchMode = debouncedQuery.trim().length > 0
 
+  const {
+    data: clusterSuggestions = [],
+    isLoading: clusterSuggestionsLoading,
+    isError: clusterSuggestionsError,
+    refetch: refetchClusterSuggestions,
+  } = useQuery({
+    queryKey: ["clusterSuggestions"],
+    queryFn: fetchClusterSuggestions,
+    staleTime: 30_000,
+  })
+
+  // S207: naming violations state
+  const [namingViolations, setNamingViolations] = useState<NamingViolation[]>([])
+
+  async function handleAutoOrganize() {
+    setIsClusterQueued(true)
+    try {
+      // Fetch naming violations in parallel with clustering
+      const [clusterResult, violations] = await Promise.all([
+        postCluster(),
+        fetchNamingViolations().catch(() => [] as NamingViolation[]),
+      ])
+      setNamingViolations(violations)
+
+      if (clusterResult.cached) {
+        // Already have pending suggestions -- show the plan immediately
+        setIsClusterQueued(false)
+        setShowOrgPlan(true)
+        return
+      }
+      // Poll suggestions after a short delay to give clustering a head start
+      setTimeout(() => {
+        void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] }).then(() => {
+          setIsClusterQueued(false)
+          setShowOrgPlan(true)
+        })
+      }, 3000)
+    } catch {
+      toast.error("Failed to start auto-organize")
+      setIsClusterQueued(false)
+    }
+  }
+
+  // Individual accept/reject kept as API helpers (backward compat) but UI uses OrganizationPlanDialog
+
   useEffect(() => {
     if (!notesLoading) {
       const elapsed = Date.now() - mountTime.current
@@ -783,6 +761,7 @@ export default function NotesPage() {
   function handleRefetch() {
     void qc.invalidateQueries({ queryKey: ["notes"] })
     void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+    void qc.invalidateQueries({ queryKey: ["collections-tree"] })
   }
 
   async function handleConvertClipToNote(clip: Clip) {
@@ -868,15 +847,23 @@ export default function NotesPage() {
                   {stripMarkdown(result.content).slice(0, 150)}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {result.tags.map((t) => (
-                    <span
-                      key={t}
-                      className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                    >
-                      <Tag size={9} />
-                      {t}
-                    </span>
-                  ))}
+                  {result.tags.map((t) => {
+                    const parts = t.split("/")
+                    return (
+                      <button
+                        key={t}
+                        onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
+                        className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                        title={`Filter by tag: ${t}`}
+                      >
+                        <Tag size={9} className="text-muted-foreground" />
+                        <span className="text-primary">{parts[0]}</span>
+                        {parts.length > 1 && (
+                          <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                        )}
+                      </button>
+                    )
+                  })}
                   <span className="ml-auto text-xs text-muted-foreground">
                     {result.source === "both" ? "FTS + Semantic" : result.source === "vector" ? "Semantic" : "FTS"}
                     {" · "}
@@ -935,13 +922,23 @@ export default function NotesPage() {
       </div>
     )
   } else if (noteList.length === 0) {
-    panelContent = (
+    panelContent = activeTag ? (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <Tag size={32} className="text-muted-foreground/50" />
+        <p className="text-base font-medium text-foreground">
+          No other notes tagged with {activeTag}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Notes tagged with this tag will appear here.
+        </p>
+      </div>
+    ) : (
       <div className="flex flex-col items-center gap-3 py-20 text-center">
         <Network size={32} className="text-muted-foreground/50" />
         <p className="text-base font-medium text-foreground">No notes yet</p>
         <p className="text-sm text-muted-foreground">Click + to create your first note.</p>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={() => setIsCreating(true)}
           className="flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
         >
           <Plus size={14} />
@@ -971,12 +968,35 @@ export default function NotesPage() {
               key={note.id}
               className="cursor-pointer"
               onClick={() => setEditingNote(note)}
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData("text/plain", note.id)}
             >
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
                 {stripMarkdown(note.content).slice(0, 60)}
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {note.tags.length > 0 ? note.tags.join(", ") : "—"}
+              <TableCell className="text-xs">
+                {note.tags.length > 0 ? (
+                  <span className="flex flex-wrap gap-1">
+                    {note.tags.map((t) => {
+                      const parts = t.split("/")
+                      return (
+                        <button
+                          key={t}
+                          onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
+                          className="whitespace-nowrap hover:underline"
+                          title={`Filter by tag: ${t}`}
+                        >
+                          <span className="text-primary">{parts[0]}</span>
+                          {parts.length > 1 && (
+                            <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {note.group_name ?? "—"}
@@ -1021,19 +1041,27 @@ export default function NotesPage() {
       {/* Left sidebar */}
       <div className="flex w-[280px] shrink-0 flex-col gap-1 overflow-auto border-r border-border p-4">
         <button
-          onClick={() => setFilter({ type: "all" })}
+          onClick={() => {
+            setFilter({ type: "all" })
+            setActiveCollectionId(null)
+            setActiveTag(null)
+          }}
           className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
-            filter.type === "all"
+            filter.type === "all" && !activeCollectionId && !activeTag
               ? "bg-accent font-medium text-foreground"
               : "text-muted-foreground hover:bg-accent/60"
           }`}
         >
           All Notes
-          <span className="ml-auto text-xs">{noteList.length}</span>
+          <span className="ml-auto text-xs">{groups?.total_notes ?? noteList.length}</span>
         </button>
 
         <button
-          onClick={() => setFilter({ type: "journal" })}
+          onClick={() => {
+            setFilter({ type: "journal" })
+            setActiveCollectionId(null)
+            setActiveTag(null)
+          }}
           className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
             filter.type === "journal"
               ? "bg-accent font-medium text-foreground"
@@ -1044,45 +1072,125 @@ export default function NotesPage() {
           Reading Journal
         </button>
 
-        {(groups?.groups ?? []).map((g) => (
-          <div key={g.name}>
+        {/* Collections section */}
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between px-1">
+            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Collections
+            </p>
             <button
-              onClick={() => setFilter({ type: "group", name: g.name })}
-              className={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm text-left ${
-                filter.type === "group" && filter.name === g.name
-                  ? "bg-accent font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60"
-              }`}
+              onClick={() => setShowCreateCollection(true)}
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+              title="New collection"
             >
-              <FolderOpen size={13} />
-              {g.name}
-              <span className="ml-auto text-xs">{g.count}</span>
+              <Plus size={12} />
             </button>
           </div>
-        ))}
+          <CollectionTree />
+          <button
+            onClick={() => setShowCreateCollection(true)}
+            className="mt-1 flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          >
+            <Plus size={11} />
+            New Collection
+          </button>
+        </div>
 
-        {(groups?.tags ?? []).length > 0 && (
-          <div className="mt-3">
-            <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {/* Tags section */}
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between px-1">
+            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Tags
             </p>
-            {groups!.tags.map((t) => (
+          </div>
+          <TagTree />
+        </div>
+
+        {/* Suggested Collections summary + auto-organize trigger */}
+        {(clusterSuggestions.length > 0 || isClusterQueued) && (
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between px-1">
+              <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Suggested Collections
+              </p>
               <button
-                key={t.name}
-                onClick={() => setFilter({ type: "tag", name: t.name })}
-                className={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm text-left ${
-                  filter.type === "tag" && filter.name === t.name
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60"
-                }`}
+                onClick={() => void handleAutoOrganize()}
+                disabled={isClusterQueued}
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50"
+                title="Auto-organize notes into collections"
               >
-                <Tag size={11} />
-                {t.name}
-                <span className="ml-auto text-xs">{t.count}</span>
+                {isClusterQueued ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
               </button>
-            ))}
+            </div>
+            {clusterSuggestionsLoading && (
+              <div className="space-y-1.5 px-1">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-12 animate-pulse rounded bg-accent/40" />
+                ))}
+              </div>
+            )}
+            {clusterSuggestionsError && (
+              <p className="px-3 text-xs text-amber-500">
+                Could not load suggestions.{" "}
+                <button onClick={() => void refetchClusterSuggestions()} className="underline">
+                  Retry
+                </button>
+              </p>
+            )}
+            {clusterSuggestions.length > 0 && !clusterSuggestionsLoading && (
+              <button
+                onClick={() => setShowOrgPlan(true)}
+                className="w-full rounded border border-border p-2 text-xs text-left hover:bg-accent/40"
+              >
+                <span className="font-medium">
+                  {clusterSuggestions.length} group{clusterSuggestions.length !== 1 ? "s" : ""} found
+                </span>
+                <span className="text-muted-foreground"> -- click to review plan</span>
+              </button>
+            )}
           </div>
         )}
+
+        {/* Auto-organize button (always visible even when no suggestions) */}
+        {clusterSuggestions.length === 0 && !isClusterQueued && (
+          <div className="mt-3">
+            <button
+              onClick={() => void handleAutoOrganize()}
+              className="flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              title="Auto-organize notes into suggested collections"
+            >
+              <Wand2 size={11} />
+              Auto-organize
+            </button>
+          </div>
+        )}
+
+        {/* Organization Plan dialog */}
+        <OrganizationPlanDialog
+          open={showOrgPlan}
+          onOpenChange={setShowOrgPlan}
+          suggestions={clusterSuggestions}
+          namingViolations={namingViolations}
+          onApplied={() => {
+            void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+            void qc.invalidateQueries({ queryKey: ["collections"] })
+            void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+            void qc.invalidateQueries({ queryKey: ["tags"] })
+            void qc.invalidateQueries({ queryKey: ["notes"] })
+            void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+            toast.success("Organization plan applied")
+          }}
+          onNamingFixesApplied={(result) => {
+            const parts: string[] = []
+            if (result.tags_renamed > 0) parts.push(`Renamed ${result.tags_renamed} tag${result.tags_renamed !== 1 ? "s" : ""}`)
+            if (result.tags_merged > 0) parts.push(`Merged ${result.tags_merged} tag${result.tags_merged !== 1 ? "s" : ""}`)
+            if (result.collections_renamed > 0) parts.push(`Renamed ${result.collections_renamed} collection${result.collections_renamed !== 1 ? "s" : ""}`)
+            if (parts.length > 0) toast.success(parts.join(". "))
+          }}
+          onDismissed={() => {
+            void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] })
+          }}
+        />
       </div>
 
       {/* Right panel */}
@@ -1090,14 +1198,29 @@ export default function NotesPage() {
         {/* Panel header with view toggle + button */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
-            {filter.type === "all"
-              ? "All Notes"
-              : filter.type === "journal"
-                ? "Reading Journal"
-                : filter.type === "group"
-                  ? filter.name
-                  : `#${filter.name}`}
+            {notesDocumentId
+              ? `Document: ${documents.find((d) => d.id === notesDocumentId)?.title ?? "..."}`
+              : activeCollectionId
+                ? `Collection: ${getCollectionName(activeCollectionId)}`
+                : activeTag
+                  ? `Tag: #${activeTag}`
+                  : filter.type === "all"
+                    ? "All Notes"
+                    : filter.type === "journal"
+                      ? "Reading Journal"
+                      : filter.type === "group"
+                        ? filter.name
+                        : `#${filter.name}`}
           </h2>
+          {notesDocumentId && (
+            <button
+              onClick={() => setNotesDocumentId(null)}
+              className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground hover:bg-primary/20 transition-colors flex items-center gap-1"
+            >
+              Clear document filter
+              <X size={10} />
+            </button>
+          )}
           {filter.type !== "journal" && (
             <div className="flex items-center gap-2">
               <div className="relative">
@@ -1134,7 +1257,7 @@ export default function NotesPage() {
                 Generate Flashcards
               </button>
               <button
-                onClick={() => setShowCreate((v) => !v)}
+                onClick={() => setIsCreating(true)}
                 className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
                 title="New note"
               >
@@ -1145,25 +1268,40 @@ export default function NotesPage() {
           )}
         </div>
 
-        {/* Create form — hidden in Reading Journal view */}
-        {showCreate && filter.type !== "journal" && (
-          <CreateNoteForm
-            documents={documents}
-            onClose={() => setShowCreate(false)}
-            onCreated={handleRefetch}
-          />
-        )}
-
         {panelContent}
       </div>
 
-      {/* NoteEditorDialog — rendered once at page level */}
-      <NoteEditorDialog
+      {/* NoteReaderSheet — rendered once at page level for both View and Create */}
+      <NoteReaderSheet
         note={editingNote}
-        onClose={() => setEditingNote(null)}
-        onSaved={() => {
-          void qc.invalidateQueries({ queryKey: ["notes"] })
+        isNew={isCreating}
+        initialContent={notePreload?.content}
+        initialCollectionId={notePreload?.collectionId}
+        documents={documents}
+        onClose={() => {
           setEditingNote(null)
+          setIsCreating(false)
+        }}
+        onSaved={(savedNote) => {
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+          void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+          
+          if (isCreating && activeCollectionId) {
+            // If we're inside a collection, add the new note to it immediately
+            void fetch(`${API_BASE}/collections/${activeCollectionId}/notes`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ note_ids: [savedNote.id] }),
+            }).then(() => {
+              void qc.invalidateQueries({ queryKey: ["notes"] })
+              void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+              void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+            })
+          }
+
+          setEditingNote(savedNote)
+          setIsCreating(false)
         }}
       />
 
@@ -1178,6 +1316,12 @@ export default function NotesPage() {
       <GapDetectDialog
         open={showGapDetect}
         onClose={() => setShowGapDetect(false)}
+      />
+
+      {/* CreateCollectionDialog */}
+      <CreateCollectionDialog
+        open={showCreateCollection}
+        onClose={() => setShowCreateCollection(false)}
       />
     </div>
   )
