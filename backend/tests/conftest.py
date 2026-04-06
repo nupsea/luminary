@@ -13,8 +13,12 @@ baseline: even tests that don't define their own DB fixture will never touch
 """
 
 import os
+import warnings
 
 import pytest
+
+# Filter aiosqlite DeprecationWarning for Python 3.12+ datetime adapter
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite")
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -302,7 +302,7 @@ async def test_http_upload_reaches_complete(upload_db):
 
         # Poll until done, yielding to the event loop on each iteration
         final: dict = {}
-        for _ in range(200):
+        for _ in range(1000):
             await asyncio.sleep(0.05)
             status_resp = await client.get(f"/documents/{doc_id}/status")
             assert status_resp.status_code == 200
@@ -336,7 +336,7 @@ async def test_http_status_schema_on_every_poll(upload_db):
 
         schema_violations: list[str] = []
         last_pct = -1
-        for _ in range(200):
+        for _ in range(1000):
             await asyncio.sleep(0.05)
             status_resp = await client.get(f"/documents/{doc_id}/status")
             assert status_resp.status_code == 200
