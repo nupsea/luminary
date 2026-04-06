@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     DATA_DIR: str = ".luminary"
     OLLAMA_URL: str = "http://localhost:11434"
     LOG_LEVEL: str = "INFO"
-    LITELLM_DEFAULT_MODEL: str = "ollama/mistral"
+    LITELLM_DEFAULT_MODEL: str = "ollama/gemma4"
     PHOENIX_ENABLED: bool = True
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""

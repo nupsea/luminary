@@ -2,12 +2,12 @@
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
-	@(cd backend && uv run uvicorn app.main:app --reload --port 8000) &
+	@(cd backend && uv run uvicorn app.main:app --reload --port 7820) &
 	@(cd frontend && npm run dev) &
 	@wait
 
 backend:
-	cd backend && uv run uvicorn app.main:app --reload --port 8000
+	cd backend && uv run uvicorn app.main:app --reload --port 7820
 
 frontend:
 	cd frontend && npm run dev
@@ -29,7 +29,7 @@ test-perf:
 	cd backend && uv run pytest tests/test_performance.py -v -m slow
 
 test-e2e:
-	cd backend && BACKEND_URL=$${BACKEND_URL:-http://localhost:8000} uv run pytest tests/test_e2e_upload.py -m e2e -v
+	cd backend && BACKEND_URL=$${BACKEND_URL:-http://localhost:7820} uv run pytest tests/test_e2e_upload.py -m e2e -v
 
 test-book-e2e:
 	cd backend && uv run pytest tests/test_e2e_book.py -v -m slow --timeout=700
@@ -47,11 +47,11 @@ test-v2:
 	cd backend && uv run pytest tests/test_v2_pipeline.py -v -m slow --timeout=1800
 
 smoke:
-	@echo "Running smoke tests (requires backend on :8000)..."
+	@echo "Running smoke tests (requires backend on :7820)..."
 	bash scripts/smoke/all.sh
 
 eval:
-	@echo "Running retrieval quality evals (backend must be running on :8000)..."
+	@echo "Running retrieval quality evals (backend must be running on :7820)..."
 	cd evals && uv run python run_eval.py --dataset book --assert-thresholds
 	cd evals && uv run python run_eval.py --dataset paper --assert-thresholds
 

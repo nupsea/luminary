@@ -1,230 +1,306 @@
 # Luminary
 
-Luminary is a local-first personal knowledge and learning assistant. It ingests your documents (PDFs, books, papers, conversations, notes, and code), builds a queryable knowledge graph, and turns content into spaced-repetition flashcards -- all running on your machine with no data leaving your device unless you configure a cloud LLM key.
+A local-first personal knowledge and learning assistant. Upload documents, build a knowledge graph, chat with your library, and study with AI-generated flashcards -- all running on your machine.
 
-## Features
+No data leaves your device unless you explicitly configure a cloud LLM key.
 
-- **Document ingestion** -- Upload PDFs, plain text, and other formats. Luminary parses, chunks, embeds, and indexes them automatically.
-- **Hybrid Contextual search** -- Queries combine vector similarity (`BAAI/bge-m3`, 1024-dim), BM25 keyword search (SQLite FTS5), and graph traversal (Kuzu).
-- **Smart Chunking** -- Uses structural splitting (paragraph/sentence boundaries) and **Context Injection** (prepending book/chapter titles to chunks) to improve retrieval accuracy.
-- **Parent-Child Retrieval** -- Automatically fetches neighboring chunks during search to provide coherent, high-quality context windows to the LLM.
-- **Knowledge graph** -- Entities and relationships are extracted with GLiNER and stored in an embedded graph DB. Explore visually in the Viz tab.
-- **Agentic chat** -- Ask questions across your library. The chat graph classifies intent, routes to the right retrieval path, and retries on low-confidence answers.
-- **Summaries** -- Executive and detailed summaries generated per document and per section, cached after the first run.
-- **Spaced repetition** -- Flashcards generated from document content, scheduled with FSRS (superior to SM-2 in retention accuracy).
-- **Notes** -- Markdown notes editor with side-by-side Write/Preview. Notes are searchable alongside your uploaded documents.
-- **Dynamic Evaluation** -- RAGAS-based retrieval quality metrics (HR@5, MRR, Faithfulness) with a golden dataset runner. The **Monitoring** tab allows selecting and running any golden dataset (`.jsonl`) found in the `evals/golden/` directory.
-- **Local by default** -- Runs entirely on your machine using Ollama. Optimized for performance with 1024-dimensional bge-m3 embeddings via ONNX Runtime and batched vector storage.
+---
 
-## Architecture
+## Quick Start (5 minutes)
+
+### 1. Install prerequisites
+
+| Tool | Install |
+|------|---------|
+| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| [Node 20+](https://nodejs.org/) | `brew install node` or download from nodejs.org |
+| [Ollama](https://ollama.com/) | `brew install ollama` or download from ollama.com |
+
+### 2. Pull the default LLM
+
+```bash
+# Start Ollama (if not already running)
+brew services start ollama
+
+# Pull Gemma 4 (default model)
+ollama pull gemma4
+```
+
+> Requires Ollama v0.20.0+. Check with `ollama --version` and upgrade if needed.
+
+### 3. Clone and launch
+
+```bash
+git clone <repo-url>
+cd luminary
+
+# One command does everything
+make luminary
+```
+
+`make luminary` installs frontend dependencies (first run only), starts the backend (port 7820) and frontend (port 5173), and prints a ready banner when everything is up.
+
+Open **http://localhost:5173** when you see:
+
+```
+  Luminary is ready  --  0 document(s) in library
+  http://localhost:5173
+```
+
+### 4. Upload your first document
+
+1. Go to the **Learning** tab
+2. Click **Upload** and select a PDF or text file
+3. Luminary parses, chunks, embeds, and indexes it automatically
+4. Switch to **Chat** and ask a question about your document
+
+---
+
+## What you can do
+
+### Learning -- your document library
+
+Upload PDFs and text files. Luminary parses, chunks, embeds, and indexes them. Browse your library, view summaries, and open documents in the built-in reader.
+
+![Library overview](docs/images/main_library.png)
+
+### Reader -- read and annotate
+
+Side-by-side PDF viewer with text search, section navigation, and Key Points summaries.
+
+![Document reader](docs/images/reader.png)
+
+### Notes -- write and search
+
+Markdown editor with live preview. Notes are indexed alongside your documents and appear in search results.
+
+![Notes editor](docs/images/notes.png)
+
+### Other tabs
+
+| Tab | Purpose |
+|-----|---------|
+| **Chat** | Ask questions across your entire library with source citations |
+| **Viz** | Explore the knowledge graph -- entities and relationships extracted from your documents |
+| **Study** | Review AI-generated flashcards with spaced repetition (FSRS) |
+| **Monitoring** | System health, model usage, and retrieval quality metrics |
+
+---
+
+## Choosing a local model
+
+Luminary defaults to **Gemma 4** via Ollama. You can switch to any Ollama-supported model.
+
+### Recommended models
+
+| Model | Pull command | Best for | VRAM |
+|-------|-------------|----------|------|
+| **Gemma 4 E4B** | `ollama pull gemma4` | Everyday use, laptops | ~4 GB |
+| **Gemma 4 26B A4B** (MoE) | `ollama pull gemma4:26b-a4b` | Balanced quality/speed | ~16 GB |
+| **Gemma 4 31B** | `ollama pull gemma4:31b` | Maximum quality | ~20 GB |
+| Mistral 7B | `ollama pull mistral` | Lightweight alternative | ~4 GB |
+| Llama 3.1 8B | `ollama pull llama3.1` | Good general purpose | ~5 GB |
+
+### Switching models
+
+Create or edit `backend/.env`:
+
+```bash
+LITELLM_DEFAULT_MODEL=ollama/gemma4
+```
+
+Restart Luminary after changing the model. Verify in the **Monitoring** tab or:
+
+```bash
+curl http://localhost:7820/settings
+```
+
+### Using cloud models (optional)
+
+Add your API key to `backend/.env`:
+
+```bash
+# OpenAI
+LITELLM_DEFAULT_MODEL=openai/gpt-4o
+OPENAI_API_KEY=sk-...
+
+# Anthropic
+LITELLM_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Google
+LITELLM_DEFAULT_MODEL=gemini/gemini-2.5-flash
+GOOGLE_API_KEY=...
+```
+
+---
+
+## Configuration
+
+All settings are environment variables in `backend/.env`. The file is gitignored.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LITELLM_DEFAULT_MODEL` | `ollama/gemma4` | LLM model for chat, summaries, flashcards |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
+| `VISION_MODEL` | `ollama/llava:13b` | Model for image/figure analysis |
+| `GLINER_ENABLED` | `true` | Entity extraction (disable on low-memory machines) |
+| `WEB_SEARCH_PROVIDER` | `none` | `none`, `brave`, `tavily`, or `duckduckgo` |
+| `PHOENIX_ENABLED` | `true` | Arize Phoenix tracing at localhost:6006 |
+| `DATA_DIR` | `.luminary` | Where Luminary stores its databases |
+
+---
+
+## Platform Notes
+
+### macOS Apple Silicon (recommended)
+
+Everything works natively. Follow the Quick Start above.
+
+### macOS Intel (x86_64)
+
+Core packages (`lancedb`, `onnxruntime`, `kuzu`) have no Intel macOS wheels for Python 3.13. **Docker is required for the backend.**
+
+```bash
+# Install Docker Desktop, then:
+make luminary
+```
+
+The script detects Intel Mac automatically and runs the backend in a container. The frontend still runs natively.
+
+### Linux / Windows WSL
+
+Works natively. Same Quick Start steps apply.
+
+---
+
+## Make Commands
+
+### Daily use
+
+| Command | Description |
+|---------|-------------|
+| `make luminary` | Start backend + frontend with readiness check (recommended) |
+| `make logs` | Same as above but with DEBUG-level log output |
+| `make backend` | Start backend only (port 7820) |
+| `make frontend` | Start frontend only (port 5173) |
+
+### Testing
+
+| Command | Description |
+|---------|-------------|
+| `make test` | Unit + integration tests |
+| `make lint` | Ruff (Python) + tsc (TypeScript) |
+| `make ci` | Full CI: sync deps, lint, layer check, tests, build |
+| `make smoke` | Smoke tests (requires running backend) |
+
+### Advanced testing
+
+| Command | Description |
+|---------|-------------|
+| `make test-full` | Corpus tests with real ML models (slow, downloads models on first run) |
+| `make test-e2e` | End-to-end upload tests (requires running backend + Ollama) |
+| `make test-perf` | Performance/latency assertions |
+| `make test-books-all` | Ingest all 3 corpus books, run all book tests |
+| `make eval` | RAGAS retrieval quality evaluation with threshold assertions |
+
+---
+
+## Architecture (for contributors)
 
 ```
 Types -> Config -> Repo -> Service -> Runtime -> API
          (6-layer dependency rule -- no reverse imports)
 ```
 
-Backend domains:
+| Layer | Technology |
+|-------|------------|
+| Backend | Python 3.13, FastAPI, LangGraph, LiteLLM |
+| Storage | SQLite (metadata), LanceDB (vectors), Kuzu (graph), FTS5 (keyword search) |
+| ML | BAAI/bge-m3 embeddings (1024-dim, ONNX), GLiNER (zero-shot NER) |
+| Retrieval | RRF hybrid: vector + BM25 keyword + graph traversal |
+| Spaced rep | FSRS algorithm |
+| Frontend | React 18, TypeScript 5, Vite, shadcn/ui, Tailwind CSS |
+| Graph viz | Sigma.js v3 + Graphology (WebGL, handles 10K+ nodes) |
+| State | Zustand + TanStack Query |
 
-| Domain     | Responsibility                                                         |
-|------------|------------|
-| Ingestion  | Parse, **Hybrid Contextual chunking**, embed, NER (GLiNER), graph, summarize |
-| Retrieval  | **Parent-Child RRF**: vector (LanceDB v3) + BM25 (FTS5) + neighbors   |
-| LLM        | Cache-first summarization, Q&A, explanation via LiteLLM                |
-| Learning   | Flashcard generation, FSRS scheduling, gap detection                   |
-| Monitoring | Phoenix tracing, Langfuse evals, **Dynamic RAGAS datasets**            |
+### Backend structure
 
-Navigation tabs: **Learning | Chat | Viz | Study | Notes | Monitoring**
-
-## Tech Stack
-
-| Layer    | Technology                                                                       |
-|----------|----------------------------------------------------------------------------------|
-| Backend  | Python 3.13, FastAPI, LangGraph, LanceDB (v3), SQLite FTS5, Kuzu, GLiNER, LiteLLM |
-| Frontend | React 18, TypeScript 5, Vite 5, shadcn/ui, Tailwind CSS, Sigma.js v3            |
-| Storage  | SQLite (documents, flashcards, history), LanceDB (vectors), Kuzu (graph)         |
-| LLM      | Ollama (local, default), OpenAI / Anthropic / Gemini (optional via LiteLLM)      |
-| Embedder | `BAAI/bge-m3` (1024-dim via ONNX Runtime, batched inference)                   |
-
-## Prerequisites
-
-- [uv](https://docs.astral.sh/uv/) -- Python package manager
-- Node 20+
-- [Ollama](https://ollama.com/) -- local LLM server (required for Chat and Summarization)
-
-```bash
-# Install Ollama (macOS)
-brew install ollama
-
-# Pull the default model
-ollama pull mistral
+```
+backend/app/
+  config.py          Settings (env vars)
+  models.py          SQLAlchemy ORM models
+  db_init.py         DDL (tables, indexes)
+  database.py        Engine + session factory
+  services/          Business logic (one file per domain)
+  routers/           FastAPI endpoints (one file per domain)
+  runtime/           LangGraph workflows, background workers
+  workflows/         Ingestion pipeline
 ```
 
-## Platform Notes
+### Frontend structure
 
-### macOS Intel (x86_64)
-
-Three core packages — `lancedb`, `onnxruntime`, and `kuzu` — have dropped Intel macOS wheels and have no source distributions on PyPI. None are buildable without major effort on Python 3.13. **Docker is the only practical path.**
-
-Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) then run:
-
-```bash
-make luminary
+```
+frontend/src/
+  pages/             Tab-level components (Learning, Chat, Viz, Study, Notes, Monitoring)
+  components/        Reusable UI components
+  store/             Zustand stores
+  lib/               Utilities, API client, config
+  hooks/             Custom React hooks
 ```
 
-`make luminary` detects Intel Mac automatically, builds the backend into a Linux container (first run takes a few minutes), and wires it to your local Ollama. The frontend still runs natively.
-
-> All other platforms (Linux x86_64/ARM64, macOS Apple Silicon, Windows x86_64) install with no extra steps.
-
-## Quickstart
-
-```bash
-git clone <repo-url>
-cd luminary
-
-# Install frontend deps (first time only)
-cd frontend && npm install && cd ..
-
-# Start Ollama (required for Chat and Summarization)
-ollama serve &
-
-# Launch everything with a single command
-make luminary
-```
-
-`make luminary` starts the backend and frontend, waits for both to be ready, then prints the URL. Open [http://localhost:5173](http://localhost:5173) when it reports ready.
-
-For colorized, per-process log output with DEBUG-level ingestion tracing:
-
-```bash
-make logs
-```
-
-Backend lines appear in cyan `[BACKEND]`, frontend in green `[FRONTEND]`. Ctrl-C stops both.
-
-## Make Commands
-
-| Command | Description |
-|---|---|
-| `make luminary` | **Recommended.** Start backend + frontend, wait for readiness, print URL |
-| `make dev` | Start backend + frontend together (no readiness wait) |
-| `make backend` | Start backend only (port 8000) |
-| `make frontend` | Start frontend only (port 5173) |
-| `make logs` | Colorized dev log output with DEBUG tracing |
-| `make lint` | Run ruff (Python) + tsc type-check (TypeScript) |
-| `make test` | Backend unit + integration tests |
-| `make test-full` | Full corpus integration tests (slow, real ML models) |
-| `make test-concurrent` | Concurrent session tests |
-| `make test-perf` | Performance/latency tests |
-| `make test-e2e` | E2E upload tests (requires running backend) |
-| `make test-book-e2e` | Book ingestion E2E tests |
-| `make test-book-content` | Book content retrieval tests |
-| `make test-books-all` | Ingest all 3 corpus books, then run all book tests |
-| `make smoke` | Smoke tests against backend on :8000 |
-| `make eval` | RAGAS quality evals with threshold assertions |
-| `make ci` | Full CI: sync deps → lint → layer check → tests → build |
-
-## Running Tests
-
-```bash
-# Backend unit + integration tests
-make test
-
-# TypeScript type check
-cd frontend && npx tsc --noEmit
-
-# All CI checks (lint + type check + tests + build)
-make ci
-```
-
-Tests use a temporary `DATA_DIR` so they never touch `~/.luminary` and cannot conflict with a live dev backend.
-
-### Integration Tests
-
-Integration tests run the full ingestion pipeline on real public-domain fixtures. Core ML services (BAAI/bge-m3 embeddings, GLiNER NER) use real models; only LiteLLM is mocked. Real SQLite FTS5, LanceDB, and Kuzu run in a temp directory.
-
-```bash
-cd backend && uv run pytest tests/test_integration.py -v
-```
-
-### Full Integration Tests (slow)
-
-Full corpus integration tests ingest all 3 canonical books (Time Machine, Alice in Wonderland, The Odyssey) with real ML models and verify retrieval quality. First run downloads models (~2-5 min); subsequent runs reuse the cache.
-
-```bash
-make test-full
-# or: cd backend && uv run pytest tests/test_integration_full.py -v -m slow
-```
-
-### E2E Upload Tests
-
-```bash
-# Requires backend and Ollama running
-make test-e2e
-
-# Point at a custom backend URL
-BACKEND_URL=http://my-host:8000 make test-e2e
-```
-
-### Performance Tests
-
-```bash
-make test-perf
-# or: cd backend && uv run pytest tests/test_performance.py -v -m slow
-```
-
-Asserts p50 search latency < 500ms, p95 < 2000ms, and RSS growth < 500MB while ingesting 10 documents.
+---
 
 ## Running Evaluations
 
-Start Langfuse (requires Docker):
+Luminary includes a RAGAS-based evaluation framework with golden datasets.
 
 ```bash
+# Start Langfuse (optional, requires Docker)
 docker compose -f docker-compose.langfuse.yml up -d
-```
 
-Run RAGAS evaluations against the bundled golden datasets:
+# Run retrieval evals
+cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
 
-```bash
-cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:8000
-```
-
-You can run any `.jsonl` file in `evals/golden/` by passing its name as the `--dataset`.
-
-### Quality Gates
-
-```bash
-# Requires: backend running on :8000
+# Run with threshold assertions (CI mode)
 make eval
 ```
 
-`make eval` runs the `book` and `paper` datasets with `--assert-thresholds` and exits 1 if any metric falls below:
+Quality thresholds:
 
-| Metric       | Threshold |
-|--------------|-----------|
-| HR@5         | >= 0.60   |
-| MRR          | >= 0.45   |
-| Faithfulness | >= 0.65 (requires `--model`, LLM scoring only) |
+| Metric | Threshold |
+|--------|-----------|
+| HR@5 | >= 0.60 |
+| MRR | >= 0.45 |
+| Faithfulness | >= 0.65 |
+
+Detailed LLM traces are available in Arize Phoenix at **http://localhost:6006**.
+
+---
 
 ## Monitoring
 
 The **Monitoring** tab shows:
 
-- **Dynamic Eval Runner** -- Select any golden dataset and trigger a RAGAS run.
 - RAG quality metrics (HR@5, MRR, Faithfulness, Context Precision)
-- Ingestion queue status
-- Model usage breakdown (local vs cloud)
-- Evaluation run history sparklines
+- Ingestion queue status and progress
+- Active model and provider (local vs cloud)
+- Evaluation run history
+- Dynamic eval runner -- select any golden dataset and trigger a RAGAS run from the UI
 
-Detailed LLM traces are available in Arize Phoenix at [http://localhost:6006](http://localhost:6006).
+
+---
 
 ## Contributing
 
-1. Fork the repo and create a feature branch.
-2. Install deps: `cd backend && uv sync` and `cd frontend && npm install`.
-3. Run `make ci` before opening a PR -- it must pass cleanly.
-4. Keep the 6-layer import rule: Types -> Config -> Repo -> Service -> Runtime -> API. No reverse imports.
-5. All LLM calls must go through LiteLLM -- no direct provider SDK imports.
-6. New service methods and API endpoints require at least one pytest test.
+1. Fork the repo and create a feature branch
+2. Install deps: `cd backend && uv sync` and `cd frontend && npm install`
+3. Run `make ci` before opening a PR -- it must pass cleanly
+4. Follow the 6-layer import rule. No reverse imports.
+5. All LLM calls go through LiteLLM -- no direct provider SDK imports
+6. New endpoints and service methods require at least one pytest test
+
+---
 
 ## License
 
