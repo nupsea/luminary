@@ -62,19 +62,19 @@ Open **http://localhost:5173** when you see:
 
 Upload PDFs and text files. Luminary parses, chunks, embeds, and indexes them. Browse your library, view summaries, and open documents in the built-in reader.
 
-![Library overview](docs/images/main_library.png)
+![Library overview](assets/images/main_library.png)
 
 ### Reader -- read and annotate
 
 Side-by-side PDF viewer with text search, section navigation, and Key Points summaries.
 
-![Document reader](docs/images/reader.png)
+![Document reader](assets/images/reader.png)
 
 ### Notes -- write and search
 
 Markdown editor with live preview. Notes are indexed alongside your documents and appear in search results.
 
-![Notes editor](docs/images/notes.png)
+![Notes editor](assets/images/notes.png)
 
 ### Other tabs
 
