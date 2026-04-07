@@ -1,0 +1,23 @@
+name: Mergability Checks
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, labeled, unlabeled]
+
+jobs:
+  check-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR Body
+        run: |
+          if [ -z "${{ github.event.pull_request.body }}" ]; then
+            echo "PR must have a body describing the changes."
+            exit 1
+          fi
+
+      - name: Check PR Labels
+        run: |
+          if [ -z "${{ github.event.pull_request.labels[0].name }}" ]; then
+            echo "PR must have at least one label (e.g., bug, enhancement, documentation)."
+            exit 1
+          fi

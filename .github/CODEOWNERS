@@ -1,0 +1,11 @@
+# This file defines the owners of the repository.
+# For more info: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global owners (will be requested for review if no more specific owner exists)
+*       @sethurama
+
+# Specific owners for backend
+/backend/ @sethurama
+
+# Specific owners for frontend
+/frontend/ @sethurama

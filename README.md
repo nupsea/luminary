@@ -151,6 +151,24 @@ All settings are environment variables in `backend/.env`. The file is gitignored
 
 ---
 
+## Data Management
+
+### Backup & Transfer
+Luminary is local-first. All your data—including the library database, vector embeddings, knowledge graph, and notes—is stored in the **`.luminary`** directory at the root of the project.
+
+To move your data to a new device:
+1.  **Stop the application** to ensure database files are closed.
+2.  Copy the **`.luminary/`** and **`DATA/`** (source books) directories to the same location on your new device.
+3.  Copy your **`.env`** file to preserve your configuration and API keys.
+
+### Exporting Content
+If you want to use your data in other tools, you can export from the UI:
+- **Markdown:** Export collections as an Obsidian-compatible Markdown vault.
+- **Anki:** Export flashcard decks as `.apkg` files for study in Anki.
+- **CSV:** Export individual flashcard sets for spreadsheet use.
+
+---
+
 ## Platform Notes
 
 ### macOS Apple Silicon (recommended)

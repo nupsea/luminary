@@ -7,8 +7,22 @@ on:
     branches: ["main"]
 
 jobs:
+  branch-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    steps:
+      - name: Check Branch Name
+        run: |
+          BRANCH_NAME=$(echo ${{ github.ref }} | sed 's/refs\/heads\///')
+          if [[ ! $BRANCH_NAME =~ ^(feature\/|bugfix\/|hotfix\/|chore\/|docs\/).+ ]]; then
+            echo "Error: Branch name '$BRANCH_NAME' does not follow the convention (feature/..., bugfix/..., hotfix/..., chore/..., docs/...)!"
+            exit 1
+          fi
+
   ci:
     runs-on: ubuntu-latest
+    needs: [branch-check]
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
 
     steps:
       - uses: actions/checkout@v4
