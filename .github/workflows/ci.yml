@@ -9,7 +9,7 @@ on:
 jobs:
   branch-check:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
     steps:
       - name: Check Branch Name
         run: |
