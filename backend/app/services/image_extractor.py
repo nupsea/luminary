@@ -208,6 +208,53 @@ def extract_images_epub(
     return results
 
 
+def extract_images_md(
+    images_dir: Path,
+    doc_id: str,
+) -> list[ExtractedImage]:
+    """Scan already-mirrored images for a web article (markdown).
+
+    ArticleExtractor mirrors images to images/{doc_id} during parsing.
+    We scan that directory and create ExtractedImage objects for each file.
+    """
+    out_dir = images_dir / doc_id
+    if not out_dir.exists():
+        logger.info("MD image extraction: no images found for doc=%s", doc_id)
+        return []
+
+    results: list[ExtractedImage] = []
+    # ArticleExtractor uses md5 hashes for filenames
+    for img_path in out_dir.iterdir():
+        if img_path.is_dir() or img_path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            continue
+
+        try:
+            with PILImage.open(img_path) as img_pil:
+                w, h = img_pil.size
+                
+            # Use file content hash if possible, otherwise filename
+            with open(img_path, "rb") as f:
+                content_hash = hashlib.sha256(f.read()).hexdigest()
+
+            rel_path = f"images/{doc_id}/{img_path.name}"
+            results.append(
+                ExtractedImage(
+                    page=0,
+                    index=len(results),
+                    width=w,
+                    height=h,
+                    content_hash=content_hash,
+                    abs_path=img_path,
+                    rel_path=rel_path,
+                )
+            )
+        except Exception as exc:
+            logger.warning("MD image scanning failed for %s: %s", img_path, exc)
+
+    logger.info("MD image scanning complete doc=%s images=%d", doc_id, len(results))
+    return results
+
+
 async def image_extract_handler(document_id: str, job_id: str) -> None:
     """Enrichment handler for job_type='image_extract'.
 
@@ -255,6 +302,8 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
         extracted = extract_images_pdf(file_path, images_dir, document_id)
     elif fmt == "epub":
         extracted = extract_images_epub(file_path, images_dir, document_id)
+    elif fmt in ("md", "markdown"):
+        extracted = extract_images_md(images_dir, document_id)
     else:
         logger.info("image_extract_handler: format %s has no image extraction", fmt)
         return

@@ -12,7 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import case, delete, func, select, text
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
@@ -354,7 +354,15 @@ async def list_documents(
         enrichment_status_sq = (
             select(EnrichmentJobModel.status)
             .where(EnrichmentJobModel.document_id == DocumentModel.id)
-            .order_by(EnrichmentJobModel.created_at.desc())
+            .order_by(
+                # Prioritize image-related jobs for the status display (S134)
+                case(
+                    (EnrichmentJobModel.job_type == "image_analyze", 1),
+                    (EnrichmentJobModel.job_type == "image_extract", 2),
+                    else_=3,
+                ),
+                EnrichmentJobModel.created_at.desc(),
+            )
             .limit(1)
             .correlate(DocumentModel)
             .scalar_subquery()

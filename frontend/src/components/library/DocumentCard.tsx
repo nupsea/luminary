@@ -324,7 +324,9 @@ export function DocumentCard({
           doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700",
         )}>
           {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching..."}
-          {doc.enrichment_status === "done" && "Images ready"}
+          {doc.enrichment_status === "done" && (
+            (doc.format === "pdf" || doc.format === "epub" || doc.format === "md" || doc.format === "markdown") ? "Images ready" : "Analysis complete"
+          )}
           {doc.enrichment_status === "failed" && "Enrichment failed"}
         </span>
       )}

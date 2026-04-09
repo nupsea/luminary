@@ -37,7 +37,9 @@ export function DocumentRow({ doc, onClick }: DocumentRowProps) {
         <span className="hidden text-xs text-blue-600 sm:block">Enriching...</span>
       )}
       {doc.enrichment_status === "done" && (
-        <span className="hidden text-xs text-green-700 sm:block">Images ready</span>
+        <span className="hidden text-xs text-green-700 sm:block">
+          {(doc.format === "pdf" || doc.format === "epub" || doc.format === "md" || doc.format === "markdown") ? "Images ready" : "Analysis complete"}
+        </span>
       )}
       {doc.enrichment_status === "failed" && (
         <span className="hidden text-xs text-orange-600 sm:block">Enrichment failed</span>

@@ -87,6 +87,7 @@ async def _extract_references(section_content: str) -> list[dict]:
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.0,
+        timeout=30.0,
     )
     raw = response.choices[0].message.content or ""
     cleaned = _strip_fences(raw)

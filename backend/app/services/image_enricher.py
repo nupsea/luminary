@@ -34,7 +34,7 @@ _VISION_PROMPT = (
 )
 
 # Semaphore to limit concurrent LLM calls (avoids OOM on large PDFs)
-_ENRICH_SEM = asyncio.Semaphore(3)
+_ENRICH_SEM = asyncio.Semaphore(1)
 
 
 def _is_decorative(pil_image: object) -> bool:
@@ -98,6 +98,7 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
                     }
                 ],
                 temperature=0.0,
+                timeout=300.0,
                 **extra_kwargs,
             )
             if model != vision_model:

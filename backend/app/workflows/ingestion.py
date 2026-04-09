@@ -1561,9 +1561,9 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
 
     doc_id = state["document_id"]
     fmt = state.get("format", "").lower()
-    _IMAGE_FORMATS = {"pdf", "epub"}
+    _IMAGE_FORMATS = {"pdf", "epub", "md", "markdown"}
 
-    # Image extraction: only for PDF/EPUB
+    # Image extraction: PDF, EPUB, and MD (web articles)
     if fmt in _IMAGE_FORMATS:
         try:
             job_id = str(_uuid.uuid4())

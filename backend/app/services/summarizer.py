@@ -275,7 +275,7 @@ class SummarizationService:
             if not _is_metadata_section(row.heading, row.content)
         ]
 
-        if len(qualifying) < 3:
+        if not qualifying:
             return None
 
         parts = [f"## {row.heading}\n{row.content}" for row in qualifying]

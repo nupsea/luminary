@@ -67,6 +67,8 @@ class ArticleExtractor:
         if not markdown_text:
             raise ValueError("Could not extract any meaningful content from the article.")
 
+        logger.debug("ArticleExtractor: extracted markdown (first 500 chars): %s", markdown_text[:500])
+
         # 4. Localize Image Links in Markdown
         # Trafilatura outputs markdown like ![alt](url)
         markdown_text = await self._mirror_markdown_images(markdown_text, doc_id)

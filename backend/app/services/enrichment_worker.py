@@ -11,7 +11,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, or_, select, update
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel
@@ -54,10 +54,14 @@ class EnrichmentQueueWorker:
         get retried -- these were interrupted by a previous shutdown.
         """
         async with get_session_factory()() as session:
+            # Reset stale 'running' and 'failed' jobs to 'pending' for retry
             result = await session.execute(
                 update(EnrichmentJobModel)
-                .where(EnrichmentJobModel.status == "running")
-                .values(status="pending", started_at=None)
+                .where(or_(
+                    EnrichmentJobModel.status == "running",
+                    EnrichmentJobModel.status == "failed"
+                ))
+                .values(status="pending", started_at=None, error_message=None)
                 .returning(EnrichmentJobModel.id)
             )
             reset_ids = [row[0] for row in result.all()]
@@ -120,7 +124,15 @@ class EnrichmentQueueWorker:
                         EnrichmentJobModel.document_id == document_id,
                         EnrichmentJobModel.status == "pending",
                     )
-                    .order_by(EnrichmentJobModel.created_at)
+                    .order_by(
+                        # Prioritize image extraction and analysis (S134)
+                        case(
+                            (EnrichmentJobModel.job_type == "image_extract", 1),
+                            (EnrichmentJobModel.job_type == "image_analyze", 2),
+                            else_=3,
+                        ),
+                        EnrichmentJobModel.created_at,
+                    )
                     .limit(1)
                 )
                 job = result.scalar_one_or_none()

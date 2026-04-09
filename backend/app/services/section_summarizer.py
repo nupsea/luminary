@@ -25,7 +25,7 @@ _SYSTEM_PROMPT = (
     "Output only the summary."
 )
 
-MIN_PREVIEW_LEN = 200
+MIN_PREVIEW_LEN = 50
 # 30 units per document: enough thematic coverage while keeping Ollama call count
 # manageable (100 was causing >30 min ingestion times on local hardware).
 MAX_UNITS = 30
@@ -128,6 +128,7 @@ class SectionSummarizerService:
                             {"role": "user", "content": unit["text"][:TEXT_HARD_CAP]},
                         ],
                         temperature=0.0,
+                        timeout=90.0,
                     )
                     summary_text = response.choices[0].message.content or ""
                 except litellm.ServiceUnavailableError:
