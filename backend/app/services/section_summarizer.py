@@ -25,7 +25,7 @@ _SYSTEM_PROMPT = (
     "Output only the summary."
 )
 
-MIN_PREVIEW_LEN = 50
+MIN_PREVIEW_LEN = 200
 # 30 units per document: enough thematic coverage while keeping Ollama call count
 # manageable (100 was causing >30 min ingestion times on local hardware).
 MAX_UNITS = 30

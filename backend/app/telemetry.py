@@ -93,21 +93,35 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
         phoenix_dir.mkdir(parents=True, exist_ok=True)
         os.environ["PHOENIX_WORKING_DIR"] = str(phoenix_dir)
 
-        # launch_app() starts Phoenix's own internal server thread and returns
-        # quickly.  We do NOT wrap this in another thread — the double-threading
-        # was the source of the race condition.
-        px.launch_app(use_temp_dir=False)
+        # Honour PHOENIX_GRPC_PORT from .env.  pydantic-settings reads .env
+        # into Settings but does NOT export to os.environ; Phoenix reads the
+        # env var directly, so we bridge the gap here.
+        from app.config import get_settings  # noqa: PLC0415
+        os.environ["PHOENIX_GRPC_PORT"] = str(get_settings().PHOENIX_GRPC_PORT)
 
-        # Wait for Phoenix to actually bind to the port before we register the
-        # OTLP exporter.  Without this wait the first span batches are dropped
-        # with "Connection refused" because the BatchSpanProcessor flushes
-        # before Phoenix finishes binding.
-        if _wait_for_phoenix():
-            logger.info("Phoenix UI available at http://localhost:%d", _PHOENIX_PORT)
-        else:
-            logger.warning(
-                "Phoenix did not bind within 15 s — tracing may be incomplete"
+        # If Phoenix is already reachable (e.g. running in Docker), skip
+        # launching an in-process instance to avoid port conflicts.
+        if _wait_for_phoenix(timeout=1.0):
+            logger.info(
+                "Phoenix already running at http://localhost:%d — skipping in-process launch",
+                _PHOENIX_PORT,
             )
+        else:
+            # launch_app() starts Phoenix's own internal server thread and
+            # returns quickly.  We do NOT wrap this in another thread — the
+            # double-threading was the source of the race condition.
+            px.launch_app(use_temp_dir=False)
+
+            # Wait for Phoenix to actually bind to the port before we register
+            # the OTLP exporter.  Without this wait the first span batches are
+            # dropped with "Connection refused" because the BatchSpanProcessor
+            # flushes before Phoenix finishes binding.
+            if _wait_for_phoenix():
+                logger.info("Phoenix UI available at http://localhost:%d", _PHOENIX_PORT)
+            else:
+                logger.warning(
+                    "Phoenix did not bind within 15 s — tracing may be incomplete"
+                )
 
         # Register the TracerProvider for the "luminary" project.
         tracer_provider = register(

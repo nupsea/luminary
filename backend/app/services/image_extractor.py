@@ -225,7 +225,8 @@ def extract_images_md(
     results: list[ExtractedImage] = []
     # ArticleExtractor uses md5 hashes for filenames
     for img_path in out_dir.iterdir():
-        if img_path.is_dir() or img_path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        allowed = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        if img_path.is_dir() or img_path.suffix.lower() not in allowed:
             continue
 
         try:

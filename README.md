@@ -16,14 +16,17 @@ No data leaves your device unless you explicitly configure a cloud LLM key.
 | [Node 20+](https://nodejs.org/) | `brew install node` or download from nodejs.org |
 | [Ollama](https://ollama.com/) | `brew install ollama` or download from ollama.com |
 
-### 2. Pull the default LLM
+### 2. Pull the default models
 
 ```bash
 # Start Ollama (if not already running)
 brew services start ollama
 
-# Pull Gemma 4 (default model)
+# Pull Gemma 4 (default chat model)
 ollama pull gemma4
+
+# Pull LLaVA 7B (default vision model)
+ollama pull llava:7b
 ```
 
 > Requires Ollama v0.20.0+. Check with `ollama --version` and upgrade if needed.
@@ -143,7 +146,7 @@ All settings are environment variables in `backend/.env`. The file is gitignored
 |----------|---------|-------------|
 | `LITELLM_DEFAULT_MODEL` | `ollama/gemma4` | LLM model for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
-| `VISION_MODEL` | `ollama/llava:13b` | Model for image/figure analysis |
+| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis (use `:13b` for higher quality) |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on low-memory machines) |
 | `WEB_SEARCH_PROVIDER` | `none` | `none`, `brave`, `tavily`, or `duckduckgo` |
 | `PHOENIX_ENABLED` | `true` | Arize Phoenix tracing at localhost:6006 |

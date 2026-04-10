@@ -62,18 +62,93 @@
 }
 
 /* S148: Code block readability fix.
-   Tailwind prose sets a dark pre background, but github.css tokens use dark text.
-   Force a light bg so highlight.js token colors remain visible. */
+   Light mode: GitHub light theme (github.css) with light background.
+   Dark mode: GitHub dark theme colors with dark background.
+   Selector targets all <code> (not just .hljs) so un-highlighted blocks stay readable. */
 .prose pre {
-  background: #f6f8fa !important;  /* GitHub-style light gray */
+  background: #f6f8fa !important;
   border: 1px solid #d0d7de !important;
   border-radius: 0.375rem !important;
   padding: 1rem !important;
 }
-.prose pre code.hljs {
+.prose pre code {
   background: transparent !important;
-  color: #24292f !important;
+  color: #24292e !important;
   padding: 0 !important;
+}
+
+/* Dark mode: github-dark theme overrides */
+.dark .prose pre {
+  background: #0d1117 !important;
+  border-color: #30363d !important;
+}
+.dark .prose pre code {
+  color: #c9d1d9 !important;
+}
+.dark .hljs-doctag,
+.dark .hljs-keyword,
+.dark .hljs-meta .hljs-keyword,
+.dark .hljs-template-tag,
+.dark .hljs-template-variable,
+.dark .hljs-type,
+.dark .hljs-variable.language_ {
+  color: #ff7b72 !important;
+}
+.dark .hljs-title,
+.dark .hljs-title.class_,
+.dark .hljs-title.class_.inherited__,
+.dark .hljs-title.function_ {
+  color: #d2a8ff !important;
+}
+.dark .hljs-attr,
+.dark .hljs-attribute,
+.dark .hljs-literal,
+.dark .hljs-meta,
+.dark .hljs-number,
+.dark .hljs-operator,
+.dark .hljs-variable,
+.dark .hljs-selector-attr,
+.dark .hljs-selector-class,
+.dark .hljs-selector-id {
+  color: #79c0ff !important;
+}
+.dark .hljs-regexp,
+.dark .hljs-string,
+.dark .hljs-meta .hljs-string {
+  color: #a5d6ff !important;
+}
+.dark .hljs-built_in,
+.dark .hljs-symbol {
+  color: #ffa657 !important;
+}
+.dark .hljs-comment,
+.dark .hljs-code,
+.dark .hljs-formula {
+  color: #8b949e !important;
+}
+.dark .hljs-name,
+.dark .hljs-quote,
+.dark .hljs-selector-tag,
+.dark .hljs-selector-pseudo {
+  color: #7ee787 !important;
+}
+.dark .hljs-subst {
+  color: #c9d1d9 !important;
+}
+.dark .hljs-section {
+  color: #1f6feb !important;
+  font-weight: bold;
+}
+.dark .hljs-bullet {
+  color: #f2cc60 !important;
+}
+.dark .hljs-addition {
+  color: #aff5b4 !important;
+  background-color: #033a16 !important;
+}
+.dark .hljs-deletion {
+  color: #ffdcd7 !important;
+  background-color: #67060c !important;
 }
 
 /* PDF text layer uses the official pdfjs .textLayer class from pdf_viewer.css.

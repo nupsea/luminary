@@ -173,11 +173,11 @@ async def test_collection_migration_merges_duplicates(test_db):
         data = resp.json()
         assert data["merged"] >= 1
 
-    # Verify: only one collection remains, named 'my-notes'
+    # Verify: only one collection remains, named 'MY-NOTES'
     async with factory() as session:
         cols = (await session.execute(select(NoteCollectionModel))).scalars().all()
         assert len(cols) == 1
-        assert cols[0].name == "my-notes"
+        assert cols[0].name == "MY-NOTES"
         # The keeper should have the col1_id (more members)
         assert cols[0].id == col1_id
 
@@ -196,7 +196,7 @@ async def test_create_collection_normalizes_name(test_db):
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["name"] == "my-notes"
+        assert data["name"] == "MY-NOTES"
 
 
 @pytest.mark.anyio

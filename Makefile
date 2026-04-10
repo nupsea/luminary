@@ -1,4 +1,15 @@
-.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary
+.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean
+
+clean:
+	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
+	@for port in 7820 5173 5174; do \
+		pid=$$(lsof -ti :$$port 2>/dev/null); \
+		if [ -n "$$pid" ]; then \
+			echo "  killing PID $$pid on :$$port"; \
+			kill -9 $$pid; \
+		fi; \
+	done
+	@echo "Done."
 
 dev:
 	@echo "Starting backend and frontend dev servers..."

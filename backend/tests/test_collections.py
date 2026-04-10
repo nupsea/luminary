@@ -36,7 +36,7 @@ def test_create_top_level_collection(client):
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert data["name"] == "philosophy"
+    assert data["name"] == "PHILOSOPHY"
     assert data["color"] == "#FF5733"
     assert data["parent_collection_id"] is None
     assert isinstance(data["id"], str)

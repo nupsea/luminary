@@ -15,12 +15,13 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
-    VISION_MODEL: str = "ollama/llava:13b"
+    VISION_MODEL: str = "ollama/llava:7b"
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
     WEB_SEARCH_PROVIDER: str = "none"  # "none" | "brave" | "tavily" | "duckduckgo"
     BRAVE_API_KEY: str = ""
     TAVILY_API_KEY: str = ""
     ADMIN_KEY: str = ""
+    PHOENIX_GRPC_PORT: int = 4317
 
     model_config = {"env_file": (".env", "/app/.luminary/.env"), "env_file_encoding": "utf-8"}
 

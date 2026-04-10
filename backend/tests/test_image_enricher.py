@@ -184,7 +184,9 @@ async def test_enrich_sets_description_and_image_type(
         mock_llm.return_value = mock_response
         settings = MagicMock()
         settings.DATA_DIR = str(data_dir)
-        settings.VISION_MODEL = "ollama/llava:13b"
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
         mock_settings.return_value = settings
 
         svc = ImageEnricherService()
@@ -255,7 +257,9 @@ async def test_decorative_image_skips_llm(
     ):
         settings = MagicMock()
         settings.DATA_DIR = str(tmp_path)
-        settings.VISION_MODEL = "ollama/llava:13b"
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
         mock_settings.return_value = settings
 
         svc = ImageEnricherService()
@@ -300,7 +304,9 @@ async def test_offline_503_propagates(
     ):
         settings = MagicMock()
         settings.DATA_DIR = str(data_dir)
-        settings.VISION_MODEL = "ollama/llava:13b"
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
         mock_settings.return_value = settings
 
         svc = ImageEnricherService()
@@ -345,7 +351,9 @@ async def test_images_fts_keyword_search(
         mock_llm.return_value = mock_response
         settings = MagicMock()
         settings.DATA_DIR = str(data_dir)
-        settings.VISION_MODEL = "ollama/llava:13b"
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
         mock_settings.return_value = settings
 
         svc = ImageEnricherService()
@@ -530,7 +538,7 @@ def _ollama_has_llava() -> bool:
         result = subprocess.run(
             ["ollama", "list"], capture_output=True, text=True, timeout=5
         )
-        return "llava" in result.stdout
+        return "llava:7b" in result.stdout
     except Exception:
         return False
 
@@ -591,7 +599,9 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     ):
         settings = MagicMock()
         settings.DATA_DIR = str(tmp_path)
-        settings.VISION_MODEL = "ollama/llava:13b"
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
         mock_settings.return_value = settings
 
         svc = ImageEnricherService()

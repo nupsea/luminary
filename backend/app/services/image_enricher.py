@@ -24,13 +24,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _VISION_PROMPT = (
-    "Task 1: Classify this image as one of: architecture_diagram, "
-    "sequence_diagram, er_diagram, flowchart, code_screenshot, table, "
-    "chart, photo, decorative, other. "
-    "Task 2: List every labeled component visible and any connections between them. "
-    "Task 3: Extract any visible text verbatim. "
-    "Respond in JSON: "
-    '{"image_type": "...", "components": [...], "text": "...", "description": "..."}'
+    "Classify this image as one of: architecture_diagram, sequence_diagram, "
+    "er_diagram, flowchart, code_screenshot, table, chart, photo, other.\n"
+    "Then describe what the image shows in 1-2 sentences.\n"
+    'Reply ONLY with JSON: {"image_type": "...", "description": "..."}'
 )
 
 # Semaphore to limit concurrent LLM calls (avoids OOM on large PDFs)
@@ -72,8 +69,17 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
     if vision_model.startswith("ollama/") and not default_model.startswith("ollama/"):
         models_to_try.append(default_model)
 
-    with open(image_path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
+    # Resize large images to reduce inference time and avoid timeouts.
+    from io import BytesIO  # noqa: PLC0415
+
+    from PIL import Image as _PILImage  # noqa: PLC0415
+
+    img = _PILImage.open(image_path)
+    if max(img.size) > 1024:
+        img.thumbnail((1024, 1024))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
 
     last_exc: Exception | None = None
     for model in models_to_try:
@@ -135,8 +141,6 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
         return {
             "image_type": "other",
             "description": raw,
-            "components": [],
-            "text": "",
         }
 
 

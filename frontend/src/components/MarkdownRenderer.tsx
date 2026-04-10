@@ -15,8 +15,11 @@
 
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
 import rehypeHighlight from "rehype-highlight"
+import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
+import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
@@ -56,8 +59,8 @@ export function MarkdownRenderer({ children, className, validNoteIds }: Markdown
       className
     )}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight, rehypeRaw]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeHighlight, rehypeKatex, rehypeRaw]}
         components={{
           code: ({ children: codeChildren, ...props }) => {
             const text = String(codeChildren)
