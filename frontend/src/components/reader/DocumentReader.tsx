@@ -2099,7 +2099,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
 
   function handleSelectionAskInChat(text: string, sourceRef: SourceRef) {
     setChatPreload({ text: `Regarding this passage:\n> "${text}"\n\nMy question: `, documentId: sourceRef.documentId })
-    navigate("/chat")
+    useAppStore.getState().setChatPanelOpen(true)
   }
 
   async function handleSelectionHighlight(text: string, sourceRef: SourceRef, color: string = "yellow") {

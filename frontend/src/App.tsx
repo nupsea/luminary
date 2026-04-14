@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench } from "lucide-react"
+import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -252,6 +252,8 @@ function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const chatPanelOpen = useAppStore(s => s.chatPanelOpen)
+  const setChatPanelOpen = useAppStore(s => s.setChatPanelOpen)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
@@ -349,9 +351,9 @@ function AppShell() {
   }, [])
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar />
-      <main className="flex-1 h-full overflow-auto">
+      <main className="flex-1 h-full overflow-auto relative">
         <Routes>
           <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
           <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
@@ -359,12 +361,35 @@ function AppShell() {
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
           <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
-          {/* /admin is NOT linked from the nav; accessible via the "Dev Tools" footer link */}
           <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
-          {/* Legacy redirect: /monitoring -> /progress */}
           <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
         </Routes>
       </main>
+
+      {/* Global Sliding Chat Panel Overlay */}
+      <div 
+        className={cn(
+           "fixed top-0 right-0 h-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] border-l border-border bg-background shadow-2xl z-50 transform flex flex-col",
+           chatPanelOpen ? "w-[450px] translate-x-0 opacity-100" : "w-0 translate-x-[200px] opacity-0 pointer-events-none"
+        )}
+      >
+        {chatPanelOpen && (
+           <>
+             <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
+               <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <MessageSquare size={16} className="text-primary"/> Luminary AI
+               </h2>
+               <button onClick={() => setChatPanelOpen(false)} className="rounded-md p-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                  <X size={15}/>
+               </button>
+             </div>
+             <div className="flex-1 overflow-hidden relative">
+               <Suspense fallback={<PageSkeleton />}><Chat /></Suspense>
+             </div>
+           </>
+        )}
+      </div>
+
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )
