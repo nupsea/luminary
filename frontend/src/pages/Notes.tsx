@@ -510,6 +510,7 @@ interface NoteCardProps {
 function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -570,6 +571,23 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         <div className="cursor-pointer" onClick={onEdit}>
           <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
         </div>
+      )}
+
+      {/* Source back-link — deep-links to the document section this note was created from */}
+      {note.document_id && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            const params = new URLSearchParams({ doc: note.document_id! })
+            if (note.chunk_id) params.set("chunk_id", note.chunk_id)
+            navigate(`/?${params.toString()}`)
+          }}
+          className="flex items-center gap-1.5 self-start rounded-md border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-primary hover:bg-accent hover:text-foreground transition-colors"
+          title="Open source document"
+        >
+          <BookOpen size={11} />
+          Go to source
+        </button>
       )}
 
       {/* Tags -- breadcrumb style: root in text-primary, /child in text-muted-foreground */}

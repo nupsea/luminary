@@ -1255,29 +1255,37 @@ export default function Viz() {
 
           {/* Camera controls */}
           {filteredGraph && filteredGraph.order > 0 && (
-            <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
-              <button
-                onClick={zoomIn}
-                className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
-                title="Zoom in"
-              >
-                <Plus size={14} />
-              </button>
-              <button
-                onClick={zoomOut}
-                className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
-                title="Zoom out"
-              >
-                <Minus size={14} />
-              </button>
-              <button
-                onClick={resetCamera}
-                className="flex h-8 w-8 items-center justify-center rounded border border-border bg-background text-foreground shadow-sm hover:bg-accent"
-                title="Fit to screen"
-              >
-                <Maximize2 size={14} />
-              </button>
-            </div>
+            <>
+              {/* Interaction hint — fades out after 4 seconds */}
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-pulse" style={{ animationIterationCount: 3, animationDuration: '1.5s' }}>
+                <div className="rounded-full bg-foreground/80 px-4 py-1.5 text-xs font-medium text-background backdrop-blur-sm shadow-lg">
+                  Scroll to zoom · Click node to explore · Drag to pan
+                </div>
+              </div>
+              <div className="absolute bottom-4 right-4 flex flex-col gap-1.5 z-10">
+                <button
+                  onClick={zoomIn}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-md hover:bg-accent hover:shadow-lg transition-all"
+                  title="Zoom in"
+                >
+                  <Plus size={16} />
+                </button>
+                <button
+                  onClick={zoomOut}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-md hover:bg-accent hover:shadow-lg transition-all"
+                  title="Zoom out"
+                >
+                  <Minus size={16} />
+                </button>
+                <button
+                  onClick={resetCamera}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-md hover:bg-accent hover:shadow-lg transition-all"
+                  title="Fit to screen"
+                >
+                  <Maximize2 size={16} />
+                </button>
+              </div>
+            </>
           )}
 
           {/* Note node preview panel (S172) -- right-side panel */}
@@ -1333,9 +1341,16 @@ export default function Viz() {
               )}
               <button
                 onClick={() => {
+                  const docId = activeDocumentId
+                  const entityLabel = selectedNode.label
                   setSelectedNode(null)
-                  setActiveDocument(null)
-                  navigate("/")
+                  if (docId) {
+                    // Navigate to the document reader with the entity in the search bar
+                    navigate(`/?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`)
+                  } else {
+                    // Fallback: all-docs scope — search in library
+                    navigate(`/?search=${encodeURIComponent(entityLabel)}`)
+                  }
                 }}
                 className="text-xs text-primary underline hover:no-underline"
               >

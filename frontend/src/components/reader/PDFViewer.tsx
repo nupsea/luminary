@@ -73,9 +73,13 @@ function applyPdfHighlights(
 
   if (annotations.length === 0) return
 
+  // 1. Filter annotations for current page efficiently
+  const sectionMap = new Map<string, SectionItem>()
+  for (const s of sections) sectionMap.set(s.id, s)
+
   const pageAnnotations = annotations.filter((ann) => {
     if (ann.page_number != null) return ann.page_number === currentPage
-    const sec = sections.find((s) => s.id === ann.section_id)
+    const sec = sectionMap.get(ann.section_id)
     if (sec) {
       const start = sec.page_start || 1
       const end = sec.page_end || start
@@ -92,14 +96,20 @@ function applyPdfHighlights(
 
   const containerRect = overlayContainer.getBoundingClientRect()
 
+  // 2. Pre-calculate normalized full text once outside loop
+  const normFull = fullText.replace(/\s+/g, " ")
+
   for (const ann of pageAnnotations) {
-    let idx = fullText.indexOf(ann.selected_text)
-    let searchText = ann.selected_text
+    const searchVal = ann.selected_text
+    let idx = fullText.indexOf(searchVal)
+    let searchText = searchVal
+
     if (idx < 0) {
-      const normFull = fullText.replace(/\s+/g, " ")
-      const normSearch = ann.selected_text.replace(/\s+/g, " ")
+      // 3. Normalized search
+      const normSearch = searchVal.replace(/\s+/g, " ")
       const normIdx = normFull.indexOf(normSearch)
       if (normIdx < 0) continue
+
       idx = mapNormToFullOffset(fullText, normFull, normIdx)
       const endIdx = mapNormToFullOffset(fullText, normFull, normIdx + normSearch.length)
       searchText = fullText.slice(idx, endIdx)
@@ -199,6 +209,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     annotationsRef.current = annotations
     const highlightsVisibleRef = useRef(highlightsVisible)
     highlightsVisibleRef.current = highlightsVisible
+    const sectionsRef = useRef(sections)
+    sectionsRef.current = sections
 
     // ── Search state ──────────────────────────────────────────────────
     const [searchOpen, setSearchOpen] = useState(false)
@@ -239,6 +251,12 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
       const task = pdfjsLib.getDocument({
         url: `${API_BASE}/documents/${documentId}/file`,
+        // Enable HTTP range requests so pdfjs can fetch only the byte ranges
+        // it needs (e.g. xref table + first page) instead of downloading the
+        // entire PDF before showing anything. Dramatically speeds up large PDFs.
+        disableRange: false,
+        disableStream: false,
+        rangeChunkSize: 65536, // 64 KB chunks
       })
 
       task.promise
@@ -246,52 +264,49 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           if (cancelled) return
           setPdfDoc(doc)
           setTotalPages(doc.numPages)
+          // Set ready immediately so the page render effect fires right away.
+          // Auto-fit and TOC scan are deferred so they don't delay first paint.
           setLoadStatus("ready")
 
-          // Auto-fit: compute zoom so the first page fills the scroll area width
-          try {
-            const page = await doc.getPage(1)
-            const naturalVp = page.getViewport({ scale: 1.0 })
-            page.cleanup()
-            if (scrollAreaRef.current && naturalVp.width > 0) {
-              const available = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
-              if (available > 0) setZoom(available / naturalVp.width)
-            }
-          } catch {
-            // non-fatal; zoom stays at 1.0
-          }
+          // Defer auto-fit and TOC after a tick so the canvas renders first
+          setTimeout(async () => {
+            if (cancelled) return
 
-          // ── TOC source determination ─────────────────────────────────────
-          // Rule 1 — Native PDF bookmarks (always preferred when present).
-          //   Standard PDFs embed an authored outline; use every entry in it.
-          //   Entries whose page cannot be resolved are kept as static labels
-          //   so the full TOC structure is always visible.
-          //   Sort navigable entries (page > 0) by page; unresolvable entries
-          //   follow in their original declaration order.
-          // Rule 2 — Font-size scanning (only when no native outline exists).
-          //   PDFs without bookmarks (e.g. scanned or minimal exports) fall back
-          //   to scanning heading-sized text across all pages.
-          try {
-            const rawOutline = await doc.getOutline()
-            if (rawOutline && rawOutline.length > 0 && !cancelled) {
-              // Rule 1: native outline present — resolve and use all entries
-              const resolved = await resolveOutline(doc, rawOutline, 1)
-              if (!cancelled) {
-                const flat = flattenOutline(resolved)
-                // Navigable entries sorted by page; unresolved entries keep
-                // their original DFS (reading) order appended after.
-                const navigable = flat.filter(e => e.page > 0).sort((a, b) => a.page - b.page)
-                const unresolved = flat.filter(e => e.page === 0)
-                setPdfOutline([...navigable, ...unresolved])
+            // Auto-fit: compute zoom so the first page fills the scroll area width
+            try {
+              const page = await doc.getPage(1)
+              const naturalVp = page.getViewport({ scale: 1.0 })
+              page.cleanup()
+              if (scrollAreaRef.current && naturalVp.width > 0) {
+                const available = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
+                if (available > 0) setZoom(available / naturalVp.width)
               }
-            } else if (!cancelled) {
-              // Rule 2: no native outline — scan font sizes
-              const fontToc = await buildFontTOC(doc, () => cancelled)
-              if (!cancelled && fontToc.length > 0) setPdfOutline(fontToc)
+            } catch {
+              // non-fatal; zoom stays at 1.0
             }
-          } catch {
-            // non-fatal; TOC panel falls back to backend sections
-          }
+
+            if (cancelled) return
+
+            // ── TOC source determination ─────────────────────────────────────
+            try {
+              const rawOutline = await doc.getOutline()
+              if (rawOutline && rawOutline.length > 0 && !cancelled) {
+                const resolved = await resolveOutline(doc, rawOutline, 1)
+                if (!cancelled) {
+                  const flat = flattenOutline(resolved)
+                  const navigable = flat.filter(e => e.page > 0).sort((a, b) => a.page - b.page)
+                  const unresolved = flat.filter(e => e.page === 0)
+                  setPdfOutline([...navigable, ...unresolved])
+                }
+              } else if (!cancelled) {
+                // Rule 2: no native outline — scan font sizes (expensive, deferred)
+                const fontToc = await buildFontTOC(doc, () => cancelled)
+                if (!cancelled && fontToc.length > 0) setPdfOutline(fontToc)
+              }
+            } catch {
+              // non-fatal; TOC panel falls back to backend sections
+            }
+          }, 100)
         })
         .catch(() => {
           if (!cancelled) setLoadStatus("error")
@@ -352,6 +367,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           }
           if (cancelled) return
 
+          // Yield to browser so the canvas paints immediately before we do expensive text extraction
+          await new Promise(resolve => setTimeout(resolve, 0))
+          if (cancelled) return
+
           // Official pdfjs TextLayer -- supports proper drag-to-select across spans.
           // We set --scale-factor CSS var on the container so TextLayer's
           // setLayerDimensions() can compute width/height correctly.
@@ -374,30 +393,34 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             textLayerDiv.style.pointerEvents = "auto"
             textLayerDiv.style.zIndex = "10"
 
-            const textContent = await page.getTextContent()
-            if (cancelled) return
+            try {
+              const textContent = await page.getTextContent()
+              if (cancelled) return
 
-            const tl = new TextLayer({
-              textContentSource: textContent,
-              container: textLayerDiv,
-              viewport,
-            })
-            activeTextLayer = tl
+              const tl = new TextLayer({
+                textContentSource: textContent,
+                container: textLayerDiv,
+                viewport,
+              })
+              activeTextLayer = tl
 
-            await tl.render()
-            if (!cancelled) {
-              // Size the highlight overlay to match the text layer
-              const overlayDiv = highlightOverlayRef.current
-              if (overlayDiv) {
-                overlayDiv.style.width = `${viewport.width}px`
-                overlayDiv.style.height = `${viewport.height}px`
-                overlayDiv.replaceChildren() // clear stale overlays
+              await tl.render()
+              if (!cancelled) {
+                // Size the highlight overlay to match the text layer
+                const overlayDiv = highlightOverlayRef.current
+                if (overlayDiv) {
+                  overlayDiv.style.width = `${viewport.width}px`
+                  overlayDiv.style.height = `${viewport.height}px`
+                  overlayDiv.replaceChildren() // clear stale overlays
+                }
+                // Apply highlights immediately after text layer is ready
+                if (highlightsVisibleRef.current && annotationsRef.current.length > 0 && overlayDiv) {
+                  applyPdfHighlights(textLayerDiv, overlayDiv, annotationsRef.current, pageNum, sectionsRef.current)
+                }
+                setTextLayerVersion((v) => v + 1)
               }
-              // Apply highlights immediately after text layer is ready
-              if (highlightsVisibleRef.current && annotationsRef.current.length > 0 && overlayDiv) {
-                applyPdfHighlights(textLayerDiv, overlayDiv, annotationsRef.current, pageNum, sections)
-              }
-              setTextLayerVersion((v) => v + 1)
+            } catch (err) {
+              console.warn("Text layer rendering cancelled/failed", err)
             }
           }
 
@@ -485,12 +508,18 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       }
 
       void renderPage(currentPage, canvasRef.current, textLayerRef.current, annotationLayerRef.current)
-      if (currentPage < totalPages) {
-        void renderPage(currentPage + 1, nextCanvasRef.current, null, null)
-      }
+      // Defer pre-rendering next page by 300ms so current page renders first.
+      // This makes highlight navigation feel instant — the current page appears
+      // right away instead of waiting for two pages to render in parallel.
+      const nextPageTimer = currentPage < totalPages
+        ? setTimeout(() => {
+            if (!cancelled) void renderPage(currentPage + 1, nextCanvasRef.current, null, null)
+          }, 300)
+        : null
 
       return () => {
         cancelled = true
+        if (nextPageTimer) clearTimeout(nextPageTimer)
         activeTextLayer?.cancel()
         // Cancel all in-progress pdfjs render tasks so the canvas is free
         // for the next effect run. Without this, rapid page/zoom changes cause
@@ -504,17 +533,19 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       onPageChange?.(currentPage)
     }, [currentPage, onPageChange])
 
-    // Apply annotation highlight overlays after the text layer renders
+    // Apply annotation highlight overlays after the text layer renders.
+    // Only depends on textLayerVersion (bumped after each page render) so it
+    // doesn't re-run on unrelated parent re-renders.
     useEffect(() => {
       const textDiv = textLayerRef.current
       const overlayDiv = highlightOverlayRef.current
       if (!textDiv || !overlayDiv || textLayerVersion === 0) return
-      if (!highlightsVisible || annotations.length === 0) {
+      if (!highlightsVisibleRef.current || annotationsRef.current.length === 0) {
         clearOverlays(overlayDiv, "data-pdf-highlight")
         return
       }
-      applyPdfHighlights(textDiv, overlayDiv, annotations, currentPage, sections)
-    }, [textLayerVersion, annotations, highlightsVisible, currentPage, sections])
+      applyPdfHighlights(textDiv, overlayDiv, annotationsRef.current, currentPage, sectionsRef.current)
+    }, [textLayerVersion, currentPage])
 
     function goToPage(n: number) {
       const clamped = Math.max(1, Math.min(n, totalPages))

@@ -38,6 +38,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { AnimatePresence, motion } from "framer-motion"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -480,64 +481,96 @@ function FlashcardCard({
       {card.section_heading && !editing && (
         <p className="text-xs text-muted-foreground">{card.section_heading}</p>
       )}
-      {/* Question */}
-      <div className="flex items-start justify-between gap-2">
-        {editing ? (
-          <textarea
-            value={editQuestion}
-            onChange={(e) => setEditQuestion(e.target.value)}
-            className="flex-1 resize-none rounded border border-border bg-background p-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            rows={2}
-          />
-        ) : (
-          <p className="flex-1 text-sm font-medium text-foreground">{card.question}</p>
+      {/* Flip container */}
+      <div className="relative w-full mt-2 min-h-[140px]" style={{ perspective: "1000px" }}>
+        <AnimatePresence mode="wait">
+          {/* Front (Question only) */}
+          {!editing && !showAnswer && (
+            <motion.div
+              key="front"
+            initial={{ rotateX: -180, opacity: 0 }}
+            animate={{ rotateX: 0, opacity: 1 }}
+            exit={{ rotateX: 180, opacity: 0 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
+            style={{ backfaceVisibility: "hidden" }}
+            className="w-full flex flex-col gap-2"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="flex-1 text-sm font-medium text-foreground">{card.question}</p>
+              {!confirmDelete && (
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setEditing(true) }}
+                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Edit"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete(true) }}
+                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+            <div>
+              <button
+                onClick={() => setShowAnswer(true)}
+                className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-1"
+              >
+                <ChevronDown size={12} /> Make it flip
+              </button>
+            </div>
+          </motion.div>
         )}
 
-        {!editing && !confirmDelete && (
-          <div className="flex shrink-0 gap-1">
+        {/* Back (Question + Answer) */}
+        {!editing && showAnswer && (
+          <motion.div
+            key="back"
+            initial={{ rotateX: 180, opacity: 0 }}
+            animate={{ rotateX: 0, opacity: 1 }}
+            exit={{ rotateX: -180, opacity: 0 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
+            style={{ backfaceVisibility: "hidden" }}
+            className="w-full flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3"
+          >
+            <p className="text-sm font-medium text-muted-foreground">{card.question}</p>
+            <hr className="border-primary/10" />
+            <MarkdownRenderer className="text-sm text-foreground">{card.answer}</MarkdownRenderer>
             <button
-              onClick={() => setEditing(true)}
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              title="Edit"
+              onClick={() => setShowAnswer(false)}
+              className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-2 self-start"
             >
-              <Pencil size={14} />
+              <ChevronUp size={12} /> Hide answer
             </button>
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-              title="Delete"
-            >
-              <Trash2 size={14} />
-            </button>
+          </motion.div>
+        )}
+        </AnimatePresence>
+
+        {/* Editing mode */}
+        {editing && (
+          <div className="flex flex-col gap-3">
+            <textarea
+              value={editQuestion}
+              onChange={(e) => setEditQuestion(e.target.value)}
+              className="resize-none rounded border border-border bg-background p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              rows={2}
+              placeholder="Question..."
+            />
+            <textarea
+              value={editAnswer}
+              onChange={(e) => setEditAnswer(e.target.value)}
+              className="resize-none rounded border border-border bg-background p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              rows={3}
+              placeholder="Answer..."
+            />
           </div>
         )}
       </div>
-
-      {/* Answer */}
-      {editing ? (
-        <textarea
-          value={editAnswer}
-          onChange={(e) => setEditAnswer(e.target.value)}
-          className="resize-none rounded border border-border bg-background p-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          rows={3}
-          placeholder="Answer..."
-        />
-      ) : (
-        <div>
-          <button
-            onClick={() => setShowAnswer((prev) => !prev)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            {showAnswer ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            {showAnswer ? "Hide answer" : "Show answer"}
-          </button>
-          {showAnswer && (
-            <MarkdownRenderer className="mt-1 text-sm">{card.answer}</MarkdownRenderer>
-          )}
-        </div>
-      )}
-
-      {/* Edit actions */}
       {editing && (
         <div className="flex gap-2">
           <button
@@ -1414,7 +1447,6 @@ function StrugglingPanel({ documentId }: StrugglingPanelProps) {
 // GoalsPanel (exported so Progress tab can render it without Study tab re-implementing)
 // ---------------------------------------------------------------------------
 
-export { fetchGoals, createGoal, deleteGoalApi, fetchReadiness }
 export type { LearningGoal, ReadinessResult, AtRiskCard, DocListItem }
 
 function RetentionBadge({ pct }: { pct: number }) {

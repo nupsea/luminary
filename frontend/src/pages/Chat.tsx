@@ -701,6 +701,8 @@ export default function Chat() {
   // S148: navigate to Learning tab with DocumentReader open at the cited section/page
   function navigateToCitation(c: SourceCitation) {
     setActiveDocument(c.document_id)
+    // Close the chat side-panel if open, so user sees the document
+    useAppStore.getState().setChatPanelOpen(false)
     const params = new URLSearchParams()
     params.set("doc", c.document_id)
     if (c.section_id) params.set("section_id", c.section_id)

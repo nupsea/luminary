@@ -1,14 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight, GitCompareArrows } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import type { ContentType } from "@/components/library/types"
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
-import type { AnnotationItem, DocumentDetail, SummaryMode, SummaryTabDef } from "./types"
+import type { AnnotationItem, DocumentDetail, SectionItem, SummaryMode, SummaryTabDef } from "./types"
 import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -1612,10 +1612,11 @@ interface DocumentReaderProps {
 
 export function DocumentReader({ documentId, onBack, initialSectionId, initialChunkId, initialPage }: DocumentReaderProps) {
   const qc = useQueryClient()
-  const navigate = useNavigate()
+
   const { data: doc, isLoading } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
+    staleTime: 60_000,
   })
 
   const sectionListRef = useRef<HTMLDivElement>(null)
@@ -1629,6 +1630,14 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
+  const pageTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  
+  const handlePageChange = useCallback((page: number) => {
+    if (pageTimerRef.current) clearTimeout(pageTimerRef.current)
+    pageTimerRef.current = setTimeout(() => {
+      setPdfCurrentPage(page)
+    }, 100)
+  }, [])
   const highlightsPanelRef = useRef<HTMLDivElement>(null)
   const highlightsToggleRef = useRef<HTMLButtonElement>(null)
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
@@ -1680,6 +1689,16 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
   const isAudio = doc?.content_type === "audio"
   const isVideo = doc?.content_type === "video"
   const isYouTube = isYouTubeDoc(doc ?? {})
+
+  // S111: Pre-calculate section map for O(1) lookups in highlight loops
+  const sectionMap = useMemo(() => {
+    const m = new Map<string, SectionItem>()
+    if (doc?.sections) {
+      for (const s of doc.sections) m.set(s.id, s)
+    }
+    return m
+  }, [doc?.sections])
+
   const audioUrl = (isAudio && !isYouTube) ? `${API_BASE}/documents/${documentId}/audio` : null
   const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
 
@@ -1806,6 +1825,28 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
     () => new Set(searchResults.map((r) => r.section_id)),
     [searchResults],
   )
+
+  // S131: Group annotations by section for O(1) retrieval in section list
+  const annotationsBySection = useMemo(() => {
+    const m = new Map<string, AnnotationItem[]>()
+    if (docAnnotations) {
+      for (const ann of docAnnotations) {
+        const list = m.get(ann.section_id) || []
+        list.push(ann)
+        m.set(ann.section_id, list)
+      }
+    }
+    return m
+  }, [docAnnotations])
+
+  // S151: Pre-calculate search snippet map for O(1) retrieval
+  const searchSnippetMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of searchResults) {
+      if (r.snippet) m.set(r.section_id, r.snippet)
+    }
+    return m
+  }, [searchResults])
 
   // S151: Cmd+F / Ctrl+F keydown listener — opens inline search bar
   useEffect(() => {
@@ -2006,23 +2047,33 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
 
   // Navigate to a highlight: for PDF annotations go to PDF page, otherwise Read tab
   function navigateToHighlight(ann: AnnotationItem) {
+    setHighlightsPanelOpen(false)
+
+    const isAlreadyPdf = leftTab === "pdfview" && pdfViewVisited
+
     // PDF highlight with page number -- jump to that page in PDF view
     if (ann.page_number != null && doc?.format === "pdf") {
       setPdfViewVisited(true)
       setLeftTab("pdfview")
-      // Small delay to ensure PDF viewer is mounted before calling goToPage
-      setTimeout(() => pdfViewerRef.current?.goToPage(ann.page_number!), 50)
-      setHighlightsPanelOpen(false)
+      if (isAlreadyPdf) {
+        pdfViewerRef.current?.goToPage(ann.page_number)
+      } else {
+        // Small delay to ensure PDF viewer tab is mounted before calling goToPage
+        setTimeout(() => pdfViewerRef.current?.goToPage(ann.page_number!), 50)
+      }
       return
     }
     // PDF highlight without page_number but with section -- use section page_start
     if (doc?.format === "pdf") {
-      const sec = doc.sections.find((s) => s.id === ann.section_id)
+      const sec = sectionMap.get(ann.section_id)
       if (sec && sec.page_start > 0) {
         setPdfViewVisited(true)
         setLeftTab("pdfview")
-        setTimeout(() => pdfViewerRef.current?.goToPage(sec.page_start), 50)
-        setHighlightsPanelOpen(false)
+        if (isAlreadyPdf) {
+          pdfViewerRef.current?.goToPage(sec.page_start)
+        } else {
+          setTimeout(() => pdfViewerRef.current?.goToPage(sec.page_start), 50)
+        }
         return
       }
     }
@@ -2034,7 +2085,6 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
       const el = document.getElementById(`read-sec-${ann.section_id}`)
       if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
     }
-    setHighlightsPanelOpen(false)
   }
 
   async function handleDeleteHighlight(id: string) {
@@ -2180,6 +2230,187 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
 
   const Icon = CONTENT_TYPE_ICONS[doc.content_type as ContentType] ?? CONTENT_TYPE_ICONS.notes
 
+  // Pre-render highlights list items (avoids useMemo inside JSX which is illegal)
+  const renderedHighlightItems = (docAnnotations ?? []).map((ann) => {
+    const sectionHeading = sectionMap.get(ann.section_id)?.heading ?? ""
+    return (
+      <li key={ann.id} className="flex items-start gap-2 px-3 py-2 hover:bg-accent/50 group">
+        <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", COLOR_CLASSES[ann.color] ?? COLOR_CLASSES.yellow)} />
+        <button
+          onClick={() => navigateToHighlight(ann)}
+          className="min-w-0 flex-1 text-left"
+        >
+          <p className="truncate text-xs text-foreground" title={ann.selected_text}>
+            {ann.selected_text.length > 50 ? `${ann.selected_text.slice(0, 50)}...` : ann.selected_text}
+          </p>
+          {sectionHeading && (
+            <p className="truncate text-[10px] text-muted-foreground">{sectionHeading}</p>
+          )}
+        </button>
+        <button
+          onClick={() => void handleDeleteHighlight(ann.id)}
+          title="Remove highlight"
+          className="shrink-0 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+        >
+          <Trash2 size={12} />
+        </button>
+      </li>
+    )
+  })
+
+  // Pre-compute section list items (performance comes from the O(1) Map lookups above)
+  const renderedSectionItems = doc.sections.map((section) => {
+    const hasNote = notedSections.has(section.id)
+    const editorOpen = openNoteEditor === section.id
+    const heatmapItem = heatmapData?.[section.id] ?? null
+    const fragilityClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
+    const sectionBorderClass = section.admonition_type
+      ? admonitionClass(section.admonition_type)
+      : fragilityClass
+    const tooltipText =
+      heatmapItem && heatmapItem.fragility_score !== null
+        ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
+        : undefined
+    const mediaStartTime = (isAudio || isVideo || isYouTube) ? parseAudioStartTime(section.heading) : null
+    return (
+      <li
+        key={section.id}
+        data-section-id={section.id}
+        title={tooltipText}
+        className={cn(
+          "rounded-md border border-border p-3",
+          sectionBorderClass,
+          searchHitSectionIds.has(section.id) && "ring-2 ring-primary",
+        )}
+      >
+        <div className="flex items-start gap-1">
+          <p
+            className="flex-1 text-sm font-semibold text-foreground"
+            style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
+          >
+            {section.admonition_type && (
+              <span
+                className="mr-1 rounded px-1 py-0.5 text-xs font-bold uppercase tracking-wide"
+                style={{ color: ADMONITION_LABEL_COLORS[section.admonition_type] ?? "inherit" }}
+              >
+                {section.admonition_type}
+              </span>
+            )}
+            {section.heading || "(Untitled section)"}
+          </p>
+          <button
+            onClick={() => {
+              setReadSectionId(section.id)
+              setLeftTab("read")
+            }}
+            title="Read from this section"
+            className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <BookOpen size={12} />
+          </button>
+          {doc.format === "pdf" && section.page_start > 0 && (
+            <button
+              onClick={() => {
+                setPdfViewVisited(true)
+                setLeftTab("pdfview")
+                pdfViewerRef.current?.goToPage(section.page_start)
+              }}
+              title={`Open PDF at page ${section.page_start}`}
+              className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              p.{section.page_start}
+            </button>
+          )}
+          {mediaStartTime !== null && (
+            isYouTube && doc?.source_url ? (
+              <a
+                href={buildYouTubeTimestampUrl(doc.source_url, mediaStartTime)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open YouTube at ${formatMmSs(mediaStartTime)}`}
+                className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                {formatMmSs(mediaStartTime)}
+              </a>
+            ) : (
+              <button
+                onClick={() => isAudio ? seekAndPlay(mediaStartTime) : seekAndPlayVideo(mediaStartTime)}
+                title={`Play from ${formatMmSs(mediaStartTime)}`}
+                className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                {formatMmSs(mediaStartTime)}
+              </button>
+            )
+          )}
+          {progressBySectionId.has(section.id) && (
+            <button
+              onClick={() => setActiveSectionGoals(
+                activeSectionGoals === section.id ? null : section.id
+              )}
+              title={`${Math.round(progressBySectionId.get(section.id) ?? 0)}% objectives covered`}
+              className="mt-0.5 shrink-0"
+            >
+              <ChapterProgressRing pct={progressBySectionId.get(section.id) ?? 0} size={12} />
+            </button>
+          )}
+          {hasNote && (
+            <span title="Has note" className="mt-0.5 shrink-0 text-primary">
+              <StickyNote size={12} />
+            </span>
+          )}
+          <button
+            onClick={() =>
+              setOpenNoteEditor(editorOpen ? null : section.id)
+            }
+            title="Add note"
+            className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <StickyNote size={12} />
+          </button>
+          {(doc.content_type === "tech_book" || doc.content_type === "tech_article") && (
+            <button
+              onClick={() => setFeynmanSection(section.id)}
+              title="Practice Feynman technique for this section"
+              className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <Brain size={12} />
+            </button>
+          )}
+        </div>
+        {section.preview && (
+          <SectionPreviewWithHighlights
+            preview={section.preview}
+            annotations={annotationsBySection.get(section.id) ?? []}
+            sectionId={section.id}
+            searchSnippet={searchSnippetMap.get(section.id)}
+          />
+        )}
+        {section.preview && hasCodeFence(section.preview) && (
+          <PredictPanel
+            sectionId={section.id}
+            documentId={documentId}
+            preview={section.preview}
+          />
+        )}
+        {editorOpen && (
+          <NoteEditor
+            documentId={documentId}
+            sectionId={section.id}
+            onSaved={() => {
+              setOpenNoteEditor(null)
+              void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+              void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+              void qc.invalidateQueries({ queryKey: ["notes"] })
+              void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+              void qc.invalidateQueries({ queryKey: ["collections"] })
+            }}
+            onCancel={() => setOpenNoteEditor(null)}
+          />
+        )}
+      </li>
+    )
+  })
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Back button + Compare my notes (S197) */}
@@ -2306,32 +2537,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
                     <p className="text-xs font-medium text-foreground">{(docAnnotations ?? []).length} highlight{(docAnnotations ?? []).length !== 1 ? "s" : ""}</p>
                   </div>
                   <ul className="divide-y divide-border">
-                    {(docAnnotations ?? []).map((ann) => {
-                      const sectionHeading = doc.sections.find((s) => s.id === ann.section_id)?.heading ?? ""
-                      return (
-                        <li key={ann.id} className="flex items-start gap-2 px-3 py-2 hover:bg-accent/50 group">
-                          <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", COLOR_CLASSES[ann.color] ?? COLOR_CLASSES.yellow)} />
-                          <button
-                            onClick={() => navigateToHighlight(ann)}
-                            className="min-w-0 flex-1 text-left"
-                          >
-                            <p className="truncate text-xs text-foreground" title={ann.selected_text}>
-                              {ann.selected_text.length > 50 ? `${ann.selected_text.slice(0, 50)}...` : ann.selected_text}
-                            </p>
-                            {sectionHeading && (
-                              <p className="truncate text-[10px] text-muted-foreground">{sectionHeading}</p>
-                            )}
-                          </button>
-                          <button
-                            onClick={() => void handleDeleteHighlight(ann.id)}
-                            title="Remove highlight"
-                            className="shrink-0 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </li>
-                      )
-                    })}
+                    {renderedHighlightItems}
                   </ul>
                 </div>
               )}
@@ -2347,7 +2553,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={setPdfCurrentPage} />
+                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}
@@ -2430,167 +2636,7 @@ export function DocumentReader({ documentId, onBack, initialSectionId, initialCh
                     <p className="text-sm text-muted-foreground">No sections detected.</p>
                   ) : (
                     <ul className="space-y-3">
-                      {doc.sections.map((section) => {
-                        const hasNote = notedSections.has(section.id)
-                        const editorOpen = openNoteEditor === section.id
-                        const heatmapItem = heatmapData?.[section.id] ?? null
-                        const fragilityClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
-                        // Admonition styling takes priority over fragility heatmap
-                        const sectionBorderClass = section.admonition_type
-                          ? admonitionClass(section.admonition_type)
-                          : fragilityClass
-                        const tooltipText =
-                          heatmapItem && heatmapItem.fragility_score !== null
-                            ? `${heatmapItem.due_card_count} card${heatmapItem.due_card_count !== 1 ? "s" : ""} due, avg retention ${heatmapItem.avg_retention_pct ?? 0}%`
-                            : undefined
-                        // Timestamp badge for audio (S120), video (S121), and YouTube (S122)
-                        const mediaStartTime = (isAudio || isVideo || isYouTube) ? parseAudioStartTime(section.heading) : null
-                        return (
-                          <li
-                            key={section.id}
-                            data-section-id={section.id}
-                            title={tooltipText}
-                            className={cn(
-                              "rounded-md border border-border p-3",
-                              sectionBorderClass,
-                              searchHitSectionIds.has(section.id) && "ring-2 ring-primary",
-                            )}
-                          >
-                            <div className="flex items-start gap-1">
-                              <p
-                                className="flex-1 text-sm font-semibold text-foreground"
-                                style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
-                              >
-                                {section.admonition_type && (
-                                  <span
-                                    className="mr-1 rounded px-1 py-0.5 text-xs font-bold uppercase tracking-wide"
-                                    style={{ color: ADMONITION_LABEL_COLORS[section.admonition_type] ?? "inherit" }}
-                                  >
-                                    {section.admonition_type}
-                                  </span>
-                                )}
-                                {section.heading || "(Untitled section)"}
-                              </p>
-                              {/* Read button — switches to Read tab and scrolls to this section */}
-                              <button
-                                onClick={() => {
-                                  setReadSectionId(section.id)
-                                  setLeftTab("read")
-                                }}
-                                title="Read from this section"
-                                className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-                              >
-                                <BookOpen size={12} />
-                              </button>
-                              {/* PDF page-jump badge — switches to PDF View and navigates to the section's page */}
-                              {doc.format === "pdf" && section.page_start > 0 && (
-                                <button
-                                  onClick={() => {
-                                    setPdfViewVisited(true)
-                                    setLeftTab("pdfview")
-                                    pdfViewerRef.current?.goToPage(section.page_start)
-                                  }}
-                                  title={`Open PDF at page ${section.page_start}`}
-                                  className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                  p.{section.page_start}
-                                </button>
-                              )}
-                              {/* Timestamp badge — link out for YouTube, seek locally for audio/video */}
-                              {mediaStartTime !== null && (
-                                isYouTube && doc?.source_url ? (
-                                  <a
-                                    href={buildYouTubeTimestampUrl(doc.source_url, mediaStartTime)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={`Open YouTube at ${formatMmSs(mediaStartTime)}`}
-                                    className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-                                  >
-                                    {formatMmSs(mediaStartTime)}
-                                  </a>
-                                ) : (
-                                  <button
-                                    onClick={() => isAudio ? seekAndPlay(mediaStartTime) : seekAndPlayVideo(mediaStartTime)}
-                                    title={`Play from ${formatMmSs(mediaStartTime)}`}
-                                    className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-                                  >
-                                    {formatMmSs(mediaStartTime)}
-                                  </button>
-                                )
-                              )}
-                              {/* Mini progress ring (S143) — only when objectives exist for this section */}
-                              {progressBySectionId.has(section.id) && (
-                                <button
-                                  onClick={() => setActiveSectionGoals(
-                                    activeSectionGoals === section.id ? null : section.id
-                                  )}
-                                  title={`${Math.round(progressBySectionId.get(section.id) ?? 0)}% objectives covered`}
-                                  className="mt-0.5 shrink-0"
-                                >
-                                  <ChapterProgressRing pct={progressBySectionId.get(section.id) ?? 0} size={12} />
-                                </button>
-                              )}
-                              {hasNote && (
-                                <span title="Has note" className="mt-0.5 shrink-0 text-primary">
-                                  <StickyNote size={12} />
-                                </span>
-                              )}
-                              <button
-                                onClick={() =>
-                                  setOpenNoteEditor(editorOpen ? null : section.id)
-                                }
-                                title="Add note"
-                                className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-                              >
-                                <StickyNote size={12} />
-                              </button>
-                              {/* Feynman button -- only for tech books (S144) */}
-                              {(doc.content_type === "tech_book" || doc.content_type === "tech_article") && (
-                                <button
-                                  onClick={() => setFeynmanSection(section.id)}
-                                  title="Practice Feynman technique for this section"
-                                  className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-                                >
-                                  <Brain size={12} />
-                                </button>
-                              )}
-                            </div>
-                            {section.preview && (
-                              <SectionPreviewWithHighlights
-                                preview={section.preview}
-                                annotations={docAnnotations ?? []}
-                                sectionId={section.id}
-                                searchSnippet={
-                                  searchResults.find((r) => r.section_id === section.id)?.snippet
-                                }
-                              />
-                            )}
-                            {/* Predict toggle — only for sections whose preview contains a code fence (S140) */}
-                            {section.preview && hasCodeFence(section.preview) && (
-                              <PredictPanel
-                                sectionId={section.id}
-                                documentId={documentId}
-                                preview={section.preview}
-                              />
-                            )}
-                            {editorOpen && (
-                              <NoteEditor
-                                documentId={documentId}
-                                sectionId={section.id}
-                                onSaved={() => {
-                                  setOpenNoteEditor(null)
-                                  void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-                                  void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-                                  void qc.invalidateQueries({ queryKey: ["notes"] })
-                                  void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-                                  void qc.invalidateQueries({ queryKey: ["collections"] })
-                                }}
-                                onCancel={() => setOpenNoteEditor(null)}
-                              />
-                            )}
-                          </li>
-                        )
-                      })}
+                      {renderedSectionItems}
                     </ul>
                   )}
                 </div>

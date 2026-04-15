@@ -59,6 +59,21 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
 const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
 
+// Accent band colors per content type (top-border gradient effect)
+const ACCENT_COLORS: Record<string, string> = {
+  book: "from-indigo-500 to-blue-500",
+  paper: "from-purple-500 to-violet-500",
+  code: "from-orange-500 to-amber-500",
+  epub: "from-indigo-400 to-purple-500",
+  conversation: "from-emerald-500 to-green-500",
+  notes: "from-slate-400 to-gray-500",
+  audio: "from-yellow-500 to-orange-400",
+  kindle_clippings: "from-amber-500 to-yellow-500",
+  tech_book: "from-blue-500 to-cyan-500",
+  tech_article: "from-teal-500 to-emerald-500",
+  youtube: "from-red-500 to-rose-500",
+}
+
 const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "tech_book", "tech_article"]
 
 const ACTION_ICONS: Record<DocAction, typeof BookOpen> = {
@@ -183,11 +198,20 @@ export function DocumentCard({
     }
   }
 
+  const accentKey = isYouTube ? "youtube" : doc.content_type
+  const accentGradient = ACCENT_COLORS[accentKey] ?? "from-slate-400 to-gray-500"
+
   return (
     <Card
-      className={`group cursor-pointer select-none transition-colors ${selected ? "border-primary bg-primary/5" : ""}`}
+      className={cn(
+        "group cursor-pointer select-none transition-all duration-200 overflow-hidden",
+        "hover:shadow-lg hover:-translate-y-0.5",
+        selected ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "hover:border-border/80",
+      )}
       onClick={handleCardClick}
     >
+      {/* Accent band */}
+      <div className={cn("h-1 w-full bg-gradient-to-r", accentGradient)} />
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {onSelect && (
