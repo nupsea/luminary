@@ -125,20 +125,20 @@ async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
 }
 
 async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes`, {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note_ids: [noteId] }),
+    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
   })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/notes failed`)
+  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
 }
 
 async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes/${noteId}`, {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
     method: "DELETE",
   })
   if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${collectionId}/notes/${noteId} failed`)
+    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
 }
 
 async function fetchNoteLinks(noteId: string): Promise<NoteLinksResponse> {

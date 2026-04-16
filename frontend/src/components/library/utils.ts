@@ -1,19 +1,31 @@
-import { BookOpen, BookText, Code2, MessageSquare, ScrollText, StickyNote, Volume2, Youtube } from "lucide-react"
-import type { ContentType, LearningStatus } from "./types"
+import { 
+  Book, 
+  BookOpen, 
+  Bookmark, 
+  Code, 
+  Cpu, 
+  FileText, 
+  MessageSquare, 
+  Mic, 
+  Newspaper, 
+  StickyNote, 
+  Youtube 
+} from "lucide-react"
+import type { ContentType } from "./types"
 
 export { Youtube }
 
 export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
-  book: BookOpen,
-  paper: ScrollText,
+  book: Book,
+  paper: FileText,
   conversation: MessageSquare,
   notes: StickyNote,
-  code: Code2,
-  audio: Volume2,
-  epub: BookText,
-  kindle_clippings: BookText,
-  tech_book: BookOpen,
-  tech_article: StickyNote,
+  code: Code,
+  audio: Mic,
+  epub: BookOpen,
+  kindle_clippings: Bookmark,
+  tech_book: Cpu,
+  tech_article: Newspaper,
 }
 
 export function isYouTubeDoc(doc: { source_url?: string | null }): boolean {

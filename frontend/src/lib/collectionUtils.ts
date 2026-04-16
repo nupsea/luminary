@@ -10,6 +10,7 @@ export interface CollectionTreeItem {
   color: string
   icon: string | null
   note_count: number
+  document_count: number
   children: CollectionTreeItem[]
 }
 
@@ -29,16 +30,17 @@ export function flattenCollectionTree(items: CollectionTreeItem[]): CollectionTr
  * Build the fetch request parameters for adding a note to a collection.
  * Used by NoteEditorDialog checkbox (checked -> POST).
  */
-export function buildAddNoteRequest(
+export function buildAddMemberRequest(
   apiBase: string,
   collectionId: string,
-  noteId: string,
+  memberId: string,
+  memberType: "note" | "document" = "note",
 ): { url: string; method: string; body: string; headers: Record<string, string> } {
   return {
-    url: `${apiBase}/collections/${collectionId}/notes`,
+    url: `${apiBase}/collections/${collectionId}/members`,
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note_ids: [noteId] }),
+    body: JSON.stringify({ member_ids: [memberId], member_type: memberType }),
   }
 }
 
@@ -46,13 +48,13 @@ export function buildAddNoteRequest(
  * Build the fetch request parameters for removing a note from a collection.
  * Used by NoteEditorDialog checkbox (unchecked -> DELETE).
  */
-export function buildRemoveNoteRequest(
+export function buildRemoveMemberRequest(
   apiBase: string,
   collectionId: string,
-  noteId: string,
+  memberId: string,
 ): { url: string; method: string } {
   return {
-    url: `${apiBase}/collections/${collectionId}/notes/${noteId}`,
+    url: `${apiBase}/collections/${collectionId}/members/${memberId}`,
     method: "DELETE",
   }
 }

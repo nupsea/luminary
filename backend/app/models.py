@@ -586,14 +586,14 @@ class ReadingPositionModel(Base):
     )
 
 
-class NoteCollectionModel(Base):
-    """A named collection of notes supporting up to 2 levels of nesting.
+class CollectionModel(Base):
+    """A named collection of notes and documents supporting up to 2 levels of nesting.
 
     parent_collection_id is null for top-level collections.
     Max depth: child collections may not themselves have children (enforced at API layer).
     """
 
-    __tablename__ = "note_collections"
+    __tablename__ = "collections"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -609,22 +609,23 @@ class NoteCollectionModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
-class NoteCollectionMemberModel(Base):
-    """Pivot table: maps notes to collections (many-to-many).
+class CollectionMemberModel(Base):
+    """Pivot table: maps members (notes, documents) to collections (many-to-many).
 
-    A note may belong to multiple collections.
-    Duplicate (note_id, collection_id) pairs are silently ignored via ON CONFLICT DO NOTHING.
+    Duplicate (member_id, collection_id, member_type) triples are silently ignored via ON CONFLICT DO NOTHING.
     """
 
-    __tablename__ = "note_collection_members"
+    __tablename__ = "collection_members"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    note_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     collection_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    member_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    # note | document
+    member_type: Mapped[str] = mapped_column(String, nullable=False, default="note")
     added_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
-        UniqueConstraint("note_id", "collection_id", name="uq_note_collection_member"),
+        UniqueConstraint("member_id", "collection_id", "member_type", name="uq_collection_member"),
     )
 
 

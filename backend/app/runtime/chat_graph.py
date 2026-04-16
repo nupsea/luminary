@@ -987,21 +987,22 @@ async def notes_gap_node(state: ChatState) -> dict:
         from sqlalchemy import select  # noqa: PLC0415
 
         from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import NoteCollectionMemberModel, NoteCollectionModel  # noqa: PLC0415
+        from app.models import CollectionMemberModel, CollectionModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             # Step 1: find auto-collection for this document
             coll_row = (await session.execute(
-                select(NoteCollectionModel.id).where(
-                    NoteCollectionModel.auto_document_id == document_id
+                select(CollectionModel.id).where(
+                    CollectionModel.auto_document_id == document_id
                 )
             )).first()
             if coll_row:
                 auto_collection_id = coll_row[0]
                 # Step 2: fetch note IDs from collection members
                 member_rows = (await session.execute(
-                    select(NoteCollectionMemberModel.note_id).where(
-                        NoteCollectionMemberModel.collection_id == auto_collection_id
+                    select(CollectionMemberModel.member_id).where(
+                        CollectionMemberModel.collection_id == auto_collection_id,
+                        CollectionMemberModel.member_type == "note",
                     )
                 )).fetchall()
                 note_ids = [r[0] for r in member_rows]

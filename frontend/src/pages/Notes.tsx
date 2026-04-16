@@ -1307,10 +1307,10 @@ export default function NotesPage() {
           
           if (isCreating && activeCollectionId) {
             // If we're inside a collection, add the new note to it immediately
-            void fetch(`${API_BASE}/collections/${activeCollectionId}/notes`, {
+            void fetch(`${API_BASE}/collections/${activeCollectionId}/members`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ note_ids: [savedNote.id] }),
+              body: JSON.stringify({ member_ids: [savedNote.id], member_type: "note" }),
             }).then(() => {
               void qc.invalidateQueries({ queryKey: ["notes"] })
               void qc.invalidateQueries({ queryKey: ["notes-groups"] })

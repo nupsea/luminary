@@ -5,7 +5,7 @@ Reads all note embeddings from LanceDB note_vectors_v2, runs sklearn HDBSCAN
 per-cluster confidence scores, generates human-readable collection names via LiteLLM,
 and persists each cluster as a ClusterSuggestionModel row.
 
-Users then accept (creates NoteCollection + members) or reject each suggestion via the API.
+Users then accept (creates Collection + members) or reject each suggestion via the API.
 """
 
 import asyncio
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ClusterSuggestionModel,
-    NoteCollectionModel,
+    CollectionModel,
     NoteModel,
 )
 from app.services.naming import normalize_collection_name, normalize_tag_slug
@@ -242,7 +242,7 @@ class ClusteringService:
     async def accept_suggestion(
         self, suggestion_id: str, db: AsyncSession
     ) -> str | None:
-        """Accept a cluster suggestion: create NoteCollection + members, mark accepted.
+        """Accept a cluster suggestion: create Collection + members, mark accepted.
 
         Returns the new collection_id, or None if suggestion not found.
         """
@@ -255,7 +255,7 @@ class ClusteringService:
 
         # Create NoteCollection
         collection_id = str(uuid.uuid4())
-        collection = NoteCollectionModel(
+        collection = CollectionModel(
             id=collection_id,
             name=normalize_collection_name(suggestion.suggested_name),
             color="#6366F1",
@@ -272,13 +272,14 @@ class ClusteringService:
         for note_id in suggestion.note_ids or []:
             await db.execute(
                 sa_text(
-                    "INSERT OR IGNORE INTO note_collection_members"
-                    " (id, note_id, collection_id, added_at)"
-                    " VALUES (:id, :note_id, :collection_id, :added_at)"
+                    "INSERT OR IGNORE INTO collection_members"
+                    " (id, member_id, member_type, collection_id, added_at)"
+                    " VALUES (:id, :member_id, :member_type, :collection_id, :added_at)"
                 ),
                 {
                     "id": str(uuid.uuid4()),
-                    "note_id": note_id,
+                    "member_id": note_id,
+                    "member_type": "note",
                     "collection_id": collection_id,
                     "added_at": datetime.now(UTC).isoformat(),
                 },
@@ -343,7 +344,7 @@ class ClusteringService:
             collection_id = str(uuid.uuid4())
             raw_name = name_overrides.get(sid) or suggestion.suggested_name
             name = normalize_collection_name(raw_name)
-            collection = NoteCollectionModel(
+            collection = CollectionModel(
                 id=collection_id,
                 name=name,
                 color="#6366F1",
@@ -360,13 +361,14 @@ class ClusteringService:
             for note_id in effective_note_ids:
                 await db.execute(
                     sa_text(
-                        "INSERT OR IGNORE INTO note_collection_members"
-                        " (id, note_id, collection_id, added_at)"
-                        " VALUES (:id, :note_id, :collection_id, :added_at)"
+                        "INSERT OR IGNORE INTO collection_members"
+                        " (id, member_id, member_type, collection_id, added_at)"
+                        " VALUES (:id, :member_id, :member_type, :collection_id, :added_at)"
                     ),
                     {
                         "id": str(uuid.uuid4()),
-                        "note_id": note_id,
+                        "member_id": note_id,
+                        "member_type": "note",
                         "collection_id": collection_id,
                         "added_at": datetime.now(UTC).isoformat(),
                     },
@@ -462,8 +464,8 @@ class ClusteringService:
         # --- Collections ---
         coll_rows = (
             await db.execute(
-                select(NoteCollectionModel).where(
-                    NoteCollectionModel.auto_document_id.is_(None)
+                select(CollectionModel).where(
+                    CollectionModel.auto_document_id.is_(None)
                 )
             )
         ).scalars().all()
@@ -624,7 +626,7 @@ class ClusteringService:
                 new_name = fix["suggested_name"]
                 coll = (
                     await db.execute(
-                        select(NoteCollectionModel).where(NoteCollectionModel.id == coll_id)
+                        select(CollectionModel).where(CollectionModel.id == coll_id)
                     )
                 ).scalar_one_or_none()
                 if coll:

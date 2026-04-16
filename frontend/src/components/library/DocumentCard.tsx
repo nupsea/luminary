@@ -2,7 +2,25 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { BookOpen, Check, MessageSquare, Network, Pencil, MoreVertical, StickyNote, Trash2, X, Zap } from "lucide-react"
+import { 
+  Book, 
+  BookOpen, 
+  Bookmark, 
+  Check, 
+  Code, 
+  Cpu, 
+  FileText, 
+  MessageSquare, 
+  Mic, 
+  MoreVertical, 
+  Network, 
+  Newspaper, 
+  Pencil, 
+  StickyNote, 
+  Trash2, 
+  X, 
+  Zap 
+} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
@@ -43,17 +61,17 @@ function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   )
 }
 
-const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string }> = {
-  book: { label: "Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
-  conversation: { label: "Conversation", className: "bg-green-100 text-green-700 hover:bg-green-200" },
-  notes: { label: "Notes", className: "bg-gray-100 text-gray-600 hover:bg-gray-200" },
-  paper: { label: "Paper", className: "bg-purple-100 text-purple-700 hover:bg-purple-200" },
-  code: { label: "Code", className: "bg-orange-100 text-orange-700 hover:bg-orange-200" },
-  audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
-  epub: { label: "EPUB", className: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
-  kindle_clippings: { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
-  tech_book: { label: "Tech Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
-  tech_article: { label: "Tech Article", className: "bg-teal-100 text-teal-700 hover:bg-teal-200" },
+const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string; icon: typeof Book }> = {
+  book: { label: "Book", className: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100", icon: Book },
+  conversation: { label: "Chat Log", className: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100", icon: MessageSquare },
+  notes: { label: "Note", className: "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100", icon: StickyNote },
+  paper: { label: "Paper", className: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100", icon: FileText },
+  code: { label: "Code", className: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100", icon: Code },
+  audio: { label: "Audio", className: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100", icon: Mic },
+  epub: { label: "E-Book", className: "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100", icon: BookOpen },
+  kindle_clippings: { label: "Kindle", className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100", icon: Bookmark },
+  tech_book: { label: "Tech Book", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100", icon: Cpu },
+  tech_article: { label: "Article", className: "bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100", icon: Newspaper },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
@@ -112,7 +130,7 @@ export function DocumentCard({
   const isYouTube = isYouTubeDoc(doc)
   const isKindleSource = doc.tags.includes("kindle")
   const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
-  const badge = isYouTube ? YOUTUBE_BADGE : (isKindleSource ? KINDLE_SOURCE_BADGE : CONTENT_TYPE_BADGE[doc.content_type])
+  const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : CONTENT_TYPE_BADGE[doc.content_type])
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -292,10 +310,11 @@ export function DocumentCard({
           }}
           title="Change document type (re-ingest to apply new chunking)"
           className={cn(
-            "rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
+            "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors border shadow-sm",
             badge.className,
           )}
         >
+          {badge.icon && <badge.icon size={10} />}
           {badge.label}
         </button>
 

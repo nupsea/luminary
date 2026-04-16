@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest"
 import {
   flattenCollectionTree,
   countTreeItems,
-  buildAddNoteRequest,
-  buildRemoveNoteRequest,
+  buildAddMemberRequest,
+  buildRemoveMemberRequest,
 } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 
@@ -35,6 +35,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
     color: "#6366F1",
     icon: null,
     note_count: 5,
+    document_count: 2,
     children: [
       {
         id: "col-1a",
@@ -42,6 +43,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
         color: "#8B5CF6",
         icon: null,
         note_count: 18,
+        document_count: 0,
         children: [],
       },
       {
@@ -50,6 +52,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
         color: "#EC4899",
         icon: null,
         note_count: 27,
+        document_count: 1,
         children: [],
       },
     ],
@@ -60,6 +63,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
     color: "#10B981",
     icon: null,
     note_count: 12,
+    document_count: 0,
     children: [],
   },
 ]
@@ -77,8 +81,8 @@ describe("CollectionTree item count from fixture", () => {
 
   it("counts only top-level items when tree has no children", () => {
     const flat: CollectionTreeItem[] = [
-      { id: "a", name: "A", color: "#fff", icon: null, note_count: 1, children: [] },
-      { id: "b", name: "B", color: "#fff", icon: null, note_count: 2, children: [] },
+      { id: "a", name: "A", color: "#fff", icon: null, note_count: 1, document_count: 0, children: [] },
+      { id: "b", name: "B", color: "#fff", icon: null, note_count: 2, document_count: 0, children: [] },
     ]
     expect(countTreeItems(flat)).toBe(2)
   })
@@ -110,38 +114,39 @@ describe("CollectionTree item count from fixture", () => {
 })
 
 // ---------------------------------------------------------------------------
-// AC: Checkbox check fires POST /collections/{id}/notes (correct endpoint)
+// AC: Checkbox check fires POST /collections/{id}/members (correct endpoint)
 // ---------------------------------------------------------------------------
 
 describe("Checkbox fires correct endpoints", () => {
   const NOTE_ID = "note-abc-123"
   const COL_ID = "col-1"
 
-  it("check fires POST /collections/{id}/notes with correct URL", () => {
-    const req = buildAddNoteRequest(API_BASE, COL_ID, NOTE_ID)
+  it("check fires POST /collections/{id}/members with correct URL", () => {
+    const req = buildAddMemberRequest(API_BASE, COL_ID, NOTE_ID)
     expect(req.method).toBe("POST")
-    expect(req.url).toBe(`${API_BASE}/collections/${COL_ID}/notes`)
+    expect(req.url).toBe(`${API_BASE}/collections/${COL_ID}/members`)
   })
 
-  it("check body contains note_ids array with the note id", () => {
-    const req = buildAddNoteRequest(API_BASE, COL_ID, NOTE_ID)
-    const body = JSON.parse(req.body) as { note_ids: string[] }
-    expect(body.note_ids).toEqual([NOTE_ID])
+  it("check body contains member_ids array and member_type", () => {
+    const req = buildAddMemberRequest(API_BASE, COL_ID, NOTE_ID)
+    const body = JSON.parse(req.body) as { member_ids: string[]; member_type: string }
+    expect(body.member_ids).toEqual([NOTE_ID])
+    expect(body.member_type).toBe("note")
   })
 
   it("check sets Content-Type: application/json header", () => {
-    const req = buildAddNoteRequest(API_BASE, COL_ID, NOTE_ID)
+    const req = buildAddMemberRequest(API_BASE, COL_ID, NOTE_ID)
     expect(req.headers["Content-Type"]).toBe("application/json")
   })
 
-  it("uncheck fires DELETE /collections/{id}/notes/{note_id} with correct URL", () => {
-    const req = buildRemoveNoteRequest(API_BASE, COL_ID, NOTE_ID)
+  it("uncheck fires DELETE /collections/{id}/members/{member_id} with correct URL", () => {
+    const req = buildRemoveMemberRequest(API_BASE, COL_ID, NOTE_ID)
     expect(req.method).toBe("DELETE")
-    expect(req.url).toBe(`${API_BASE}/collections/${COL_ID}/notes/${NOTE_ID}`)
+    expect(req.url).toBe(`${API_BASE}/collections/${COL_ID}/members/${NOTE_ID}`)
   })
 
-  it("uncheck URL includes both collection id and note id", () => {
-    const req = buildRemoveNoteRequest(API_BASE, "col-99", "note-xyz")
+  it("uncheck URL includes both collection id and member id", () => {
+    const req = buildRemoveMemberRequest(API_BASE, "col-99", "note-xyz")
     expect(req.url).toContain("col-99")
     expect(req.url).toContain("note-xyz")
   })

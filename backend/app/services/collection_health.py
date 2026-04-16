@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     FlashcardModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
+    CollectionMemberModel,
+    CollectionModel,
     NoteModel,
     NoteTagIndexModel,
 )
@@ -123,7 +123,7 @@ class CollectionHealthService:
         """Compute all health metrics for the given collection."""
         # Fetch collection
         col_result = await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+            select(CollectionModel).where(CollectionModel.id == collection_id)
         )
         col = col_result.scalar_one_or_none()
         if col is None:
@@ -131,8 +131,9 @@ class CollectionHealthService:
 
         # Member note IDs
         member_result = await session.execute(
-            select(NoteCollectionMemberModel.note_id).where(
-                NoteCollectionMemberModel.collection_id == collection_id
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
             )
         )
         member_note_ids: list[str] = [row[0] for row in member_result.all()]
@@ -146,7 +147,9 @@ class CollectionHealthService:
             select(NoteModel.id).where(
                 NoteModel.archived.is_(False),
                 NoteModel.id.not_in(
-                    select(NoteCollectionMemberModel.note_id).distinct()
+                    select(CollectionMemberModel.member_id).where(
+                        CollectionMemberModel.member_type == "note"
+                    ).distinct()
                 ),
             )
         )
@@ -229,15 +232,16 @@ class CollectionHealthService:
     ) -> int:
         """Set archived=True for stale notes in this collection. Returns count archived."""
         col_result = await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+            select(CollectionModel).where(CollectionModel.id == collection_id)
         )
         col = col_result.scalar_one_or_none()
         if col is None:
             raise ValueError(f"Collection {collection_id!r} not found")
 
         member_result = await session.execute(
-            select(NoteCollectionMemberModel.note_id).where(
-                NoteCollectionMemberModel.collection_id == collection_id
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
             )
         )
         member_note_ids = [row[0] for row in member_result.all()]

@@ -17,8 +17,8 @@ from app.models import (
     ChunkModel,
     DocumentModel,
     FlashcardModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
+    CollectionMemberModel,
+    CollectionModel,
     NoteModel,
     SectionModel,
 )
@@ -942,7 +942,7 @@ class FlashcardService:
         """
         from sqlalchemy import or_  # noqa: PLC0415
 
-        from app.models import NoteCollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
+        from app.models import CollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
 
         stmt = select(FlashcardModel)
         _fts_query_used = False
@@ -972,8 +972,9 @@ class FlashcardService:
             stmt = stmt.where(FlashcardModel.document_id == document_id)
 
         if collection_id:
-            member_sub = select(NoteCollectionMemberModel.note_id).where(
-                NoteCollectionMemberModel.collection_id == collection_id
+            member_sub = select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
             )
             stmt = stmt.where(FlashcardModel.note_id.in_(member_sub))
 
@@ -1021,8 +1022,9 @@ class FlashcardService:
             if document_id:
                 stmt_fallback = stmt_fallback.where(FlashcardModel.document_id == document_id)
             if collection_id:
-                member_sub2 = select(NoteCollectionMemberModel.note_id).where(
-                    NoteCollectionMemberModel.collection_id == collection_id
+                member_sub2 = select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_type == "note",
                 )
                 stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(member_sub2))
             if tag:
@@ -1424,7 +1426,7 @@ class FlashcardService:
 
         # 1. Fetch collection name
         coll_result = await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+            select(CollectionModel).where(CollectionModel.id == collection_id)
         )
         collection = coll_result.scalar_one_or_none()
         if collection is None:
@@ -1434,8 +1436,9 @@ class FlashcardService:
 
         # 2. Fetch member note_ids
         member_result = await session.execute(
-            select(NoteCollectionMemberModel.note_id).where(
-                NoteCollectionMemberModel.collection_id == collection_id
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
             )
         )
         note_ids = [row[0] for row in member_result.all()]

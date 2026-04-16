@@ -41,7 +41,7 @@ from app.models import (
     ChunkModel,
     DocumentModel,
     FlashcardModel,
-    NoteCollectionModel,
+    CollectionModel,
     ReviewEventModel,
     SectionModel,
 )
@@ -697,8 +697,8 @@ async def list_flashcard_decks(
 ) -> list[DeckItem]:
     """Return all distinct decks with card counts and source type (S169).
 
-    source_type is derived by joining deck name against NoteCollectionModel.name:
-    - "collection" when the deck matches a NoteCollectionModel.name
+    source_type is derived by joining deck name against CollectionModel.name:
+    - "collection" when the deck matches a CollectionModel.name
     - "document" when document_id is non-null (source='document')
     - "note" otherwise (tag-scoped or note_ids-scoped)
     """
@@ -718,7 +718,7 @@ async def list_flashcard_decks(
 
     # Fetch all collection names in one query
     coll_result = await session.execute(
-        select(NoteCollectionModel.id, NoteCollectionModel.name)
+        select(CollectionModel.id, CollectionModel.name)
     )
     name_to_id = {row[1]: row[0] for row in coll_result.all()}
 

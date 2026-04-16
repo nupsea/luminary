@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     DocumentModel,
     FlashcardModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
+    CollectionMemberModel,
+    CollectionModel,
     NoteModel,
 )
 
@@ -113,11 +113,11 @@ class ExportService:
         self,
         collection_id: str,
         session: AsyncSession,
-    ) -> tuple[NoteCollectionModel, list[str], list[NoteModel]]:
+    ) -> tuple[CollectionModel, list[str], list[NoteModel]]:
         """Return (collection, collection_path, notes_in_collection_and_children)."""
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                select(CollectionModel).where(CollectionModel.id == collection_id)
             )
         ).scalar_one_or_none()
         if col is None:
@@ -127,8 +127,8 @@ class ExportService:
         if col.parent_collection_id:
             parent = (
                 await session.execute(
-                    select(NoteCollectionModel).where(
-                        NoteCollectionModel.id == col.parent_collection_id
+                    select(CollectionModel).where(
+                        CollectionModel.id == col.parent_collection_id
                     )
                 )
             ).scalar_one_or_none()
@@ -138,8 +138,8 @@ class ExportService:
 
         # Gather all relevant collection_ids: the collection itself + child collections
         child_ids_result = await session.execute(
-            select(NoteCollectionModel.id).where(
-                NoteCollectionModel.parent_collection_id == collection_id
+            select(CollectionModel.id).where(
+                CollectionModel.parent_collection_id == collection_id
             )
         )
         child_ids = [row[0] for row in child_ids_result.all()]
@@ -148,8 +148,9 @@ class ExportService:
         # Load all note_ids in these collections
         member_rows = (
             await session.execute(
-                select(NoteCollectionMemberModel.note_id).where(
-                    NoteCollectionMemberModel.collection_id.in_(all_collection_ids)
+                select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id.in_(all_collection_ids),
+                    CollectionMemberModel.member_type == "note",
                 )
             )
         ).all()
@@ -229,7 +230,7 @@ class ExportService:
         """
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                select(CollectionModel).where(CollectionModel.id == collection_id)
             )
         ).scalar_one_or_none()
         if col is None:

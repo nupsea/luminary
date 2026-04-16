@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import (
-    NoteCollectionMemberModel,
+    CollectionMemberModel,
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
@@ -517,8 +517,9 @@ async def list_notes(
     if collection_id:
         stmt = stmt.where(
             NoteModel.id.in_(
-                select(NoteCollectionMemberModel.note_id).where(
-                    NoteCollectionMemberModel.collection_id == collection_id
+                select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_type == "note",
                 )
             )
         )
@@ -534,9 +535,12 @@ async def list_notes(
         member_rows = (
             await session.execute(
                 select(
-                    NoteCollectionMemberModel.note_id,
-                    NoteCollectionMemberModel.collection_id,
-                ).where(NoteCollectionMemberModel.note_id.in_(note_ids))
+                    CollectionMemberModel.member_id,
+                    CollectionMemberModel.collection_id,
+                ).where(
+                    CollectionMemberModel.member_id.in_(note_ids),
+                    CollectionMemberModel.member_type == "note",
+                )
             )
         ).all()
         for row in member_rows:
@@ -611,8 +615,9 @@ async def _apply_note_update(
     # Re-fetch relevant IDs for a fully populated response
     coll_rows = (
         await session.execute(
-            select(NoteCollectionMemberModel.collection_id).where(
-                NoteCollectionMemberModel.note_id == note.id
+            select(CollectionMemberModel.collection_id).where(
+                CollectionMemberModel.member_id == note.id,
+                CollectionMemberModel.member_type == "note",
             )
         )
     ).scalars().all()
@@ -714,20 +719,21 @@ async def preview_note_flashcard_generation(
 
     from app.models import (  # noqa: PLC0415
         FlashcardModel,
-        NoteCollectionMemberModel,
-        NoteCollectionModel,
+        CollectionMemberModel,
+        CollectionModel,
     )
 
     coll_result = await session.execute(
-        select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+        select(CollectionModel).where(CollectionModel.id == collection_id)
     )
     collection = coll_result.scalar_one_or_none()
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     member_result = await session.execute(
-        select(sa_func.count()).select_from(NoteCollectionMemberModel).where(
-            NoteCollectionMemberModel.collection_id == collection_id
+        select(sa_func.count()).select_from(CollectionMemberModel).where(
+            CollectionMemberModel.collection_id == collection_id,
+            CollectionMemberModel.member_type == "note",
         )
     )
     total_notes = member_result.scalar_one()
@@ -995,7 +1001,7 @@ async def accept_cluster_suggestion(
     suggestion_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Accept a cluster suggestion: create NoteCollection + member rows."""
+    """Accept a cluster suggestion: create Collection + member rows."""
     from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     collection_id = await get_clustering_service().accept_suggestion(suggestion_id, session)
@@ -1255,8 +1261,8 @@ async def get_note(
 
     member_rows = (
         await session.execute(
-            select(NoteCollectionMemberModel.collection_id).where(
-                NoteCollectionMemberModel.note_id == note_id
+            select(CollectionMemberModel.collection_id).where(
+                CollectionMemberModel.note_id == note_id
             )
         )
     ).scalars().all()

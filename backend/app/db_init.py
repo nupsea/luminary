@@ -23,8 +23,8 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     LearningObjectiveModel,
     LibrarySummaryModel,
     MisconceptionModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
+    CollectionMemberModel,
+    CollectionModel,
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
@@ -122,8 +122,48 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.execute(text(FLASHCARDS_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
-        # Additive migrations — safe to run on existing databases.
-        # SQLite ignores "duplicate column" errors so we wrap each in its own try.
+        # S208: Rename note_collections to collections.
+        # SQLite does not support RENAME TABLE if there are dependent views or triggers
+        # in some versions, but usually it's fine. We'll use the table-rebuild idiom
+        # to ensure the new table name is set correctly in metadata.
+        try:
+            await conn.execute(text("ALTER TABLE note_collections RENAME TO collections"))
+        except Exception:
+            pass  # Already renamed or doesn't exist
+
+        # S208: Create collection_members and migrate from note_collection_members.
+        # We check if collection_members exists; if not, create and migrate.
+        try:
+            # Check if old table exists
+            table_check = (await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='note_collection_members'")
+            )).fetchone()
+            if table_check:
+                # Create the new generic table if it doesn't exist yet (Base.metadata.create_all handles this too)
+                await conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS collection_members ("
+                        " id TEXT PRIMARY KEY,"
+                        " collection_id TEXT NOT NULL,"
+                        " member_id TEXT NOT NULL,"
+                        " member_type TEXT NOT NULL DEFAULT 'note',"
+                        " added_at DATETIME,"
+                        " UNIQUE(member_id, collection_id, member_type)"
+                        ")"
+                    )
+                )
+                # Migrate existing note memberships
+                await conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO collection_members (id, collection_id, member_id, member_type, added_at)"
+                        " SELECT id, collection_id, note_id, 'note', added_at FROM note_collection_members"
+                    )
+                )
+                # Drop the old table
+                await conn.execute(text("DROP TABLE note_collection_members"))
+        except Exception as e:
+            logger.warning("Migration S208 failed (non-critical): %s", e)
+
         for ddl in [
             "ALTER TABLE documents ADD COLUMN file_hash TEXT",
             "ALTER TABLE documents ADD COLUMN chapter_count INTEGER",
@@ -166,7 +206,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE documents ADD COLUMN channel_name TEXT",
             "ALTER TABLE documents ADD COLUMN youtube_url TEXT",
             # S192: auto-collection document linkage
-            "ALTER TABLE note_collections ADD COLUMN auto_document_id TEXT",
+            "ALTER TABLE collections ADD COLUMN auto_document_id TEXT",
             # S194: URL validation status for web references
             "ALTER TABLE web_references ADD COLUMN is_valid INTEGER",
             "ALTER TABLE web_references ADD COLUMN last_checked_at DATETIME",
@@ -176,13 +216,13 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             except Exception:
                 pass  # column already exists
 
-        # S161: migrate distinct group_name values into note_collections (idempotent).
+        # S161: migrate distinct group_name values into collections (idempotent).
         # Uses INSERT OR IGNORE so re-running on an already-migrated DB is safe.
         # The collection id is derived from the group_name to be deterministic across runs.
         await conn.execute(
             text(
                 """
-                INSERT OR IGNORE INTO note_collections
+                INSERT OR IGNORE INTO collections
                     (id, name, color, sort_order, created_at, updated_at)
                 SELECT
                     lower(hex(randomblob(16))) AS id,
@@ -196,23 +236,24 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     FROM notes
                     WHERE group_name IS NOT NULL
                 ) AS distinct_groups
-                WHERE group_name NOT IN (SELECT name FROM note_collections)
+                WHERE group_name NOT IN (SELECT name FROM collections)
                 """
             )
         )
 
-        # S161: populate note_collection_members from group_name (idempotent via INSERT OR IGNORE).
+        # S161: populate collection_members from group_name (idempotent via INSERT OR IGNORE).
         await conn.execute(
             text(
                 """
-                INSERT OR IGNORE INTO note_collection_members (id, note_id, collection_id, added_at)
+                INSERT OR IGNORE INTO collection_members (id, member_id, collection_id, member_type, added_at)
                 SELECT
                     lower(hex(randomblob(16))) AS id,
-                    notes.id AS note_id,
-                    note_collections.id AS collection_id,
+                    notes.id AS member_id,
+                    collections.id AS collection_id,
+                    'note' AS member_type,
                     datetime('now') AS added_at
                 FROM notes
-                JOIN note_collections ON notes.group_name = note_collections.name
+                JOIN collections ON notes.group_name = collections.name
                 WHERE notes.group_name IS NOT NULL
                 """
             )
@@ -221,8 +262,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # S192: index on auto_document_id for fast auto-collection lookup.
         await conn.execute(
             text(
-                "CREATE INDEX IF NOT EXISTS idx_note_collections_auto_doc_id "
-                "ON note_collections(auto_document_id)"
+                "CREATE INDEX IF NOT EXISTS idx_collections_auto_doc_id "
+                "ON collections(auto_document_id)"
             )
         )
 
@@ -593,14 +634,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # Normalize collection names (skip auto-collections)
         coll_rows = (await conn.execute(
-            text("SELECT id, name FROM note_collections WHERE auto_document_id IS NULL")
+            text("SELECT id, name FROM collections WHERE auto_document_id IS NULL")
         )).fetchall()
         for coll_id, coll_name in coll_rows:
             new_name = _norm_coll(coll_name)
             if not new_name or coll_name == new_name:
                 continue
             await conn.execute(
-                text("UPDATE note_collections SET name = :name WHERE id = :cid"),
+                text("UPDATE collections SET name = :name WHERE id = :cid"),
                 {"name": new_name, "cid": coll_id},
             )
 

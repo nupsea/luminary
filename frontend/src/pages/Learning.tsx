@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MapPin } from "lucide-react"
+import { cn } from "@/lib/utils"
 import {
   BookOpen,
   BookPlus,
@@ -23,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { FilterBar } from "@/components/library/FilterBar"
+import { CONTENT_TYPE_ICONS } from "@/components/library/utils"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
 import { UploadDialog } from "@/components/library/UploadDialog"
@@ -452,19 +454,25 @@ function SearchPanel({ query, onDocumentClick }: SearchPanelProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        {ALL_CONTENT_TYPES.map((ct) => (
-          <button
-            key={ct}
-            onClick={() => toggleType(ct)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-              filterTypes.has(ct)
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-muted text-muted-foreground hover:bg-accent"
-            }`}
-          >
-            {ct}
-          </button>
-        ))}
+        {ALL_CONTENT_TYPES.map((ct) => {
+          const Icon = CONTENT_TYPE_ICONS[ct] || FileText
+          const isActive = filterTypes.has(ct)
+          return (
+            <button
+              key={ct}
+              onClick={() => toggleType(ct)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors",
+                isActive
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-muted text-muted-foreground hover:bg-accent"
+              )}
+            >
+              <Icon size={12} />
+              {ct.replace(/_/g, " ")}
+            </button>
+          )
+        })}
       </div>
 
       {loading && (
