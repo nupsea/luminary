@@ -90,6 +90,10 @@ function applyPdfHighlights(
 
   if (pageAnnotations.length === 0) return
 
+  // S111: Sort by start_offset so we find occurrences in document order.
+  // This is critical for the "find next occurrence" strategy to work.
+  const sortedAnnotations = [...pageAnnotations].sort((a, b) => (a.start_offset || 0) - (b.start_offset || 0))
+
   const textData = buildTextParts(textLayerDiv)
   if (!textData) return
   const { spans, parts, fullText } = textData
@@ -99,15 +103,45 @@ function applyPdfHighlights(
   // 2. Pre-calculate normalized full text once outside loop
   const normFull = fullText.replace(/\s+/g, " ")
 
-  for (const ann of pageAnnotations) {
+  const usedFullOffsets = new Set<number>()
+  const usedNormOffsets = new Set<number>()
+
+  for (const ann of sortedAnnotations) {
     const searchVal = ann.selected_text
-    let idx = fullText.indexOf(searchVal)
+    if (!searchVal) continue
+
+    let idx = -1
+    let searchStart = 0
+
+    // Try finding the next unused exact occurrence
+    while (true) {
+      idx = fullText.indexOf(searchVal, searchStart)
+      if (idx < 0) break
+      if (!usedFullOffsets.has(idx)) {
+        usedFullOffsets.add(idx)
+        break
+      }
+      searchStart = idx + 1
+    }
+
     let searchText = searchVal
 
     if (idx < 0) {
-      // 3. Normalized search
+      // 3. Fallback: Normalized next-occurrence search
       const normSearch = searchVal.replace(/\s+/g, " ")
-      const normIdx = normFull.indexOf(normSearch)
+      let normIdx = -1
+      let normSearchStart = 0
+      
+      while (true) {
+        normIdx = normFull.indexOf(normSearch, normSearchStart)
+        if (normIdx < 0) break
+        if (!usedNormOffsets.has(normIdx)) {
+          usedNormOffsets.add(normIdx)
+          break
+        }
+        normSearchStart = normIdx + 1
+      }
+
       if (normIdx < 0) continue
 
       idx = mapNormToFullOffset(fullText, normFull, normIdx)
@@ -540,12 +574,12 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       const textDiv = textLayerRef.current
       const overlayDiv = highlightOverlayRef.current
       if (!textDiv || !overlayDiv || textLayerVersion === 0) return
-      if (!highlightsVisibleRef.current || annotationsRef.current.length === 0) {
+      if (!highlightsVisible || annotations.length === 0) {
         clearOverlays(overlayDiv, "data-pdf-highlight")
         return
       }
-      applyPdfHighlights(textDiv, overlayDiv, annotationsRef.current, currentPage, sectionsRef.current)
-    }, [textLayerVersion, currentPage])
+      applyPdfHighlights(textDiv, overlayDiv, annotations, currentPage, sections)
+    }, [textLayerVersion, currentPage, annotations, highlightsVisible, sections])
 
     function goToPage(n: number) {
       const clamped = Math.max(1, Math.min(n, totalPages))
@@ -597,6 +631,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           // Set initial match index to first match if not yet set
           setGlobalMatchIndex((prev) => (prev < 0 && matches.length > 0 ? 0 : prev))
         }
+        // S131: Yield to main thread between batches to keep UI responsive
+        await new Promise((resolve) => setTimeout(resolve, 50))
       }
     }, [extractPageText])
 

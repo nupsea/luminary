@@ -27,8 +27,8 @@ class AnnotationCreateRequest(BaseModel):
     section_id: str
     chunk_id: str | None = None
     selected_text: str
-    start_offset: int
-    end_offset: int
+    start_offset: int = 0
+    end_offset: int = 0
     color: Literal["yellow", "green", "blue", "pink"] = "yellow"
     note_text: str | None = None
     page_number: int | None = None
