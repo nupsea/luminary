@@ -1,7 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Graph from "graphology"
 import forceAtlas2 from "graphology-layout-forceatlas2"
-import { ChevronDown, ChevronRight, Maximize2, Minus, Network, Plus } from "lucide-react"
+import {
+  Eye,
+  Filter,
+  GitBranch,
+  Maximize2,
+  Minus,
+  Network,
+  Plus,
+  Search,
+  Tag,
+  X,
+  Zap,
+} from "lucide-react"
 import { Component, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import Sigma from "sigma"
@@ -90,7 +102,7 @@ import type { TagNodeData, TagEdgeData } from "@/components/TagGraph"
 import NodeSquareProgram from "@/lib/sigma-square"
 import NotePreviewPanel from "@/components/NotePreviewPanel"
 import { NOTE_NODE_COLOR, noteNodeAttrs } from "@/lib/noteGraphUtils"
-const SIDEBAR_W = 240
+// Sidebar width is set inline (260px) in the flex layout
 
 // ---------------------------------------------------------------------------
 // Tag graph types and fetcher (S167)
@@ -546,8 +558,7 @@ export default function Viz() {
   // Learning path state (S117)
   const [learningPathStart, setLearningPathStart] = useState("")
   const [lpInputDraft, setLpInputDraft] = useState("")
-  // View Options collapsible panel state (S181)
-  const [viewOptionsOpen, setViewOptionsOpen] = useState(false)
+  // (View options are always visible in the sidebar; no collapse state needed)
   // Cluster view toggle (S181): when enabled and entity count > 200, collapse into type clusters
   const [clusterViewEnabled, setClusterViewEnabled] = useState(false)
   // Set of entity types that have been expanded out of cluster view by clicking a cluster node
@@ -857,514 +868,551 @@ export default function Viz() {
     return trail
   }, [selectedNode, lpData, viewMode])
 
+  // Derived stats for the graph legend
+  const graphStats = useMemo(() => {
+    if (viewMode === "tags") return null
+    if (!filteredGraph || filteredGraph.order === 0) return null
+    const nodeCount = filteredGraph.order
+    const edgeCount = filteredGraph.size
+    // Count unique entity types present
+    const typeCounts = new Map<string, number>()
+    filteredGraph.forEachNode((_node, attrs) => {
+      const t = (attrs.entityType as string) ?? "unknown"
+      typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1)
+    })
+    return { nodeCount, edgeCount, typeCounts }
+  }, [filteredGraph, viewMode])
+
+  // View mode configuration
+  const viewModes = useMemo(() => {
+    const modes: { key: typeof viewMode; label: string; icon: typeof Network }[] = [
+      { key: "knowledge_graph", label: "Knowledge", icon: Network },
+      ...(isCodeDoc ? [{ key: "call_graph" as const, label: "Call Graph", icon: GitBranch }] : []),
+      { key: "learning_path", label: "Learning Path", icon: Zap },
+      { key: "tags", label: "Tags", icon: Tag },
+    ]
+    return modes
+  }, [isCodeDoc])
+
   return (
     <VizErrorBoundary>
-      {/*
-        Absolute layout so heights are always definite:
-          - outer div: position relative, fills 100% of <main> height
-          - sidebar: absolute left column (SIDEBAR_W px wide)
-          - graph area: absolute, fills the rest
-        This avoids flex cross-axis height propagation issues entirely.
-      */}
-      <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden" }}>
+      <div className="flex h-full flex-col bg-background" style={{ height: "100vh", overflow: "hidden" }}>
 
-        {/* ---- Controls sidebar ---- */}
-        <div
-          className="flex flex-col gap-4 border-r border-border bg-background p-4 overflow-y-auto"
-          style={{ position: "absolute", left: 0, top: 0, width: SIDEBAR_W, bottom: 0 }}
-        >
-          {/* Document picker -- hidden for Tags mode (no document scope) */}
-          {viewMode !== "tags" && (
-            <div>
-              <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Document
-              </p>
+        {/* ---- Header bar (matches Study/Notes pattern) ---- */}
+        <div className="flex items-center justify-between border-b border-border bg-card/30 px-6 py-2.5 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-6">
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Viz</h1>
+
+            {/* View mode pills */}
+            <div className="flex items-center gap-1 rounded-full border border-border bg-muted/30 p-0.5">
+              {viewModes.map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setViewMode(key)
+                    void queryClient.invalidateQueries({ queryKey })
+                  }}
+                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-all ${
+                    viewMode === key
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                  }`}
+                >
+                  <Icon size={13} />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Scope toggle -- hidden for Tags mode */}
+            {viewMode !== "tags" && (
+              <div className="flex items-center gap-1 rounded-full border border-border bg-muted/30 p-0.5">
+                {(["document", "all"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      setScope(s)
+                      void queryClient.invalidateQueries({ queryKey })
+                    }}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                      scope === s
+                        ? "bg-secondary text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {s === "document" ? "This doc" : "All docs"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Document picker -- hidden for Tags mode */}
+            {viewMode !== "tags" && (
               <select
                 value={activeDocumentId ?? ""}
                 onChange={(e) => setActiveDocument(e.target.value || null)}
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground max-w-[220px] truncate focus:outline-none focus:ring-1 focus:ring-ring"
               >
-                <option value="">Select a document…</option>
+                <option value="">Select document...</option>
                 {(docList ?? []).map((doc) => (
                   <option key={doc.id} value={doc.id}>{doc.title}</option>
                 ))}
               </select>
-            </div>
-          )}
-
-          {/* View toggle (S181: call_graph only shown for code documents) */}
-          <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              View
-            </p>
-            <div className="flex flex-col rounded-md border border-border overflow-hidden text-xs">
-              {(
-                [
-                  "knowledge_graph",
-                  ...(isCodeDoc ? (["call_graph"] as const) : []),
-                  "learning_path",
-                  "tags",
-                ] as ("knowledge_graph" | "call_graph" | "learning_path" | "tags")[]
-              ).map((v) => (
-                <button
-                  key={v}
-                  onClick={() => {
-                    setViewMode(v)
-                    void queryClient.invalidateQueries({ queryKey })
-                  }}
-                  className={`flex-1 py-1.5 transition-colors ${
-                    viewMode === v
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  {v === "knowledge_graph"
-                    ? "Knowledge"
-                    : v === "call_graph"
-                      ? "Call Graph"
-                      : v === "learning_path"
-                        ? "Learning Path"
-                        : "Tags"}
-                </button>
-              ))}
-            </div>
-            {viewMode === "learning_path" && (
-              <p className="mt-1 text-xs text-muted-foreground">Orange arrows = PREREQUISITE_OF</p>
             )}
-            {viewMode === "tags" && (
-              <p className="mt-1 text-xs text-muted-foreground">Click a node to filter Notes</p>
+
+            {/* Graph stats badge */}
+            {graphStats && (
+              <div className="flex items-center gap-2 rounded-full border border-border bg-card/50 px-3 py-1">
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase">
+                  {graphStats.nodeCount} nodes
+                </span>
+                <span className="text-border">|</span>
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase">
+                  {graphStats.edgeCount} edges
+                </span>
+              </div>
             )}
           </div>
-
-          {/* Learning path: start entity input (S117) */}
-          {viewMode === "learning_path" && (
-            <div>
-              <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Start entity
-              </p>
-              <input
-                type="text"
-                value={lpInputDraft}
-                onChange={(e) => setLpInputDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") setLearningPathStart(lpInputDraft.trim())
-                }}
-                placeholder="Type a concept name..."
-                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <button
-                onClick={() => setLearningPathStart(lpInputDraft.trim())}
-                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
-              >
-                Load path
-              </button>
-            </div>
-          )}
-
-          {/* Scope toggle -- hidden for Tags mode */}
-          {viewMode !== "tags" && <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Scope
-            </p>
-            <div className="flex rounded-md border border-border overflow-hidden text-xs">
-              {(["document", "all"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setScope(s)
-                    void queryClient.invalidateQueries({ queryKey })
-                  }}
-                  className={`flex-1 py-1.5 capitalize transition-colors ${
-                    scope === s
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  {s === "document" ? "This doc" : "All docs"}
-                </button>
-              ))}
-            </div>
-          </div>}
-
-          {/* Search, View Options (collapsible) -- hidden for Tags mode (S181) */}
-          {viewMode !== "tags" && (
-            <>
-              <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Search
-                </p>
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Find entity..."
-                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              {/* View Options collapsible panel (S181) */}
-              <div>
-                <button
-                  onClick={() => setViewOptionsOpen((v) => !v)}
-                  className="flex w-full items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
-                >
-                  <span>View Options</span>
-                  {viewOptionsOpen
-                    ? <ChevronDown size={12} />
-                    : <ChevronRight size={12} />
-                  }
-                </button>
-
-                {viewOptionsOpen && (
-                  <div className="mt-2 space-y-3">
-                    {/* Layers subsection */}
-                    <div>
-                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">Layers</p>
-                      <div className="space-y-1.5">
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={showDiagramNodes}
-                            onChange={() => setShowDiagramNodes((v) => !v)}
-                            className="accent-primary"
-                          />
-                          <span className="text-xs text-foreground">Diagrams</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={showPrerequisites}
-                            onChange={() => setShowPrerequisites((v) => !v)}
-                            className="accent-primary"
-                          />
-                          <span
-                            className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: PREREQ_EDGE_COLOR }}
-                          />
-                          <span className="text-xs text-foreground">Prerequisites</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={showCrossBook}
-                            onChange={() => setShowCrossBook((v) => !v)}
-                            className="accent-primary"
-                          />
-                          <span
-                            className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: SAME_CONCEPT_COLOR }}
-                          />
-                          <span className="text-xs text-foreground">Cross-book</span>
-                        </label>
-                        {/* Notes layer toggle (S172) */}
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={showNotes}
-                            onChange={() => setShowNotes((v) => !v)}
-                            className="accent-primary"
-                          />
-                          <span
-                            className="inline-block h-2.5 w-2.5 rounded-sm flex-shrink-0"
-                            style={{ backgroundColor: NOTE_NODE_COLOR }}
-                          />
-                          <span className="text-xs text-foreground">Notes</span>
-                        </label>
-                      </div>
-                    </div>
-
-                    {/* Entity Types subsection with Select All / Deselect All (S181) */}
-                    <div>
-                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">Entity types</p>
-                      <div className="flex gap-1 mb-2">
-                        <button
-                          onClick={selectAllEntityTypes}
-                          className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
-                        >
-                          Select All
-                        </button>
-                        <button
-                          onClick={deselectAllEntityTypes}
-                          className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
-                        >
-                          Deselect All
-                        </button>
-                      </div>
-                      <div className="space-y-1.5">
-                        {ALL_ENTITY_TYPES.map((type) => (
-                          <label key={type} className="flex items-center gap-2 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={activeTypes.has(type)}
-                              onChange={() => toggleEntityType(type)}
-                              className="accent-primary"
-                            />
-                            <span
-                              className="inline-block h-2.5 w-2.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: TYPE_COLORS[type] }}
-                            />
-                            <span className="text-xs text-foreground capitalize">{type.toLowerCase()}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Cluster view toggle (S181) */}
-                    <div>
-                      <label className="flex items-center gap-2 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={clusterViewEnabled}
-                          onChange={() => setClusterViewEnabled((v) => !v)}
-                          className="accent-primary"
-                        />
-                        <span className="text-xs text-foreground">Cluster view (&gt;200 nodes)</span>
-                      </label>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
         </div>
 
-        {/* ---- Graph area ---- */}
-        <div
-          style={{ position: "absolute", left: SIDEBAR_W, top: 0, right: 0, bottom: 0 }}
-        >
-          {/* State overlays — all use absolute fill so they sit in the same space */}
+        {/* ---- Main content: sidebar + graph canvas ---- */}
+        <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
 
-          {noDocSelected && viewMode !== "tags" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
-              <Network size={40} className="text-muted-foreground/40" />
-              <p className="text-base font-semibold text-foreground">No document selected</p>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                Choose a document from the dropdown on the left to explore its knowledge graph.
-              </p>
-            </div>
-          )}
-
-          {/* Learning path states (S117) */}
-          {lpNoInput && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
-              <Network size={40} className="text-muted-foreground/40" />
-              <p className="text-base font-semibold text-foreground">Enter a start entity</p>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                Type a concept name in the "Start entity" input and press Enter to view its prerequisite chain.
-              </p>
-            </div>
-          )}
-
-          {lpShowLoading && (
-            <div className="absolute inset-0 flex flex-col gap-4 p-6">
-              <Skeleton className="h-8 w-48" />
-              <Skeleton className="flex-1 w-full rounded-lg" />
-            </div>
-          )}
-
-          {lpShowError && (
-            <div className="absolute inset-0 flex items-center justify-center p-6">
-              <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
-                <p className="font-medium">Failed to load learning path</p>
-                <button
-                  onClick={() => void lpRefetch()}
-                  className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 transition-colors"
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          )}
-
-          {lpShowEmpty && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
-              <Network size={40} className="text-muted-foreground/40" />
-              <p className="text-base font-semibold text-foreground">
-                No prerequisite path found for "{learningPathStart}"
-              </p>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                This entity has no PREREQUISITE_OF edges in this document. Try a different concept.
-              </p>
-            </div>
-          )}
-
-          {!noDocSelected && isLoading && viewMode !== "tags" && (
-            <div className="absolute inset-0 flex flex-col gap-4 p-6">
-              <Skeleton className="h-8 w-48" />
-              <Skeleton className="flex-1 w-full rounded-lg" />
-            </div>
-          )}
-
-          {!noDocSelected && !isLoading && isError && viewMode !== "tags" && (
-            <div className="absolute inset-0 flex items-center justify-center p-6">
-              <div className="flex flex-col items-center gap-3 rounded-md border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
-                <p className="font-medium">Failed to load knowledge graph</p>
-                <button
-                  onClick={() => void refetch()}
-                  className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 transition-colors"
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          )}
-
-          {showEmpty && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
-              <Network size={40} className="text-muted-foreground/40" />
-              <p className="text-base font-semibold text-foreground">No knowledge graph yet</p>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                Ingest a document first — entities and relationships will appear here.
-              </p>
-            </div>
-          )}
-
-          {showAllHidden && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-6">
-              <Network size={40} className="text-muted-foreground/40" />
-              <p className="text-base font-semibold text-foreground">
-                Select at least one entity type to show the graph
-              </p>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                {entityNodeCount} {entityNodeCount === 1 ? "entity" : "entities"} found.
-                Open View Options and enable at least one entity type.
-              </p>
-            </div>
-          )}
-
-          {/* Tag co-occurrence graph (S167) -- shown only in Tags mode */}
-          {viewMode === "tags" && (
-            <div className="absolute inset-0">
-              <TagGraph
-                nodes={tagGraphData?.nodes ?? []}
-                edges={tagGraphData?.edges ?? []}
-                isLoading={tagGraphLoading}
-                isError={tagGraphError}
-                onRetry={() => void tagGraphRefetch()}
-              />
-            </div>
-          )}
-
-          {/* The actual sigma canvas div — always rendered so canvasRef is always populated.
-              Sigma mounts into this div via useEffect above.
-              Hidden in Tags mode (TagGraph has its own canvas). */}
-          <div
-            ref={canvasRef}
-            style={{ width: "100%", height: "100%", display: viewMode === "tags" ? "none" : "block" }}
-          />
-
-          {/* Camera controls */}
-          {filteredGraph && filteredGraph.order > 0 && (
-            <>
-              {/* Interaction hint — fades out after 4 seconds */}
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-pulse" style={{ animationIterationCount: 3, animationDuration: '1.5s' }}>
-                <div className="rounded-full bg-foreground/80 px-4 py-1.5 text-xs font-medium text-background backdrop-blur-sm shadow-lg">
-                  Scroll to zoom · Click node to explore · Drag to pan
+          {/* ---- Sidebar panel ---- */}
+          {viewMode !== "tags" && (
+            <div
+              className="flex flex-col border-r border-border bg-card/20 overflow-y-auto shrink-0 custom-scrollbar"
+              style={{ width: 260 }}
+            >
+              {/* Search */}
+              <div className="p-4 pb-3 border-b border-border/50">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search entities..."
+                    className="w-full rounded-lg border border-border bg-background pl-8 pr-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => setSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
                 </div>
               </div>
-              <div className="absolute bottom-4 right-4 flex flex-col gap-1.5 z-10">
+
+              {/* Learning path: start entity input (S117) */}
+              {viewMode === "learning_path" && (
+                <div className="p-4 border-b border-border/50">
+                  <p className="mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Start Entity
+                  </p>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={lpInputDraft}
+                      onChange={(e) => setLpInputDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setLearningPathStart(lpInputDraft.trim())
+                      }}
+                      placeholder="Concept name..."
+                      className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <button
+                      onClick={() => setLearningPathStart(lpInputDraft.trim())}
+                      className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                    >
+                      Go
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/60">
+                    Orange arrows show prerequisite chains
+                  </p>
+                </div>
+              )}
+
+              {/* Layers section */}
+              <div className="p-4 border-b border-border/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <Eye size={13} className="text-primary/70" />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Layers</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { label: "Diagrams", checked: showDiagramNodes, toggle: () => setShowDiagramNodes((v) => !v), color: "#14b8a6" },
+                    { label: "Prerequisites", checked: showPrerequisites, toggle: () => setShowPrerequisites((v) => !v), color: PREREQ_EDGE_COLOR },
+                    { label: "Cross-book", checked: showCrossBook, toggle: () => setShowCrossBook((v) => !v), color: SAME_CONCEPT_COLOR },
+                    { label: "Notes", checked: showNotes, toggle: () => setShowNotes((v) => !v), color: NOTE_NODE_COLOR },
+                  ].map((layer) => (
+                    <button
+                      key={layer.label}
+                      onClick={layer.toggle}
+                      className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs transition-all ${
+                        layer.checked
+                          ? "bg-accent/60 text-foreground border border-border"
+                          : "text-muted-foreground/60 border border-transparent hover:bg-accent/30"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full shrink-0 transition-opacity ${layer.checked ? "opacity-100" : "opacity-30"}`}
+                        style={{ backgroundColor: layer.color }}
+                      />
+                      <span className="truncate font-medium">{layer.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Entity type filter */}
+              <div className="p-4 flex-1">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Filter size={13} className="text-primary/70" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Entity Types</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={selectAllEntityTypes}
+                      className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/10 transition-colors"
+                    >
+                      All
+                    </button>
+                    <span className="text-border">|</span>
+                    <button
+                      onClick={deselectAllEntityTypes}
+                      className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-accent transition-colors"
+                    >
+                      None
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {ALL_ENTITY_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => toggleEntityType(type)}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all ${
+                        activeTypes.has(type)
+                          ? "bg-foreground/10 text-foreground border border-border shadow-sm"
+                          : "text-muted-foreground/40 border border-transparent hover:text-muted-foreground hover:bg-accent/30"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full shrink-0 transition-opacity ${activeTypes.has(type) ? "opacity-100" : "opacity-25"}`}
+                        style={{ backgroundColor: TYPE_COLORS[type] }}
+                      />
+                      {type.toLowerCase().replace(/_/g, " ")}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Cluster view toggle */}
+                <div className="mt-4 pt-3 border-t border-border/50">
+                  <button
+                    onClick={() => setClusterViewEnabled((v) => !v)}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs w-full transition-all ${
+                      clusterViewEnabled
+                        ? "bg-primary/10 text-primary border border-primary/30"
+                        : "text-muted-foreground border border-transparent hover:bg-accent/30"
+                    }`}
+                  >
+                    <Network size={13} />
+                    <span className="font-medium">Cluster view</span>
+                    <span className="ml-auto text-[10px] text-muted-foreground">
+                      &gt;200 nodes
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ---- Graph area ---- */}
+          <div className="flex-1 relative" style={{ minWidth: 0 }}>
+            {/* State overlays */}
+
+            {noDocSelected && viewMode !== "tags" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
+                <div className="rounded-2xl bg-muted/30 p-6">
+                  <Network size={48} className="text-muted-foreground/30" />
+                </div>
+                <p className="text-lg font-semibold text-foreground">No document selected</p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Choose a document from the header to explore its knowledge graph.
+                </p>
+              </div>
+            )}
+
+            {/* Learning path states (S117) */}
+            {lpNoInput && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
+                <div className="rounded-2xl bg-muted/30 p-6">
+                  <Zap size={48} className="text-muted-foreground/30" />
+                </div>
+                <p className="text-lg font-semibold text-foreground">Enter a start entity</p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Type a concept name in the sidebar and press Enter to view its prerequisite chain.
+                </p>
+              </div>
+            )}
+
+            {lpShowLoading && (
+              <div className="absolute inset-0 flex flex-col gap-4 p-6">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="flex-1 w-full rounded-lg" />
+              </div>
+            )}
+
+            {lpShowError && (
+              <div className="absolute inset-0 flex items-center justify-center p-6">
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-8 py-6 text-sm text-red-700">
+                  <p className="font-semibold">Failed to load learning path</p>
+                  <button
+                    onClick={() => void lpRefetch()}
+                    className="rounded-lg border border-red-300 bg-white px-4 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {lpShowEmpty && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
+                <div className="rounded-2xl bg-muted/30 p-6">
+                  <Network size={48} className="text-muted-foreground/30" />
+                </div>
+                <p className="text-lg font-semibold text-foreground">
+                  No prerequisite path found for &ldquo;{learningPathStart}&rdquo;
+                </p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  This entity has no PREREQUISITE_OF edges in this document. Try a different concept.
+                </p>
+              </div>
+            )}
+
+            {!noDocSelected && isLoading && viewMode !== "tags" && (
+              <div className="absolute inset-0 flex flex-col gap-4 p-6">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="flex-1 w-full rounded-lg" />
+              </div>
+            )}
+
+            {!noDocSelected && !isLoading && isError && viewMode !== "tags" && (
+              <div className="absolute inset-0 flex items-center justify-center p-6">
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-8 py-6 text-sm text-red-700">
+                  <p className="font-semibold">Failed to load knowledge graph</p>
+                  <button
+                    onClick={() => void refetch()}
+                    className="rounded-lg border border-red-300 bg-white px-4 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showEmpty && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
+                <div className="rounded-2xl bg-muted/30 p-6">
+                  <Network size={48} className="text-muted-foreground/30" />
+                </div>
+                <p className="text-lg font-semibold text-foreground">No knowledge graph yet</p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Ingest a document first -- entities and relationships will appear here.
+                </p>
+              </div>
+            )}
+
+            {showAllHidden && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
+                <div className="rounded-2xl bg-muted/30 p-6">
+                  <Filter size={48} className="text-muted-foreground/30" />
+                </div>
+                <p className="text-lg font-semibold text-foreground">
+                  All entity types are hidden
+                </p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  {entityNodeCount} {entityNodeCount === 1 ? "entity" : "entities"} found.
+                  Enable at least one entity type in the sidebar.
+                </p>
+              </div>
+            )}
+
+            {/* Tag co-occurrence graph (S167) */}
+            {viewMode === "tags" && (
+              <div className="absolute inset-0">
+                <TagGraph
+                  nodes={tagGraphData?.nodes ?? []}
+                  edges={tagGraphData?.edges ?? []}
+                  isLoading={tagGraphLoading}
+                  isError={tagGraphError}
+                  onRetry={() => void tagGraphRefetch()}
+                />
+              </div>
+            )}
+
+            {/* Sigma canvas */}
+            <div
+              ref={canvasRef}
+              style={{ width: "100%", height: "100%", display: viewMode === "tags" ? "none" : "block" }}
+            />
+
+            {/* Interaction hint overlay */}
+            {filteredGraph && filteredGraph.order > 0 && (
+              <div
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-pulse"
+                style={{ animationIterationCount: 3, animationDuration: "1.5s" }}
+              >
+                <div className="rounded-full bg-foreground/80 px-4 py-1.5 text-[11px] font-medium text-background backdrop-blur-sm shadow-lg">
+                  Scroll to zoom  --  Click node to explore  --  Drag to pan
+                </div>
+              </div>
+            )}
+
+            {/* Camera controls (bottom-right) */}
+            {(filteredGraph && filteredGraph.order > 0) || viewMode === "tags" ? (
+              <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
                 <button
                   onClick={zoomIn}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-md hover:bg-accent hover:shadow-lg transition-all"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/90 text-foreground shadow-sm hover:bg-accent transition-all backdrop-blur-sm"
                   title="Zoom in"
                 >
-                  <Plus size={16} />
+                  <Plus size={14} />
                 </button>
                 <button
                   onClick={zoomOut}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-md hover:bg-accent hover:shadow-lg transition-all"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/90 text-foreground shadow-sm hover:bg-accent transition-all backdrop-blur-sm"
                   title="Zoom out"
                 >
-                  <Minus size={16} />
+                  <Minus size={14} />
                 </button>
+                <div className="h-px bg-border/50 mx-1" />
                 <button
                   onClick={resetCamera}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-md hover:bg-accent hover:shadow-lg transition-all"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/90 text-foreground shadow-sm hover:bg-accent transition-all backdrop-blur-sm"
                   title="Fit to screen"
                 >
-                  <Maximize2 size={16} />
+                  <Maximize2 size={14} />
                 </button>
               </div>
-            </>
-          )}
+            ) : null}
 
-          {/* Note node preview panel (S172) -- right-side panel */}
-          {selectedNoteId && (
-            <NotePreviewPanel
-              noteId={selectedNoteId}
-              onClose={() => setSelectedNoteId(null)}
-            />
-          )}
-
-          {/* Node click popover */}
-          {selectedNode && (
-            <div
-              className="fixed z-50 rounded-lg border border-border bg-background shadow-lg p-3 min-w-[180px] max-w-[260px]"
-              style={{ left: selectedNode.screenX + 8, top: selectedNode.screenY - 60 }}
-            >
-              <div className="flex items-center gap-2 mb-1.5">
-                <span
-                  className="inline-block h-2 w-2 rounded-full flex-shrink-0"
-                  style={{
-                    backgroundColor: TYPE_COLORS[selectedNode.type as EntityType] ?? DEFAULT_COLOR,
-                  }}
-                />
-                <span className="text-xs text-muted-foreground font-medium">{selectedNode.type}</span>
-              </div>
-              <p className="text-sm font-semibold text-foreground capitalize mb-1">
-                {selectedNode.label}
-              </p>
-              {viewMode === "learning_path" && lpBreadcrumb.length > 1 ? (
-                <div className="mb-2">
-                  <p className="text-xs text-muted-foreground font-medium mb-1">Prerequisites:</p>
-                  <p className="text-xs text-foreground">
-                    {lpBreadcrumb.join(" -> ")}
-                  </p>
+            {/* Graph legend (bottom-left) -- only when graph is visible */}
+            {graphStats && graphStats.typeCounts.size > 0 && (
+              <div className="absolute bottom-4 left-4 z-10 rounded-xl border border-border bg-background/90 backdrop-blur-sm shadow-sm px-3 py-2.5 max-w-[200px]">
+                <p className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-2">Legend</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {Array.from(graphStats.typeCounts.entries())
+                    .filter(([t]) => t !== "cluster" && t !== "note")
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 8)
+                    .map(([type, count]) => (
+                      <div key={type} className="flex items-center gap-1">
+                        <span
+                          className="inline-block h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: TYPE_COLORS[type as EntityType] ?? DEFAULT_COLOR }}
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          {type.toLowerCase().replace(/_/g, " ")} ({count})
+                        </span>
+                      </div>
+                    ))}
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground mb-2">
-                  Mentions: {selectedNode.frequency}
-                </p>
-              )}
-              {/* Image thumbnail for diagram-derived nodes (S136) */}
-              {selectedNode.source_image_id && (
-                <div className="mb-2">
-                  <img
-                    src={`${API_BASE}/images/${selectedNode.source_image_id}/raw`}
-                    alt="Source diagram"
-                    className="w-full rounded border border-border object-contain max-h-40"
-                    onError={(e) => {
-                      ;(e.target as HTMLImageElement).style.display = "none"
+              </div>
+            )}
+
+            {/* Note node preview panel (S172) */}
+            {selectedNoteId && (
+              <NotePreviewPanel
+                noteId={selectedNoteId}
+                onClose={() => setSelectedNoteId(null)}
+              />
+            )}
+
+            {/* Node click popover */}
+            {selectedNode && (
+              <div
+                className="fixed z-50 rounded-2xl border border-border bg-background/95 backdrop-blur-sm shadow-xl p-4 min-w-[200px] max-w-[280px]"
+                style={{ left: selectedNode.screenX + 12, top: selectedNode.screenY - 70 }}
+              >
+                <button
+                  onClick={() => setSelectedNode(null)}
+                  className="absolute top-2 right-2 rounded p-0.5 text-muted-foreground/40 hover:text-foreground transition-colors"
+                >
+                  <X size={12} />
+                </button>
+                <div className="flex items-center gap-2 mb-2">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{
+                      backgroundColor: TYPE_COLORS[selectedNode.type as EntityType] ?? DEFAULT_COLOR,
                     }}
                   />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">
+                    {selectedNode.type.replace(/_/g, " ")}
+                  </span>
                 </div>
-              )}
-              <button
-                onClick={() => {
-                  const docId = activeDocumentId
-                  const entityLabel = selectedNode.label
-                  setSelectedNode(null)
-                  if (docId) {
-                    // Navigate to the document reader with the entity in the search bar
-                    navigate(`/?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`)
-                  } else {
-                    // Fallback: all-docs scope — search in library
-                    navigate(`/?search=${encodeURIComponent(entityLabel)}`)
-                  }
-                }}
-                className="text-xs text-primary underline hover:no-underline"
-              >
-                Find in document
-              </button>
-            </div>
-          )}
+                <p className="text-sm font-bold text-foreground mb-1">
+                  {selectedNode.label}
+                </p>
+                {viewMode === "learning_path" && lpBreadcrumb.length > 1 ? (
+                  <div className="mb-3">
+                    <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Prerequisites</p>
+                    <p className="text-xs text-foreground leading-relaxed">
+                      {lpBreadcrumb.join(" -> ")}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    {selectedNode.frequency} {selectedNode.frequency === 1 ? "mention" : "mentions"}
+                  </p>
+                )}
+                {/* Image thumbnail for diagram-derived nodes (S136) */}
+                {selectedNode.source_image_id && (
+                  <div className="mb-3">
+                    <img
+                      src={`${API_BASE}/images/${selectedNode.source_image_id}/raw`}
+                      alt="Source diagram"
+                      className="w-full rounded-lg border border-border object-contain max-h-40"
+                      onError={(e) => {
+                        ;(e.target as HTMLImageElement).style.display = "none"
+                      }}
+                    />
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    const docId = activeDocumentId
+                    const entityLabel = selectedNode.label
+                    setSelectedNode(null)
+                    if (docId) {
+                      navigate(`/?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`)
+                    } else {
+                      navigate(`/?search=${encodeURIComponent(entityLabel)}`)
+                    }
+                  }}
+                  className="w-full rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors text-center"
+                >
+                  Find in document
+                </button>
+              </div>
+            )}
 
-          {/* Edge hover tooltip */}
-          {edgeTooltip && (
-            <div className="absolute bottom-16 right-4 rounded bg-foreground px-2 py-1 text-xs text-background z-10">
-              {edgeTooltip}
-            </div>
-          )}
+            {/* Edge hover tooltip */}
+            {edgeTooltip && (
+              <div className="absolute bottom-14 right-4 rounded-lg bg-foreground/90 px-3 py-1.5 text-[11px] font-medium text-background z-10 backdrop-blur-sm shadow-sm">
+                {edgeTooltip.replace(/_/g, " ")}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </VizErrorBoundary>
