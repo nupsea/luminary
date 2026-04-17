@@ -128,15 +128,12 @@ export function NotesReaderPanel({
   const [sheetNote, setSheetNote] = useState<NoteItem | null>(null)
   const [sheetIsNew, setSheetIsNew] = useState(false)
 
-  // Step 1: ensure auto-collection exists
+  // Step 1: fetch auto-collection if it exists
   useEffect(() => {
     let cancelled = false
     async function ensure() {
       try {
-        let col = await fetchAutoCollection(documentId)
-        if (!col && !cancelled) {
-          col = await createAutoCollection(documentId)
-        }
+        const col = await fetchAutoCollection(documentId)
         if (!cancelled && col) {
           setCollectionId(col.id)
         }

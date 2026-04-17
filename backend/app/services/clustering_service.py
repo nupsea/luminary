@@ -464,9 +464,7 @@ class ClusteringService:
         # --- Collections ---
         coll_rows = (
             await db.execute(
-                select(CollectionModel).where(
-                    CollectionModel.auto_document_id.is_(None)
-                )
+                select(CollectionModel)
             )
         ).scalars().all()
 

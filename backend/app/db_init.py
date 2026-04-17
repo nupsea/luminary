@@ -500,7 +500,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 return ""
             s = re.sub(r"[_\s]+", "-", s)
             s = re.sub(r"-+", "-", s)
-            s = s.lower().strip("-")
+            s = s.upper().strip("-")
             return s
 
         # Normalize canonical_tags
@@ -634,7 +634,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # Normalize collection names (skip auto-collections)
         coll_rows = (await conn.execute(
-            text("SELECT id, name FROM collections WHERE auto_document_id IS NULL")
+            text("SELECT id, name FROM collections")
         )).fetchall()
         for coll_id, coll_name in coll_rows:
             new_name = _norm_coll(coll_name)

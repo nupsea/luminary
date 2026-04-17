@@ -383,14 +383,23 @@ async def create_note(
         section_id=req.section_id,
         content=req.content,
         content_hash=content_hash,
-        tags=(
-            [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
-            if req.tags else req.tags
-        ),
         group_name=req.group_name,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
+
+    # S208: Automatic tag saving for new notes if none provided
+    tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
+    if not tags and req.content.strip():
+        from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
+        try:
+            raw_tags = await get_note_tagger().suggest_tags(req.content)
+            tags = [_nt for t in raw_tags if (_nt := normalize_tag_slug(t))]
+            logger.info("Auto-tagged new note %s with %d tags", note.id, len(tags))
+        except Exception:
+            logger.warning("Auto-tagging failed for new note %s", note.id, exc_info=True)
+
+    note.tags = tags
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
     await _sync_tag_index(note.id, note.tags or [], session)
@@ -1262,7 +1271,8 @@ async def get_note(
     member_rows = (
         await session.execute(
             select(CollectionMemberModel.collection_id).where(
-                CollectionMemberModel.note_id == note_id
+                CollectionMemberModel.member_id == note_id,
+                CollectionMemberModel.member_type == "note",
             )
         )
     ).scalars().all()
