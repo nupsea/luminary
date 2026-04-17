@@ -20,12 +20,15 @@ import {
   ChevronRight,
   ChevronUp,
   Copy,
+  CornerDownRight,
   Download,
+  FileText,
   Layers,
   Loader2,
   Pencil,
   PlayCircle,
   Plus,
+  StickyNote,
   Trash2,
   X,
   Zap,
@@ -2141,12 +2144,12 @@ export default function Study() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {(() => {
-                  const flatten = (items: any[]): any[] => {
+                  const flatten = (items: any[], parentName: string | null = null): any[] => {
                     let result: any[] = []
                     items.forEach(item => {
-                      result.push(item)
+                      result.push({ ...item, _parentName: parentName, _isNested: parentName !== null })
                       if (item.children && item.children.length > 0) {
-                        result = result.concat(flatten(item.children))
+                        result = result.concat(flatten(item.children, item.name))
                       }
                     })
                     return result
@@ -2163,8 +2166,18 @@ export default function Study() {
                         setActiveCollectionId(coll.id)
                         setActiveDocument(null)
                       }}
-                      className="group relative cursor-pointer overflow-hidden rounded-3xl border border-border bg-card/40 p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl"
+                      className={`group relative cursor-pointer overflow-hidden rounded-3xl border p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl ${
+                        coll._isNested
+                          ? 'border-primary/20 bg-card/30'
+                          : 'border-border bg-card/40'
+                      }`}
                     >
+                      {coll._isNested && (
+                        <div className="absolute top-3 right-3 flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                          <CornerDownRight size={10} />
+                          <span className="font-medium">{coll._parentName}</span>
+                        </div>
+                      )}
                       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:scale-110">
                         <Layers size={24} />
                       </div>
@@ -2174,7 +2187,34 @@ export default function Study() {
                           {coll.description || "Synthesize knowledge across documents and notes."}
                         </p>
                       </div>
-                      <div className="mt-8 flex items-center justify-between border-t border-border/50 pt-4">
+                      {/* Source counts */}
+                      <div className="mt-4 flex items-center gap-3">
+                        {(coll.document_count > 0 || coll.note_count > 0) ? (
+                          <>
+                            {coll.document_count > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <BookOpen size={12} className="text-blue-500/70" />
+                                {coll.document_count} {coll.document_count === 1 ? 'doc' : 'docs'}
+                              </span>
+                            )}
+                            {coll.note_count > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <StickyNote size={12} className="text-amber-500/70" />
+                                {coll.note_count} {coll.note_count === 1 ? 'note' : 'notes'}
+                              </span>
+                            )}
+                            {coll.children && coll.children.length > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <Layers size={12} className="text-primary/50" />
+                                {coll.children.length} sub
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground/50 italic">No sources yet</span>
+                        )}
+                      </div>
+                      <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
                         <div className="text-xs font-semibold uppercase text-primary opacity-0 transition-opacity group-hover:opacity-100">
                           Enter Context
                         </div>

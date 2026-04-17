@@ -284,6 +284,12 @@ class CollectionTopic(BaseModel):
     note_count: int
 
 
+class CollectionSource(BaseModel):
+    id: str
+    title: str
+    type: str  # "document" | "note"
+
+
 class CollectionSubEnclave(BaseModel):
     id: str
     name: str
