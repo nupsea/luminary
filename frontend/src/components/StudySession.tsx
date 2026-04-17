@@ -318,9 +318,22 @@ async function startSession(documentId: string | null): Promise<string> {
   return data.id
 }
 
-async function fetchDueCards(documentId: string | null): Promise<Flashcard[]> {
-  const params = new URLSearchParams({ limit: "20" })
+async function fetchDueCards(
+  documentId: string | null,
+  collectionId: string | null = null,
+  filters: any = {}
+): Promise<Flashcard[]> {
+  const params = new URLSearchParams({ limit: "50" })
   if (documentId) params.set("document_id", documentId)
+  if (collectionId) params.set("collection_id", collectionId)
+  if (filters.tag) params.set("tag", filters.tag)
+  if (filters.document_ids?.length) {
+    filters.document_ids.forEach((id: string) => params.append("document_ids", id))
+  }
+  if (filters.note_ids?.length) {
+    filters.note_ids.forEach((id: string) => params.append("note_ids", id))
+  }
+  
   const res = await fetch(`${API_BASE}/study/due?${params.toString()}`)
   if (!res.ok) return []
   return res.json() as Promise<Flashcard[]>
@@ -692,13 +705,19 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack }: SessionC
 // ---------------------------------------------------------------------------
 
 interface StudySessionProps {
-  documentId: string | null
+  documentId?: string | null
+  collectionId?: string | null
+  filters?: {
+    tag?: string
+    document_ids?: string[]
+    note_ids?: string[]
+  }
   onExit: () => void
 }
 
 type SessionState = "loading" | "studying" | "complete" | "empty"
 
-export function StudySession({ documentId, onExit }: StudySessionProps) {
+export function StudySession({ documentId, collectionId, filters, onExit }: StudySessionProps) {
   const [sessionState, setSessionState] = useState<SessionState>("loading")
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [queue, setQueue] = useState<Flashcard[]>([])
@@ -725,8 +744,8 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
     async function init() {
       try {
         const [sid, cards] = await Promise.all([
-          startSession(documentId),
-          fetchDueCards(documentId),
+          startSession(documentId), // startSession still just needs a docId if it's doc-focused, or null for general
+          fetchDueCards(documentId || null, collectionId || null, filters || {}),
         ])
         if (cancelled) return
         setSessionId(sid)
@@ -741,7 +760,7 @@ export function StudySession({ documentId, onExit }: StudySessionProps) {
     return () => {
       cancelled = true
     }
-  }, [documentId])
+  }, [documentId, collectionId, filters])
 
   async function handleRate(rating: Rating) {
     if (!sessionId || isRating) return

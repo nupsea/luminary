@@ -17,9 +17,11 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Copy,
   Download,
+  Layers,
   Loader2,
   Pencil,
   PlayCircle,
@@ -45,6 +47,8 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
+import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
+
 // ProgressDashboard is Recharts-heavy — lazy-load so Recharts stays out of the initial Study chunk
 const ProgressDashboard = lazy(() =>
   import("@/components/ProgressDashboard").then((m) => ({ default: m.ProgressDashboard }))
@@ -1861,604 +1865,340 @@ function SessionHistoryTab() {
 }
 
 // ---------------------------------------------------------------------------
+// DocPicker
+// ---------------------------------------------------------------------------
+
+function DocPicker({ 
+  docs, 
+  activeId, 
+  onSelect 
+}: { 
+  docs: DocListItem[], 
+  activeId: string | null, 
+  onSelect: (id: string | null) => void 
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <BookOpen size={16} className="text-muted-foreground" />
+      <select
+        value={activeId || ""}
+        onChange={(e) => onSelect(e.target.value || null)}
+        className="h-9 min-w-[200px] rounded-full border border-border bg-card px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-foreground transition-all hover:border-primary/50 focus:border-primary focus:outline-none"
+      >
+        <option value="">- SELECT STANDALONE DOC -</option>
+        {docs.map((d) => (
+          <option key={d.id} value={d.id}>{d.title.toUpperCase()}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FlashcardManager (Standalone view for document-centric study)
+// ---------------------------------------------------------------------------
+
+function FlashcardManager({ documentId }: { documentId: string }) {
+  const [page, setPage] = useState(1)
+  const qc = useQueryClient()
+  const { data: docList = [] } = useQuery<DocListItem[]>({
+    queryKey: ["study-doc-list"],
+    queryFn: fetchDocList,
+  })
+  
+  const { data: searchResult, isLoading: cardsLoading } = useQuery<FlashcardSearchResponse>({
+    queryKey: ["flashcards-search", documentId, page],
+    queryFn: () => fetchFlashcardSearch({ document_id: documentId, page, page_size: 20 }),
+  })
+  
+  const { data: docData } = useQuery<DocumentSections>({
+    queryKey: ["document-sections", documentId],
+    queryFn: () => fetchDocumentSections(documentId),
+    enabled: !!documentId,
+  })
+
+  const cards = searchResult?.items ?? []
+  const totalCards = searchResult?.total ?? 0
+  const totalPages = Math.ceil(totalCards / 20)
+
+  // Mutations for update, delete, generate
+  const updateMutation = useMutation({
+    mutationFn: (args: { id: string; data: any }) => updateFlashcard(args.id, args.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["flashcards-search"] }),
+  })
+  
+  const deleteMutation = useMutation({
+    mutationFn: deleteFlashcard,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["flashcards-search"] }),
+  })
+
+  const generateMutation = useMutation({
+    mutationFn: generateFlashcards,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      toast.success("Cards generated successfully")
+    },
+    onError: () => toast.error("Failed to generate cards"),
+  })
+
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-wrap items-start justify-between gap-6">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">
+            {docList.find(d => d.id === documentId)?.title || "Source Grounding"}
+          </h2>
+          <p className="text-sm text-muted-foreground">Managing {totalCards} flashcards for this document</p>
+        </div>
+        
+        <GenerateButton 
+          documentId={documentId}
+          sections={docData?.sections || []}
+          cards={cards}
+          onGenerate={(req) => generateMutation.mutate({ ...req, document_id: documentId })}
+          onGenerateFromGraph={(k) => {}}
+          onGenerateCloze={(sid, count) => {}}
+          isGenerating={generateMutation.isPending}
+          isClozeGenerating={false}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 flex flex-col gap-4">
+          {cardsLoading ? (
+            <div className="flex py-10 justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+          ) : cards.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border py-20 bg-card/10">
+              <Zap size={32} className="text-muted-foreground opacity-30" />
+              <p className="text-muted-foreground italic">No cards found. Generate some some to get started.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {cards.map(c => (
+                <FlashcardCard 
+                  key={c.id} 
+                  card={c} 
+                  onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                  isUpdating={updateMutation.isPending}
+                  isDeleting={deleteMutation.isPending}
+                />
+              ))}
+            </div>
+          )}
+          
+          {totalPages > 1 && (
+            <div className="flex justify-center gap-2 mt-4">
+              <button onClick={() => setPage(p => Math.max(1, p-1))} className="text-xs uppercase font-bold text-primary px-3 py-1 bg-secondary rounded-full hover:bg-secondary/80">Prev</button>
+              <span className="text-xs font-bold flex items-center">{page} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p+1))} className="text-xs uppercase font-bold text-primary px-3 py-1 bg-secondary rounded-full hover:bg-secondary/80">Next</button>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex flex-col gap-6">
+          <InsightsAccordion documentId={documentId} cards={cards} />
+          <WeakAreasPanel documentId={documentId} onSelectSection={() => {}} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Study page
 // ---------------------------------------------------------------------------
 
 type GenerateErrorKind = "ollama_offline" | "server_error" | null
 
 export default function Study() {
-  const activeDocumentId = useAppStore((s) => s.activeDocumentId)
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
-  const studySectionFilter = useAppStore((s) => s.studySectionFilter)
-  const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
-  const queryClient = useQueryClient()
-  const [studying, setStudying] = useState(false)
-  const [generateErrorKind, setGenerateErrorKind] = useState<GenerateErrorKind>(null)
-  const [studySubTab, setStudySubTab] = useState<"flashcards" | "history">("flashcards")
-  const [filterType, setFilterType] = useState<string | null>(null)
-  const [filterBloomMin, setFilterBloomMin] = useState(1)
-  const [filterBloomMax, setFilterBloomMax] = useState(6)
-  // S143: active section filter consumed from store
-  const [activeSectionFilter, setActiveSectionFilter] = useState<{
-    sectionId: string
-    bloomLevelMin: number
-    sectionHeading?: string
-  } | null>(null)
-  const mountTime = useRef(Date.now())
+  const navigate = useNavigate()
+  const { 
+    activeDocumentId, 
+    setActiveDocument, 
+    activeCollectionId, 
+    setActiveCollectionId,
+  } = useAppStore()
+  
+  const [isStudying, setIsStudying] = useState(false)
+  const [isHistoryView, setIsHistoryView] = useState(false)
+  const [studyFilters, setStudyFilters] = useState<any>(null)
+  
+  const { data: collections = [], isLoading: loadingCollections } = useQuery({
+    queryKey: ["collections-list"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/collections/tree`)
+      if (!res.ok) return []
+      return res.json() as Promise<any[]>
+    }
+  })
 
-  // Document list for the in-tab picker
   const { data: docList = [] } = useQuery<DocListItem[]>({
     queryKey: ["study-doc-list"],
     queryFn: fetchDocList,
-    staleTime: 30_000,
   })
 
-  // S184: search state
-  const [searchQuery, setSearchQuery] = useState("")
-  const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [filterDocId, setFilterDocId] = useState<string | null>(null)
-  const [filterCollectionId, setFilterCollectionId] = useState<string | null>(null)
-  const [filterTag, setFilterTag] = useState<string | null>(null)
-  const [filterFsrsState, setFilterFsrsState] = useState<string | null>(null)
-  const [searchPage, setSearchPage] = useState(1)
-
-  // S184: 300ms debounce for search query
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
-    return () => clearTimeout(timer)
-  }, [searchQuery])
-
-  // Reset page when any filter changes
-  useEffect(() => {
-    setSearchPage(1)
-  }, [debouncedQuery, filterDocId, filterCollectionId, filterTag, filterBloomMin, filterBloomMax, filterFsrsState, filterType])
-
-  useEffect(() => {
-    logger.info("[Study] mounted")
-  }, [])
-
-  // S143: consume studySectionFilter from store when it changes
-  useEffect(() => {
-    if (!studySectionFilter) return
-    setActiveSectionFilter({
-      sectionId: studySectionFilter.sectionId,
-      bloomLevelMin: studySectionFilter.bloomLevelMin,
-    })
-    // Clear the store filter immediately after consuming
-    setStudySectionFilter(null)
-  }, [studySectionFilter, setStudySectionFilter])
-
-  // S184: Unified flashcard search query
-  const searchFilters: FlashcardSearchFilters = {
-    query: debouncedQuery || undefined,
-    document_id: filterDocId ?? activeDocumentId ?? undefined,
-    collection_id: filterCollectionId ?? undefined,
-    tag: filterTag ?? undefined,
-    bloom_level_min: filterBloomMin > 1 ? filterBloomMin : undefined,
-    bloom_level_max: filterBloomMax < 6 ? filterBloomMax : undefined,
-    fsrs_state: filterFsrsState ?? undefined,
-    flashcard_type: filterType ?? undefined,
-    page: searchPage,
-    page_size: 20,
-  }
-  const { data: searchResult, isLoading: cardsLoading, isError: cardsError } = useQuery<FlashcardSearchResponse>({
-    queryKey: ["flashcards-search", debouncedQuery, filterDocId, activeDocumentId, filterCollectionId, filterTag, filterBloomMin, filterBloomMax, filterFsrsState, filterType, searchPage],
-    queryFn: () => fetchFlashcardSearch(searchFilters),
-  })
-  const cards = searchResult?.items ?? []
-  const totalCards = searchResult?.total ?? 0
-
-  // S184: Collections list for filter dropdown
-  const { data: collectionList = [] } = useQuery<CollectionItem[]>({
-    queryKey: ["collections-list"],
-    queryFn: fetchCollections,
-    staleTime: 60_000,
-  })
-
-  useEffect(() => {
-    if (!cardsLoading && activeDocumentId) {
-      const elapsed = Date.now() - mountTime.current
-      logger.info("[Study] loaded", { duration_ms: elapsed, itemCount: cards.length })
-    }
-  }, [cardsLoading, activeDocumentId, cards.length])
-
-  // Document sections (for section scope dropdown)
-  const { data: docData } = useQuery<DocumentSections>({
-    queryKey: ["document-sections", activeDocumentId],
-    queryFn: () => fetchDocumentSections(activeDocumentId!),
-    enabled: !!activeDocumentId,
-  })
-
-  const sections = docData?.sections ?? []
-
-  // Generate from graph mutation
-  const generateFromGraphMutation = useMutation({
-    mutationFn: (k: number) =>
-      generateFromGraph({ document_id: activeDocumentId!, k }),
-    onSuccess: (newCards) => {
-      setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-      toast.success(
-        `Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""} from entity pairs`
-      )
-    },
-    onError: (err: unknown) => {
-      const status = err instanceof GenerateError ? err.status : 0
-      if (status === 503) {
-        setGenerateErrorKind("ollama_offline")
-      } else {
-        setGenerateErrorKind("server_error")
-      }
-    },
-  })
-
-  // Generate mutation
-  const generateMutation = useMutation({
-    mutationFn: (req: {
-      scope: "full" | "section"
-      section_heading: string | null
-      count: number
-      difficulty: "easy" | "medium" | "hard"
-    }) =>
-      generateFlashcards({
-        document_id: activeDocumentId!,
-        ...req,
-      }),
-    onSuccess: (newCards) => {
-      setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-      toast.success(`Generated ${newCards.length} flashcard${newCards.length !== 1 ? "s" : ""}`)
-    },
-    onError: (err: unknown) => {
-      const status = err instanceof GenerateError ? err.status : 0
-      if (status === 503) {
-        setGenerateErrorKind("ollama_offline")
-      } else {
-        setGenerateErrorKind("server_error")
-      }
-    },
-  })
-
-  // S154: Cloze generation mutation
-  const generateClozeMutation = useMutation({
-    mutationFn: ({ sectionId, count }: { sectionId: string; count: number }) =>
-      generateClozeFlashcards(sectionId, count),
-    onSuccess: (newCards) => {
-      setGenerateErrorKind(null)
-      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-      toast.success(`Generated ${newCards.length} cloze card${newCards.length !== 1 ? "s" : ""}`)
-    },
-    onError: (err: unknown) => {
-      const status = err instanceof GenerateError ? err.status : 0
-      if (status === 503) {
-        setGenerateErrorKind("ollama_offline")
-      } else {
-        setGenerateErrorKind("server_error")
-      }
-    },
-  })
-
-  // Update mutation
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { question?: string; answer?: string } }) =>
-      updateFlashcard(id, data),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-      toast.success("Flashcard updated")
-    },
-    onError: () => toast.error("Failed to update flashcard"),
-  })
-
-  // Delete mutation
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteFlashcard(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-      toast.success("Flashcard deleted")
-    },
-    onError: () => toast.error("Failed to delete flashcard"),
-  })
-
-  // Delete all mutation
-  const deleteAllMutation = useMutation({
-    mutationFn: () => deleteAllFlashcards(activeDocumentId!),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-    },
-    onError: () => toast.error("Failed to clear flashcards"),
-  })
-
-  function handleExportCsv() {
-    if (!activeDocumentId) return
-    window.open(`${API_BASE}/flashcards/${activeDocumentId}/export/csv`, "_blank")
+  const handleStartStudy = (filters?: any) => {
+    setStudyFilters(filters)
+    setIsStudying(true)
   }
 
-  // Show StudySession when user clicks Start Studying
-  if (studying) {
+  if (isStudying) {
     return (
       <StudySession
         documentId={activeDocumentId}
-        onExit={() => {
-          setStudying(false)
-          void queryClient.invalidateQueries({ queryKey: ["flashcards-search"] })
-          if (activeDocumentId) {
-            void queryClient.invalidateQueries({ queryKey: ["section-heatmap", activeDocumentId] })
-          }
-        }}
+        collectionId={activeCollectionId}
+        filters={studyFilters}
+        onExit={() => setIsStudying(false)}
       />
     )
   }
 
   return (
-    <div className="flex h-full flex-col gap-6 overflow-auto p-6">
-      {/* S185: Top CTA row -- Start Studying + Generate Cards (max 2 CTAs above the fold) */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => setStudying(true)}
-          disabled={cards.length === 0}
-          className="flex items-center gap-2 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <PlayCircle size={14} />
-          Start Studying
-        </button>
-        {activeDocumentId && (
-          <GenerateButton
-            documentId={activeDocumentId}
-            sections={sections}
-            cards={cards}
-            onGenerate={(req) => { setGenerateErrorKind(null); generateMutation.mutate(req) }}
-            onGenerateFromGraph={(k) => {
-              setGenerateErrorKind(null)
-              generateFromGraphMutation.mutate(k)
-            }}
-            onGenerateCloze={(sectionId, count) => {
-              setGenerateErrorKind(null)
-              generateClozeMutation.mutate({ sectionId, count })
-            }}
-            isGenerating={
-              generateMutation.isPending ||
-              deleteAllMutation.isPending ||
-              generateFromGraphMutation.isPending
-            }
-            isClozeGenerating={generateClozeMutation.isPending}
-          />
-        )}
-      </div>
-
-      {/* Inline generate error banners */}
-      {generateErrorKind === "ollama_offline" && (
-        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <span className="flex-1">
-            Ollama is not running. To generate flashcards, run:{" "}
-            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">ollama serve</code>
-          </span>
-          <button
-            onClick={() => void navigator.clipboard.writeText("ollama serve")}
-            className="flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-            title="Copy command"
-          >
-            <Copy size={11} />
-            Copy
-          </button>
-        </div>
-      )}
-      {generateErrorKind === "server_error" && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Flashcard generation failed. Please try again.
-        </div>
-      )}
-
-      {/* S184: Search bar */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder="Search flashcards..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-md border border-border bg-background pl-3 pr-8 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X size={14} />
-            </button>
-          )}
-        </div>
-        {/* Document filter dropdown */}
-        <select
-          value={filterDocId ?? activeDocumentId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value || null
-            setFilterDocId(v)
-            setActiveDocument(v)
-          }}
-          className="rounded-md border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-xs"
-        >
-          <option value="">All documents</option>
-          {docList.map((doc) => (
-            <option key={doc.id} value={doc.id}>{doc.title}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* S184: Active filter chips */}
-      {(filterDocId || filterCollectionId || filterTag || filterFsrsState || filterType || filterBloomMin > 1 || filterBloomMax < 6) && (
-        <div className="flex flex-wrap gap-2">
-          {filterDocId && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Doc: {docList.find((d) => d.id === filterDocId)?.title ?? filterDocId}
-              <button onClick={() => { setFilterDocId(null); setActiveDocument(null) }} className="hover:text-primary/70"><X size={12} /></button>
-            </span>
-          )}
-          {filterFsrsState && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              State: {FSRS_STATE_LABELS[filterFsrsState] ?? filterFsrsState}
-              <button onClick={() => setFilterFsrsState(null)} className="hover:text-primary/70"><X size={12} /></button>
-            </span>
-          )}
-          {filterType && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Type: {filterType}
-              <button onClick={() => setFilterType(null)} className="hover:text-primary/70"><X size={12} /></button>
-            </span>
-          )}
-          {filterTag && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Tag: {filterTag}
-              <button onClick={() => setFilterTag(null)} className="hover:text-primary/70"><X size={12} /></button>
-            </span>
-          )}
-          {filterCollectionId && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Collection: {collectionList.find((c) => c.id === filterCollectionId)?.name ?? filterCollectionId}
-              <button onClick={() => setFilterCollectionId(null)} className="hover:text-primary/70"><X size={12} /></button>
-            </span>
-          )}
-          {(filterBloomMin > 1 || filterBloomMax < 6) && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Bloom: {BLOOM_LEVEL_LABELS[filterBloomMin] ?? filterBloomMin} - {BLOOM_LEVEL_LABELS[filterBloomMax] ?? filterBloomMax}
-              <button onClick={() => { setFilterBloomMin(1); setFilterBloomMax(6) }} className="hover:text-primary/70"><X size={12} /></button>
-            </span>
-          )}
-          <button
+    <div className="flex h-full flex-col bg-background">
+      {/* Universal Header */}
+      <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
+        <div className="flex items-center gap-8">
+          <h1 
+            className="cursor-pointer text-xl font-bold tracking-tight text-foreground"
             onClick={() => {
-              setFilterDocId(null); setActiveDocument(null)
-              setFilterCollectionId(null); setFilterTag(null)
-              setFilterFsrsState(null); setFilterType(null)
-              setFilterBloomMin(1); setFilterBloomMax(6)
-              setSearchQuery("")
+              setActiveCollectionId(null)
+              setActiveDocument(null)
+              setIsHistoryView(false)
             }}
-            className="text-xs text-muted-foreground hover:text-foreground underline"
           >
-            Clear all
-          </button>
+            Study
+          </h1>
+          
+          <DocPicker 
+            docs={docList} 
+            activeId={activeDocumentId} 
+            onSelect={(id) => {
+              setActiveDocument(id)
+              if (id) setActiveCollectionId(null)
+              setIsHistoryView(false)
+            }} 
+          />
         </div>
-      )}
-
-      {/* S184: Quick filter row */}
-      <div className="flex flex-wrap gap-2">
-        <select
-          value={filterCollectionId ?? ""}
-          onChange={(e) => setFilterCollectionId(e.target.value || null)}
-          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-        >
-          <option value="">Any collection</option>
-          {collectionList.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-        <input
-          type="text"
-          placeholder="Filter by tag..."
-          value={filterTag ?? ""}
-          onChange={(e) => setFilterTag(e.target.value || null)}
-          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground w-32"
-        />
-        <select
-          value={filterFsrsState ?? ""}
-          onChange={(e) => setFilterFsrsState(e.target.value || null)}
-          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-        >
-          <option value="">Any state</option>
-          {Object.entries(FSRS_STATE_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-        <select
-          value={filterType ?? ""}
-          onChange={(e) => setFilterType(e.target.value || null)}
-          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-        >
-          <option value="">Any type</option>
-          <option value="definition">Definition</option>
-          <option value="concept">Concept</option>
-          <option value="application">Application</option>
-          <option value="analysis">Analysis</option>
-          <option value="evaluation">Evaluation</option>
-          <option value="cloze">Cloze</option>
-          <option value="trace">Trace</option>
-          <option value="concept_explanation">Concept explanation</option>
-        </select>
-        <select
-          value={filterBloomMin}
-          onChange={(e) => setFilterBloomMin(Number(e.target.value))}
-          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-        >
-          {Object.entries(BLOOM_LEVEL_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>Min: {v}</option>
-          ))}
-        </select>
-        <select
-          value={filterBloomMax}
-          onChange={(e) => setFilterBloomMax(Number(e.target.value))}
-          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-        >
-          {Object.entries(BLOOM_LEVEL_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>Max: {v}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Sub-tab toggle (only when a document is active) */}
-      {activeDocumentId && (
-        <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
+        
+        <div className="flex items-center gap-4">
           <button
-            onClick={() => setStudySubTab("flashcards")}
-            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-              studySubTab === "flashcards"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+            onClick={() => setIsHistoryView(!isHistoryView)}
+            className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wider transition-all ${
+              isHistoryView ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-secondary/70'
             }`}
           >
-            Flashcards
-          </button>
-          <button
-            onClick={() => setStudySubTab("history")}
-            className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-              studySubTab === "history"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
+            <CalendarDays size={14} />
             History
           </button>
         </div>
-      )}
+      </div>
 
-      {activeDocumentId && studySubTab === "history" ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold text-foreground">Session History</h2>
-          <SessionHistoryTab />
-        </section>
-      ) : (
-        <>
-          {/* S143: Section filter banner */}
-          {activeSectionFilter && (
-            <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-              <span className="text-foreground">
-                Showing flashcards for section &mdash; bloom level &ge; {activeSectionFilter.bloomLevelMin}
-              </span>
-              <button
-                onClick={() => setActiveSectionFilter(null)}
-                className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-                title="Clear section filter"
+      <div className="flex-1 overflow-auto p-8 lg:p-12">
+        {isHistoryView ? (
+          <div className="mx-auto max-w-5xl">
+            <h2 className="mb-8 text-2xl font-bold tracking-tight">Recent Sessions</h2>
+            <SessionHistoryTab />
+          </div>
+        ) : activeCollectionId ? (
+          <CollectionStudyDashboard
+            collectionId={activeCollectionId}
+            onBack={() => setActiveCollectionId(null)}
+            onStartStudy={handleStartStudy}
+            onGenerateFromGraph={() => {
+              // Enclave-level synthesis placeholder: 
+              // In a real app, we'd fetch all doc IDs in the collection and trigger synthesis for each.
+              // For now, let's toast that it is starting.
+              toast.info("Synthesizing enclave knowledge across documents...")
+            }}
+            onGenerateCloze={() => {
+              toast.info("Generating cloze deletions for enclave notes...")
+            }}
+            onNavigateToCollection={(id) => setActiveCollectionId(id)}
+          />
+        ) : activeDocumentId ? (
+          <FlashcardManager documentId={activeDocumentId} />
+        ) : (
+          /* Collection Grid - Compact Version */
+          <div className="flex flex-col gap-10">
+            <div className="flex flex-col gap-2 max-w-2xl">
+              <motion.h1 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="text-3xl font-bold tracking-tight text-foreground"
               >
-                <X size={14} />
-              </button>
+                Focused Enclaves
+              </motion.h1>
+              <p className="text-muted-foreground text-lg">
+                Grouped knowledge silos for topic-centric learning.
+              </p>
             </div>
-          )}
 
-          {/* S184: Card grid -- always visible (search is global) */}
-          <section className="flex flex-col gap-4">
-                {cardsLoading ? (
-                  <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-                    <Loader2 size={24} className="animate-spin" />
-                    <span className="text-sm">Loading your cards...</span>
-                  </div>
-                ) : cardsError ? (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    Failed to load flashcards. Please try refreshing.
-                  </div>
-                ) : cards.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      {debouncedQuery
-                        ? `No flashcards found for "${debouncedQuery}". Try a different search term.`
-                        : "No flashcards match your filters."}
-                      {!debouncedQuery && activeDocumentId && " Try generating cards with Smart Generate above."}
-                      {!debouncedQuery && !activeDocumentId && " Select a document or adjust your search to find cards."}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {cards.map((card) => (
-                      <FlashcardCard
-                        key={card.id}
-                        card={card}
-                        onUpdate={(id, data) => updateMutation.mutate({ id, data })}
-                        onDelete={(id) => deleteMutation.mutate(id)}
-                        isUpdating={updateMutation.isPending}
-                        isDeleting={deleteMutation.isPending}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Bottom bar */}
-                {cards.length > 0 && (
-                  <div className="flex items-center gap-3 border-t border-border pt-4">
-                    <span className="text-sm text-muted-foreground">
-                      {totalCards} card{totalCards !== 1 ? "s" : ""} total
-                      {totalCards > 20 && ` (page ${searchPage} of ${Math.ceil(totalCards / 20)})`}
-                    </span>
-                    {totalCards > 20 && (
-                      <div className="flex gap-1">
-                        <button
-                          disabled={searchPage <= 1}
-                          onClick={() => setSearchPage((p) => Math.max(1, p - 1))}
-                          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
-                        >
-                          Prev
-                        </button>
-                        <button
-                          disabled={searchPage >= Math.ceil(totalCards / 20)}
-                          onClick={() => setSearchPage((p) => p + 1)}
-                          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
-                        >
-                          Next
-                        </button>
+            {loadingCollections ? (
+              <div className="flex py-20 justify-center">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {(() => {
+                  const flatten = (items: any[]): any[] => {
+                    let result: any[] = []
+                    items.forEach(item => {
+                      result.push(item)
+                      if (item.children && item.children.length > 0) {
+                        result = result.concat(flatten(item.children))
+                      }
+                    })
+                    return result
+                  }
+                  const flatCollections = flatten(collections)
+                  return flatCollections.map((coll, idx) => (
+                    <motion.div
+                      key={coll.id}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      whileHover={{ y: -5 }}
+                      onClick={() => {
+                        setActiveCollectionId(coll.id)
+                        setActiveDocument(null)
+                      }}
+                      className="group relative cursor-pointer overflow-hidden rounded-3xl border border-border bg-card/40 p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:scale-110">
+                        <Layers size={24} />
                       </div>
-                    )}
-                    <div className="ml-auto flex gap-2">
-                      {activeDocumentId && (
-                        <button
-                          onClick={handleExportCsv}
-                          className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                        >
-                          <Download size={14} />
-                          Export CSV
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setStudying(true)}
-                        className="flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                      >
-                        <PlayCircle size={14} />
-                        Start Studying
-                      </button>
-                    </div>
+                      <div className="mt-6 flex flex-col gap-2">
+                        <h3 className="text-lg font-semibold text-foreground">{coll.name}</h3>
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed opacity-70">
+                          {coll.description || "Synthesize knowledge across documents and notes."}
+                        </p>
+                      </div>
+                      <div className="mt-8 flex items-center justify-between border-t border-border/50 pt-4">
+                        <div className="text-xs font-semibold uppercase text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                          Enter Context
+                        </div>
+                        <ChevronRight size={16} className="text-primary translate-x-4 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+                      </div>
+                    </motion.div>
+                  ))
+                })()}
+                
+                <motion.button
+                   onClick={() => navigate("/notes")}
+                   className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
+                >
+                  <Plus size={24} className="group-hover:scale-110 transition-transform" />
+                  <div className="text-center">
+                    <p className="text-sm font-semibold uppercase">New Enclave</p>
                   </div>
-                )}
-          </section>
-
-          {/* Document-specific panels (only when a document is active) */}
-          {activeDocumentId && (
-            <>
-              {/* Deck Status accordion (S178/S185 merged) */}
-              <InsightsAccordion documentId={activeDocumentId} cards={cards} />
-
-              {/* Weak Areas panel */}
-              <WeakAreasPanel
-                documentId={activeDocumentId}
-                onSelectSection={(_heading) => {
-                  window.scrollTo({ top: 0, behavior: "smooth" })
-                }}
-              />
-
-              {/* Progress dashboard (S23b) */}
-              <section className="flex flex-col gap-4">
-                <h2 className="text-lg font-semibold text-foreground">Progress</h2>
-                <Suspense fallback={<div className="h-48 animate-pulse rounded-md bg-muted" />}>
-                  <ProgressDashboard documentId={activeDocumentId} />
-                </Suspense>
-              </section>
-            </>
-          )}
-        </>
-      )}
+                </motion.button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
+

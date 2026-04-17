@@ -26,9 +26,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     ChunkModel,
+    CollectionMemberModel,
+    CollectionModel,
     DocumentModel,
     FlashcardModel,
     MisconceptionModel,
+    NoteModel,
+    NoteTagIndexModel,
     ReviewEventModel,
     SectionModel,
     StudySessionModel,
@@ -274,6 +278,29 @@ class DueCountResponse(BaseModel):
     due_today: int
 
 
+class CollectionTopic(BaseModel):
+    tag: str
+    card_count: int
+    note_count: int
+
+
+class CollectionSubEnclave(BaseModel):
+    id: str
+    name: str
+    card_count: int
+
+
+class StudyCollectionDashboardResponse(BaseModel):
+    collection_id: str
+    collection_name: str
+    due_today: int
+    new_today: int
+    mastery_pct: float
+    topics: list[CollectionTopic]
+    sources: list[CollectionSource]
+    sub_collections: list[CollectionSubEnclave] = []
+
+
 def _compute_section_heatmap(
     cards: list[FlashcardModel],
     chunk_to_section: dict[str, str | None],
@@ -422,19 +449,60 @@ def _build_session_plan(
 
 @router.get("/due-count", response_model=DueCountResponse)
 async def get_due_count(
+    collection_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    document_ids: list[str] | None = Query(default=None),
+    note_ids: list[str] | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
 ) -> DueCountResponse:
-    """Return the count of flashcards whose due_date is today or in the past.
-
-    Lightweight endpoint for frontend notification checks -- O(index) count
-    query, not a full card fetch.
-    """
+    """Return the count of flashcards whose due_date is today or in the past."""
     now = datetime.now(UTC)
-    result = await session.execute(
-        select(func.count()).select_from(FlashcardModel).where(
-            FlashcardModel.due_date <= now
-        )
-    )
+    stmt = select(func.count()).select_from(FlashcardModel).where(FlashcardModel.due_date <= now)
+    
+    # Apply filters
+    if document_ids:
+        stmt = stmt.where(FlashcardModel.document_id.in_(document_ids))
+    if note_ids:
+        stmt = stmt.where(FlashcardModel.note_id.in_(note_ids))
+    
+    # Combined collection logic
+    if collection_id and not (document_ids or note_ids):
+        # Resolve all doc/note IDs in hierarchy
+        c_doc_ids, c_note_ids = await _resolve_collection_members(collection_id, session)
+        
+        if tag:
+            # Topic filter within collection
+            from app.routers.documents import _safe_tags
+            all_c_docs = (await session.execute(select(DocumentModel.id, DocumentModel.tags).where(DocumentModel.id.in_(c_doc_ids)))).all()
+            matching_doc_ids = [did for did, dtags in all_c_docs if tag in _safe_tags(dtags)]
+            
+            tag_notes_stmt = select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.note_id.in_(c_note_ids)).where(NoteTagIndexModel.tag_full == tag)
+            matching_note_ids = (await session.execute(tag_notes_stmt)).scalars().all()
+            
+            stmt = stmt.where(or_(
+                FlashcardModel.document_id.in_(matching_doc_ids) if matching_doc_ids else False,
+                FlashcardModel.note_id.in_(matching_note_ids) if matching_note_ids else False
+            ))
+        else:
+            # All in collection
+            stmt = stmt.where(or_(
+                FlashcardModel.document_id.in_(c_doc_ids) if c_doc_ids else False,
+                FlashcardModel.note_id.in_(c_note_ids) if c_note_ids else False
+            ))
+    elif tag:
+        # Global tag filter (no collection scope)
+        all_docs_with_tag = (await session.execute(select(DocumentModel.id, DocumentModel.tags))).all()
+        from app.routers.documents import _safe_tags
+        matching_doc_ids = [did for did, dtags in all_docs_with_tag if tag in _safe_tags(dtags)]
+        
+        stmt = stmt.join(NoteModel, FlashcardModel.note_id == NoteModel.id, isouter=True) \
+                   .join(NoteTagIndexModel, NoteModel.id == NoteTagIndexModel.note_id, isouter=True) \
+                   .where(or_(
+                       FlashcardModel.document_id.in_(matching_doc_ids) if matching_doc_ids else False,
+                       NoteTagIndexModel.tag_full == tag
+                   ))
+
+    result = await session.execute(stmt)
     count = result.scalar_one()
     logger.debug("due-count: %d cards due", count)
     return DueCountResponse(due_today=count)
@@ -443,14 +511,57 @@ async def get_due_count(
 @router.get("/due", response_model=list[FlashcardResponse])
 async def get_due_cards(
     document_id: str | None = None,
+    collection_id: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    document_ids: list[str] | None = Query(default=None),
+    note_ids: list[str] | None = Query(default=None),
     limit: int = 20,
     session: AsyncSession = Depends(get_db),
 ) -> list[FlashcardResponse]:
     """Return flashcards whose due_date is now or in the past."""
     now = datetime.now(UTC)
     stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
-    if document_id:
-        stmt = stmt.where(FlashcardModel.document_id == document_id)
+    
+    # Apply filters
+    used_document_ids = document_ids or ([document_id] if document_id else [])
+    if used_document_ids:
+        stmt = stmt.where(FlashcardModel.document_id.in_(used_document_ids))
+    if note_ids:
+        stmt = stmt.where(FlashcardModel.note_id.in_(note_ids))
+        
+    if collection_id and not (used_document_ids or note_ids):
+        # Resolve all doc/note IDs in hierarchy
+        c_doc_ids, c_note_ids = await _resolve_collection_members(collection_id, session)
+        
+        if tag:
+            from app.routers.documents import _safe_tags
+            all_c_docs = (await session.execute(select(DocumentModel.id, DocumentModel.tags).where(DocumentModel.id.in_(c_doc_ids)))).all()
+            matching_doc_ids = [did for did, dtags in all_c_docs if tag in _safe_tags(dtags)]
+            
+            tag_notes_stmt = select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.note_id.in_(c_note_ids)).where(NoteTagIndexModel.tag_full == tag)
+            matching_note_ids = (await session.execute(tag_notes_stmt)).scalars().all()
+            
+            stmt = stmt.where(or_(
+                FlashcardModel.document_id.in_(matching_doc_ids) if matching_doc_ids else False,
+                FlashcardModel.note_id.in_(matching_note_ids) if matching_note_ids else False
+            ))
+        else:
+            stmt = stmt.where(or_(
+                FlashcardModel.document_id.in_(c_doc_ids) if c_doc_ids else False,
+                FlashcardModel.note_id.in_(c_note_ids) if c_note_ids else False
+            ))
+    elif tag:
+        all_docs_with_tag = (await session.execute(select(DocumentModel.id, DocumentModel.tags))).all()
+        from app.routers.documents import _safe_tags
+        matching_doc_ids = [did for did, dtags in all_docs_with_tag if tag in _safe_tags(dtags)]
+        
+        stmt = stmt.join(NoteModel, FlashcardModel.note_id == NoteModel.id, isouter=True) \
+                   .join(NoteTagIndexModel, NoteModel.id == NoteTagIndexModel.note_id, isouter=True) \
+                   .where(or_(
+                       FlashcardModel.document_id.in_(matching_doc_ids) if matching_doc_ids else False,
+                       NoteTagIndexModel.tag_full == tag
+                   ))
+
     stmt = stmt.order_by(FlashcardModel.due_date.asc()).limit(limit)
     result = await session.execute(stmt)
     cards = list(result.scalars().all())
@@ -632,6 +743,167 @@ async def end_session(
         cards_correct=cards_correct,
         accuracy_pct=accuracy_pct,
         ended_at=sess.ended_at,
+    )
+
+
+async def _resolve_collection_members(
+    collection_id: str,
+    session: AsyncSession
+) -> tuple[list[str], list[str]]:
+    """Recursively identify all document and note IDs in a collection hierarchy."""
+    # 1. Resolve all collection IDs in the hierarchy
+    all_coll_ids = {collection_id}
+    to_process = [collection_id]
+    
+    while to_process:
+        curr_id = to_process.pop()
+        children_stmt = select(CollectionModel.id).where(CollectionModel.parent_collection_id == curr_id)
+        children = (await session.execute(children_stmt)).scalars().all()
+        for child_id in children:
+            if child_id not in all_coll_ids:
+                all_coll_ids.add(child_id)
+                to_process.append(child_id)
+    
+    # 2. Get members of all identified collections
+    members_stmt = select(CollectionMemberModel.member_id, CollectionMemberModel.member_type).where(
+        CollectionMemberModel.collection_id.in_(list(all_coll_ids))
+    )
+    members_rows = (await session.execute(members_stmt)).all()
+    
+    doc_ids = list({m[0] for m in members_rows if m[1] == "document"})
+    note_ids = list({m[0] for m in members_rows if m[1] == "note"})
+    return doc_ids, note_ids
+
+
+@router.get("/collections/{collection_id}/dashboard", response_model=StudyCollectionDashboardResponse)
+async def get_collection_study_dashboard(
+    collection_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> StudyCollectionDashboardResponse:
+    """Return a summary of study status for all material in a collection (S192)."""
+    # 1. Fetch collection name
+    coll_result = await session.execute(
+        select(CollectionModel.name).where(CollectionModel.id == collection_id)
+    )
+    coll_name = coll_result.scalar_one_or_none()
+    if not coll_name:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # 2. Resolve all documents and notes in this hierarchy
+    doc_ids, note_ids = await _resolve_collection_members(collection_id, session)
+
+    # 3. Aggregate flashcard stats across all documents (and any note-sourced cards)
+    now = datetime.now(UTC)
+    cards_stmt = select(FlashcardModel).where(
+        or_(
+            FlashcardModel.document_id.in_(doc_ids) if doc_ids else False,
+            FlashcardModel.note_id.in_(note_ids) if note_ids else False
+        )
+    )
+    cards_result = await session.execute(cards_stmt)
+    all_cards = list(cards_result.scalars().all())
+
+    due_today = sum(1 for c in all_cards if c.due_date and c.due_date.replace(tzinfo=UTC) <= now)
+    new_today = sum(1 for c in all_cards if c.fsrs_state == "new")
+    
+    # Mastery % = cards with stability > 30 days
+    mastered = sum(1 for c in all_cards if c.fsrs_stability > 30.0)
+    mastery_pct = round(mastered / len(all_cards) * 100, 1) if all_cards else 0.0
+
+    # 4. Topics (tags) aggregation
+    # We want tags that are present in either documents or notes of this collection.
+    # For each tag, we want:
+    # - card_count: flashcards linked to docs with this tag OR notes with this tag (within the collection)
+    # - note_count: notes in the collection with this tag
+    
+    tag_to_docs: dict[str, set[str]] = {}
+    tag_to_notes: dict[str, set[str]] = {}
+    
+    # (a) Process documents in collection
+    if doc_ids:
+        docs_stmt = select(DocumentModel.id, DocumentModel.tags).where(DocumentModel.id.in_(doc_ids))
+        docs_rows = (await session.execute(docs_stmt)).all()
+        for did, dtags in docs_rows:
+            from app.routers.documents import _safe_tags
+            dtags_list = _safe_tags(dtags)
+            for t in dtags_list:
+                tag_to_docs.setdefault(t, set()).add(did)
+                
+    # (b) Process notes in collection
+    if note_ids:
+        note_tag_stmt = select(NoteTagIndexModel.tag_full, NoteTagIndexModel.note_id).where(NoteTagIndexModel.note_id.in_(note_ids))
+        note_tag_rows = (await session.execute(note_tag_stmt)).all()
+        for t, nid in note_tag_rows:
+            tag_to_notes.setdefault(t, set()).add(nid)
+            
+    # (c) Build topics list
+    all_tags = set(tag_to_docs.keys()) | set(tag_to_notes.keys())
+    topics: list[CollectionTopic] = []
+    
+    for t in all_tags:
+        t_doc_ids = list(tag_to_docs.get(t, set()))
+        t_note_ids = list(tag_to_notes.get(t, set()))
+        
+        # Count flashcards for this tag in this collection
+        # Card belongs if: (doc in t_doc_ids) OR (note in t_note_ids)
+        card_count_stmt = select(func.count(FlashcardModel.id)).where(
+            or_(
+                FlashcardModel.document_id.in_(t_doc_ids) if t_doc_ids else False,
+                FlashcardModel.note_id.in_(t_note_ids) if t_note_ids else False
+            )
+        )
+        card_count = (await session.execute(card_count_stmt)).scalar() or 0
+        
+        note_count = len(t_note_ids)
+        if card_count > 0 or note_count > 0:
+            topics.append(CollectionTopic(tag=t, card_count=card_count, note_count=note_count))
+            
+    # Sort by card_count desc, then note_count desc
+    topics.sort(key=lambda x: (x.card_count, x.note_count), reverse=True)
+    topics = topics[:10]
+
+    # 5. Sources list
+    sources: list[CollectionSource] = []
+    if doc_ids:
+        docs_result = await session.execute(
+            select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
+        )
+        for did, dtitle in docs_result:
+            sources.append(CollectionSource(id=did, title=dtitle, type="document"))
+    if note_ids:
+        notes_result = await session.execute(
+            select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(note_ids))
+        )
+        for nid, ncontent in notes_result:
+            ntitle = ncontent.split("\n")[0][:60] or "Untitled Note"
+            sources.append(CollectionSource(id=nid, title=ntitle, type="note"))
+
+    # 6. Sub-collections
+    child_stmt = select(CollectionModel.id, CollectionModel.name).where(CollectionModel.parent_collection_id == collection_id)
+    children = (await session.execute(child_stmt)).all()
+    sub_collections: list[CollectionSubEnclave] = []
+    
+    for cid, cname in children:
+        # Get total card count for this sub-enclave
+        c_doc_ids, c_note_ids = await _resolve_collection_members(cid, session)
+        count_stmt = select(func.count(FlashcardModel.id)).where(
+            or_(
+                FlashcardModel.document_id.in_(c_doc_ids) if c_doc_ids else False,
+                FlashcardModel.note_id.in_(c_note_ids) if c_note_ids else False
+            )
+        )
+        total_cards_count = (await session.execute(count_stmt)).scalar() or 0
+        sub_collections.append(CollectionSubEnclave(id=cid, name=cname, card_count=total_cards_count))
+
+    return StudyCollectionDashboardResponse(
+        collection_id=collection_id,
+        collection_name=coll_name,
+        due_today=due_today,
+        new_today=new_today,
+        mastery_pct=mastery_pct,
+        topics=topics,
+        sources=sources,
+        sub_collections=sub_collections,
     )
 
 
