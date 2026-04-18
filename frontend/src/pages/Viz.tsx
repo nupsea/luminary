@@ -1,20 +1,26 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import Graph from "graphology"
 import forceAtlas2 from "graphology-layout-forceatlas2"
 import {
+  AlertTriangle,
+  BookOpen,
+  ChevronDown,
   Eye,
+  FileText,
   Filter,
   GitBranch,
+  Library,
   Maximize2,
   Minus,
   Network,
   Plus,
   Search,
+  StickyNote,
   Tag,
   X,
   Zap,
 } from "lucide-react"
-import { Component, useEffect, useMemo, useRef, useState } from "react"
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import Sigma from "sigma"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
@@ -119,6 +125,41 @@ async function fetchTagGraph(): Promise<TagGraphData> {
   if (!res.ok) throw new Error("Failed to fetch tag graph")
   return res.json() as Promise<TagGraphData>
 }
+
+// ---------------------------------------------------------------------------
+// Mastery / retention overlay types and fetcher
+// ---------------------------------------------------------------------------
+
+interface MasteryConceptItem {
+  concept: string
+  mastery: number
+  card_count: number
+  due_soon: number
+  no_flashcards: boolean
+  document_ids: string[]
+}
+
+interface MasteryConceptsResponse {
+  document_ids: string[]
+  concepts: MasteryConceptItem[]
+}
+
+async function fetchMasteryConcepts(docIds: string[]): Promise<MasteryConceptsResponse> {
+  const params = docIds.map((id) => `document_ids=${encodeURIComponent(id)}`).join("&")
+  const res = await fetch(`${API_BASE}/mastery/concepts?${params}`)
+  if (!res.ok) return { document_ids: docIds, concepts: [] }
+  return res.json() as Promise<MasteryConceptsResponse>
+}
+
+/** Map mastery score to a color for the retention overlay. */
+function masteryColor(mastery: number): string {
+  if (mastery >= 0.7) return "#22c55e"   // green-500: strong
+  if (mastery >= 0.4) return "#84cc16"   // lime-500: good
+  if (mastery >= 0.15) return "#f97316"  // orange-500: weak
+  return "#ef4444"                        // red-500: critical
+}
+
+const BLIND_SPOT_COLOR = "#94a3b8" // slate-400: no flashcards
 
 // Diagram-derived node types that use the hexagon renderer (S136)
 const DIAGRAM_NODE_TYPES: ReadonlySet<string> = new Set(["COMPONENT", "ACTOR", "ENTITY_DM", "STEP"])
@@ -541,7 +582,12 @@ export default function Viz() {
   // Entity type filter state from vizStore (persisted to localStorage) (S181)
   const { activeEntityTypes: activeTypes, toggleEntityType, selectAllEntityTypes, deselectAllEntityTypes } = useVizStore()
   const [search, setSearch] = useState("")
-  const [scope, setScope] = useState<"document" | "all">("document")
+  // Default to "all" when no document is pre-selected so the graph loads immediately
+  const [scope, setScope] = useState<"document" | "all">(activeDocumentId ? "document" : "all")
+  // Document picker search filter state
+  const [docPickerSearch, setDocPickerSearch] = useState("")
+  const [docPickerOpen, setDocPickerOpen] = useState(false)
+  const docPickerRef = useRef<HTMLDivElement>(null)
   const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path" | "tags">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
@@ -553,6 +599,8 @@ export default function Viz() {
   const [showCrossBook, setShowCrossBook] = useState(false)
   // Notes layer toggle: show/hide Note nodes (S172) -- default off
   const [showNotes, setShowNotes] = useState(false)
+  // Retention overlay toggle: color nodes by FSRS mastery strength
+  const [showRetention, setShowRetention] = useState(false)
   // Selected note node ID for NotePreviewPanel (S172)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   // Learning path state (S117)
@@ -571,6 +619,39 @@ export default function Viz() {
     staleTime: 30_000,
   })
 
+  // Filtered doc list for the searchable picker
+  const filteredDocList = useMemo(() => {
+    if (!docList) return []
+    if (!docPickerSearch.trim()) return docList
+    const q = docPickerSearch.toLowerCase()
+    return docList.filter((d) => d.title.toLowerCase().includes(q))
+  }, [docList, docPickerSearch])
+
+  // Close doc picker on outside click
+  useEffect(() => {
+    if (!docPickerOpen) return
+    function handleClick(e: MouseEvent) {
+      if (docPickerRef.current && !docPickerRef.current.contains(e.target as Node)) {
+        setDocPickerOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [docPickerOpen])
+
+  // Handle document selection from the searchable picker
+  const handleDocSelect = useCallback((docId: string | null) => {
+    setActiveDocument(docId)
+    setDocPickerOpen(false)
+    setDocPickerSearch("")
+    // Auto-switch scope: selecting a doc → "This doc", clearing → "All docs"
+    if (docId) {
+      setScope("document")
+    } else {
+      setScope("all")
+    }
+  }, [setActiveDocument])
+
   // Detect whether selected document is a code document (S181)
   const selectedDoc = docList?.find((d) => d.id === activeDocumentId)
   const isCodeDoc = isCodeDocument(selectedDoc?.format ?? "")
@@ -588,6 +669,7 @@ export default function Viz() {
       showNotes,
     ),
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
     enabled: !noDocSelected && viewMode !== "learning_path" && viewMode !== "tags",
   })
 
@@ -614,8 +696,32 @@ export default function Viz() {
     queryKey: ["tag-graph"],
     queryFn: fetchTagGraph,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
     enabled: viewMode === "tags",
   })
+
+  // Mastery / retention overlay data
+  const allDocIds = useMemo(() => docList?.map((d) => d.id) ?? [], [docList])
+  const masteryDocIds = useMemo(
+    () => (scope === "document" && activeDocumentId ? [activeDocumentId] : allDocIds),
+    [scope, activeDocumentId, allDocIds],
+  )
+  const { data: masteryData } = useQuery({
+    queryKey: ["mastery-concepts", ...masteryDocIds],
+    queryFn: () => fetchMasteryConcepts(masteryDocIds),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+    enabled: showRetention && masteryDocIds.length > 0 && viewMode !== "tags",
+  })
+  // Build lowercase name -> mastery entry map for fast lookup in nodeReducer
+  const masteryMap = useMemo(() => {
+    const map = new Map<string, MasteryConceptItem>()
+    if (!masteryData?.concepts) return map
+    for (const c of masteryData.concepts) {
+      map.set(c.concept.toLowerCase(), c)
+    }
+    return map
+  }, [masteryData])
 
   // Reset call_graph mode when the selected document is no longer a code document (S181)
   useEffect(() => {
@@ -670,37 +776,74 @@ export default function Viz() {
   // ---------------------------------------------------------------------------
   // Core effect: mount/update raw Sigma instance when filteredGraph changes
   // ---------------------------------------------------------------------------
+
+  // Track whether we need to rebuild sigma after a WebGL context restore
+  const pendingRestoreRef = useRef(false)
+
   useEffect(() => {
-    // Destroy previous instance first
+    const el = canvasRef.current
+    if (!el) return
+
+    // Keep previous sigma alive during loading transitions (filteredGraph = null)
+    // to avoid unnecessary WebGL context churn
+    if (!filteredGraph) return
+    if (filteredGraph.order === 0) {
+      if (sigmaRef.current) {
+        sigmaRef.current.kill()
+        sigmaRef.current = null
+      }
+      el.innerHTML = ""
+      return
+    }
+
+    // Destroy previous instance before creating new one
     if (sigmaRef.current) {
       sigmaRef.current.kill()
       sigmaRef.current = null
     }
 
-    const el = canvasRef.current
-    if (!el || !filteredGraph || filteredGraph.order === 0) return
+    // Clean container explicitly to ensure no stale canvases remain
+    el.innerHTML = ""
 
     const s = new Sigma(filteredGraph, el, {
       renderEdgeLabels: false,
       defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
       labelSize: 12,
       labelWeight: "normal",
-      // Register hexagon (S136) and square (S172) node programs.
-      // Nodes without a type attribute use sigma's default renderer (NodePointProgram).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sigma generic variance
       nodeProgramClasses: {
         hexagon: NodeHexagonProgram as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sigma generic variance
         square: NodeSquareProgram as any,
       },
+      allowInvalidContainer: true,
     })
 
-    // Node click → popover or note panel (S172) or cluster expand (S181)
+    // WebGL context lost/restored handlers
+    const canvases = el.querySelectorAll("canvas")
+    const handleContextLost = (e: Event) => {
+      e.preventDefault()
+      logger.warn("[Viz] WebGL context lost -- will restore on recovery")
+      pendingRestoreRef.current = true
+    }
+    const handleContextRestored = () => {
+      logger.info("[Viz] WebGL context restored -- refreshing sigma")
+      pendingRestoreRef.current = false
+      try {
+        s.refresh()
+      } catch {
+        // If refresh fails, sigma is in a bad state; flag for rebuild on next render
+        logger.warn("[Viz] sigma refresh after context restore failed")
+      }
+    }
+    canvases.forEach((c) => {
+      c.addEventListener("webglcontextlost", handleContextLost)
+      c.addEventListener("webglcontextrestored", handleContextRestored)
+    })
+
+    // Node click -> popover or note panel (S172) or cluster expand (S181)
     s.on("clickNode", (payload: SigmaNodeEventPayload) => {
       const { node, event } = payload
       const entityType = filteredGraph.getNodeAttribute(node, "entityType") as string
 
-      // Cluster nodes (S181): toggle expansion
       const isCluster = filteredGraph.getNodeAttribute(node, "isCluster") as boolean | undefined
       if (isCluster) {
         const clusterEntityType = filteredGraph.getNodeAttribute(node, "clusterEntityType") as string
@@ -714,7 +857,6 @@ export default function Viz() {
         return
       }
 
-      // Note nodes open NotePreviewPanel; entity nodes open the entity popover
       if (entityType === "note") {
         const noteId = (filteredGraph.getNodeAttribute(node, "note_id") as string | undefined) ?? node
         setSelectedNode(null)
@@ -741,15 +883,12 @@ export default function Viz() {
       event.preventSigmaDefault()
     })
 
-    // Edge hover → tooltip
     s.on("enterEdge", (payload: SigmaEdgeEventPayload) => {
-      const edgeType =
-        (filteredGraph.getEdgeAttribute(payload.edge, "type") as string | undefined) ?? "CO_OCCURS"
+      const edgeType = (filteredGraph.getEdgeAttribute(payload.edge, "type") as string | undefined) ?? "CO_OCCURS"
       setEdgeTooltip(edgeType)
     })
     s.on("leaveEdge", () => setEdgeTooltip(null))
 
-    // Click blank area → deselect node/note panel
     s.on("clickStage", () => {
       setSelectedNode(null)
       setSelectedNoteId(null)
@@ -758,52 +897,81 @@ export default function Viz() {
     sigmaRef.current = s
 
     return () => {
+      canvases.forEach((c) => {
+        c.removeEventListener("webglcontextlost", handleContextLost)
+        c.removeEventListener("webglcontextrestored", handleContextRestored)
+      })
       s.kill()
       sigmaRef.current = null
+      if (el) el.innerHTML = ""
     }
   }, [filteredGraph])
 
   // ---------------------------------------------------------------------------
-  // Search effect: update sigma reducers without rebuilding the instance
+  // Combined search + retention overlay effect
+  // Both use sigma nodeReducer so they must be composed in a single effect.
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const s = sigmaRef.current
     if (!s) return
 
-    if (!search) {
+    const q = search?.toLowerCase() ?? ""
+    const hasSearch = q.length > 0
+    const hasRetention = showRetention && masteryMap.size > 0
+
+    if (!hasSearch && !hasRetention) {
       s.setSetting("nodeReducer", null)
       s.setSetting("edgeReducer", null)
       return
     }
 
-    const q = search.toLowerCase()
     s.setSetting("nodeReducer", (_node: string, d: Record<string, unknown>) => {
-      const label = (d.label as string) ?? ""
-      if (label.toLowerCase().includes(q)) return d
-      return { ...d, color: DIM_COLOR, label: "" }
-    })
-    s.setSetting("edgeReducer", (_edge: string, d: Record<string, unknown>) => ({
-      ...d,
-      color: DIM_COLOR,
-    }))
+      const label = ((d.label as string) ?? "")
+      const labelLower = label.toLowerCase()
 
-    // Pan to first matching node
-    const graph = s.getGraph()
-    const firstMatch = graph.nodes().find((n) => {
-      const lbl = (graph.getNodeAttribute(n, "label") as string) ?? ""
-      return lbl.toLowerCase().includes(q)
+      // Search dimming takes priority
+      if (hasSearch && !labelLower.includes(q)) {
+        return { ...d, color: DIM_COLOR, label: "" }
+      }
+
+      // Retention coloring (skip note/cluster nodes)
+      if (hasRetention) {
+        const entityType = d.entityType as string
+        if (entityType === "note" || entityType === "cluster") return d
+        const entry = masteryMap.get(labelLower)
+        if (!entry || entry.no_flashcards) {
+          return { ...d, color: BLIND_SPOT_COLOR }
+        }
+        return { ...d, color: masteryColor(entry.mastery) }
+      }
+
+      return d
     })
-    if (firstMatch) {
-      s.getCamera().animate(
-        {
-          x: graph.getNodeAttribute(firstMatch, "x") as number,
-          y: graph.getNodeAttribute(firstMatch, "y") as number,
-          ratio: 0.5,
-        },
-        { duration: 500 },
-      )
+
+    s.setSetting("edgeReducer", hasSearch
+      ? (_edge: string, d: Record<string, unknown>) => ({ ...d, color: DIM_COLOR })
+      : null,
+    )
+
+    // Pan to first matching node on search
+    if (hasSearch) {
+      const graph = s.getGraph()
+      const firstMatch = graph.nodes().find((n) => {
+        const lbl = (graph.getNodeAttribute(n, "label") as string) ?? ""
+        return lbl.toLowerCase().includes(q)
+      })
+      if (firstMatch) {
+        s.getCamera().animate(
+          {
+            x: graph.getNodeAttribute(firstMatch, "x") as number,
+            y: graph.getNodeAttribute(firstMatch, "y") as number,
+            ratio: 0.5,
+          },
+          { duration: 500 },
+        )
+      }
     }
-  }, [search, filteredGraph]) // re-apply after sigma rebuilds
+  }, [search, filteredGraph, showRetention, masteryMap]) // re-apply after sigma rebuilds
 
   // ---------------------------------------------------------------------------
   // Camera controls
@@ -945,24 +1113,9 @@ export default function Viz() {
                 ))}
               </div>
             )}
-          </div>
+          </div> {/* End header left side (946) */}
 
-          <div className="flex items-center gap-3">
-            {/* Document picker -- hidden for Tags mode */}
-            {viewMode !== "tags" && (
-              <select
-                value={activeDocumentId ?? ""}
-                onChange={(e) => setActiveDocument(e.target.value || null)}
-                className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground max-w-[220px] truncate focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">Select document...</option>
-                {(docList ?? []).map((doc) => (
-                  <option key={doc.id} value={doc.id}>{doc.title}</option>
-                ))}
-              </select>
-            )}
-
-            {/* Graph stats badge */}
+          <div className="flex items-center gap-3"> {/* Header right side */}
             {graphStats && (
               <div className="flex items-center gap-2 rounded-full border border-border bg-card/50 px-3 py-1">
                 <span className="text-[10px] font-semibold text-muted-foreground uppercase">
@@ -975,7 +1128,7 @@ export default function Viz() {
               </div>
             )}
           </div>
-        </div>
+        </div> {/* End header bar (945) */}
 
         {/* ---- Main content: sidebar + graph canvas ---- */}
         <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
@@ -986,27 +1139,120 @@ export default function Viz() {
               className="flex flex-col border-r border-border bg-card/20 overflow-y-auto shrink-0 custom-scrollbar"
               style={{ width: 260 }}
             >
-              {/* Search */}
-              <div className="p-4 pb-3 border-b border-border/50">
-                <div className="relative">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+              {/* Browsing / Context Selection */}
+              <div className="p-4 py-3 border-b border-border/50">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <Library size={13} className="text-primary/70" />
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Library</span>
+                </div>
+                
+                {/* Search within Library/Entities */}
+                <div className="relative mb-3">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40" />
                   <input
                     type="text"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search entities..."
-                    className="w-full rounded-lg border border-border bg-background pl-8 pr-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={docPickerSearch || search}
+                    onChange={(e) => {
+                      setDocPickerSearch(e.target.value)
+                      setSearch(e.target.value)
+                    }}
+                    placeholder="Search docs or concepts..."
+                    className="w-full rounded-lg border border-border bg-background pl-8 pr-3 py-2 text-[11px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring"
                   />
-                  {search && (
+                  {(docPickerSearch || search) && (
                     <button
-                      onClick={() => setSearch("")}
+                      onClick={() => {
+                        setDocPickerSearch("")
+                        setSearch("")
+                      }}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
                       <X size={12} />
                     </button>
                   )}
                 </div>
+
+                {/* Quick select list or "All" toggle */}
+                <div className="space-y-0.5 max-h-[220px] overflow-y-auto px-1 -mx-1 custom-scrollbar">
+                  <button
+                    onClick={() => handleDocSelect(null)}
+                    className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] transition-colors ${
+                      !activeDocumentId ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    }`}
+                  >
+                    <BookOpen size={12} className={!activeDocumentId ? "text-primary" : "text-muted-foreground/50"} />
+                    <span className="truncate">All documents</span>
+                  </button>
+                  
+                  {filteredDocList.slice(0, 15).map((doc) => (
+                    <button
+                      key={doc.id}
+                      onClick={() => handleDocSelect(doc.id)}
+                      className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] transition-colors ${
+                        activeDocumentId === doc.id ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                      }`}
+                      title={doc.title}
+                    >
+                      <FileText size={12} className={activeDocumentId === doc.id ? "text-primary" : "text-muted-foreground/50"} />
+                      <span className="truncate">{doc.title}</span>
+                    </button>
+                  ))}
+                  
+                  {filteredDocList.length > 15 && (
+                    <p className="px-2 py-1 text-[9px] text-muted-foreground/50 italic">
+                      + {filteredDocList.length - 15} more... search to filter
+                    </p>
+                  )}
+                  
+                  {filteredDocList.length === 0 && docPickerSearch && (
+                    <p className="px-2 py-3 text-[10px] text-muted-foreground/50 text-center italic">
+                      No matching documents
+                    </p>
+                  )}
+                </div>
               </div>
+
+              {/* Notes Context section (if notes layer is on) */}
+              {showNotes && (
+                <div className="p-4 py-3 border-b border-border/50 bg-yellow-50/10">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <StickyNote size={13} className="text-yellow-600/70" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Notes in Context</span>
+                  </div>
+                  
+                  <div className="space-y-0.5 max-h-[160px] overflow-y-auto px-1 -mx-1 custom-scrollbar">
+                    {!filteredGraph || filteredGraph.nodes().filter(n => filteredGraph.getNodeAttribute(n, "type") === "note").length === 0 ? (
+                      <p className="px-2 py-3 text-[10px] text-muted-foreground/50 text-center italic">
+                        No notes found in graph
+                      </p>
+                    ) : (
+                      filteredGraph.nodes()
+                        .filter(n => filteredGraph.getNodeAttribute(n, "type") === "note")
+                        .slice(0, 10)
+                        .map((n) => {
+                          const label = filteredGraph.getNodeAttribute(n, "label") as string
+                          const nodeNoteId = filteredGraph.getNodeAttribute(n, "note_id") as string
+                          return (
+                            <button
+                              key={n}
+                              onClick={() => {
+                                setSelectedNoteId(nodeNoteId)
+                                setSelectedNode(null)
+                                // Scroll to node is handled by useEffect on selectedNoteId
+                              }}
+                              className={`flex items-start gap-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] transition-colors ${
+                                selectedNoteId === nodeNoteId ? "bg-yellow-500/10 text-yellow-700 font-semibold" : "text-muted-foreground hover:bg-yellow-500/5 hover:text-foreground"
+                              }`}
+                            >
+                              <StickyNote size={11} className="mt-0.5 shrink-0 opacity-50" />
+                              <span className="line-clamp-2">{label}</span>
+                            </button>
+                          )
+                        })
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Learning path: start entity input (S117) */}
               {viewMode === "learning_path" && (
@@ -1050,6 +1296,7 @@ export default function Viz() {
                     { label: "Prerequisites", checked: showPrerequisites, toggle: () => setShowPrerequisites((v) => !v), color: PREREQ_EDGE_COLOR },
                     { label: "Cross-book", checked: showCrossBook, toggle: () => setShowCrossBook((v) => !v), color: SAME_CONCEPT_COLOR },
                     { label: "Notes", checked: showNotes, toggle: () => setShowNotes((v) => !v), color: NOTE_NODE_COLOR },
+                    { label: "Retention", checked: showRetention, toggle: () => setShowRetention((v) => !v), color: "#22c55e" },
                   ].map((layer) => (
                     <button
                       key={layer.label}
@@ -1069,6 +1316,48 @@ export default function Viz() {
                   ))}
                 </div>
               </div>
+
+              {/* Needs Attention panel -- visible when retention overlay is active */}
+              {showRetention && masteryData?.concepts && masteryData.concepts.filter((c) => c.no_flashcards || c.mastery < 0.3).length > 0 && (
+                <div className="p-4 py-3 border-b border-border/50">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <AlertTriangle size={13} className="text-amber-500/70" />
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Needs Attention</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mb-2">
+                    Concepts with weak retention or no flashcards
+                  </p>
+                  <div className="space-y-0.5 max-h-[200px] overflow-y-auto px-1 -mx-1 custom-scrollbar">
+                    {masteryData.concepts
+                      .filter((c) => c.no_flashcards || c.mastery < 0.3)
+                      .slice(0, 15)
+                      .map((c) => (
+                        <button
+                          key={c.concept}
+                          onClick={() => setSearch(c.concept)}
+                          className="flex items-center justify-between gap-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                        >
+                          <span className="flex items-center gap-1.5 truncate min-w-0">
+                            <span
+                              className="inline-block h-2 w-2 rounded-full shrink-0"
+                              style={{ backgroundColor: c.no_flashcards ? BLIND_SPOT_COLOR : masteryColor(c.mastery) }}
+                            />
+                            <span className="truncate">{c.concept}</span>
+                          </span>
+                          <span className={`text-[10px] font-mono shrink-0 ${
+                            c.no_flashcards
+                              ? "text-muted-foreground/40"
+                              : c.mastery < 0.15
+                                ? "text-red-500"
+                                : "text-amber-500"
+                          }`}>
+                            {c.no_flashcards ? "blind spot" : `${Math.round(c.mastery * 100)}%`}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               {/* Entity type filter */}
               <div className="p-4 flex-1">
@@ -1145,8 +1434,14 @@ export default function Viz() {
                 </div>
                 <p className="text-lg font-semibold text-foreground">No document selected</p>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  Choose a document from the header to explore its knowledge graph.
+                  Switch to &ldquo;All docs&rdquo; to explore the full knowledge graph, or pick a document from the header.
                 </p>
+                <button
+                  onClick={() => setScope("all")}
+                  className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
+                >
+                  Show all documents
+                </button>
               </div>
             )}
 
@@ -1305,8 +1600,29 @@ export default function Viz() {
               </div>
             ) : null}
 
-            {/* Graph legend (bottom-left) -- only when graph is visible */}
-            {graphStats && graphStats.typeCounts.size > 0 && (
+            {/* Graph legend (bottom-left) -- switches between entity types and retention */}
+            {showRetention && filteredGraph && filteredGraph.order > 0 ? (
+              <div className="absolute bottom-4 left-4 z-10 rounded-xl border border-border bg-background/90 backdrop-blur-sm shadow-sm px-3 py-2.5 max-w-[240px]">
+                <p className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-2">Retention Strength</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {([
+                    ["#ef4444", "Critical (<15%)"],
+                    ["#f97316", "Weak (15-40%)"],
+                    ["#84cc16", "Good (40-70%)"],
+                    ["#22c55e", "Strong (>70%)"],
+                    [BLIND_SPOT_COLOR, "No flashcards"],
+                  ] as const).map(([color, label]) => (
+                    <div key={label} className="flex items-center gap-1">
+                      <span
+                        className="inline-block h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                      <span className="text-[10px] text-muted-foreground">{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : graphStats && graphStats.typeCounts.size > 0 ? (
               <div className="absolute bottom-4 left-4 z-10 rounded-xl border border-border bg-background/90 backdrop-blur-sm shadow-sm px-3 py-2.5 max-w-[200px]">
                 <p className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-2">Legend</p>
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -1327,7 +1643,7 @@ export default function Viz() {
                     ))}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Note node preview panel (S172) */}
             {selectedNoteId && (
