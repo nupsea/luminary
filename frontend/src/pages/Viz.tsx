@@ -644,6 +644,10 @@ export default function Viz() {
     setActiveDocument(docId)
     setDocPickerOpen(false)
     setDocPickerSearch("")
+    setSearch("") // Clear the graph visual filter as well so the new doc is fully visible
+    setSelectedNode(null)
+    setSelectedNoteId(null)
+    
     // Auto-switch scope: selecting a doc → "This doc", clearing → "All docs"
     if (docId) {
       setScope("document")
@@ -785,124 +789,120 @@ export default function Viz() {
     if (!el) return
 
     // Keep previous sigma alive during loading transitions (filteredGraph = null)
-    // to avoid unnecessary WebGL context churn
     if (!filteredGraph) return
-    if (filteredGraph.order === 0) {
-      if (sigmaRef.current) {
-        sigmaRef.current.kill()
-        sigmaRef.current = null
-      }
-      el.innerHTML = ""
-      return
-    }
-
-    // Destroy previous instance before creating new one
+    
+    // Destroy previous instance
     if (sigmaRef.current) {
       sigmaRef.current.kill()
       sigmaRef.current = null
     }
 
-    // Clean container explicitly to ensure no stale canvases remain
-    el.innerHTML = ""
-
-    const s = new Sigma(filteredGraph, el, {
-      renderEdgeLabels: false,
-      defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
-      labelSize: 12,
-      labelWeight: "normal",
-      nodeProgramClasses: {
-        hexagon: NodeHexagonProgram as any,
-        square: NodeSquareProgram as any,
-      },
-      allowInvalidContainer: true,
-    })
-
-    // WebGL context lost/restored handlers
-    const canvases = el.querySelectorAll("canvas")
-    const handleContextLost = (e: Event) => {
-      e.preventDefault()
-      logger.warn("[Viz] WebGL context lost -- will restore on recovery")
-      pendingRestoreRef.current = true
+    if (filteredGraph.order === 0) {
+      el.innerHTML = ""
+      return
     }
-    const handleContextRestored = () => {
-      logger.info("[Viz] WebGL context restored -- refreshing sigma")
-      pendingRestoreRef.current = false
-      try {
-        s.refresh()
-      } catch {
-        // If refresh fails, sigma is in a bad state; flag for rebuild on next render
-        logger.warn("[Viz] sigma refresh after context restore failed")
+
+    // Delay initialization slightly to ensure WebGL context from killed instance is fully reclaimed
+    const timer = setTimeout(() => {
+      // Re-check el exists in timeout
+      const currentEl = canvasRef.current
+      if (!currentEl) return
+
+      // Clean container explicitly
+      currentEl.innerHTML = ""
+
+      const s = new Sigma(filteredGraph, currentEl, {
+        renderEdgeLabels: false,
+        defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
+        labelSize: 12,
+        labelWeight: "normal",
+        nodeProgramClasses: {
+          hexagon: NodeHexagonProgram as any,
+          square: NodeSquareProgram as any,
+        },
+        allowInvalidContainer: true,
+      })
+
+      // WebGL context lost/restored handlers
+      const canvases = currentEl.querySelectorAll("canvas")
+      const handleContextLost = (e: Event) => {
+        e.preventDefault()
+        logger.warn("[Viz] WebGL context lost -- will restore on recovery")
+        pendingRestoreRef.current = true
       }
-    }
-    canvases.forEach((c) => {
-      c.addEventListener("webglcontextlost", handleContextLost)
-      c.addEventListener("webglcontextrestored", handleContextRestored)
-    })
+      const handleContextRestored = () => {
+        logger.info("[Viz] WebGL context restored -- refreshing sigma")
+        pendingRestoreRef.current = false
+        try { s.refresh() } catch { logger.warn("[Viz] sigma refresh failed") }
+      }
+      canvases.forEach((c) => {
+        c.addEventListener("webglcontextlost", handleContextLost)
+        c.addEventListener("webglcontextrestored", handleContextRestored)
+      })
 
-    // Node click -> popover or note panel (S172) or cluster expand (S181)
-    s.on("clickNode", (payload: SigmaNodeEventPayload) => {
-      const { node, event } = payload
-      const entityType = filteredGraph.getNodeAttribute(node, "entityType") as string
+      s.on("clickNode", (payload: SigmaNodeEventPayload) => {
+        const { node, event } = payload
+        const entityType = filteredGraph.getNodeAttribute(node, "entityType") as string
 
-      const isCluster = filteredGraph.getNodeAttribute(node, "isCluster") as boolean | undefined
-      if (isCluster) {
-        const clusterEntityType = filteredGraph.getNodeAttribute(node, "clusterEntityType") as string
-        setExpandedClusters((prev) => {
-          const next = new Set(prev)
-          if (next.has(clusterEntityType)) next.delete(clusterEntityType)
-          else next.add(clusterEntityType)
-          return next
+        const isCluster = filteredGraph.getNodeAttribute(node, "isCluster") as boolean | undefined
+        if (isCluster) {
+          const clusterEntityType = filteredGraph.getNodeAttribute(node, "clusterEntityType") as string
+          setExpandedClusters((prev) => {
+            const next = new Set(prev)
+            if (next.has(clusterEntityType)) next.delete(clusterEntityType)
+            else next.add(clusterEntityType)
+            return next
+          })
+          event.preventSigmaDefault()
+          return
+        }
+
+        if (entityType === "note") {
+          const noteId = (filteredGraph.getNodeAttribute(node, "note_id") as string | undefined) ?? node
+          setSelectedNode(null)
+          setSelectedNoteId(noteId)
+          event.preventSigmaDefault()
+          return
+        }
+
+        const pos = s.graphToViewport({
+          x: filteredGraph.getNodeAttribute(node, "x") as number,
+          y: filteredGraph.getNodeAttribute(node, "y") as number,
+        })
+        const rect = currentEl.getBoundingClientRect()
+        setSelectedNoteId(null)
+        setSelectedNode({
+          id: node,
+          label: filteredGraph.getNodeAttribute(node, "label") as string,
+          type: entityType,
+          frequency: filteredGraph.getNodeAttribute(node, "frequency") as number,
+          screenX: rect.left + pos.x,
+          screenY: rect.top + pos.y,
+          source_image_id: (filteredGraph.getNodeAttribute(node, "source_image_id") as string | undefined) ?? "",
         })
         event.preventSigmaDefault()
-        return
-      }
+      })
 
-      if (entityType === "note") {
-        const noteId = (filteredGraph.getNodeAttribute(node, "note_id") as string | undefined) ?? node
+      s.on("enterEdge", (payload: SigmaEdgeEventPayload) => {
+        const edgeType = (filteredGraph.getEdgeAttribute(payload.edge, "type") as string | undefined) ?? "CO_OCCURS"
+        setEdgeTooltip(edgeType)
+      })
+      s.on("leaveEdge", () => setEdgeTooltip(null))
+
+      s.on("clickStage", () => {
         setSelectedNode(null)
-        setSelectedNoteId(noteId)
-        event.preventSigmaDefault()
-        return
-      }
-
-      const pos = s.graphToViewport({
-        x: filteredGraph.getNodeAttribute(node, "x") as number,
-        y: filteredGraph.getNodeAttribute(node, "y") as number,
+        setSelectedNoteId(null)
       })
-      const rect = el.getBoundingClientRect()
-      setSelectedNoteId(null)
-      setSelectedNode({
-        id: node,
-        label: filteredGraph.getNodeAttribute(node, "label") as string,
-        type: entityType,
-        frequency: filteredGraph.getNodeAttribute(node, "frequency") as number,
-        screenX: rect.left + pos.x,
-        screenY: rect.top + pos.y,
-        source_image_id: (filteredGraph.getNodeAttribute(node, "source_image_id") as string | undefined) ?? "",
-      })
-      event.preventSigmaDefault()
-    })
 
-    s.on("enterEdge", (payload: SigmaEdgeEventPayload) => {
-      const edgeType = (filteredGraph.getEdgeAttribute(payload.edge, "type") as string | undefined) ?? "CO_OCCURS"
-      setEdgeTooltip(edgeType)
-    })
-    s.on("leaveEdge", () => setEdgeTooltip(null))
-
-    s.on("clickStage", () => {
-      setSelectedNode(null)
-      setSelectedNoteId(null)
-    })
-
-    sigmaRef.current = s
+      sigmaRef.current = s
+    }, 100)
 
     return () => {
-      canvases.forEach((c) => {
-        c.removeEventListener("webglcontextlost", handleContextLost)
-        c.removeEventListener("webglcontextrestored", handleContextRestored)
-      })
-      s.kill()
-      sigmaRef.current = null
+      clearTimeout(timer)
+      if (sigmaRef.current) {
+        sigmaRef.current.kill()
+        sigmaRef.current = null
+      }
       if (el) el.innerHTML = ""
     }
   }, [filteredGraph])
@@ -1151,20 +1151,18 @@ export default function Viz() {
                   <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40" />
                   <input
                     type="text"
-                    value={docPickerSearch || search}
+                    value={docPickerSearch}
                     onChange={(e) => {
                       setDocPickerSearch(e.target.value)
-                      setSearch(e.target.value)
+                      // Only update global search if not specifically filtering the library list
+                      if (!e.target.value) setSearch("")
                     }}
-                    placeholder="Search docs or concepts..."
+                    placeholder="Filter documents..."
                     className="w-full rounded-lg border border-border bg-background pl-8 pr-3 py-2 text-[11px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring"
                   />
-                  {(docPickerSearch || search) && (
+                  {docPickerSearch && (
                     <button
-                      onClick={() => {
-                        setDocPickerSearch("")
-                        setSearch("")
-                      }}
+                      onClick={() => setDocPickerSearch("")}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
                       <X size={12} />
