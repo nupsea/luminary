@@ -381,11 +381,15 @@ async def test_delete_document_removes_child_rows(test_db):
 
     async with factory() as session:
         chunks = (
-            await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id))
-        ).scalars().all()
+            (await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
         summaries = (
-            await session.execute(select(SummaryModel).where(SummaryModel.document_id == doc_id))
-        ).scalars().all()
+            (await session.execute(select(SummaryModel).where(SummaryModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
     assert chunks == []
     assert summaries == []
 

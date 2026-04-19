@@ -194,9 +194,7 @@ async def test_full_ingest_fiction(full_integration_db, monkeypatch):
 
     # 2. At least 50 chunks should be stored (book: 600-char chunks, ~180k chars → ~300+)
     async with factory() as session:
-        result = await session.execute(
-            select(func.count()).where(ChunkModel.document_id == doc_id)
-        )
+        result = await session.execute(select(func.count()).where(ChunkModel.document_id == doc_id))
         chunk_count = result.scalar_one()
     assert chunk_count >= 50, f"Expected >=50 chunks, got {chunk_count}"
 
@@ -205,9 +203,7 @@ async def test_full_ingest_fiction(full_integration_db, monkeypatch):
 
     graph_data = get_graph_service().get_graph_for_document(doc_id)
     entity_count = len(graph_data["nodes"])
-    assert entity_count >= 10, (
-        f"Expected >=10 graph nodes from GLiNER, got {entity_count}"
-    )
+    assert entity_count >= 10, f"Expected >=10 graph nodes from GLiNER, got {entity_count}"
 
     # 4. Search for 'time traveller' returns >= 3 results via hybrid retrieval
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -250,9 +246,7 @@ async def test_full_ingest_technical(full_integration_db, monkeypatch):
 
     # 2. At least 100 chunks should be stored (paper: 300-char chunks, ~109k chars → ~360+)
     async with factory() as session:
-        result = await session.execute(
-            select(func.count()).where(ChunkModel.document_id == doc_id)
-        )
+        result = await session.execute(select(func.count()).where(ChunkModel.document_id == doc_id))
         chunk_count = result.scalar_one()
     assert chunk_count >= 100, f"Expected >=100 chunks, got {chunk_count}"
 
@@ -261,9 +255,7 @@ async def test_full_ingest_technical(full_integration_db, monkeypatch):
 
     graph_data = get_graph_service().get_graph_for_document(doc_id)
     entity_count = len(graph_data["nodes"])
-    assert entity_count >= 15, (
-        f"Expected >=15 graph nodes from GLiNER, got {entity_count}"
-    )
+    assert entity_count >= 15, f"Expected >=15 graph nodes from GLiNER, got {entity_count}"
 
     # 4. Search for 'Unix philosophy' returns >= 3 results via hybrid retrieval
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

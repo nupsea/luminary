@@ -223,9 +223,7 @@ async def test_get_references_excludes_invalid_by_default(test_db):
     await _insert_ref(factory, doc_id, url="https://invalid.com", is_valid=False, term="invalid")
     await _insert_ref(factory, doc_id, url="https://unchecked.com", is_valid=None, term="unchecked")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Default: exclude invalid
         resp = await client.get(f"/references/documents/{doc_id}")
         assert resp.status_code == 200

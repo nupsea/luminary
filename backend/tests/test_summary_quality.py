@@ -120,9 +120,7 @@ def test_is_metadata_section_true_for_copyright_in_text():
 
 
 def test_is_metadata_section_false_for_content():
-    assert (
-        _is_metadata_section("Chapter 1", "Holmes examined the room carefully...") is False
-    )
+    assert _is_metadata_section("Chapter 1", "Holmes examined the room carefully...") is False
 
 
 def test_is_metadata_section_false_for_named_characters():
@@ -149,9 +147,8 @@ async def test_metadata_section_filtered_in_generate(test_db):
 
     # 3 qualifying content sections + 1 metadata section (also long enough to qualify by length)
     long_preview = "A" * (MIN_PREVIEW_LEN + 50)
-    metadata_preview = (
-        "Project Gutenberg is a non-profit organization. "
-        + "x" * (MIN_PREVIEW_LEN + 10)
+    metadata_preview = "Project Gutenberg is a non-profit organization. " + "x" * (
+        MIN_PREVIEW_LEN + 10
     )
 
     async with factory() as session:
@@ -193,9 +190,7 @@ async def test_metadata_section_filtered_in_generate(test_db):
 
     # Only 3 non-metadata sections should have triggered LLM calls
     assert inserted == 3, f"Expected 3 summaries (metadata skipped), got {inserted}"
-    assert mock_llm.call_count == 3, (
-        f"Expected 3 LLM calls (not 4), got {mock_llm.call_count}"
-    )
+    assert mock_llm.call_count == 3, f"Expected 3 LLM calls (not 4), got {mock_llm.call_count}"
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 """Unit tests for image_extractor.py -- S133."""
+
 import hashlib
 from io import BytesIO
 from pathlib import Path

@@ -195,7 +195,8 @@ def canonicalize_batch(
             # as a spurious canonical in subsequent iterations.
             stripped_canonical = _strip_honorifics(canonical)
             evict = [
-                p for p in pool
+                p
+                for p in pool
                 if _strip_honorifics(p) != stripped_canonical
                 and (
                     (
@@ -208,10 +209,8 @@ def canonicalize_batch(
                         and len(stripped_canonical) > len(_strip_honorifics(p))
                     )
                     or (
-                        len(
-                            set(stripped_canonical.split())
-                            & set(_strip_honorifics(p).split())
-                        ) >= 2
+                        len(set(stripped_canonical.split()) & set(_strip_honorifics(p).split()))
+                        >= 2
                         and len(stripped_canonical) > len(_strip_honorifics(p))
                     )
                 )

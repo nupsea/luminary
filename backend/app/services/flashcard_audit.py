@@ -25,9 +25,7 @@ _BLOOM_LEVEL_INSTRUCTIONS: dict[int, str] = {
         "Write an UNDERSTANDING question asking the learner to explain, summarise, "
         "or interpret this concept in their own words."
     ),
-    3: (
-        "Write an APPLICATION question asking how to USE this concept in a realistic scenario."
-    ),
+    3: ("Write an APPLICATION question asking how to USE this concept in a realistic scenario."),
     4: (
         "Write an ANALYSIS question asking the reader to COMPARE, CONTRAST, or EVALUATE "
         "different aspects of this concept."
@@ -61,9 +59,7 @@ _AUDIT_FILL_SYSTEM = (
 class FlashcardAuditService:
     """Analyze Bloom's taxonomy coverage and fill gaps for a document's flashcard deck."""
 
-    async def analyze_coverage(
-        self, document_id: str, db: AsyncSession
-    ) -> CoverageReport:
+    async def analyze_coverage(self, document_id: str, db: AsyncSession) -> CoverageReport:
         """Return a CoverageReport for all flashcards belonging to document_id.
 
         Cards with null chunk_id (source='note', 'gap', 'feynman') are excluded
@@ -117,12 +113,8 @@ class FlashcardAuditService:
         # coverage_score = fraction of sections with >= 1 L3+ card
         # Guard against division by zero when no section has bloom-level data
         total_sections = len(by_section)
-        sections_with_l3_plus = sum(
-            1 for s in by_section.values() if s["has_level_3_plus"]
-        )
-        coverage_score = (
-            0.0 if total_sections == 0 else sections_with_l3_plus / total_sections
-        )
+        sections_with_l3_plus = sum(1 for s in by_section.values() if s["has_level_3_plus"])
+        coverage_score = 0.0 if total_sections == 0 else sections_with_l3_plus / total_sections
 
         # Gaps: sections missing any levels 1-6 AND lacking L3+ card
         # (only sections with zero L3+ cards are actionable)
@@ -176,9 +168,7 @@ class FlashcardAuditService:
         # Each tuple: (section_id, level, cards_data)
         LLMResult = tuple[str, int, list[dict]]
 
-        async def _llm_one(
-            section_id: str, section_heading: str, level: int
-        ) -> LLMResult:
+        async def _llm_one(section_id: str, section_heading: str, level: int) -> LLMResult:
             instruction = _BLOOM_LEVEL_INSTRUCTIONS.get(level, "")
             prompt = (
                 f"Section: {section_heading}\n\n"
@@ -201,9 +191,7 @@ class FlashcardAuditService:
                 # Only generate for levels 2-6 (L1 recall cards usually already exist)
                 if level < 2:
                     continue
-                tasks.append(
-                    _llm_one(gap["section_id"], gap["section_heading"], level)
-                )
+                tasks.append(_llm_one(gap["section_id"], gap["section_heading"], level))
 
         if not tasks:
             return 0

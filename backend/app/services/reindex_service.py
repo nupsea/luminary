@@ -32,9 +32,7 @@ class ReindexService:
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
         from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
-        result = await db.execute(
-            select(NoteModel.id, NoteModel.content, NoteModel.document_id)
-        )
+        result = await db.execute(select(NoteModel.id, NoteModel.content, NoteModel.document_id))
         rows = result.all()
         total = len(rows)
         reindexed = 0

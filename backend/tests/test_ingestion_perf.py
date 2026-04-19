@@ -153,10 +153,10 @@ async def test_summarization_is_fire_and_forget(test_db):
     # No summaries in DB (background task hasn't run yet)
     async with factory() as session:
         count = (
-            await session.execute(
-                select(SummaryModel).where(SummaryModel.document_id == doc_id)
-            )
-        ).scalars().all()
+            (await session.execute(select(SummaryModel).where(SummaryModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
     assert len(count) == 0, "Summaries written synchronously — should be fire-and-forget"
 
     # Clean up pending task so event loop doesn't complain
@@ -202,8 +202,9 @@ async def test_chunks_written_in_batch(test_db):
             "format": "txt",
             "pages": 1,
             "word_count": 500,
-            "sections": [{"heading": "Intro", "level": 1, "text": long_text,
-                          "page_start": 0, "page_end": 1}],
+            "sections": [
+                {"heading": "Intro", "level": 1, "text": long_text, "page_start": 0, "page_end": 1}
+            ],
             "raw_text": long_text,
         },
         "chunks": None,
@@ -216,10 +217,10 @@ async def test_chunks_written_in_batch(test_db):
     # All chunks must be in the DB
     async with factory() as session:
         db_chunks = (
-            await session.execute(
-                select(ChunkModel).where(ChunkModel.document_id == doc_id)
-            )
-        ).scalars().all()
+            (await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
 
     in_state = result.get("chunks") or []
     assert len(db_chunks) == len(in_state), (

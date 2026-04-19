@@ -98,9 +98,7 @@ async def test_suggestions_book_document(db_session):
         "PLACE": ["Ithaca"],
     }
 
-    with patch(
-        "app.routers.chat_meta.get_graph_service"
-    ) as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
         from app.routers.chat_meta import get_suggestions
 
@@ -121,9 +119,7 @@ async def test_suggestions_null_document_id(db_session):
     """Null document_id returns cross-document entity suggestions."""
     shared_entities = ["quantum entanglement", "Schrodinger", "wave function"]
 
-    with patch(
-        "app.routers.chat_meta.get_graph_service"
-    ) as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_cross_document_entities.return_value = shared_entities
 
         from app.routers.chat_meta import get_suggestions
@@ -153,9 +149,7 @@ async def test_suggestions_technical_document(db_session):
         "TECHNOLOGY": ["Redis", "PostgreSQL"],
     }
 
-    with patch(
-        "app.routers.chat_meta.get_graph_service"
-    ) as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
 
         from app.routers.chat_meta import get_suggestions
@@ -184,9 +178,7 @@ async def test_suggestions_video_document(db_session):
         "PERSON": ["Geoffrey Hinton"],
     }
 
-    with patch(
-        "app.routers.chat_meta.get_graph_service"
-    ) as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
 
         from app.routers.chat_meta import get_suggestions
@@ -206,9 +198,7 @@ async def test_suggestions_video_document(db_session):
 @pytest.mark.asyncio
 async def test_suggestions_empty_library(db_session):
     """No cross-document entities returns onboarding suggestions."""
-    with patch(
-        "app.routers.chat_meta.get_graph_service"
-    ) as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_cross_document_entities.return_value = []
 
         from app.routers.chat_meta import get_suggestions
@@ -234,9 +224,7 @@ async def test_suggestions_returns_four(db_session):
 
     entities = {"CONCEPT": ["one-concept"]}
 
-    with patch(
-        "app.routers.chat_meta.get_graph_service"
-    ) as mock_graph:
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_entities_by_type_for_document.return_value = entities
 
         from app.routers.chat_meta import get_suggestions
@@ -257,24 +245,28 @@ async def test_suggestions_not_in_history(db_session):
     doc = _make_doc("doc-hist-1", "History Doc", "book")
     db_session.add(doc)
     # Need executive summary for LLM path to activate
-    db_session.add(SummaryModel(
-        id=str(uuid.uuid4()),
-        document_id="doc-hist-1",
-        mode="executive",
-        content="A story about Alice and curiosity.",
-    ))
+    db_session.add(
+        SummaryModel(
+            id=str(uuid.uuid4()),
+            document_id="doc-hist-1",
+            mode="executive",
+            content="A story about Alice and curiosity.",
+        )
+    )
     await db_session.commit()
 
     # Seed 3 history rows
     for i in range(3):
-        db_session.add(ChatSuggestionHistoryModel(
-            id=str(uuid.uuid4()),
-            document_id="doc-hist-1",
-            suggestion_text=f"Previously shown question {i}",
-            bloom_level=5,
-            was_asked=False,
-            shown_at=datetime.now(UTC),
-        ))
+        db_session.add(
+            ChatSuggestionHistoryModel(
+                id=str(uuid.uuid4()),
+                document_id="doc-hist-1",
+                suggestion_text=f"Previously shown question {i}",
+                bloom_level=5,
+                was_asked=False,
+                shown_at=datetime.now(UTC),
+            )
+        )
     await db_session.commit()
 
     entities = {"PERSON": ["Alice"], "CONCEPT": ["curiosity"]}
@@ -291,11 +283,7 @@ async def test_suggestions_not_in_history(db_session):
     import json as _json
 
     mock_llm_response = AsyncMock()
-    mock_llm_response.choices = [
-        AsyncMock(
-            message=AsyncMock(content=_json.dumps(llm_questions))
-        )
-    ]
+    mock_llm_response.choices = [AsyncMock(message=AsyncMock(content=_json.dumps(llm_questions)))]
 
     with (
         patch(
@@ -337,14 +325,16 @@ async def test_bloom_level_decrease(db_session):
 
     # Seed 4 asked rows
     for i in range(4):
-        db_session.add(ChatSuggestionHistoryModel(
-            id=str(uuid.uuid4()),
-            document_id="doc-bloom-1",
-            suggestion_text=f"Asked question {i}",
-            bloom_level=5,
-            was_asked=True,
-            shown_at=datetime.now(UTC),
-        ))
+        db_session.add(
+            ChatSuggestionHistoryModel(
+                id=str(uuid.uuid4()),
+                document_id="doc-bloom-1",
+                suggestion_text=f"Asked question {i}",
+                bloom_level=5,
+                was_asked=True,
+                shown_at=datetime.now(UTC),
+            )
+        )
     await db_session.commit()
 
     level = await svc.get_target_bloom_level("doc-bloom-1")
@@ -352,14 +342,16 @@ async def test_bloom_level_decrease(db_session):
 
     # Seed 4 more (total 8) -> level 3
     for i in range(4, 8):
-        db_session.add(ChatSuggestionHistoryModel(
-            id=str(uuid.uuid4()),
-            document_id="doc-bloom-1",
-            suggestion_text=f"Asked question {i}",
-            bloom_level=4,
-            was_asked=True,
-            shown_at=datetime.now(UTC),
-        ))
+        db_session.add(
+            ChatSuggestionHistoryModel(
+                id=str(uuid.uuid4()),
+                document_id="doc-bloom-1",
+                suggestion_text=f"Asked question {i}",
+                bloom_level=4,
+                was_asked=True,
+                shown_at=datetime.now(UTC),
+            )
+        )
     await db_session.commit()
 
     level = await svc.get_target_bloom_level("doc-bloom-1")
@@ -367,14 +359,16 @@ async def test_bloom_level_decrease(db_session):
 
     # Seed many more to hit floor
     for i in range(8, 20):
-        db_session.add(ChatSuggestionHistoryModel(
-            id=str(uuid.uuid4()),
-            document_id="doc-bloom-1",
-            suggestion_text=f"Asked question {i}",
-            bloom_level=3,
-            was_asked=True,
-            shown_at=datetime.now(UTC),
-        ))
+        db_session.add(
+            ChatSuggestionHistoryModel(
+                id=str(uuid.uuid4()),
+                document_id="doc-bloom-1",
+                suggestion_text=f"Asked question {i}",
+                bloom_level=3,
+                was_asked=True,
+                shown_at=datetime.now(UTC),
+            )
+        )
     await db_session.commit()
 
     level = await svc.get_target_bloom_level("doc-bloom-1")
@@ -395,12 +389,14 @@ async def test_fallback_on_llm_unavailable(db_session):
     db_session.add(doc)
     db_session.add(_make_section("doc-fallback-1", "Chapter One", 1))
     # Seed executive summary so the LLM path is entered
-    db_session.add(SummaryModel(
-        id=str(uuid.uuid4()),
-        document_id="doc-fallback-1",
-        mode="executive",
-        content="A tale of a hero and bravery in a kingdom.",
-    ))
+    db_session.add(
+        SummaryModel(
+            id=str(uuid.uuid4()),
+            document_id="doc-fallback-1",
+            mode="executive",
+            content="A tale of a hero and bravery in a kingdom.",
+        )
+    )
     await db_session.commit()
 
     entities = {
@@ -414,7 +410,9 @@ async def test_fallback_on_llm_unavailable(db_session):
         patch(
             "app.services.suggestion_service.litellm.acompletion",
             side_effect=litellm_mod.ServiceUnavailableError(
-                message="Service unavailable", model="test", llm_provider="test",
+                message="Service unavailable",
+                model="test",
+                llm_provider="test",
             ),
         ),
         patch("app.services.settings_service.get_litellm_kwargs", return_value={"model": "test"}),

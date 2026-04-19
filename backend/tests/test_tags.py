@@ -72,9 +72,7 @@ async def test_patch_tags_stores_list(test_db):
         session.add(_make_doc(doc_id, tags=[]))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         patch_resp = await client.patch(
             f"/documents/{doc_id}/tags",
             json={"tags": ["physics", "science"]},
@@ -105,9 +103,7 @@ async def test_tag_filter_returns_matching_docs(test_db):
         session.add(_make_doc(doc_history, title="History Book", tags=["history"]))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents?tag=physics")
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -125,9 +121,7 @@ async def test_tag_filter_no_substring_collision(test_db):
         session.add(_make_doc(doc_bio, title="Biology Book", tags=["biology"]))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents?tag=bio")
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -145,9 +139,7 @@ async def test_patch_tags_replaces_not_appends(test_db):
         session.add(_make_doc(doc_id, tags=["old-tag"]))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # First patch
         await client.patch(
             f"/documents/{doc_id}/tags",
@@ -187,7 +179,7 @@ async def test_s162_create_note_populates_tag_index(test_db):
             "/notes",
             json={
                 "content": "Python and Go notes",
-                "tags": ["programming/python", "programming/go"]
+                "tags": ["programming/python", "programming/go"],
             },
         )
         assert resp.status_code == 201
@@ -210,18 +202,24 @@ async def test_s162_parent_tag_filter_returns_children(test_db):
     """GET /notes?tag=programming returns notes tagged 'programming/python' and 'programming/go'."""
     unique = uuid.uuid4().hex[:8]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        note_python = (await client.post(
-            "/notes",
-            json={"content": f"Python note {unique}", "tags": [f"prog{unique}/python"]},
-        )).json()
-        note_go = (await client.post(
-            "/notes",
-            json={"content": f"Go note {unique}", "tags": [f"prog{unique}/go"]},
-        )).json()
-        unrelated = (await client.post(
-            "/notes",
-            json={"content": f"Unrelated {unique}", "tags": [f"biology{unique}"]},
-        )).json()
+        note_python = (
+            await client.post(
+                "/notes",
+                json={"content": f"Python note {unique}", "tags": [f"prog{unique}/python"]},
+            )
+        ).json()
+        note_go = (
+            await client.post(
+                "/notes",
+                json={"content": f"Go note {unique}", "tags": [f"prog{unique}/go"]},
+            )
+        ).json()
+        unrelated = (
+            await client.post(
+                "/notes",
+                json={"content": f"Unrelated {unique}", "tags": [f"biology{unique}"]},
+            )
+        ).json()
 
         resp = await client.get(f"/notes?tag=prog{unique}")
         assert resp.status_code == 200
@@ -292,8 +290,7 @@ async def test_s162_autocomplete_limit_10(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for i in range(15):
             await client.post(
-                "/notes",
-                json={"content": f"Bulk {i}", "tags": [f"bulk{unique}{i:02d}"]}
+                "/notes", json={"content": f"Bulk {i}", "tags": [f"bulk{unique}{i:02d}"]}
             )
 
         resp = await client.get(f"/tags/autocomplete?q=bulk{unique}")

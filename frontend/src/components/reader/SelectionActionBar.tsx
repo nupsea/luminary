@@ -23,6 +23,7 @@ export interface SourceRef {
   sectionId: string | undefined
   documentId: string
   documentTitle: string
+  pageNumber?: number
 }
 
 /** Maximum character count for highlights. Longer selections can still use other actions. */

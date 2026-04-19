@@ -34,7 +34,11 @@ async def ask_question(req: QARequest) -> StreamingResponse:
     history = [m.model_dump() for m in req.messages] if req.messages else []
     return StreamingResponse(
         svc.stream_answer(
-            req.question, req.document_ids, req.scope, req.model, history,
+            req.question,
+            req.document_ids,
+            req.scope,
+            req.model,
+            history,
             web_enabled=req.web_enabled,
         ),
         media_type="text/event-stream",

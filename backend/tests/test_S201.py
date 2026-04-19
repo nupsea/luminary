@@ -187,7 +187,7 @@ async def test_batch_accept_normalizes_collection_names(test_db):
     async with factory() as session:
         row = (
             await session.execute(
-                text("SELECT name FROM note_collections WHERE id = :cid"),
+                text("SELECT name FROM collections WHERE id = :cid"),
                 {"cid": result_ids[0]},
             )
         ).fetchone()

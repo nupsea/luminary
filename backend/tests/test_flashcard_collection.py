@@ -14,9 +14,9 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import (
+    CollectionMemberModel,
+    CollectionModel,
     FlashcardModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
     NoteModel,
 )
 from app.services.flashcard import FlashcardService
@@ -71,47 +71,56 @@ async def test_generate_from_collection_skips_matching_hash(test_db):
         note_id = str(uuid.uuid4())
         content = "This is a test note about Python."
 
-        session.add(NoteCollectionModel(
-            id=coll_id,
-            name="MyCollection",
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
-        session.add(NoteModel(
-            id=note_id,
-            content=content,
-            tags="[]",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
-        session.add(NoteCollectionMemberModel(
-            id=str(uuid.uuid4()),
-            note_id=note_id,
-            collection_id=coll_id,
-            added_at=datetime.now(UTC),
-        ))
+        session.add(
+            CollectionModel(
+                id=coll_id,
+                name="MyCollection",
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            NoteModel(
+                id=note_id,
+                content=content,
+                tags="[]",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            CollectionMemberModel(
+                id=str(uuid.uuid4()),
+                member_id=note_id,
+                member_type="note",
+                collection_id=coll_id,
+                added_at=datetime.now(UTC),
+            )
+        )
         # Seed existing flashcard with matching hash
-        session.add(FlashcardModel(
-            id=str(uuid.uuid4()),
-            document_id=None,
-            chunk_id=None,
-            source="note",
-            deck="MyCollection",
-            source_content_hash=_content_hash(content),
-            question="Q?",
-            answer="A.",
-            source_excerpt="excerpt",
-            difficulty="medium",
-            fsrs_state="new",
-            fsrs_stability=0.0,
-            fsrs_difficulty=0.0,
-            due_date=datetime.now(UTC),
-            reps=0,
-            lapses=0,
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=None,
+                chunk_id=None,
+                source="note",
+                deck="MyCollection",
+                source_content_hash=_content_hash(content),
+                question="Q?",
+                answer="A.",
+                source_excerpt="excerpt",
+                difficulty="medium",
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=datetime.now(UTC),
+                reps=0,
+                lapses=0,
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     async with test_db() as session:
@@ -136,47 +145,56 @@ async def test_generate_from_collection_processes_changed_content(test_db):
         note_id = str(uuid.uuid4())
         content = "This is a test note about Python."
 
-        session.add(NoteCollectionModel(
-            id=coll_id,
-            name="ChangedCollection",
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
-        session.add(NoteModel(
-            id=note_id,
-            content=content,
-            tags="[]",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
-        session.add(NoteCollectionMemberModel(
-            id=str(uuid.uuid4()),
-            note_id=note_id,
-            collection_id=coll_id,
-            added_at=datetime.now(UTC),
-        ))
+        session.add(
+            CollectionModel(
+                id=coll_id,
+                name="ChangedCollection",
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            NoteModel(
+                id=note_id,
+                content=content,
+                tags="[]",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            CollectionMemberModel(
+                id=str(uuid.uuid4()),
+                member_id=note_id,
+                member_type="note",
+                collection_id=coll_id,
+                added_at=datetime.now(UTC),
+            )
+        )
         # Seed flashcard with DIFFERENT hash (simulates stale content)
-        session.add(FlashcardModel(
-            id=str(uuid.uuid4()),
-            document_id=None,
-            chunk_id=None,
-            source="note",
-            deck="ChangedCollection",
-            source_content_hash="stalehashabcd",
-            question="Old Q?",
-            answer="Old A.",
-            source_excerpt="excerpt",
-            difficulty="medium",
-            fsrs_state="new",
-            fsrs_stability=0.0,
-            fsrs_difficulty=0.0,
-            due_date=datetime.now(UTC),
-            reps=0,
-            lapses=0,
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=None,
+                chunk_id=None,
+                source="note",
+                deck="ChangedCollection",
+                source_content_hash="stalehashabcd",
+                question="Old Q?",
+                answer="Old A.",
+                source_excerpt="excerpt",
+                difficulty="medium",
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=datetime.now(UTC),
+                reps=0,
+                lapses=0,
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     import json as _json
@@ -213,33 +231,37 @@ async def test_get_flashcard_decks_collection_source_type(test_db):
     """GET /flashcards/decks returns source_type='collection' for collection-named deck."""
     async with test_db() as session:
         coll_id = str(uuid.uuid4())
-        session.add(NoteCollectionModel(
-            id=coll_id,
-            name="MyDeck",
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
-        session.add(FlashcardModel(
-            id=str(uuid.uuid4()),
-            document_id=None,
-            chunk_id=None,
-            source="note",
-            deck="MyDeck",
-            source_content_hash=None,
-            question="Q?",
-            answer="A.",
-            source_excerpt="excerpt",
-            difficulty="medium",
-            fsrs_state="new",
-            fsrs_stability=0.0,
-            fsrs_difficulty=0.0,
-            due_date=datetime.now(UTC),
-            reps=0,
-            lapses=0,
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            CollectionModel(
+                id=coll_id,
+                name="MyDeck",
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=None,
+                chunk_id=None,
+                source="note",
+                deck="MyDeck",
+                source_content_hash=None,
+                question="Q?",
+                answer="A.",
+                source_excerpt="excerpt",
+                difficulty="medium",
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=datetime.now(UTC),
+                reps=0,
+                lapses=0,
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     client = TestClient(app)

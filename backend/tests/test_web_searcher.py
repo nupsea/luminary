@@ -93,8 +93,9 @@ async def test_search_with_mocked_duckduckgo():
 
     with (
         patch("app.services.web_searcher.get_settings", return_value=mock_settings),
-        patch("app.services.web_searcher.WebSearcher._search_duckduckgo",
-              new_callable=AsyncMock) as mock_search,
+        patch(
+            "app.services.web_searcher.WebSearcher._search_duckduckgo", new_callable=AsyncMock
+        ) as mock_search,
     ):
         from app.types import WebSnippet
 
@@ -103,7 +104,7 @@ async def test_search_with_mocked_duckduckgo():
                 url="https://docs.python.org/3/library/asyncio.html",
                 title="asyncio — Python 3.12 docs",
                 content="The asyncio module provides infrastructure for writing single-threaded"
-                        " concurrent code using coroutines. Python 3.12 improved this.",
+                " concurrent code using coroutines. Python 3.12 improved this.",
                 source_quality="official_docs",
                 version_info="Python 3.12",
                 domain="docs.python.org",
@@ -176,6 +177,7 @@ async def test_get_web_search_settings_enabled_true_when_provider_set(monkeypatc
     monkeypatch.setenv("WEB_SEARCH_PROVIDER", "duckduckgo")
 
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     from app.main import app

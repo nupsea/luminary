@@ -1,4 +1,5 @@
 """Tests for S123 -- EPUB and Kindle My Clippings.txt ingestion."""
+
 import io
 import uuid
 from unittest.mock import MagicMock, patch
@@ -75,14 +76,15 @@ def test_classify_epub_takes_priority_over_kindle_content():
 # EPUB parsing tests - MOCKED to avoid zip/ebooklib issues
 # ---------------------------------------------------------------------------
 
+
 def test_parse_epub_extracts_chapters(tmp_path):
     epub_path = tmp_path / "test.epub"
     epub_path.write_bytes(b"fake epub content")
-    
+
     with patch("ebooklib.epub.read_epub") as mock_read:
         mock_book = MagicMock()
         mock_book.get_metadata.return_value = [("Test EPUB Book", {})]
-        
+
         item1 = MagicMock()
         item1.get_name.return_value = "ch1.html"
         item1.get_content.return_value = (
@@ -90,13 +92,13 @@ def test_parse_epub_extracts_chapters(tmp_path):
             b"the chapter to ensure it passes the minimum length "
             b"requirement of 50 characters in the parser.</p>"
         )
-        
+
         mock_book.get_items_of_type.return_value = [item1]
         mock_read.return_value = mock_book
-        
+
         parser = DocumentParser()
         result = parser.parse(epub_path, "epub")
-        
+
         assert result is not None
         assert result.title == "Test EPUB Book"
         assert len(result.sections) >= 1
@@ -119,11 +121,9 @@ async def test_ingest_epub_accepted(test_db, tmp_path):
     epub_path.write_bytes(b"fake epub content")
 
     mock_run = MagicMock(return_value=asyncio.sleep(0))
-    
+
     with patch.object(docs_module, "run_ingestion", mock_run):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest",
                 files={"file": ("book.epub", b"fake content", "application/epub+zip")},
@@ -150,6 +150,7 @@ A beginning is a very delicate time.
 ==========
 """
 
+
 @pytest.mark.anyio
 async def test_ingest_kindle_creates_one_doc_per_book(test_db):
     """POST /documents/ingest-kindle creates one DocumentModel per book."""
@@ -161,9 +162,7 @@ async def test_ingest_kindle_creates_one_doc_per_book(test_db):
     mock_run = MagicMock(return_value=asyncio.sleep(0))
 
     with patch.object(docs_module, "run_ingestion", mock_run):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-kindle",
                 files={
@@ -238,9 +237,7 @@ async def test_flashcard_generation_works_on_kindle_doc(test_db):
     ]
 
     with patch.object(FlashcardService, "generate", new=AsyncMock(return_value=mock_cards)):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 f"/flashcards/generate/{doc_id}",
                 json={"num_cards": 5},

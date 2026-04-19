@@ -79,29 +79,21 @@ class KuzuService:
             "id STRING PRIMARY KEY, name STRING, node_type STRING,"
             " source_image_id STRING, document_id STRING, frequency INT64)",
             # Edge tables
-            "CREATE REL TABLE IF NOT EXISTS MENTIONED_IN("
-            "FROM Entity TO Document, count INT64)",
+            "CREATE REL TABLE IF NOT EXISTS MENTIONED_IN(FROM Entity TO Document, count INT64)",
             "CREATE REL TABLE IF NOT EXISTS CO_OCCURS("
             "FROM Entity TO Entity, weight FLOAT, document_id STRING)",
             "CREATE REL TABLE IF NOT EXISTS RELATED_TO("
             "FROM Entity TO Entity, relation_label STRING, confidence FLOAT)",
-            "CREATE REL TABLE IF NOT EXISTS CALLS("
-            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS CALLS(FROM Entity TO Entity, document_id STRING)",
             "CREATE REL TABLE IF NOT EXISTS PREREQUISITE_OF("
             "FROM Entity TO Entity, document_id STRING, confidence FLOAT)",
             # Tech relation edges (S135)
-            "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS("
-            "FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS EXTENDS("
-            "FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS USES("
-            "FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS REPLACES("
-            "FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS DEPENDS_ON("
-            "FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS VERSION_OF("
-            "FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS(FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS EXTENDS(FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS USES(FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS REPLACES(FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS DEPENDS_ON(FROM Entity TO Entity, document_id STRING)",
+            "CREATE REL TABLE IF NOT EXISTS VERSION_OF(FROM Entity TO Entity, document_id STRING)",
             # Diagram-derived edge tables (S136)
             "CREATE REL TABLE IF NOT EXISTS CONNECTS_TO("
             "FROM DiagramNode TO DiagramNode, document_id STRING, label STRING)",
@@ -128,15 +120,11 @@ class KuzuService:
             # Note graph (S163) -- Note nodes + edges to Entity and Document
             "CREATE NODE TABLE IF NOT EXISTS Note("
             "id STRING PRIMARY KEY, note_id STRING, preview STRING, created_at STRING)",
-            "CREATE REL TABLE IF NOT EXISTS WRITTEN_ABOUT("
-            "FROM Note TO Entity, confidence FLOAT)",
-            "CREATE REL TABLE IF NOT EXISTS TAG_IS_CONCEPT("
-            "FROM Note TO Entity, tag STRING)",
-            "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM("
-            "FROM Note TO Document)",
+            "CREATE REL TABLE IF NOT EXISTS WRITTEN_ABOUT(FROM Note TO Entity, confidence FLOAT)",
+            "CREATE REL TABLE IF NOT EXISTS TAG_IS_CONCEPT(FROM Note TO Entity, tag STRING)",
+            "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM(FROM Note TO Document)",
             # Zettelkasten links (S171) -- explicit typed note-to-note connections
-            "CREATE REL TABLE IF NOT EXISTS LINKS_TO("
-            "FROM Note TO Note, link_type STRING)",
+            "CREATE REL TABLE IF NOT EXISTS LINKS_TO(FROM Note TO Note, link_type STRING)",
         ]
         for stmt in stmts:
             self._conn.execute(stmt)
@@ -208,8 +196,7 @@ class KuzuService:
         """
         try:
             result = self._conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
-                " RETURN e.name, e.type",
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}) RETURN e.name, e.type",
                 {"did": document_id},
             )
             by_type: dict[str, list[str]] = {}
@@ -264,9 +251,7 @@ class KuzuService:
                 {"eid": entity_id, "did": document_id},
             )
 
-    def add_co_occurrence(
-        self, entity_id_a: str, entity_id_b: str, document_id: str
-    ) -> None:
+    def add_co_occurrence(self, entity_id_a: str, entity_id_b: str, document_id: str) -> None:
         """Create or increment a CO_OCCURS edge between two entities."""
         result = self._conn.execute(
             "MATCH (a:Entity {id: $aid})-[r:CO_OCCURS]->(b:Entity {id: $bid})"
@@ -396,8 +381,10 @@ class KuzuService:
                 "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
                 " CREATE (a)-[:PREREQUISITE_OF {document_id: $did, confidence: $conf}]->(b)",
                 {
-                    "dep": dependent_id, "pre": prerequisite_id,
-                    "did": document_id, "conf": confidence,
+                    "dep": dependent_id,
+                    "pre": prerequisite_id,
+                    "did": document_id,
+                    "conf": confidence,
                 },
             )
 
@@ -419,13 +406,15 @@ class KuzuService:
             edges: list[dict] = []
             while result.has_next():
                 row = result.get_next()
-                edges.append({
-                    "from_entity": row[0],
-                    "to_entity": row[1],
-                    "from_id": row[2],
-                    "to_id": row[3],
-                    "confidence": float(row[4] or 1.0),
-                })
+                edges.append(
+                    {
+                        "from_entity": row[0],
+                        "to_entity": row[1],
+                        "from_id": row[2],
+                        "to_id": row[3],
+                        "confidence": float(row[4] or 1.0),
+                    }
+                )
             return edges
         except Exception:
             logger.debug("get_prerequisite_edges_for_document failed", exc_info=True)
@@ -456,8 +445,11 @@ class KuzuService:
                     " CREATE (a)-[:PREREQUISITE_OF {document_id: $did,"
                     " confidence: $conf, source_section_id: $sid}]->(b)",
                     {
-                        "dep": dependent_id, "pre": prerequisite_id,
-                        "did": document_id, "conf": confidence, "sid": source_section_id,
+                        "dep": dependent_id,
+                        "pre": prerequisite_id,
+                        "did": document_id,
+                        "conf": confidence,
+                        "sid": source_section_id,
                     },
                 )
             except Exception:
@@ -469,8 +461,12 @@ class KuzuService:
                 self._conn.execute(
                     "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
                     " CREATE (a)-[:PREREQUISITE_OF {document_id: $did, confidence: $conf}]->(b)",
-                    {"dep": dependent_id, "pre": prerequisite_id,
-                     "did": document_id, "conf": confidence},
+                    {
+                        "dep": dependent_id,
+                        "pre": prerequisite_id,
+                        "did": document_id,
+                        "conf": confidence,
+                    },
                 )
 
     def has_prerequisite_edges(self, document_id: str) -> bool:
@@ -584,12 +580,20 @@ class KuzuService:
                     start_id = eid
 
             if start_id is None:
-                return {"start_entity": start_entity_name, "document_id": document_id,
-                        "nodes": [], "edges": []}
+                return {
+                    "start_entity": start_entity_name,
+                    "document_id": document_id,
+                    "nodes": [],
+                    "edges": [],
+                }
         except Exception:
             logger.debug("get_learning_path entity lookup failed", exc_info=True)
-            return {"start_entity": start_entity_name, "document_id": document_id,
-                    "nodes": [], "edges": []}
+            return {
+                "start_entity": start_entity_name,
+                "document_id": document_id,
+                "nodes": [],
+                "edges": [],
+            }
 
         # Step 2: BFS traversal following PREREQUISITE_OF edges from start
         try:
@@ -608,8 +612,12 @@ class KuzuService:
 
             if start_id not in adj:
                 # Start node exists but has no outgoing prerequisite edges
-                return {"start_entity": start_entity_name, "document_id": document_id,
-                        "nodes": [], "edges": []}
+                return {
+                    "start_entity": start_entity_name,
+                    "document_id": document_id,
+                    "nodes": [],
+                    "edges": [],
+                }
 
             # BFS to collect reachable subgraph
             visited: set[str] = {start_id}
@@ -638,9 +646,7 @@ class KuzuService:
             # Initialize queue with nodes that have no incoming edges.
             # Kahn's on PREREQUISITE_OF edges (dep -> prereq) yields dependents
             # first.  Reversing gives learning order: deepest prerequisites first.
-            topo_queue: deque[str] = deque(
-                nid for nid in subgraph_nodes if in_degree[nid] == 0
-            )
+            topo_queue: deque[str] = deque(nid for nid in subgraph_nodes if in_degree[nid] == 0)
             topo_order: list[str] = []
             while topo_queue:
                 node = topo_queue.popleft()
@@ -659,7 +665,8 @@ class KuzuService:
                 logger.warning(
                     "Cyclic PREREQUISITE_OF subgraph detected for document %s"
                     " (start=%s): %d nodes unreachable via topological sort",
-                    document_id, start_entity_name,
+                    document_id,
+                    start_entity_name,
                     len(subgraph_nodes) - len(topo_order),
                 )
 
@@ -698,8 +705,12 @@ class KuzuService:
             }
         except Exception:
             logger.debug("get_learning_path traversal failed", exc_info=True)
-            return {"start_entity": start_entity_name, "document_id": document_id,
-                    "nodes": [], "edges": []}
+            return {
+                "start_entity": start_entity_name,
+                "document_id": document_id,
+                "nodes": [],
+                "edges": [],
+            }
 
     # -------------------------------------------------------------------------
     # SAME_CONCEPT edges (S141)
@@ -742,8 +753,11 @@ class KuzuService:
                         " SET r.contradiction = $c, r.contradiction_note = $cn,"
                         " r.prefer_source = $ps",
                         {
-                            "aid": entity_id_a, "bid": entity_id_b,
-                            "c": contradiction_int, "cn": contradiction_note, "ps": prefer_source,
+                            "aid": entity_id_a,
+                            "bid": entity_id_b,
+                            "c": contradiction_int,
+                            "cn": contradiction_note,
+                            "ps": prefer_source,
                         },
                     )
                 except Exception:
@@ -758,10 +772,14 @@ class KuzuService:
                 " contradiction_note: $cn, prefer_source: $ps"
                 "}]->(b)",
                 {
-                    "aid": entity_id_a, "bid": entity_id_b,
-                    "sdid": source_doc_id, "tdid": target_doc_id,
-                    "conf": float(confidence), "c": contradiction_int,
-                    "cn": contradiction_note, "ps": prefer_source,
+                    "aid": entity_id_a,
+                    "bid": entity_id_b,
+                    "sdid": source_doc_id,
+                    "tdid": target_doc_id,
+                    "conf": float(confidence),
+                    "c": contradiction_int,
+                    "cn": contradiction_note,
+                    "ps": prefer_source,
                 },
             )
         except Exception:
@@ -787,18 +805,20 @@ class KuzuService:
             edges: list[dict] = []
             while result.has_next():
                 row = result.get_next()
-                edges.append({
-                    "entity_id_a": row[0],
-                    "entity_id_b": row[1],
-                    "name_a": row[2],
-                    "name_b": row[3],
-                    "source_doc_id": row[4],
-                    "target_doc_id": row[5],
-                    "confidence": float(row[6] or 0.0),
-                    "contradiction": bool(row[7]),
-                    "contradiction_note": row[8] or "",
-                    "prefer_source": row[9] or "",
-                })
+                edges.append(
+                    {
+                        "entity_id_a": row[0],
+                        "entity_id_b": row[1],
+                        "name_a": row[2],
+                        "name_b": row[3],
+                        "source_doc_id": row[4],
+                        "target_doc_id": row[5],
+                        "confidence": float(row[6] or 0.0),
+                        "contradiction": bool(row[7]),
+                        "contradiction_note": row[8] or "",
+                        "prefer_source": row[9] or "",
+                    }
+                )
             return edges
         except Exception:
             logger.debug("get_same_concept_edges failed", exc_info=True)
@@ -865,13 +885,15 @@ class KuzuService:
                         if not contradiction_note:
                             contradiction_note = e["contradiction_note"]
             concept_name = max((node_names.get(eid, "") for eid in eids), key=len)
-            clusters.append({
-                "concept_name": concept_name,
-                "entity_ids": eids,
-                "document_ids": list(doc_ids),
-                "has_contradiction": has_contradiction,
-                "contradiction_note": contradiction_note,
-            })
+            clusters.append(
+                {
+                    "concept_name": concept_name,
+                    "entity_ids": eids,
+                    "document_ids": list(doc_ids),
+                    "has_contradiction": has_contradiction,
+                    "contradiction_note": contradiction_note,
+                }
+            )
         return clusters
 
     # -------------------------------------------------------------------------
@@ -900,15 +922,13 @@ class KuzuService:
         """
         try:
             e_result = self._conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
-                " RETURN count(*)",
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}) RETURN count(*)",
                 {"did": document_id},
             )
             entity_count = e_result.get_next()[0] if e_result.has_next() else 0
 
             co_result = self._conn.execute(
-                "MATCH ()-[r:CO_OCCURS {document_id: $did}]->()"
-                " RETURN count(*)",
+                "MATCH ()-[r:CO_OCCURS {document_id: $did}]->() RETURN count(*)",
                 {"did": document_id},
             )
             edge_count = co_result.get_next()[0] if co_result.has_next() else 0
@@ -917,9 +937,7 @@ class KuzuService:
             edge_count = 0
         return int(entity_count), int(edge_count)
 
-    def get_entities_for_documents(
-        self, document_ids: list[str], limit: int = 15
-    ) -> list[str]:
+    def get_entities_for_documents(self, document_ids: list[str], limit: int = 15) -> list[str]:
         """Return entity names (PERSON, PLACE, CONCEPT) mentioned in the given documents.
 
         Iterates over each document_id and collects unique names up to *limit*.
@@ -979,9 +997,7 @@ class KuzuService:
     # Query
     # -------------------------------------------------------------------------
 
-    def get_graph_for_document(
-        self, document_id: str, include_notes: bool = False
-    ) -> dict:
+    def get_graph_for_document(self, document_id: str, include_notes: bool = False) -> dict:
         """Return nodes and edges for a single document.
 
         Includes Entity nodes (with CO_OCCURS + tech-relation edges) and
@@ -1083,13 +1099,15 @@ class KuzuService:
             sc_edges = self.get_same_concept_edges()
             for e in sc_edges:
                 if e["entity_id_a"] in nodes_map and e["entity_id_b"] in nodes_map:
-                    edges.append({
-                        "source": e["entity_id_a"],
-                        "target": e["entity_id_b"],
-                        "weight": e["confidence"],
-                        "relation": "SAME_CONCEPT",
-                        "contradiction": e["contradiction"],
-                    })
+                    edges.append(
+                        {
+                            "source": e["entity_id_a"],
+                            "target": e["entity_id_b"],
+                            "weight": e["confidence"],
+                            "relation": "SAME_CONCEPT",
+                            "contradiction": e["contradiction"],
+                        }
+                    )
 
         # Include Note nodes connected to entities in scope (S172)
         if include_notes and entity_ids:
@@ -1101,9 +1119,7 @@ class KuzuService:
 
         return {"nodes": list(nodes_map.values()), "edges": edges}
 
-    def _get_note_nodes_for_entities(
-        self, entity_ids: set[str]
-    ) -> tuple[list[dict], list[dict]]:
+    def _get_note_nodes_for_entities(self, entity_ids: set[str]) -> tuple[list[dict], list[dict]]:
         """Return Note nodes and their edges for entities in scope (S172).
 
         Returns (note_nodes, note_edges) where:
@@ -1144,11 +1160,13 @@ class KuzuService:
                     nid, preview, eid, confidence = row
                     if nid not in note_data:
                         note_data[nid] = {"preview": preview or "", "entity_edges": []}
-                    note_data[nid]["entity_edges"].append({
-                        "entity_id": eid,
-                        "rel_type": "WRITTEN_ABOUT",
-                        "confidence": float(confidence or 0.5),
-                    })
+                    note_data[nid]["entity_edges"].append(
+                        {
+                            "entity_id": eid,
+                            "rel_type": "WRITTEN_ABOUT",
+                            "confidence": float(confidence or 0.5),
+                        }
+                    )
 
                 # Query 1b: TAG_IS_CONCEPT edges
                 tic_result = self._conn.execute(
@@ -1162,11 +1180,13 @@ class KuzuService:
                     nid, preview, eid = row
                     if nid not in note_data:
                         note_data[nid] = {"preview": preview or "", "entity_edges": []}
-                    note_data[nid]["entity_edges"].append({
-                        "entity_id": eid,
-                        "rel_type": "TAG_IS_CONCEPT",
-                        "confidence": 1.0,
-                    })
+                    note_data[nid]["entity_edges"].append(
+                        {
+                            "entity_id": eid,
+                            "rel_type": "TAG_IS_CONCEPT",
+                            "confidence": 1.0,
+                        }
+                    )
 
                 if not note_data:
                     return [], []
@@ -1187,11 +1207,13 @@ class KuzuService:
                 while links_result.has_next():
                     row = links_result.get_next()
                     src_nid, tgt_nid, link_type = row
-                    links_to_edges.append({
-                        "source": src_nid,
-                        "target": tgt_nid,
-                        "link_type": link_type or "",
-                    })
+                    links_to_edges.append(
+                        {
+                            "source": src_nid,
+                            "target": tgt_nid,
+                            "link_type": link_type or "",
+                        }
+                    )
 
             # Build note_nodes from collected data
             # Compute outgoing_link_count from entity_edges + LINKS_TO edges per note
@@ -1203,34 +1225,40 @@ class KuzuService:
                 entity_edge_count = len(nd["entity_edges"])
                 total_out = entity_edge_count + links_out.get(nid, 0)
                 preview = nd["preview"]
-                note_nodes.append({
-                    "id": nid,
-                    "note_id": nid,
-                    "label": preview[:40] if preview else nid[:40],
-                    "type": "note",
-                    "size": max(8, int((total_out ** 0.5) * 5)),
-                    "outgoing_link_count": total_out,
-                    "source_image_id": "",
-                })
+                note_nodes.append(
+                    {
+                        "id": nid,
+                        "note_id": nid,
+                        "label": preview[:40] if preview else nid[:40],
+                        "type": "note",
+                        "size": max(8, int((total_out**0.5) * 5)),
+                        "outgoing_link_count": total_out,
+                        "source_image_id": "",
+                    }
+                )
                 # Add WRITTEN_ABOUT / TAG_IS_CONCEPT edges
                 for ee in nd["entity_edges"]:
-                    note_edges.append({
-                        "source": nid,
-                        "target": ee["entity_id"],
-                        "weight": ee["confidence"],
-                        "relation": ee["rel_type"],
-                    })
+                    note_edges.append(
+                        {
+                            "source": nid,
+                            "target": ee["entity_id"],
+                            "weight": ee["confidence"],
+                            "relation": ee["rel_type"],
+                        }
+                    )
 
             # Add LINKS_TO edges
             note_id_set = set(note_data.keys())
             for le in links_to_edges:
                 if le["source"] in note_id_set and le["target"] in note_id_set:
-                    note_edges.append({
-                        "source": le["source"],
-                        "target": le["target"],
-                        "weight": 1.0,
-                        "relation": "LINKS_TO",
-                    })
+                    note_edges.append(
+                        {
+                            "source": le["source"],
+                            "target": le["target"],
+                            "weight": 1.0,
+                            "relation": "LINKS_TO",
+                        }
+                    )
 
             return note_nodes, note_edges
 
@@ -1281,9 +1309,15 @@ class KuzuService:
     # Tech relation edges (S135)
     # -------------------------------------------------------------------------
 
-    _TECH_REL_TYPES: frozenset[str] = frozenset({
-        "IMPLEMENTS", "EXTENDS", "USES", "REPLACES", "DEPENDS_ON",
-    })
+    _TECH_REL_TYPES: frozenset[str] = frozenset(
+        {
+            "IMPLEMENTS",
+            "EXTENDS",
+            "USES",
+            "REPLACES",
+            "DEPENDS_ON",
+        }
+    )
 
     def add_tech_relation(
         self,
@@ -1409,12 +1443,14 @@ class KuzuService:
             entities: list[dict] = []
             while result.has_next():
                 row = result.get_next()
-                entities.append({
-                    "id": row[0],
-                    "name": row[1],
-                    "type": row[2],
-                    "frequency": int(row[3] or 1),
-                })
+                entities.append(
+                    {
+                        "id": row[0],
+                        "name": row[1],
+                        "type": row[2],
+                        "frequency": int(row[3] or 1),
+                    }
+                )
             return entities
         except Exception:
             logger.debug("get_entities_by_type failed", exc_info=True)
@@ -1436,12 +1472,14 @@ class KuzuService:
             nodes: list[dict] = []
             while result.has_next():
                 row = result.get_next()
-                nodes.append({
-                    "id": row[0],
-                    "name": row[1],
-                    "type": row[2],
-                    "frequency": int(row[3] or 1),
-                })
+                nodes.append(
+                    {
+                        "id": row[0],
+                        "name": row[1],
+                        "type": row[2],
+                        "frequency": int(row[3] or 1),
+                    }
+                )
             return nodes
         except Exception:
             logger.debug("_get_diagram_nodes_by_type failed", exc_info=True)
@@ -1480,8 +1518,11 @@ class KuzuService:
                 "CREATE (:DiagramNode {id: $id, name: $name, node_type: $ntype,"
                 " source_image_id: $siid, document_id: $did, frequency: 1})",
                 {
-                    "id": node_id, "name": name, "ntype": node_type,
-                    "siid": source_image_id, "did": document_id,
+                    "id": node_id,
+                    "name": name,
+                    "ntype": node_type,
+                    "siid": source_image_id,
+                    "did": document_id,
                 },
             )
 
@@ -1577,13 +1618,9 @@ class KuzuService:
                     {"aid": from_id, "bid": to_id, "did": document_id, "cond": condition},
                 )
         else:
-            logger.warning(
-                "add_diagram_edge: unknown edge_type=%r, skipping", edge_type
-            )
+            logger.warning("add_diagram_edge: unknown edge_type=%r, skipping", edge_type)
 
-    def add_depicts_edge(
-        self, diagram_node_id: str, entity_id: str, document_id: str
-    ) -> None:
+    def add_depicts_edge(self, diagram_node_id: str, entity_id: str, document_id: str) -> None:
         """Create a DEPICTS edge from a DiagramNode to an Entity.
 
         DEPICTS represents that a diagram component visually depicts a known entity
@@ -1612,8 +1649,7 @@ class KuzuService:
         try:
             name_lower = node_name.lower()
             result = self._conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
-                " RETURN e.id, e.name",
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}) RETURN e.id, e.name",
                 {"did": document_id},
             )
             while result.has_next():
@@ -1642,14 +1678,16 @@ class KuzuService:
             nodes: list[dict] = []
             while result.has_next():
                 row = result.get_next()
-                nodes.append({
-                    "id": row[0],
-                    "label": row[1],
-                    "type": row[2],
-                    "size": int(row[3] or 1),
-                    "source_image_id": row[4] or "",
-                    "mention_count": int(row[3] or 1),
-                })
+                nodes.append(
+                    {
+                        "id": row[0],
+                        "label": row[1],
+                        "type": row[2],
+                        "size": int(row[3] or 1),
+                        "source_image_id": row[4] or "",
+                        "mention_count": int(row[3] or 1),
+                    }
+                )
             return nodes
         except Exception:
             logger.debug("get_diagram_nodes_for_document failed", exc_info=True)
@@ -1663,7 +1701,12 @@ class KuzuService:
         """
         edges: list[dict] = []
         _DIAGRAM_RELS = (
-            "CONNECTS_TO", "STORES_IN", "SENDS_TO", "HAS_FIELD", "REFERENCES_DM", "LEADS_TO"
+            "CONNECTS_TO",
+            "STORES_IN",
+            "SENDS_TO",
+            "HAS_FIELD",
+            "REFERENCES_DM",
+            "LEADS_TO",
         )
         for rel in _DIAGRAM_RELS:
             try:
@@ -1675,19 +1718,19 @@ class KuzuService:
                 )
                 while result.has_next():
                     row = result.get_next()
-                    edges.append({
-                        "source": row[0],
-                        "target": row[1],
-                        "weight": 1.0,
-                        "relation": rel,
-                    })
+                    edges.append(
+                        {
+                            "source": row[0],
+                            "target": row[1],
+                            "weight": 1.0,
+                            "relation": rel,
+                        }
+                    )
             except Exception:
                 logger.debug("get_diagram_edges_for_document failed for %s", rel, exc_info=True)
         return edges
 
-    def _get_tech_relation_edges(
-        self, entity_ids: set[str], document_id: str
-    ) -> list[dict]:
+    def _get_tech_relation_edges(self, entity_ids: set[str], document_id: str) -> list[dict]:
         """Return tech relation edges (IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON)
         among the given entity IDs for a document."""
         if not entity_ids:
@@ -1707,12 +1750,14 @@ class KuzuService:
                 )
                 while result.has_next():
                     row = result.get_next()
-                    edges.append({
-                        "source": row[0],
-                        "target": row[1],
-                        "weight": 1.0,
-                        "relation": rel,
-                    })
+                    edges.append(
+                        {
+                            "source": row[0],
+                            "target": row[1],
+                            "weight": 1.0,
+                            "relation": rel,
+                        }
+                    )
             except Exception:
                 logger.debug("_get_tech_relation_edges failed for %s", rel, exc_info=True)
         return edges
@@ -1731,10 +1776,18 @@ class KuzuService:
             row = result.get_next()
             aid, aname, atype, afreq, bid, bname, btype, bfreq = row
             if aid not in nodes_map:
-                nodes_map[aid] = {"id": aid, "label": aname, "type": atype or "FUNCTION",
-                                   "size": afreq or 1}
+                nodes_map[aid] = {
+                    "id": aid,
+                    "label": aname,
+                    "type": atype or "FUNCTION",
+                    "size": afreq or 1,
+                }
             if bid not in nodes_map:
-                nodes_map[bid] = {"id": bid, "label": bname, "type": btype or "FUNCTION",
-                                   "size": bfreq or 1}
+                nodes_map[bid] = {
+                    "id": bid,
+                    "label": bname,
+                    "type": btype or "FUNCTION",
+                    "size": bfreq or 1,
+                }
             edges.append({"source": aid, "target": bid, "weight": 1.0})
         return {"nodes": list(nodes_map.values()), "edges": edges}

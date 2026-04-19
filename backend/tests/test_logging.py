@@ -115,9 +115,7 @@ def test_start_session_emits_info_log(client, caplog):
 
 def test_end_session_emits_info_log(client, caplog):
     """POST /study/sessions/{id}/end emits INFO 'Study session ended'."""
-    session_id = client.post(
-        "/study/sessions/start", json={"mode": "flashcard"}
-    ).json()["id"]
+    session_id = client.post("/study/sessions/start", json={"mode": "flashcard"}).json()["id"]
     with caplog.at_level(logging.INFO, logger="app.routers.study"):
         resp = client.post(f"/study/sessions/{session_id}/end")
     assert resp.status_code == 200
@@ -144,9 +142,7 @@ def test_ingest_file_received_emits_info_log(client, caplog):
     )
     assert resp.status_code == 200
     msgs = [r.message for r in caplog.records if r.name == "app.routers.documents"]
-    assert any("File received" in m for m in msgs), (
-        f"Expected 'File received' in {msgs}"
-    )
+    assert any("File received" in m for m in msgs), f"Expected 'File received' in {msgs}"
 
 
 def test_patch_document_tags_emits_info_log(client, caplog):
@@ -162,9 +158,7 @@ def test_patch_document_tags_emits_info_log(client, caplog):
     doc_id = resp.json()["document_id"]
 
     with caplog.at_level(logging.INFO, logger="app.routers.documents"):
-        tags_resp = client.patch(
-            f"/documents/{doc_id}/tags", json={"tags": ["science", "history"]}
-        )
+        tags_resp = client.patch(f"/documents/{doc_id}/tags", json={"tags": ["science", "history"]})
     assert tags_resp.status_code == 200
     msgs = [r.message for r in caplog.records if r.name == "app.routers.documents"]
     assert any("Patched document tags" in m for m in msgs), (

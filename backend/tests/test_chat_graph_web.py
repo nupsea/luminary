@@ -151,9 +151,7 @@ async def test_web_augment_node_accumulates_web_calls():
 
 def test_route_after_confidence_gate_routes_to_web_augment_when_enabled():
     """Routes to web_augment_node when web_enabled=True and confidence=low."""
-    state = _base_state(
-        web_enabled=True, confidence="low", web_calls_used=0, retry_attempted=False
-    )
+    state = _base_state(web_enabled=True, confidence="low", web_calls_used=0, retry_attempted=False)
     route = _route_after_confidence_gate(state)
     assert route == "web_augment_node"
 
@@ -172,18 +170,14 @@ def test_route_after_confidence_gate_routes_to_end_after_retry():
     """Routes to END when retry_attempted=True regardless of confidence."""
     from langgraph.graph import END
 
-    state = _base_state(
-        web_enabled=True, confidence="low", web_calls_used=0, retry_attempted=True
-    )
+    state = _base_state(web_enabled=True, confidence="low", web_calls_used=0, retry_attempted=True)
     route = _route_after_confidence_gate(state)
     assert route == END
 
 
 def test_route_after_confidence_gate_routes_to_web_augment_respects_rate_limit():
     """Routes to augment_node (local fallback) when web rate limit reached."""
-    state = _base_state(
-        web_enabled=True, confidence="low", web_calls_used=3, retry_attempted=False
-    )
+    state = _base_state(web_enabled=True, confidence="low", web_calls_used=3, retry_attempted=False)
     route = _route_after_confidence_gate(state)
     assert route == "augment_node"
 

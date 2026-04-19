@@ -744,7 +744,7 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     async function init() {
       try {
         const [sid, cards] = await Promise.all([
-          startSession(documentId), // startSession still just needs a docId if it's doc-focused, or null for general
+          startSession(documentId ?? null), // startSession still just needs a docId if it's doc-focused, or null for general
           fetchDueCards(documentId || null, collectionId || null, filters || {}),
         ])
         if (cancelled) return

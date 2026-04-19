@@ -57,10 +57,12 @@ class EnrichmentQueueWorker:
             # Reset stale 'running' and 'failed' jobs to 'pending' for retry
             result = await session.execute(
                 update(EnrichmentJobModel)
-                .where(or_(
-                    EnrichmentJobModel.status == "running",
-                    EnrichmentJobModel.status == "failed"
-                ))
+                .where(
+                    or_(
+                        EnrichmentJobModel.status == "running",
+                        EnrichmentJobModel.status == "failed",
+                    )
+                )
                 .values(status="pending", started_at=None, error_message=None)
                 .returning(EnrichmentJobModel.id)
             )
@@ -154,9 +156,7 @@ class EnrichmentQueueWorker:
                 .values(stage="complete")
             )
             await session.commit()
-        logger.info(
-            "EnrichmentQueueWorker: document enrichment complete doc=%s", document_id
-        )
+        logger.info("EnrichmentQueueWorker: document enrichment complete doc=%s", document_id)
 
     async def _run_job(self, job_id: str, document_id: str, job_type: str) -> None:
         handler = self._handlers.get(job_type)
@@ -201,9 +201,7 @@ class EnrichmentQueueWorker:
                     .values(status="done", completed_at=datetime.now(UTC))
                 )
                 await session.commit()
-            logger.info(
-                "EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id
-            )
+            logger.info("EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id)
         except Exception as exc:
             logger.warning(
                 "EnrichmentQueueWorker: job failed job_id=%s doc=%s: %s",

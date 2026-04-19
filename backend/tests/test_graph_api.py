@@ -126,9 +126,7 @@ async def test_graph_returns_nodes_after_ingest(graph_api_db, monkeypatch):
 
     await run_ingestion(doc_id, str(dest), "txt")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/graph/{doc_id}")
 
     assert resp.status_code == 200
@@ -152,6 +150,4 @@ async def test_graph_returns_nodes_after_ingest(graph_api_db, monkeypatch):
         assert isinstance(edge.get("source"), str), f"Edge 'source' must be str: {edge}"
         assert isinstance(edge.get("target"), str), f"Edge 'target' must be str: {edge}"
         weight = edge.get("weight")
-        assert isinstance(weight, (int, float)), (
-            f"Edge 'weight' must be a number: {edge}"
-        )
+        assert isinstance(weight, (int, float)), f"Edge 'weight' must be a number: {edge}"

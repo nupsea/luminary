@@ -91,7 +91,7 @@ def test_get_related_pairs_respects_limit(graph_svc: KuzuService):
         graph_svc.upsert_entity(f"e{i}", f"entity{i}", "CONCEPT")
         graph_svc.add_mention(f"e{i}", "doc-lim")
     for i in range(5):
-        graph_svc.add_relation(f"e{i}", f"e{i+1}", "linked", confidence=float(i) / 5)
+        graph_svc.add_relation(f"e{i}", f"e{i + 1}", "linked", confidence=float(i) / 5)
 
     pairs = graph_svc.get_related_entity_pairs_for_document("doc-lim", limit=3)
     assert len(pairs) <= 3

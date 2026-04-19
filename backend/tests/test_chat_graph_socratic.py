@@ -65,19 +65,22 @@ def _make_chunk(text: str = "Sample passage content.") -> ScoredChunk:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("phrase", [
-    "quiz me",
-    "quiz me on this",
-    "Quiz me on the key concepts",  # exact S95 pill label — must route to socratic
-    "test me",
-    "test me on this chapter",
-    "ask me a question",
-    "ask me questions about the book",
-    "socratic mode",
-    "give me a question",
-    "question me",
-    "what should i know",
-])
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "quiz me",
+        "quiz me on this",
+        "Quiz me on the key concepts",  # exact S95 pill label — must route to socratic
+        "test me",
+        "test me on this chapter",
+        "ask me a question",
+        "ask me questions about the book",
+        "socratic mode",
+        "give me a question",
+        "question me",
+        "what should i know",
+    ],
+)
 def test_socratic_intent_heuristic(phrase: str):
     intent, confidence = classify_intent_heuristic(phrase)
     assert intent == "socratic", f"Expected 'socratic' for {phrase!r}, got {intent!r}"
@@ -113,9 +116,7 @@ async def test_socratic_node_returns_card():
 
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = (
-        "Q: Who is Achilles?\nCONTEXT: Achilles is the hero."
-    )
+    mock_response.choices[0].message.content = "Q: Who is Achilles?\nCONTEXT: Achilles is the hero."
 
     mock_acompletion = AsyncMock(return_value=mock_response)
     with (

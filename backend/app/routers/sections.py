@@ -123,9 +123,7 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
         # Preview was truncated or empty -- reassemble from chunks, stripping
         # the "[Title > Section] " enrichment prefix from each chunk.
         if chunk_texts:
-            return "\n\n".join(
-                re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts
-            )
+            return "\n\n".join(re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts)
         # Last resort: return whatever preview we have, even if truncated
         return s.preview or ""
 

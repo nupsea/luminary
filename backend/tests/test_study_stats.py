@@ -106,9 +106,7 @@ async def test_stats_total_cards(test_db):
             session.add(_make_card(doc_id))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -118,23 +116,21 @@ async def test_stats_total_cards(test_db):
 
 @pytest.mark.asyncio
 async def test_stats_cards_mastered(test_db):
-    """cards_mastered counts only review-state cards with stability > 10."""
+    """cards_mastered counts only review-state cards with stability > 30."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
 
     async with factory() as session:
-        # mastered: review + stability > 10
-        session.add(_make_card(doc_id, fsrs_stability=12.0, fsrs_state="review"))
-        session.add(_make_card(doc_id, fsrs_stability=15.0, fsrs_state="review"))
-        # not mastered: review but stability <= 10
-        session.add(_make_card(doc_id, fsrs_stability=8.0, fsrs_state="review"))
+        # mastered: review + stability > 30
+        session.add(_make_card(doc_id, fsrs_stability=35.0, fsrs_state="review"))
+        session.add(_make_card(doc_id, fsrs_stability=40.0, fsrs_state="review"))
+        # not mastered: review but stability <= 30
+        session.add(_make_card(doc_id, fsrs_stability=25.0, fsrs_state="review"))
         # not mastered: learning state
-        session.add(_make_card(doc_id, fsrs_stability=12.0, fsrs_state="learning"))
+        session.add(_make_card(doc_id, fsrs_stability=35.0, fsrs_state="learning"))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -159,9 +155,7 @@ async def test_stats_avg_retention(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -190,9 +184,7 @@ async def test_stats_current_streak(test_db):
             )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -219,9 +211,7 @@ async def test_stats_total_study_time(test_db):
             )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -234,9 +224,7 @@ async def test_stats_empty_document(test_db):
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -260,9 +248,7 @@ async def test_stats_all_card_stabilities(test_db):
         session.add(_make_card(doc_id, fsrs_stability=7.5))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/stats/{doc_id}")
 
     assert resp.status_code == 200
@@ -307,9 +293,7 @@ async def test_history_daily_aggregation(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/history?document_id={doc_id}&days=7")
 
     assert resp.status_code == 200
@@ -337,14 +321,10 @@ async def test_history_respects_days_filter(test_db):
         )
         # Old session (10 days ago)
         old = now - timedelta(days=10)
-        session.add(
-            _make_session(doc_id, started_at=old, ended_at=old + timedelta(minutes=10))
-        )
+        session.add(_make_session(doc_id, started_at=old, ended_at=old + timedelta(minutes=10)))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/history?document_id={doc_id}&days=7")
 
     assert resp.status_code == 200
@@ -358,9 +338,7 @@ async def test_history_empty(test_db):
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/history?document_id={doc_id}&days=30")
 
     assert resp.status_code == 200

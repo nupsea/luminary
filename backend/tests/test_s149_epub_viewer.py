@@ -61,8 +61,7 @@ def _make_epub(chapters: int, tmp_dir: Path) -> Path:
         items.append(ch)
 
     book.toc = tuple(
-        epub.Link(f"chap{i + 1}.xhtml", f"Chapter {i + 1}", f"chap{i + 1}")
-        for i in range(chapters)
+        epub.Link(f"chap{i + 1}.xhtml", f"Chapter {i + 1}", f"chap{i + 1}") for i in range(chapters)
     )
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())

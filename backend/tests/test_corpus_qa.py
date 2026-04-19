@@ -65,9 +65,7 @@ async def test_alice_factual_retrieval_hr3(all_books_ingested):
             hits += 1
 
     hr3 = hits / len(factual_qs)
-    assert hr3 >= 0.6, (
-        f"Alice HR@3={hr3:.2f} < 0.60 on {len(factual_qs)} factual questions"
-    )
+    assert hr3 >= 0.6, f"Alice HR@3={hr3:.2f} < 0.60 on {len(factual_qs)} factual questions"
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +116,7 @@ async def test_odyssey_factual_retrieval_hr3(all_books_ingested):
             hits += 1
 
     hr3 = hits / len(factual_qs)
-    assert hr3 >= 0.6, (
-        f"Odyssey HR@3={hr3:.2f} < 0.60 on {len(factual_qs)} factual questions"
-    )
+    assert hr3 >= 0.6, f"Odyssey HR@3={hr3:.2f} < 0.60 on {len(factual_qs)} factual questions"
 
 
 # ---------------------------------------------------------------------------
@@ -139,12 +135,8 @@ async def test_alice_known_entities_extracted(all_books_ingested):
     by_type = graph.get_entities_by_type_for_document(alice_doc_id)
     names = {name.lower() for type_names in by_type.values() for name in type_names}
 
-    assert any("alice" in n for n in names), (
-        f"'alice' not found in entities: {sorted(names)[:30]}"
-    )
-    assert any("queen" in n for n in names), (
-        f"'queen' not found in entities: {sorted(names)[:30]}"
-    )
+    assert any("alice" in n for n in names), f"'alice' not found in entities: {sorted(names)[:30]}"
+    assert any("queen" in n for n in names), f"'queen' not found in entities: {sorted(names)[:30]}"
     assert len(names) >= 10, (
         f"Expected >= 10 distinct entities for Alice, got {len(names)}: {sorted(names)}"
     )
@@ -197,17 +189,14 @@ async def test_alice_section_summaries_no_gutenberg(all_books_ingested):
             )
         ).all()
 
-    assert len(rows) >= 5, (
-        f"Expected >= 5 section summaries for Alice, got {len(rows)}"
-    )
+    assert len(rows) >= 5, f"Expected >= 5 section summaries for Alice, got {len(rows)}"
 
     banned = ["project gutenberg", "terms of use"]
     for row in rows:
         text_lower = (row.content or "").lower()
         for phrase in banned:
             assert phrase not in text_lower, (
-                f"Alice section summary contains banned phrase '{phrase}':\n"
-                f"{row.content[:200]}"
+                f"Alice section summary contains banned phrase '{phrase}':\n{row.content[:200]}"
             )
 
 
@@ -228,17 +217,14 @@ async def test_odyssey_section_summaries_no_gutenberg(all_books_ingested):
             )
         ).all()
 
-    assert len(rows) >= 5, (
-        f"Expected >= 5 section summaries for Odyssey, got {len(rows)}"
-    )
+    assert len(rows) >= 5, f"Expected >= 5 section summaries for Odyssey, got {len(rows)}"
 
     banned = ["project gutenberg", "terms of use"]
     for row in rows:
         text_lower = (row.content or "").lower()
         for phrase in banned:
             assert phrase not in text_lower, (
-                f"Odyssey section summary contains banned phrase '{phrase}':\n"
-                f"{row.content[:200]}"
+                f"Odyssey section summary contains banned phrase '{phrase}':\n{row.content[:200]}"
             )
 
 
@@ -278,16 +264,13 @@ async def test_alice_executive_summary_quality(all_books_ingested):
         else:
             numbered_consecutive = 0
         assert numbered_consecutive < 3, (
-            "Alice executive summary looks like a passage-list (3+ numbered lines):\n"
-            + text[:400]
+            "Alice executive summary looks like a passage-list (3+ numbered lines):\n" + text[:400]
         )
 
     text_lower = text.lower()
     required_terms = ["alice", "wonderland", "queen", "rabbit", "mad"]
     missing = [t for t in required_terms if t not in text_lower]
-    assert not missing, (
-        f"Alice executive summary missing terms {missing}:\n{text[:400]}"
-    )
+    assert not missing, f"Alice executive summary missing terms {missing}:\n{text[:400]}"
 
 
 @pytest.mark.slow
@@ -332,9 +315,7 @@ async def test_odyssey_executive_summary_quality(all_books_ingested):
     )
     required_terms = ["penelope", "journey", "hero"]
     missing = [t for t in required_terms if t not in text_lower]
-    assert not missing, (
-        f"Odyssey executive summary missing terms {missing}:\n{text[:400]}"
-    )
+    assert not missing, f"Odyssey executive summary missing terms {missing}:\n{text[:400]}"
 
 
 # ---------------------------------------------------------------------------
@@ -376,12 +357,9 @@ async def test_all_books_have_section_summaries(all_books_ingested):
             doc_id = info["doc_id"]
             rows = (
                 await session.scalars(
-                    select(SectionSummaryModel).where(
-                        SectionSummaryModel.document_id == doc_id
-                    )
+                    select(SectionSummaryModel).where(SectionSummaryModel.document_id == doc_id)
                 )
             ).all()
             assert len(rows) >= 10, (
-                f"Book '{book_name}' has only {len(rows)} section summaries"
-                f" (expected >= 10)"
+                f"Book '{book_name}' has only {len(rows)} section summaries (expected >= 10)"
             )

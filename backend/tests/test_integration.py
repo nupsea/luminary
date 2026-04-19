@@ -210,9 +210,7 @@ async def test_ingest_fiction(integration_db, monkeypatch):
 
     # 2. At least 5 chunks should be in the database
     async with factory() as session:
-        result = await session.execute(
-            select(func.count()).where(ChunkModel.document_id == doc_id)
-        )
+        result = await session.execute(select(func.count()).where(ChunkModel.document_id == doc_id))
         chunk_count = result.scalar_one()
     assert chunk_count >= 5, f"Expected ≥5 chunks, got {chunk_count}"
 
@@ -220,9 +218,7 @@ async def test_ingest_fiction(integration_db, monkeypatch):
     from app.services.graph import get_graph_service
 
     graph_data = get_graph_service().get_graph_for_document(doc_id)
-    assert len(graph_data["nodes"]) >= 1, (
-        f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
-    )
+    assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
 async def test_ingest_technical(integration_db, monkeypatch):
@@ -242,9 +238,7 @@ async def test_ingest_technical(integration_db, monkeypatch):
 
     # 2. At least 5 chunks should be in the database
     async with factory() as session:
-        result = await session.execute(
-            select(func.count()).where(ChunkModel.document_id == doc_id)
-        )
+        result = await session.execute(select(func.count()).where(ChunkModel.document_id == doc_id))
         chunk_count = result.scalar_one()
     assert chunk_count >= 5, f"Expected ≥5 chunks, got {chunk_count}"
 
@@ -252,9 +246,7 @@ async def test_ingest_technical(integration_db, monkeypatch):
     from app.services.graph import get_graph_service
 
     graph_data = get_graph_service().get_graph_for_document(doc_id)
-    assert len(graph_data["nodes"]) >= 1, (
-        f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
-    )
+    assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
 async def test_search_after_ingest(integration_db, monkeypatch):

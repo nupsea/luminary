@@ -1,14 +1,18 @@
 """Quick test to surface the actual traceback from the dashboard endpoint."""
+
 import asyncio
 import traceback
-from app.db import get_engine
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-from sqlalchemy import select, func, or_
+
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.database import get_engine
 from app.models import (
-    CollectionModel, CollectionMemberModel, FlashcardModel,
-    NoteModel, NoteTagIndexModel, DocumentModel,
+    CollectionMemberModel,
+    CollectionModel,
+    FlashcardModel,
 )
-from datetime import datetime, UTC
+
 
 async def test():
     engine = get_engine()
@@ -26,8 +30,9 @@ async def test():
 
         # 2. Members
         members_result = await session.execute(
-            select(CollectionMemberModel.member_id, CollectionMemberModel.member_type)
-            .where(CollectionMemberModel.collection_id == collection_id)
+            select(CollectionMemberModel.member_id, CollectionMemberModel.member_type).where(
+                CollectionMemberModel.collection_id == collection_id
+            )
         )
         members = members_result.all()
         doc_ids = [m[0] for m in members if m[1] == "document"]
@@ -55,5 +60,6 @@ async def test():
             traceback.print_exc()
 
     await engine.dispose()
+
 
 asyncio.run(test())

@@ -2264,7 +2264,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [])
 
   const handleSelectionAddToNote = useCallback((text: string, sourceRef: SourceRef) => {
-    const heading = sectionMap.get(sourceRef.sectionId)?.heading
+    const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
     setSelectionNoteText(text)
     setSelectionNoteSourceRef(sourceRef)
     setSelectionNoteHeading(heading)
@@ -2272,7 +2272,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [sectionMap])
 
   const handleSelectionCreateFlashcard = useCallback((text: string, sourceRef: SourceRef) => {
-    const heading = sectionMap.get(sourceRef.sectionId)?.heading
+    const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
     setSelectionFlashcardText(text)
     setSelectionFlashcardSourceRef(sourceRef)
     setSelectionFlashcardHeading(heading)

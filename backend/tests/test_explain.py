@@ -43,8 +43,10 @@ async def test_each_mode_uses_different_instruction():
 
         async def capturing_generate(prompt, system="", **kwargs):
             system_calls.append(system)
+
             async def gen():
                 yield "token"
+
             return gen()
 
         llm.generate = AsyncMock(side_effect=capturing_generate)
@@ -105,16 +107,26 @@ async def test_extract_glossary_returns_list():
     llm = MagicMock()
     llm.generate = AsyncMock(return_value=glossary_json)
 
-    persisted = [{"id": "t1", "term": "Entanglement", "definition": "A quantum phenomenon.",
-                  "category": "concept", "first_mention_section_id": None,
-                  "created_at": None, "updated_at": None}]
+    persisted = [
+        {
+            "id": "t1",
+            "term": "Entanglement",
+            "definition": "A quantum phenomenon.",
+            "category": "concept",
+            "first_mention_section_id": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
 
     with (
         patch("app.services.explain.get_retriever", return_value=retriever),
         patch("app.services.explain.get_llm_service", return_value=llm),
         patch.object(
-            ExplainService, "_upsert_terms",
-            new_callable=AsyncMock, return_value=persisted,
+            ExplainService,
+            "_upsert_terms",
+            new_callable=AsyncMock,
+            return_value=persisted,
         ),
     ):
         svc = ExplainService()
@@ -131,23 +143,31 @@ async def test_extract_glossary_strips_markdown_fences():
     retriever = MagicMock()
     retriever.retrieve = AsyncMock(return_value=[_make_chunk("Some text.")])
     glossary_json = (
-        "```json\n"
-        '[{"term": "Qubit", "definition": "Quantum bit.", "category": "technical"}]\n'
-        "```"
+        '```json\n[{"term": "Qubit", "definition": "Quantum bit.", "category": "technical"}]\n```'
     )
     llm = MagicMock()
     llm.generate = AsyncMock(return_value=glossary_json)
 
-    persisted = [{"id": "t1", "term": "Qubit", "definition": "Quantum bit.",
-                  "category": "technical", "first_mention_section_id": None,
-                  "created_at": None, "updated_at": None}]
+    persisted = [
+        {
+            "id": "t1",
+            "term": "Qubit",
+            "definition": "Quantum bit.",
+            "category": "technical",
+            "first_mention_section_id": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
 
     with (
         patch("app.services.explain.get_retriever", return_value=retriever),
         patch("app.services.explain.get_llm_service", return_value=llm),
         patch.object(
-            ExplainService, "_upsert_terms",
-            new_callable=AsyncMock, return_value=persisted,
+            ExplainService,
+            "_upsert_terms",
+            new_callable=AsyncMock,
+            return_value=persisted,
         ),
     ):
         svc = ExplainService()

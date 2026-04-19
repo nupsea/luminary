@@ -64,9 +64,7 @@ def _book_suggestions(entities: dict[str, list[str]], headings: list[str]) -> li
     if places:
         suggestions.append(f"What is the significance of {places[0]} in the narrative?")
     if persons and concepts and len(suggestions) < 4:
-        suggestions.append(
-            f"How does {persons[0]} relate to the concept of {concepts[0].lower()}?"
-        )
+        suggestions.append(f"How does {persons[0]} relate to the concept of {concepts[0].lower()}?")
     if headings and len(suggestions) < 4:
         suggestions.append(f"Summarize the section on '{headings[0]}'")
 
@@ -141,17 +139,13 @@ def _cross_document_suggestions(shared_entities: list[str]) -> list[str]:
     """Generate suggestions for all-scope (no specific document)."""
     suggestions: list[str] = []
     if shared_entities:
-        suggestions.append(
-            f"Compare how {shared_entities[0]} appears across your documents"
-        )
+        suggestions.append(f"Compare how {shared_entities[0]} appears across your documents")
     if len(shared_entities) >= 2:
         suggestions.append(
             f"What connections exist between {shared_entities[0]} and {shared_entities[1]}?"
         )
     if len(shared_entities) >= 3:
-        suggestions.append(
-            f"Summarize everything you know about {shared_entities[2]}"
-        )
+        suggestions.append(f"Summarize everything you know about {shared_entities[2]}")
     suggestions.append("What are the common themes across my documents?")
     return suggestions[:4]
 
@@ -164,6 +158,7 @@ def _template_to_items(suggestions: list[str]) -> list[SuggestionItem]:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 # NOTE: POST /chat/suggestions/{id}/asked registered BEFORE any /{param} route
 @router.post("/suggestions/{suggestion_id}/asked", status_code=204)
@@ -208,9 +203,7 @@ async def get_suggestions_cached(
     if not rows:
         return SuggestionResponse(suggestions=[])
 
-    return SuggestionResponse(
-        suggestions=[SuggestionItem(id=r[0], text=r[1]) for r in rows]
-    )
+    return SuggestionResponse(suggestions=[SuggestionItem(id=r[0], text=r[1]) for r in rows])
 
 
 @router.get("/suggestions", response_model=SuggestionResponse)
@@ -233,13 +226,9 @@ async def get_suggestions(
 
 async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
     """Handle cross-document (all-scope) suggestions."""
-    shared = await asyncio.to_thread(
-        get_graph_service().get_cross_document_entities, limit=10
-    )
+    shared = await asyncio.to_thread(get_graph_service().get_cross_document_entities, limit=10)
     if not shared:
-        return SuggestionResponse(
-            suggestions=_template_to_items(_ONBOARDING_SUGGESTIONS[:4])
-        )
+        return SuggestionResponse(suggestions=_template_to_items(_ONBOARDING_SUGGESTIONS[:4]))
 
     try:
         target_bloom = await svc.get_target_bloom_level(None)
@@ -249,7 +238,10 @@ async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
                 suggestions=_template_to_items(_cross_document_suggestions(shared))
             )
         candidates = await svc.generate_suggestions(
-            document_id=None, summary=summary, entity_names=shared[:5], target_bloom=target_bloom,
+            document_id=None,
+            summary=summary,
+            entity_names=shared[:5],
+            target_bloom=target_bloom,
         )
         if candidates:
             items = await svc.persist_shown(candidates[:4], document_id=None)
@@ -257,8 +249,13 @@ async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.APIConnectionError,
+        litellm.NotFoundError,
+        litellm.RateLimitError,
+        litellm.AuthenticationError,
+    ):
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
@@ -269,15 +266,11 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     session_factory = get_session_factory()
     async with session_factory() as session:
         doc = (
-            await session.execute(
-                select(DocumentModel).where(DocumentModel.id == document_id)
-            )
+            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
 
         if doc is None:
-            return SuggestionResponse(
-                suggestions=_template_to_items(_ONBOARDING_SUGGESTIONS[:4])
-            )
+            return SuggestionResponse(suggestions=_template_to_items(_ONBOARDING_SUGGESTIONS[:4]))
 
         content_type = doc.content_type or "unknown"
 
@@ -320,8 +313,13 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)
                 return SuggestionResponse(suggestions=[SuggestionItem(**i) for i in items])
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.APIConnectionError,
+        litellm.NotFoundError,
+        litellm.RateLimitError,
+        litellm.AuthenticationError,
+    ):
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
     # Fallback to S187 template logic
@@ -365,8 +363,6 @@ async def get_explorations(
         else:
             text = f"How is {display_a} related to {display_b}?"
         suggestions.append(ExplorationSuggestion(text=text, entity_names=[name_a, name_b]))
-    logger.debug(
-        "explorations: doc=%s returned %d suggestions", document_id, len(suggestions)
-    )
+    logger.debug("explorations: doc=%s returned %d suggestions", document_id, len(suggestions))
     return suggestions
     return suggestions

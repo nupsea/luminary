@@ -65,7 +65,7 @@ export function CollectionStudyDashboard({
   onBack,
   onStartStudy,
   onGenerateFromGraph,
-  onGenerateCloze,
+  onGenerateCloze: _onGenerateCloze,
   onNavigateToCollection
 }: CollectionStudyDashboardProps) {
   const { data, isLoading, isError } = useQuery({

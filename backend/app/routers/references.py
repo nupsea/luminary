@@ -121,8 +121,7 @@ async def get_document_references(
         if not include_invalid:
             # Exclude explicitly invalid refs; keep unchecked (None) and valid (True)
             query = query.where(
-                (WebReferenceModel.is_valid.is_(None))
-                | (WebReferenceModel.is_valid == True)  # noqa: E712
+                (WebReferenceModel.is_valid.is_(None)) | (WebReferenceModel.is_valid == True)  # noqa: E712
             )
         refs_result = await session.execute(query)
         rows = refs_result.scalars().all()
@@ -178,9 +177,7 @@ async def refresh_document_references(document_id: str) -> dict:
 
         # Delete all existing refs for this document
         existing = await session.execute(
-            select(WebReferenceModel).where(
-                WebReferenceModel.document_id == document_id
-            )
+            select(WebReferenceModel).where(WebReferenceModel.document_id == document_id)
         )
         for row in existing.scalars().all():
             await session.delete(row)
@@ -193,9 +190,7 @@ async def refresh_document_references(document_id: str) -> dict:
     # Count valid/invalid from the newly persisted refs
     async with get_session_factory()() as session:
         refs_result = await session.execute(
-            select(WebReferenceModel).where(
-                WebReferenceModel.document_id == document_id
-            )
+            select(WebReferenceModel).where(WebReferenceModel.document_id == document_id)
         )
         rows = refs_result.scalars().all()
 

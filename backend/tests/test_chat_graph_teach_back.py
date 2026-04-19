@@ -65,16 +65,19 @@ def _make_chunk(text: str = "Sample passage content.") -> ScoredChunk:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("phrase", [
-    "let me explain what I understand",
-    "my understanding is that the earth revolves around the sun",
-    "i think this means the force equals mass times acceleration",
-    "i understand this as a recursive process",
-    "in my own words, osmosis is the movement of water",
-    "i believe that quantum states collapse on observation",
-    "if i understand correctly, the mitochondria is the powerhouse",
-    "here is my understanding of the water cycle",
-])
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "let me explain what I understand",
+        "my understanding is that the earth revolves around the sun",
+        "i think this means the force equals mass times acceleration",
+        "i understand this as a recursive process",
+        "in my own words, osmosis is the movement of water",
+        "i believe that quantum states collapse on observation",
+        "if i understand correctly, the mitochondria is the powerhouse",
+        "here is my understanding of the water cycle",
+    ],
+)
 def test_teach_back_intent_heuristic(phrase: str):
     intent, confidence = classify_intent_heuristic(phrase)
     assert intent == "teach_back", f"Expected 'teach_back' for {phrase!r}, got {intent!r}"
@@ -100,12 +103,14 @@ def test_teach_back_no_false_positive_summary():
 # (c) teach_back_node returns valid __card__ with parsed JSON fields
 # ---------------------------------------------------------------------------
 
-_VALID_EVAL_JSON = json.dumps({
-    "correct": ["The earth orbits the sun"],
-    "misconceptions": ["The sun is not at the center of the universe"],
-    "gaps": ["The concept of gravitational pull was not mentioned"],
-    "encouragement": "Great effort on explaining orbital mechanics!",
-})
+_VALID_EVAL_JSON = json.dumps(
+    {
+        "correct": ["The earth orbits the sun"],
+        "misconceptions": ["The sun is not at the center of the universe"],
+        "gaps": ["The concept of gravitational pull was not mentioned"],
+        "encouragement": "Great effort on explaining orbital mechanics!",
+    }
+)
 
 
 @pytest.mark.asyncio
@@ -247,12 +252,14 @@ async def test_teach_back_fenced_json_parsed():
 
     fenced = (
         "```json\n"
-        + json.dumps({
-            "correct": ["Gravity keeps the earth in orbit"],
-            "misconceptions": [],
-            "gaps": ["Elliptical orbit shape not mentioned"],
-            "encouragement": "Good start!",
-        })
+        + json.dumps(
+            {
+                "correct": ["Gravity keeps the earth in orbit"],
+                "misconceptions": [],
+                "gaps": ["Elliptical orbit shape not mentioned"],
+                "encouragement": "Good start!",
+            }
+        )
         + "\n```\n"  # trailing newline before closing fence (common LLM output)
     )
 

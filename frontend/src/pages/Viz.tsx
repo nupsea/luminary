@@ -4,7 +4,6 @@ import forceAtlas2 from "graphology-layout-forceatlas2"
 import {
   AlertTriangle,
   BookOpen,
-  ChevronDown,
   Eye,
   FileText,
   Filter,

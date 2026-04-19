@@ -141,6 +141,7 @@ def test_delete_nonexistent_note_returns_404(client):
 def test_groups_returns_correct_counts(client):
     """GET /notes/groups returns groups and tags with correct counts."""
     import uuid
+
     # Use unique names to avoid collisions with notes from other tests
     suffix = uuid.uuid4().hex[:8]
     gname1 = f"GRP1_{suffix}"
@@ -163,6 +164,7 @@ def test_groups_returns_correct_counts(client):
     tag_map = {t["name"]: t["count"] for t in data["tags"]}
     assert tag_map.get(tag1) == 2
     assert tag_map.get(tag2) == 2
+
 
 # ---------------------------------------------------------------------------
 # section_id support (S106)

@@ -70,9 +70,7 @@ class TestTimeMachineEndToEnd:
 
     async def test_diagnostics_counts(self):
         """GET /documents/{id}/diagnostics returns expected pipeline counts."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(f"/documents/{self.doc_id}/diagnostics")
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
         d = resp.json()
@@ -106,12 +104,8 @@ class TestTimeMachineEndToEnd:
     async def test_hybrid_retrieve(self):
         """Hybrid RRF retrieval for 'What is the Time Machine?' returns >= 5 results."""
         retriever = get_retriever()
-        results = await retriever.retrieve(
-            "What is the Time Machine?", [self.doc_id], k=10
-        )
-        assert len(results) >= 5, (
-            f"hybrid retrieve returned {len(results)} results"
-        )
+        results = await retriever.retrieve("What is the Time Machine?", [self.doc_id], k=10)
+        assert len(results) >= 5, f"hybrid retrieve returned {len(results)} results"
 
     # ------------------------------------------------------------------
     # Q&A streaming
@@ -154,7 +148,7 @@ class TestTimeMachineEndToEnd:
         assert len(done_events) >= 1, "Expected done=true event"
 
         # Verify citations in done event
-        done_payload = json.loads(done_events[-1][len("data: "):])
+        done_payload = json.loads(done_events[-1][len("data: ") :])
         assert done_payload.get("done") is True
         assert len(done_payload.get("citations", [])) >= 1, (
             f"Expected >= 1 citation, got {done_payload.get('citations', [])}"
@@ -179,18 +173,12 @@ class TestTimeMachineEndToEnd:
 
     async def test_search_endpoint(self):
         """GET /search?q=Weena returns 200 with >= 1 result."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.get(
-                "/search", params={"q": "Weena", "document_id": self.doc_id}
-            )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/search", params={"q": "Weena", "document_id": self.doc_id})
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
         data = resp.json()
         results = data if isinstance(data, list) else data.get("results", [])
-        assert len(results) >= 1, (
-            f"Expected >= 1 search result for 'Weena', got {len(results)}"
-        )
+        assert len(results) >= 1, f"Expected >= 1 search result for 'Weena', got {len(results)}"
 
     # ------------------------------------------------------------------
     # Timing
@@ -199,6 +187,4 @@ class TestTimeMachineEndToEnd:
     def test_ingest_elapsed(self):
         """Time Machine ingestion must complete within 600 seconds."""
         print(f"\nTime Machine ingestion: {self.elapsed:.1f}s", flush=True)
-        assert self.elapsed <= 600, (
-            f"Ingestion took {self.elapsed:.1f}s, budget is 600s"
-        )
+        assert self.elapsed <= 600, f"Ingestion took {self.elapsed:.1f}s, budget is 600s"

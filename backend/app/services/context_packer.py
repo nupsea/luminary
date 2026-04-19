@@ -16,6 +16,7 @@ import litellm
 # Token count — exact via litellm.token_counter (wraps tiktoken, graceful fallback)
 # ---------------------------------------------------------------------------
 
+
 def _token_estimate(text: str, model: str = "gpt-3.5-turbo") -> int:
     """Return exact token count for text using litellm.token_counter.
 
@@ -185,10 +186,7 @@ def pack_context(
 
             # Near-duplicate check
             if dedup_ratio < 1.0 and emitted_texts:
-                if any(
-                    _lcs_ratio(chunk_text, prev) >= dedup_ratio
-                    for prev in emitted_texts
-                ):
+                if any(_lcs_ratio(chunk_text, prev) >= dedup_ratio for prev in emitted_texts):
                     continue
 
             chunk_str = f"---\n{chunk_text}\n"

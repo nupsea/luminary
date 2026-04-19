@@ -122,9 +122,7 @@ async def test_pdf_chunks_have_page_numbers(test_db):
     await _chunk_book(state, state["parsed_document"], doc_id)
 
     async with factory() as session:
-        result = await session.execute(
-            select(ChunkModel).where(ChunkModel.document_id == doc_id)
-        )
+        result = await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id))
         chunks = result.scalars().all()
 
     assert len(chunks) > 0, "Expected at least one chunk"
@@ -147,9 +145,7 @@ async def test_txt_chunks_have_null_page_numbers(test_db):
     await _chunk_book(state, state["parsed_document"], doc_id)
 
     async with factory() as session:
-        result = await session.execute(
-            select(ChunkModel).where(ChunkModel.document_id == doc_id)
-        )
+        result = await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id))
         chunks = result.scalars().all()
 
     assert len(chunks) > 0, "Expected at least one chunk"
@@ -173,9 +169,7 @@ async def test_serve_document_file_200(test_db):
         session.add(_make_doc(doc_id, file_path=str(pdf_path)))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/file")
 
     assert resp.status_code == 200
@@ -191,9 +185,7 @@ async def test_serve_document_file_404_not_on_disk(test_db):
         session.add(_make_doc(doc_id, file_path="/nonexistent/path/to/doc.pdf"))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/file")
 
     assert resp.status_code == 404
@@ -201,9 +193,7 @@ async def test_serve_document_file_404_not_on_disk(test_db):
 
 async def test_serve_document_file_404_no_document(test_db):
     """GET /documents/{id}/file returns 404 when document not in DB."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{uuid.uuid4()}/file")
 
     assert resp.status_code == 404
@@ -218,21 +208,21 @@ async def test_get_pdf_meta_200(test_db):
         session.add(_make_doc(doc_id, page_count=42))
         # Add 2 sections so has_toc=True
         for i in range(2):
-            session.add(SectionModel(
-                id=str(uuid.uuid4()),
-                document_id=doc_id,
-                heading=f"Section {i}",
-                level=1,
-                page_start=i + 1,
-                page_end=i + 1,
-                section_order=i,
-                preview="",
-            ))
+            session.add(
+                SectionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading=f"Section {i}",
+                    level=1,
+                    page_start=i + 1,
+                    page_end=i + 1,
+                    section_order=i,
+                    preview="",
+                )
+            )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/pdf-meta")
 
     assert resp.status_code == 200
@@ -250,9 +240,7 @@ async def test_get_pdf_meta_no_toc(test_db):
         session.add(_make_doc(doc_id, page_count=10))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/pdf-meta")
 
     assert resp.status_code == 200
@@ -270,9 +258,7 @@ async def test_get_pdf_meta_400_non_pdf(test_db):
         session.add(_make_doc(doc_id, format="txt", file_path="/tmp/test.txt"))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/pdf-meta")
 
     assert resp.status_code == 400
@@ -280,9 +266,7 @@ async def test_get_pdf_meta_400_non_pdf(test_db):
 
 async def test_get_pdf_meta_404_not_found(test_db):
     """GET /documents/{id}/pdf-meta returns 404 for unknown document ID."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{uuid.uuid4()}/pdf-meta")
 
     assert resp.status_code == 404

@@ -17,9 +17,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    FlashcardModel,
     CollectionMemberModel,
     CollectionModel,
+    FlashcardModel,
     NoteModel,
     NoteTagIndexModel,
 )
@@ -117,9 +117,7 @@ async def _fetch_cohesion_score(note_ids: list[str]) -> float | None:
 
 
 class CollectionHealthService:
-    async def analyze(
-        self, collection_id: str, session: AsyncSession
-    ) -> CollectionHealthReport:
+    async def analyze(self, collection_id: str, session: AsyncSession) -> CollectionHealthReport:
         """Compute all health metrics for the given collection."""
         # Fetch collection
         col_result = await session.execute(
@@ -147,9 +145,9 @@ class CollectionHealthService:
             select(NoteModel.id).where(
                 NoteModel.archived.is_(False),
                 NoteModel.id.not_in(
-                    select(CollectionMemberModel.member_id).where(
-                        CollectionMemberModel.member_type == "note"
-                    ).distinct()
+                    select(CollectionMemberModel.member_id)
+                    .where(CollectionMemberModel.member_type == "note")
+                    .distinct()
                 ),
             )
         )
@@ -174,14 +172,10 @@ class CollectionHealthService:
         uncovered_notes: list[UncoveredNote] = []
         if uncovered_note_ids:
             note_rows = await session.execute(
-                select(NoteModel.id, NoteModel.content).where(
-                    NoteModel.id.in_(uncovered_note_ids)
-                )
+                select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(uncovered_note_ids))
             )
             for nid, content in note_rows.all():
-                uncovered_notes.append(
-                    UncoveredNote(note_id=nid, preview=content[:120])
-                )
+                uncovered_notes.append(UncoveredNote(note_id=nid, preview=content[:120]))
 
         # Stale notes: updated_at < now - 90 days, not archived
         stale_threshold = datetime.now(UTC) - timedelta(days=_STALE_DAYS)
@@ -227,9 +221,7 @@ class CollectionHealthService:
             hotspot_tags=hotspot_tags,
         )
 
-    async def archive_stale(
-        self, collection_id: str, session: AsyncSession
-    ) -> int:
+    async def archive_stale(self, collection_id: str, session: AsyncSession) -> int:
         """Set archived=True for stale notes in this collection. Returns count archived."""
         col_result = await session.execute(
             select(CollectionModel).where(CollectionModel.id == collection_id)
@@ -262,9 +254,7 @@ class CollectionHealthService:
         for note in stale_notes:
             note.archived = True
         await session.commit()
-        logger.info(
-            "Archived %d stale notes in collection id=%s", len(stale_notes), collection_id
-        )
+        logger.info("Archived %d stale notes in collection id=%s", len(stale_notes), collection_id)
         return len(stale_notes)
 
 

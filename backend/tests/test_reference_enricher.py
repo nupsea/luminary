@@ -78,7 +78,8 @@ async def _insert_section_summary(
             document_id=doc_id,
             section_id=section_id,
             heading="Chapter 1",
-            content=content or (
+            content=content
+            or (
                 "Python generators use the yield keyword to lazily produce values. "
                 "The itertools module provides tools for working with generators. "
                 "NumPy arrays store homogeneous data for vectorized computation."
@@ -254,9 +255,9 @@ async def test_no_http_calls_when_provider_none(test_db, monkeypatch):
         ),
     ):
         # Ensure httpx.AsyncClient is not instantiated by _verify_urls
-        mock_httpx.return_value.__aenter__ = AsyncMock(side_effect=AssertionError(
-            "httpx.AsyncClient should not be called when provider=none"
-        ))
+        mock_httpx.return_value.__aenter__ = AsyncMock(
+            side_effect=AssertionError("httpx.AsyncClient should not be called when provider=none")
+        )
         svc = ReferenceEnricherService()
         await svc.enrich(doc_id)
 
@@ -354,9 +355,7 @@ async def test_get_document_references_returns_empty_for_no_refs(test_db):
         session.add(doc)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/references/documents/{doc_id}")
 
     assert resp.status_code == 200
@@ -368,9 +367,7 @@ async def test_get_document_references_returns_empty_for_no_refs(test_db):
 @pytest.mark.asyncio
 async def test_get_document_references_returns_404_for_unknown_doc(test_db):
     """Returns 404 when document does not exist at all."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/references/documents/nonexistent-doc-id")
 
     assert resp.status_code == 404

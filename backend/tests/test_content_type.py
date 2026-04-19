@@ -73,9 +73,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
 @pytest.mark.anyio
 async def test_ingest_without_content_type_returns_422(test_db):
     """POST /documents/ingest without content_type form field returns HTTP 422."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("test.txt", io.BytesIO(b"hello world"), "text/plain")},
@@ -98,9 +96,7 @@ async def test_ingest_with_valid_type_skips_classify_llm(test_db, monkeypatch):
     # Patch so background task runs our mock immediately rather than real ingestion
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/documents/ingest",
             files={
@@ -117,9 +113,7 @@ async def test_ingest_with_valid_type_skips_classify_llm(test_db, monkeypatch):
     from app.models import DocumentModel  # noqa: PLC0415
 
     async with factory() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == doc_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
         doc = result.scalar_one_or_none()
     assert doc is not None
     assert doc.content_type == "book", f"Expected book, got {doc.content_type}"
@@ -134,9 +128,7 @@ async def test_patch_content_type_updates_document(test_db):
         session.add(_make_doc(doc_id, content_type="notes"))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.patch(
             f"/documents/{doc_id}",
             json={"content_type": "book"},
@@ -147,9 +139,7 @@ async def test_patch_content_type_updates_document(test_db):
     assert "Re-ingest document" in body.get("note", "")
 
     # Verify via GET /documents
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         list_resp = await client.get("/documents")
     items = list_resp.json()["items"]
     match = next((i for i in items if i["id"] == doc_id), None)
@@ -160,9 +150,7 @@ async def test_patch_content_type_updates_document(test_db):
 @pytest.mark.anyio
 async def test_invalid_content_type_returns_422(test_db):
     """POST /documents/ingest with an unsupported content_type returns HTTP 422."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("test.txt", io.BytesIO(b"hello"), "text/plain")},

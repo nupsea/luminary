@@ -232,7 +232,7 @@ def extract_images_md(
         try:
             with PILImage.open(img_path) as img_pil:
                 w, h = img_pil.size
-                
+
             # Use file content hash if possible, otherwise filename
             with open(img_path, "rb") as f:
                 content_hash = hashlib.sha256(f.read()).hexdigest()

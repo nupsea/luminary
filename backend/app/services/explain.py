@@ -64,9 +64,9 @@ class ExplainService:
 
         token_gen = await llm.generate(prompt, system=system, stream=True)
         async for token in token_gen:
-            yield f'data: {json.dumps({"token": token})}\n\n'
+            yield f"data: {json.dumps({'token': token})}\n\n"
 
-        yield f'data: {json.dumps({"done": True})}\n\n'
+        yield f"data: {json.dumps({'done': True})}\n\n"
 
     async def extract_glossary(self, document_id: str) -> list[dict]:
         """Extract technical terms from a document, persist to DB, and return."""
@@ -105,17 +105,13 @@ class ExplainService:
 
         terms = self._parse_glossary_json(raw, document_id)
         if terms is None:
-            raise GlossaryParseError(
-                "Glossary generation failed -- try again"
-            )
+            raise GlossaryParseError("Glossary generation failed -- try again")
 
         # Persist terms via upsert
         persisted = await self._upsert_terms(document_id, terms)
         return persisted
 
-    def _parse_glossary_json(
-        self, raw: str, document_id: str
-    ) -> list[dict] | None:
+    def _parse_glossary_json(self, raw: str, document_id: str) -> list[dict] | None:
         """Parse LLM glossary output, tolerating common formatting issues."""
         try:
             terms = json.loads(raw)
@@ -136,24 +132,28 @@ class ExplainService:
 
         logger.warning(
             "Glossary parse failed for doc %s: %r",
-            document_id, raw[:200],
+            document_id,
+            raw[:200],
         )
         return None
 
-    async def _upsert_terms(
-        self, document_id: str, terms: list[dict]
-    ) -> list[dict]:
+    async def _upsert_terms(self, document_id: str, terms: list[dict]) -> list[dict]:
         """Upsert glossary terms into DB and return the full persisted list."""
         now = datetime.now(UTC)
 
         # Load sections for first_mention matching
         async with get_session_factory()() as session:
             sections = (
-                await session.execute(
-                    select(SectionModel).where(SectionModel.document_id == document_id)
-                    .order_by(SectionModel.section_order)
+                (
+                    await session.execute(
+                        select(SectionModel)
+                        .where(SectionModel.document_id == document_id)
+                        .order_by(SectionModel.section_order)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             for t in terms:
                 term_text = t.get("term", "").strip()
@@ -204,12 +204,16 @@ class ExplainService:
         """Return persisted glossary terms without LLM call."""
         async with get_session_factory()() as session:
             rows = (
-                await session.execute(
-                    select(GlossaryTermModel)
-                    .where(GlossaryTermModel.document_id == document_id)
-                    .order_by(GlossaryTermModel.term)
+                (
+                    await session.execute(
+                        select(GlossaryTermModel)
+                        .where(GlossaryTermModel.document_id == document_id)
+                        .order_by(GlossaryTermModel.term)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
         return [
             {

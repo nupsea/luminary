@@ -123,6 +123,7 @@ def test_parse_file_invalid_language_returns_empty():
 # chunk_code_file metadata — function_name, file_path, start_line
 # ---------------------------------------------------------------------------
 
+
 def test_chunk_text_contains_function_name():
     p = CodeParser()
     defs = p.parse_file(PYTHON_SOURCE, "python", "calc.py")
@@ -140,7 +141,7 @@ def test_chunk_start_line_set():
 # Call edge detection
 # ---------------------------------------------------------------------------
 
-PYTHON_CALLS = '''
+PYTHON_CALLS = """
 def helper():
     return 42
 
@@ -151,7 +152,7 @@ def compute():
 def main():
     result = compute()
     print(result)
-'''
+"""
 
 
 def test_build_call_edges_detects_calls():

@@ -158,9 +158,7 @@ class SectionSummarizerService:
                 total_inserted += 1
 
         try:
-            await asyncio.gather(
-                *[_summarize_unit(i, unit) for i, unit in enumerate(units)]
-            )
+            await asyncio.gather(*[_summarize_unit(i, unit) for i, unit in enumerate(units)])
         except litellm.ServiceUnavailableError:
             logger.warning(
                 "section_summarizer: LLM unavailable — skipping section summaries",
@@ -217,9 +215,7 @@ class SectionSummarizerService:
                 )
                 session.add(job)
                 await session.commit()
-                logger.info(
-                    "section_summarizer: enqueued web_refs job for doc=%s", document_id
-                )
+                logger.info("section_summarizer: enqueued web_refs job for doc=%s", document_id)
         except Exception as exc:
             logger.warning(
                 "section_summarizer: failed to enqueue web_refs for doc=%s: %s",

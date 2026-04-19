@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react"
+import { Fragment, useState } from "react"
 import {
   AlertCircle,
   BookOpen,
@@ -19,10 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Copy,
   CornerDownRight,
-  Download,
-  FileText,
   Layers,
   Loader2,
   Pencil,
@@ -46,16 +43,12 @@ import {
 import { AnimatePresence, motion } from "framer-motion"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
 
-// ProgressDashboard is Recharts-heavy — lazy-load so Recharts stays out of the initial Study chunk
-const ProgressDashboard = lazy(() =>
-  import("@/components/ProgressDashboard").then((m) => ({ default: m.ProgressDashboard }))
-)
 
 // ---------------------------------------------------------------------------
 // Document list for the in-tab picker
@@ -75,8 +68,6 @@ async function fetchDocList(): Promise<DocListItem[]> {
 
 import { API_BASE } from "@/lib/config"
 import {
-  BLOOM_LEVEL_LABELS,
-  FSRS_STATE_LABELS,
   INSIGHTS_SECTIONS,
   buildSearchParams,
   buildSmartGenerateParams,
@@ -177,11 +168,6 @@ interface DeckHealthReport {
   hotspot_sections: HealthSection[]
 }
 
-// S184: Collection type for filter dropdown
-interface CollectionItem {
-  id: string
-  name: string
-}
 
 // S184: Search response type
 interface FlashcardSearchResponse {
@@ -252,12 +238,6 @@ async function fetchFlashcardSearch(filters: FlashcardSearchFilters): Promise<Fl
   return res.json() as Promise<FlashcardSearchResponse>
 }
 
-async function fetchCollections(): Promise<CollectionItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) return []
-  const tree = await res.json() as { id: string; name: string }[]
-  return tree.map((c) => ({ id: c.id, name: c.name }))
-}
 
 async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
   const res = await fetch(`${API_BASE}/documents/${documentId}`)
@@ -324,25 +304,18 @@ async function fetchSessionCards(sessionId: string): Promise<SessionCardDetail[]
   return res.json() as Promise<SessionCardDetail[]>
 }
 
+async function fetchStudyStats(documentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/study/stats/${documentId}`)
+  if (!res.ok) throw new Error("Failed to load study stats")
+  return res.json()
+}
+
 class GenerateError extends Error {
   status: number
   constructor(status: number, message: string) {
     super(message)
     this.status = status
   }
-}
-
-async function generateFromGraph(req: {
-  document_id: string
-  k: number
-}): Promise<Flashcard[]> {
-  const res = await fetch(`${API_BASE}/flashcards/generate-from-graph`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  })
-  if (!res.ok) throw new GenerateError(res.status, "Failed to generate entity flashcards")
-  return res.json() as Promise<Flashcard[]>
 }
 
 async function generateFlashcards(req: {
@@ -377,26 +350,6 @@ async function updateFlashcard(
 async function deleteFlashcard(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/flashcards/${id}`, { method: "DELETE" })
   if (!res.ok) throw new Error("Failed to delete flashcard")
-}
-
-async function deleteAllFlashcards(documentId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/flashcards/document/${documentId}`, {
-    method: "DELETE",
-  })
-  if (!res.ok) throw new Error("Failed to delete all flashcards")
-}
-
-// S154: Cloze generation API helper
-async function generateClozeFlashcards(
-  sectionId: string,
-  count: number,
-): Promise<Flashcard[]> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/cloze/${encodeURIComponent(sectionId)}?count=${count}`,
-    { method: "POST" },
-  )
-  if (!res.ok) throw new GenerateError(res.status, "Failed to generate cloze flashcards")
-  return res.json() as Promise<Flashcard[]>
 }
 
 // S153: Bloom's coverage audit API helpers
@@ -1901,12 +1854,24 @@ function DocPicker({
 // FlashcardManager (Standalone view for document-centric study)
 // ---------------------------------------------------------------------------
 
-function FlashcardManager({ documentId }: { documentId: string }) {
+function FlashcardManager({ 
+  documentId, 
+  onStartStudy 
+}: { 
+  documentId: string; 
+  onStartStudy: (filters?: any) => void 
+}) {
   const [page, setPage] = useState(1)
   const qc = useQueryClient()
   const { data: docList = [] } = useQuery<DocListItem[]>({
     queryKey: ["study-doc-list"],
     queryFn: fetchDocList,
+  })
+  
+  const { data: stats } = useQuery({
+    queryKey: ["study-stats", documentId],
+    queryFn: () => fetchStudyStats(documentId),
+    enabled: !!documentId,
   })
   
   const { data: searchResult, isLoading: cardsLoading } = useQuery<FlashcardSearchResponse>({
@@ -1946,6 +1911,51 @@ function FlashcardManager({ documentId }: { documentId: string }) {
 
   return (
     <div className="flex flex-col gap-8">
+      {/* Ready to Study Card for this doc */}
+      {stats && (stats.due_today > 0 || stats.new_today > 0) && (
+         <Card className="relative overflow-hidden border-none bg-gradient-to-br from-primary/20 to-secondary/10 p-8 shadow-2xl transition-all hover:scale-[1.01]">
+            <div className="flex flex-col gap-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Ready to Study</h2>
+                  <p className="text-muted-foreground">You have {stats.due_today} flashcards due for review today.</p>
+                </div>
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/20 text-primary">
+                  <Zap size={24} />
+                </div>
+              </div>
+              
+              <div className="flex gap-4">
+                <div className="rounded-xl bg-background/50 px-4 py-2 border border-border/50">
+                  <p className="text-xs text-muted-foreground uppercase">New</p>
+                  <p className="text-lg font-bold text-foreground">{stats.new_today}</p>
+                </div>
+                <div className="rounded-xl bg-background/50 px-4 py-2 border border-border/50">
+                  <p className="text-xs text-muted-foreground uppercase">Review</p>
+                  <p className="text-lg font-bold text-foreground">{stats.due_today}</p>
+                </div>
+                <div className="flex-1 rounded-xl bg-background/50 px-4 py-2 border border-border/50">
+                  <div className="flex justify-between mb-1">
+                    <p className="text-xs text-muted-foreground uppercase">Mastery</p>
+                    <p className="text-xs font-bold text-foreground">{stats.mastery_pct}%</p>
+                  </div>
+                  <Progress value={stats.mastery_pct} className="h-1.5" />
+                </div>
+              </div>
+
+              <button 
+                onClick={() => onStartStudy({ document_id: documentId })}
+                className="flex items-center justify-center gap-2 rounded-xl bg-primary py-4 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-xl active:scale-[0.98]"
+              >
+                <PlayCircle size={18} fill="currentColor" />
+                Start Studying This Document
+              </button>
+            </div>
+            {/* Subtle glow effect */}
+            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-[100px]" />
+         </Card>
+      )}
+
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="flex flex-col gap-1">
           <h2 className="text-2xl font-bold tracking-tight text-foreground">
@@ -1959,8 +1969,8 @@ function FlashcardManager({ documentId }: { documentId: string }) {
           sections={docData?.sections || []}
           cards={cards}
           onGenerate={(req) => generateMutation.mutate({ ...req, document_id: documentId })}
-          onGenerateFromGraph={(k) => {}}
-          onGenerateCloze={(sid, count) => {}}
+          onGenerateFromGraph={(_k) => {}}
+          onGenerateCloze={(_sid, _count) => {}}
           isGenerating={generateMutation.isPending}
           isClozeGenerating={false}
         />
@@ -2011,8 +2021,6 @@ function FlashcardManager({ documentId }: { documentId: string }) {
 // ---------------------------------------------------------------------------
 // Study page
 // ---------------------------------------------------------------------------
-
-type GenerateErrorKind = "ollama_offline" | "server_error" | null
 
 export default function Study() {
   const navigate = useNavigate()
@@ -2120,7 +2128,7 @@ export default function Study() {
             onNavigateToCollection={(id) => setActiveCollectionId(id)}
           />
         ) : activeDocumentId ? (
-          <FlashcardManager documentId={activeDocumentId} />
+          <FlashcardManager documentId={activeDocumentId} onStartStudy={handleStartStudy} />
         ) : (
           /* Collection Grid - Compact Version */
           <div className="flex flex-col gap-10">

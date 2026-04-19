@@ -82,13 +82,10 @@ def test_written_about_edge_created_for_known_entity(note_graph_svc, tmp_path):
         patch("app.services.graph.get_graph_service", return_value=ks),
         patch("app.services.ner.get_entity_extractor", return_value=mock_ext),
     ):
-        _run(svc.upsert_note_node(
-            note_id, "Notes on gradient descent optimization.", None, []
-        ))
+        _run(svc.upsert_note_node(note_id, "Notes on gradient descent optimization.", None, []))
 
     result = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[r:WRITTEN_ABOUT]->(e:Entity {id: $eid})"
-        " RETURN r.confidence",
+        "MATCH (n:Note {id: $nid})-[r:WRITTEN_ABOUT]->(e:Entity {id: $eid}) RETURN r.confidence",
         {"nid": note_id, "eid": entity_id},
     )
     assert result.has_next(), "WRITTEN_ABOUT edge should exist"
@@ -107,9 +104,11 @@ def test_absent_entity_skipped_without_exception(note_graph_svc):
         patch("app.services.ner.get_entity_extractor", return_value=mock_ext),
     ):
         # Should not raise
-        _run(svc.upsert_note_node(
-            note_id, "Some content mentioning nonexistent entity xyz.", None, []
-        ))
+        _run(
+            svc.upsert_note_node(
+                note_id, "Some content mentioning nonexistent entity xyz.", None, []
+            )
+        )
 
     # Note node should still have been created
     result = ks._conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": note_id})
@@ -173,8 +172,7 @@ def test_tag_is_concept_edge_created(note_graph_svc):
         _run(svc.upsert_note_node(note_id, "Content.", None, ["neural networks"]))
 
     result = ks._conn.execute(
-        "MATCH (n:Note {id: $nid})-[r:TAG_IS_CONCEPT]->(e:Entity {id: $eid})"
-        " RETURN r.tag",
+        "MATCH (n:Note {id: $nid})-[r:TAG_IS_CONCEPT]->(e:Entity {id: $eid}) RETURN r.tag",
         {"nid": note_id, "eid": entity_id},
     )
     assert result.has_next(), "TAG_IS_CONCEPT edge should exist for matching tag"

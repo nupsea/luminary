@@ -138,9 +138,7 @@ async def test_chunk_node_writes_to_db(test_db):
     assert len(result["chunks"]) >= 1
 
     async with factory() as session:
-        rows = await session.execute(
-            select(ChunkModel).where(ChunkModel.document_id == doc_id)
-        )
+        rows = await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id))
         chunks_in_db = rows.scalars().all()
 
     assert len(chunks_in_db) >= 1

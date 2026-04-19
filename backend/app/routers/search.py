@@ -76,8 +76,7 @@ async def search(
         ).where(DocumentModel.id.in_(doc_ids))
     )
     doc_map: dict[str, tuple[str, str]] = {
-        str(row[0]): (row[1] or "Untitled", row[2] or "notes")
-        for row in doc_result.fetchall()
+        str(row[0]): (row[1] or "Untitled", row[2] or "notes") for row in doc_result.fetchall()
     }
 
     # Build grouped results

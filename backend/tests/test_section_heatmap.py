@@ -106,9 +106,7 @@ async def test_section_heatmap_empty(test_db):
     """No flashcards for document -> heatmap is empty dict."""
     doc_id = str(uuid.uuid4())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/section-heatmap?document_id={doc_id}")
 
     assert resp.status_code == 200
@@ -144,9 +142,7 @@ async def test_section_heatmap_high_retrievability_low_fragility(test_db):
         session.add(card)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/section-heatmap?document_id={doc_id}")
 
     assert resp.status_code == 200
@@ -180,9 +176,7 @@ async def test_section_heatmap_null_for_no_cards(test_db):
         session.add(_make_card(doc_id=doc_id, chunk_id=chunk.id))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/section-heatmap?document_id={doc_id}")
 
     assert resp.status_code == 200
@@ -214,9 +208,7 @@ async def test_section_heatmap_due_card_count(test_db):
         session.add(_make_card(doc_id, chunk.id, due_date=now + timedelta(days=5)))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/section-heatmap?document_id={doc_id}")
 
     assert resp.status_code == 200

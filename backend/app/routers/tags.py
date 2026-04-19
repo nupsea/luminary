@@ -165,10 +165,7 @@ async def get_tag_graph_endpoint(
             )
             for n in graph.nodes
         ],
-        edges=[
-            TagEdgeItem(tag_a=e.tag_a, tag_b=e.tag_b, weight=e.weight)
-            for e in graph.edges
-        ],
+        edges=[TagEdgeItem(tag_a=e.tag_a, tag_b=e.tag_b, weight=e.weight) for e in graph.edges],
         generated_at=graph.generated_at,
     )
 
@@ -310,6 +307,7 @@ async def merge_tags(
     """
     from app.routers.notes import _sync_tag_index  # noqa: PLC0415
     from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
     source_id = normalize_tag_slug(req.source_tag_id)
     target_id = normalize_tag_slug(req.target_tag_id)
 
@@ -318,26 +316,20 @@ async def merge_tags(
 
     # Validate both tags exist
     source_tag = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
-        )
+        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
     ).scalar_one_or_none()
     if source_tag is None:
         raise HTTPException(status_code=404, detail=f"Source tag '{source_id}' not found")
 
     target_tag = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == target_id)
-        )
+        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == target_id))
     ).scalar_one_or_none()
     if target_tag is None:
         raise HTTPException(status_code=404, detail=f"Target tag '{target_id}' not found")
 
     # Find all notes with the source tag via NoteTagIndexModel
     note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id)
-        .where(NoteTagIndexModel.tag_full == source_id)
-        .distinct()
+        select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.tag_full == source_id).distinct()
     )
     note_ids = [row[0] for row in note_ids_result.all()]
 
@@ -351,8 +343,7 @@ async def merge_tags(
             )
             notes = list(notes_result.scalars().all())
             logger.info(
-                "Merging tag %r -> %r in %d notes: %r",
-                source_id, target_id, len(notes), note_ids
+                "Merging tag %r -> %r in %d notes: %r", source_id, target_id, len(notes), note_ids
             )
 
             for note in notes:
@@ -370,10 +361,11 @@ async def merge_tags(
                     logger.debug("Updating note %s tags: %r -> %r", note.id, current_tags, new_tags)
                     note.tags = list(new_tags)
                     from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+
                     flag_modified(note, "tags")
                     session.add(note)
                     await session.flush()
-                
+
                 # Always sync index even if tags didn't change (idempotent)
                 await _sync_tag_index(note.id, new_tags, session)
 
@@ -382,9 +374,7 @@ async def merge_tags(
         session.add(alias)
 
         # Delete source canonical tag
-        await session.execute(
-            delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
-        )
+        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
 
         await session.commit()
         session.expire_all()
@@ -392,9 +382,7 @@ async def merge_tags(
     except Exception as exc:
         logger.exception("Merge failed for tag %r -> %r", source_id, target_id)
         await session.rollback()
-        raise HTTPException(
-            status_code=500, detail=f"Merge failed: {exc}"
-        )
+        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}")
 
     return TagMergeResponse(affected_notes=len(note_ids))
 
@@ -459,9 +447,7 @@ async def scan_for_normalization(
     return NormalizationScanResponse(queued=True)
 
 
-@router.get(
-    "/normalization/suggestions", response_model=list[TagMergeSuggestionResponse]
-)
+@router.get("/normalization/suggestions", response_model=list[TagMergeSuggestionResponse])
 async def get_normalization_suggestions(
     session: AsyncSession = Depends(get_db),
 ) -> list[TagMergeSuggestionResponse]:
@@ -520,14 +506,10 @@ async def accept_normalization_suggestion(
 
     # Validate both tags still exist
     source_tag = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
-        )
+        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
     ).scalar_one_or_none()
     target_tag = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == target_id)
-        )
+        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == target_id))
     ).scalar_one_or_none()
     if source_tag is None or target_tag is None:
         # Tag was deleted -- mark suggestion rejected and return
@@ -538,17 +520,13 @@ async def accept_normalization_suggestion(
 
     # Find and update notes with the source tag (same logic as POST /tags/merge)
     note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id)
-        .where(NoteTagIndexModel.tag_full == source_id)
-        .distinct()
+        select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.tag_full == source_id).distinct()
     )
     note_ids = [row[0] for row in note_ids_result.all()]
 
     affected_notes = 0
     if note_ids:
-        notes_result = await session.execute(
-            select(NoteModel).where(NoteModel.id.in_(note_ids))
-        )
+        notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
         notes = list(notes_result.scalars().all())
         try:
             for note in notes:
@@ -562,6 +540,7 @@ async def accept_normalization_suggestion(
                         new_tags.append(replacement)
                 note.tags = list(new_tags)
                 from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
+
                 flag_modified(note, "tags")
                 session.add(note)
                 await _sync_tag_index(note.id, new_tags, session)
@@ -575,9 +554,7 @@ async def accept_normalization_suggestion(
     try:
         alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
         session.add(alias)
-        await session.execute(
-            delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id)
-        )
+        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
         suggestion.status = "accepted"
         session.add(suggestion)
         await session.commit()
@@ -693,9 +670,7 @@ async def migrate_tag_naming(
                     )
                     for note in notes_result.scalars().all():
                         current_tags: list[str] = note.tags or []
-                        new_tags = [
-                            normalize_tag_slug(t) for t in current_tags
-                        ]
+                        new_tags = [normalize_tag_slug(t) for t in current_tags]
                         # Deduplicate preserving order
                         seen: set[str] = set()
                         deduped: list[str] = []
@@ -783,7 +758,8 @@ async def migrate_tag_naming(
     invalidate_tag_graph_cache()
     logger.info(
         "Tag naming migration complete: renamed=%d merged=%d",
-        renamed_count, merged_count,
+        renamed_count,
+        merged_count,
     )
     return {"renamed": renamed_count, "merged": merged_count}
 
@@ -797,17 +773,14 @@ async def get_notes_for_tag(
     note_ids_result = await session.execute(
         select(NoteTagIndexModel.note_id)
         .where(
-            (NoteTagIndexModel.tag_full == tag_id)
-            | NoteTagIndexModel.tag_full.like(f"{tag_id}/%")
+            (NoteTagIndexModel.tag_full == tag_id) | NoteTagIndexModel.tag_full.like(f"{tag_id}/%")
         )
         .distinct()
     )
     note_ids = [row[0] for row in note_ids_result.all()]
     if not note_ids:
         return []
-    notes_result = await session.execute(
-        select(NoteModel).where(NoteModel.id.in_(note_ids))
-    )
+    notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
     notes = notes_result.scalars().all()
     return [NoteItem(id=n.id, content=n.content, tags=n.tags or []) for n in notes]
 
@@ -820,9 +793,7 @@ async def update_tag(
 ) -> TagResponse:
     """Rename a tag's display_name or re-parent it."""
     tag = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id)
-        )
+        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
     ).scalar_one_or_none()
     if tag is None:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -847,9 +818,7 @@ async def delete_tag(
 ) -> None:
     """Delete a canonical tag. Returns 409 if the tag has notes (note_count > 0)."""
     tag = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id)
-        )
+        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
     ).scalar_one_or_none()
     if tag is None:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -863,11 +832,7 @@ async def delete_tag(
         )
 
     # Remove any aliases pointing to this tag
-    await session.execute(
-        delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id)
-    )
-    await session.execute(
-        delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id)
-    )
+    await session.execute(delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id))
+    await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
     await session.commit()
     logger.info("Deleted canonical tag id=%r", tag_id)

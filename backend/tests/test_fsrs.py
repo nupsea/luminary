@@ -131,9 +131,7 @@ async def test_schedule_repeated_again_accumulates_lapses(test_db):
     async with factory() as session:
         from sqlalchemy import select
 
-        result = await session.execute(
-            select(FlashcardModel).where(FlashcardModel.id == card.id)
-        )
+        result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card.id))
         final = result.scalar_one()
 
     assert final.lapses == 3
@@ -176,8 +174,8 @@ async def test_get_due_cards_returns_only_past_due(test_db):
     """GET /study/due returns only cards with due_date <= now."""
     _, factory, _ = test_db
     now = datetime.now(UTC)
-    past_card = _make_card(due_offset_seconds=-60)          # overdue
-    future_card = _make_card(due_offset_seconds=3600)       # not yet due
+    past_card = _make_card(due_offset_seconds=-60)  # overdue
+    future_card = _make_card(due_offset_seconds=3600)  # not yet due
 
     async with factory() as session:
         session.add(past_card)
@@ -231,9 +229,7 @@ async def test_review_endpoint_good_rating(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            f"/flashcards/{card.id}/review", json={"rating": "good"}
-        )
+        resp = await client.post(f"/flashcards/{card.id}/review", json={"rating": "good"})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -252,9 +248,7 @@ async def test_review_endpoint_again_increases_lapses(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            f"/flashcards/{card.id}/review", json={"rating": "again"}
-        )
+        resp = await client.post(f"/flashcards/{card.id}/review", json={"rating": "again"})
 
     assert resp.status_code == 200
     assert resp.json()["lapses"] == 1
@@ -265,9 +259,7 @@ async def test_review_endpoint_404_for_missing_card(test_db):
     _, _factory, _ = test_db
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            "/flashcards/nonexistent-card/review", json={"rating": "good"}
-        )
+        resp = await client.post("/flashcards/nonexistent-card/review", json={"rating": "good"})
 
     assert resp.status_code == 404
 
@@ -313,9 +305,7 @@ async def test_end_session_sets_ended_at(test_db):
     _, factory, _ = test_db
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        start_resp = await client.post(
-            "/study/sessions/start", json={"mode": "flashcard"}
-        )
+        start_resp = await client.post("/study/sessions/start", json={"mode": "flashcard"})
         session_id = start_resp.json()["id"]
 
         end_resp = await client.post(f"/study/sessions/{session_id}/end")

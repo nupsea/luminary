@@ -5,6 +5,7 @@ Three tests:
 2. Sections from a different document are NOT returned.
 3. Empty query (q='') returns [] with HTTP 200.
 """
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

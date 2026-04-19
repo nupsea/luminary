@@ -53,9 +53,7 @@ def docx_file(tmp_fixtures):
 def txt_file(tmp_fixtures):
     path = tmp_fixtures / "sample.txt"
     content = (
-        "First paragraph with some text.\n\n"
-        "Second paragraph that follows.\n\n"
-        "Third paragraph here."
+        "First paragraph with some text.\n\nSecond paragraph that follows.\n\nThird paragraph here."
     )
     path.write_text(content, encoding="utf-8")
     return path

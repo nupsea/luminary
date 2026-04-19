@@ -121,6 +121,7 @@ async def post_feynman_message(
                 yield event
         except HTTPException as exc:
             import json  # noqa: PLC0415
+
             if exc.status_code == 404:
                 yield f"data: {json.dumps({'error': 'not_found', 'message': exc.detail})}\n\n"
             else:

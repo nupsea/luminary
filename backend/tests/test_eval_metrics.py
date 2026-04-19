@@ -80,9 +80,7 @@ def test_hit_rate_mixed():
 
 def test_hit_rate_hint_in_second_chunk():
     """Hint in second chunk (still within top-5) counts as a hit."""
-    samples = [
-        _sample("q1", "target text", ["irrelevant chunk one", "target text is here"])
-    ]
+    samples = [_sample("q1", "target text", ["irrelevant chunk one", "target text is here"])]
     assert compute_hit_rate_5(samples) == pytest.approx(1.0)
 
 

@@ -72,10 +72,20 @@ def _classify_source_quality(url: str, title: str) -> str:
     title_lower = (title or "").lower()
     if any(
         d in domain
-        for d in ("docs.python.org", "developer.mozilla.org", "docs.rust-lang.org",
-                  "docs.microsoft.com", "developer.apple.com", "docs.oracle.com",
-                  "reactjs.org", "vuejs.org", "angular.io", "nodejs.org",
-                  "golang.org", "kotlinlang.org")
+        for d in (
+            "docs.python.org",
+            "developer.mozilla.org",
+            "docs.rust-lang.org",
+            "docs.microsoft.com",
+            "developer.apple.com",
+            "docs.oracle.com",
+            "reactjs.org",
+            "vuejs.org",
+            "angular.io",
+            "nodejs.org",
+            "golang.org",
+            "kotlinlang.org",
+        )
     ):
         return "official_docs"
     if any(d in domain for d in ("spec.whatwg.org", "w3.org", "ecma-international.org")):
@@ -83,8 +93,7 @@ def _classify_source_quality(url: str, title: str) -> str:
     if "wikipedia.org" in domain:
         return "wiki"
     if any(
-        kw in domain or kw in title_lower
-        for kw in ("blog", "medium.com", "dev.to", "hashnode")
+        kw in domain or kw in title_lower for kw in ("blog", "medium.com", "dev.to", "hashnode")
     ):
         return "blog"
     return "unknown"
@@ -182,9 +191,7 @@ class WebSearcher:
                     headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
                 )
                 if resp.status_code != 200:
-                    logger.warning(
-                        "web_searcher: brave API returned %d", resp.status_code
-                    )
+                    logger.warning("web_searcher: brave API returned %d", resp.status_code)
                     return []
                 data = resp.json()
                 results = []
@@ -229,9 +236,7 @@ class WebSearcher:
                     },
                 )
                 if resp.status_code != 200:
-                    logger.warning(
-                        "web_searcher: tavily API returned %d", resp.status_code
-                    )
+                    logger.warning("web_searcher: tavily API returned %d", resp.status_code)
                     return []
                 data = resp.json()
                 results = []

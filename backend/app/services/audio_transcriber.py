@@ -3,6 +3,7 @@
 Returns (segments, duration_seconds) where segments is a list of
 {"start": float, "end": float, "text": str} dicts.
 """
+
 import logging
 from functools import lru_cache
 from pathlib import Path

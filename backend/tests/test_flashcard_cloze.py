@@ -222,9 +222,7 @@ async def test_cloze_endpoint_returns_201(test_db):
     mock_llm = _MockLLMService(response=valid_cloze)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(f"/flashcards/cloze/{sec_id}?count=3")
 
     assert resp.status_code == 201

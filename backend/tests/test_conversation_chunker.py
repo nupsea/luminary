@@ -166,9 +166,7 @@ def test_chunk_sets_speaker_field():
     chunks = chunker.chunk(PLAIN_SPEAKER_TEXT)
     assert len(chunks) > 0
     for chunk in chunks:
-        assert chunk.speaker in ("Alice", "Bob", "Carol"), (
-            f"Unexpected speaker: {chunk.speaker!r}"
-        )
+        assert chunk.speaker in ("Alice", "Bob", "Carol"), f"Unexpected speaker: {chunk.speaker!r}"
         # The chunk text should start with the speaker's name
         assert chunk.speaker in chunk.text
 
@@ -190,9 +188,7 @@ def test_chunk_respects_token_limit():
     for chunk in chunks:
         estimated_tokens = len(chunk.text) // 4
         # Allow a small buffer (one extra turn may push slightly over)
-        assert estimated_tokens <= 500, (
-            f"Chunk is too large: {estimated_tokens} estimated tokens"
-        )
+        assert estimated_tokens <= 500, f"Chunk is too large: {estimated_tokens} estimated tokens"
 
 
 def test_extract_roster_counts_turns_per_speaker():
@@ -331,9 +327,7 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
     state = _make_conv_state(doc_id, PLAIN_SPEAKER_TEXT)
     await _chunk_conversation(state, state["parsed_document"], doc_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/conversation")
 
     assert resp.status_code == 200

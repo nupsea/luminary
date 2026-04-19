@@ -218,9 +218,7 @@ def test_migration_preserves_group_name_values_and_memberships(client):
     """Distinct group_name values are present as collections; notes are in them."""
     suffix = uuid.uuid4().hex[:6]
     gname = f"migration_group_{suffix}"
-    note = client.post(
-        "/notes", json={"content": "migrated note", "group_name": gname}
-    ).json()
+    note = client.post("/notes", json={"content": "migrated note", "group_name": gname}).json()
 
     # The migration runs at startup (create_all_tables). Since this is an in-memory
     # test DB, we verify the group endpoint still reflects group_name correctly AND

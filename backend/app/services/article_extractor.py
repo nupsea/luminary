@@ -24,6 +24,7 @@ USER_AGENTS = [
     ),
 ]
 
+
 class ArticleExtractor:
     """
     Unified article extraction for a high-fidelity reading experience.
@@ -31,7 +32,7 @@ class ArticleExtractor:
 
     async def extract(self, url: str) -> ParsedDocument:
         logger.info("Extracting unified article from URL: %s", url)
-        
+
         html_content = None
         # 1. Fetch with Cloudflare bypass
         try:
@@ -56,12 +57,12 @@ class ArticleExtractor:
         # 3. Mirror Images AND Extract Markdown in one pass
         # We let trafilatura handle the extraction first to find the "real" content
         markdown_text = trafilatura.extract(
-            html_content, 
+            html_content,
             url=url,
             output_format="markdown",
             include_links=True,
             include_images=True,
-            include_formatting=True
+            include_formatting=True,
         )
 
         if not markdown_text:
@@ -78,28 +79,22 @@ class ArticleExtractor:
 
         # 5. Normalize Markdown (The "### Fix")
         markdown_text = self._normalize_markdown(markdown_text)
-        
+
         # For Articles, we keep them as one primary "Section" to ensure unified flow in UI
-        sections = [Section(
-            heading=title,
-            level=1,
-            text=markdown_text,
-            page_start=0,
-            page_end=0
-        )]
-        
+        sections = [Section(heading=title, level=1, text=markdown_text, page_start=0, page_end=0)]
+
         return ParsedDocument(
             title=title,
             format="md",
             pages=1,
             word_count=len(markdown_text.split()),
             sections=sections,
-            raw_text=markdown_text
+            raw_text=markdown_text,
         )
 
     async def _mirror_markdown_images(self, md: str, doc_id: str) -> str:
         """Finds ![alt](url) in markdown, downloads them, and updates to local path."""
-        img_re = re.compile(r'!\[(.*?)\]\((.*?)\)')
+        img_re = re.compile(r"!\[(.*?)\]\((.*?)\)")
         settings = get_settings()
         images_dir = Path(settings.DATA_DIR).expanduser() / "images" / doc_id
         images_dir.mkdir(parents=True, exist_ok=True)
@@ -107,22 +102,22 @@ class ArticleExtractor:
         async def replace_match(match):
             alt = match.group(1)
             url = match.group(2)
-            if url.startswith('__LUMINARY_IMG__'):
+            if url.startswith("__LUMINARY_IMG__"):
                 return match.group(0)
-            
+
             try:
-                ext = url.split('.')[-1].split('?')[0].lower()
+                ext = url.split(".")[-1].split("?")[0].lower()
                 if len(ext) > 4 or len(ext) < 2:
                     ext = "png"
                 filename = f"{hashlib.md5(url.encode()).hexdigest()}.{ext}"
                 dest_path = images_dir / filename
-                
+
                 if not dest_path.exists():
                     scraper = cloudscraper.create_scraper()
                     resp = await asyncio.to_thread(scraper.get, url, timeout=10)
                     if resp.status_code == 200:
                         dest_path.write_bytes(resp.content)
-                
+
                 return f"![{alt}](__LUMINARY_IMG__/{doc_id}/{filename})"
             except Exception as e:
                 logger.warning("Failed to mirror image %s: %s", url, e)
@@ -134,18 +129,20 @@ class ArticleExtractor:
             original = match.group(0)
             replacement = await replace_match(match)
             new_md = new_md.replace(original, replacement)
-        
+
         return new_md
 
     def _normalize_markdown(self, text: str) -> str:
         """Fixes common markdown parsing issues."""
         # Fix #Header -> # Header (ensure space after hashes)
-        text = re.sub(r'^(#{1,6})([^\s#])', r'\1 \2', text, flags=re.M)
+        text = re.sub(r"^(#{1,6})([^\s#])", r"\1 \2", text, flags=re.M)
         # Ensure double newlines before headers for proper block separation
-        text = re.sub(r'([^\n])\n(#{1,6}\s)', r'\1\n\n\2', text)
+        text = re.sub(r"([^\n])\n(#{1,6}\s)", r"\1\n\n\2", text)
         return text
 
+
 _extractor = ArticleExtractor()
+
 
 def get_article_extractor() -> ArticleExtractor:
     return _extractor

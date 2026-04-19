@@ -32,9 +32,7 @@ _PAT_NAME_ARROW = re.compile(r"^[A-Z][a-zA-Z .]+>\s")
 _SPEAKER_COLON = re.compile(r"^([A-Z][a-zA-Z .]+):\s+(.*)")
 _SPEAKER_ARROW = re.compile(r"^([A-Z][a-zA-Z .]+)>\s+(.*)")
 # Timestamp lines: optional [DD/MM/YYYY, HH:MM] prefix then speaker
-_SPEAKER_TIMESTAMP = re.compile(
-    r"^\[?\d{1,2}[:/]\d{2}.*?\]?\s*([A-Z][a-zA-Z .]+):\s+(.*)"
-)
+_SPEAKER_TIMESTAMP = re.compile(r"^\[?\d{1,2}[:/]\d{2}.*?\]?\s*([A-Z][a-zA-Z .]+):\s+(.*)")
 
 _MAX_TOKENS = 450
 _OVERLAP_TURNS = 1  # number of turns carried over as overlap
@@ -105,9 +103,7 @@ class ConversationChunker:
             key=lambda x: x["turn_count"],
             reverse=True,
         )
-        has_timestamps = self._has_timestamps(
-            " ".join(c.text for c in chunks[:10])
-        )
+        has_timestamps = self._has_timestamps(" ".join(c.text for c in chunks[:10]))
         return {
             "speakers": speakers,
             "total_turns": sum(speaker_turns.values()),

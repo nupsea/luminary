@@ -348,9 +348,7 @@ async def test_get_progress_endpoint(test_db):
         session.add(_make_objective(doc_id, section_id))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/progress")
 
     assert resp.status_code == 200
@@ -370,9 +368,7 @@ async def test_get_progress_endpoint_no_objectives(test_db):
         session.add(_make_doc(doc_id))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/progress")
 
     assert resp.status_code == 200
@@ -399,9 +395,7 @@ async def test_refresh_progress_endpoint(test_db):
         session.add(_make_objective(doc_id, section_id))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(f"/documents/{doc_id}/refresh_progress")
 
     assert resp.status_code == 200
@@ -415,9 +409,7 @@ async def test_progress_endpoint_404(test_db):
     """GET /documents/{id}/progress returns 404 for unknown document."""
     _, _factory, _ = test_db
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{uuid.uuid4()}/progress")
 
     assert resp.status_code == 404

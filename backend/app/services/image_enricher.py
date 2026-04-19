@@ -110,14 +110,13 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
             if model != vision_model:
                 logger.info(
                     "_call_vision_llm: VISION_MODEL (%s) unreachable; used fallback model %s",
-                    vision_model, model,
+                    vision_model,
+                    model,
                 )
             break
         except (litellm.APIConnectionError, litellm.ServiceUnavailableError) as exc:
             last_exc = exc
-            logger.debug(
-                "_call_vision_llm: model %s unavailable (%s), trying next", model, exc
-            )
+            logger.debug("_call_vision_llm: model %s unavailable (%s), trying next", model, exc)
             continue
     else:
         # All models exhausted — raise the last connection error so the job is marked failed.
@@ -179,9 +178,7 @@ class ImageEnricherService:
             logger.info("image_enricher: no un-described images for doc=%s", document_id)
             return 0
 
-        logger.info(
-            "image_enricher: processing %d images for doc=%s", len(images), document_id
-        )
+        logger.info("image_enricher: processing %d images for doc=%s", len(images), document_id)
 
         processed = 0
         embedder = get_embedding_service()
@@ -204,9 +201,7 @@ class ImageEnricherService:
                     if _is_decorative(pil_img):
                         image_type = "decorative"
                         description = "Decorative image"
-                        logger.debug(
-                            "image_enricher: decorative image_id=%s", img.id
-                        )
+                        logger.debug("image_enricher: decorative image_id=%s", img.id)
                     else:
                         parsed = await _call_vision_llm(abs_path, settings)
                         image_type = parsed.get("image_type") or "other"
@@ -241,9 +236,7 @@ class ImageEnricherService:
                     lancedb_svc.upsert_image_vector(img.id, document_id, description, vector)
 
                     processed += 1
-                    logger.info(
-                        "image_enricher: analyzed image_id=%s type=%s", img.id, image_type
-                    )
+                    logger.info("image_enricher: analyzed image_id=%s type=%s", img.id, image_type)
 
                 except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
                     logger.warning(
@@ -256,9 +249,7 @@ class ImageEnricherService:
                     )
                     raise
                 except Exception as exc:
-                    logger.warning(
-                        "image_enricher: failed to analyze image_id=%s: %s", img.id, exc
-                    )
+                    logger.warning("image_enricher: failed to analyze image_id=%s: %s", img.id, exc)
                     continue
 
         logger.info(
@@ -282,18 +273,17 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
     were produced. Uses a deduplication check to avoid enqueueing multiple jobs on
     retry (checks for existing pending/running diagram_extract jobs).
     """
-    logger.info(
-        "image_analyze_handler: starting doc=%s job=%s", document_id, job_id
-    )
+    logger.info("image_analyze_handler: starting doc=%s job=%s", document_id, job_id)
     svc = ImageEnricherService()
     await svc.enrich(document_id)
-    logger.info(
-        "image_analyze_handler: done doc=%s job=%s", document_id, job_id
-    )
+    logger.info("image_analyze_handler: done doc=%s job=%s", document_id, job_id)
 
     # Enqueue diagram_extract if qualifying diagram images now exist (S136)
     _QUALIFYING_DIAGRAM_TYPES = [
-        "architecture_diagram", "sequence_diagram", "er_diagram", "flowchart"
+        "architecture_diagram",
+        "sequence_diagram",
+        "er_diagram",
+        "flowchart",
     ]
     try:
         import uuid as _uuid  # noqa: PLC0415
@@ -310,11 +300,13 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
         async with _get_sf()() as session:
             # Check if any qualifying diagram images exist for this document
             has_diagrams_result = await session.execute(
-                _select(_ImageModel.id).where(
+                _select(_ImageModel.id)
+                .where(
                     _ImageModel.document_id == document_id,
                     _ImageModel.image_type.in_(_QUALIFYING_DIAGRAM_TYPES),
                     _ImageModel.description.is_not(None),
-                ).limit(1)
+                )
+                .limit(1)
             )
             has_diagrams = has_diagrams_result.scalar_one_or_none() is not None
 
@@ -353,9 +345,7 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
             )
             session.add(job)
             await session.commit()
-            logger.info(
-                "image_analyze_handler: enqueued diagram_extract for doc=%s", document_id
-            )
+            logger.info("image_analyze_handler: enqueued diagram_extract for doc=%s", document_id)
     except Exception as exc:
         # Non-fatal: failure to enqueue diagram_extract should not fail image_analyze
         logger.warning(

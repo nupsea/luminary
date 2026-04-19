@@ -28,12 +28,14 @@ import litellm
 
 logger = logging.getLogger(__name__)
 
-_QUALIFYING_TYPES: frozenset[str] = frozenset({
-    "architecture_diagram",
-    "sequence_diagram",
-    "er_diagram",
-    "flowchart",
-})
+_QUALIFYING_TYPES: frozenset[str] = frozenset(
+    {
+        "architecture_diagram",
+        "sequence_diagram",
+        "er_diagram",
+        "flowchart",
+    }
+)
 
 # Semaphore: at most 3 concurrent LLM calls across all diagram extraction jobs
 _EXTRACT_SEM = asyncio.Semaphore(3)
@@ -93,7 +95,7 @@ def _parse_llm_response(raw: str) -> dict:
     if text.startswith("```"):
         first_newline = text.find("\n")
         if first_newline != -1:
-            text = text[first_newline + 1:].strip()
+            text = text[first_newline + 1 :].strip()
         # Strip trailing ```
         if text.endswith("```"):
             text = text[: text.rfind("```")].strip()
@@ -140,9 +142,7 @@ class DiagramExtractorService:
             images = list(result.scalars().all())
 
         if not images:
-            logger.info(
-                "diagram_extractor: no qualifying diagram images for doc=%s", document_id
-            )
+            logger.info("diagram_extractor: no qualifying diagram images for doc=%s", document_id)
             return 0
 
         logger.info(
@@ -310,13 +310,9 @@ class DiagramExtractorService:
             if entity_id is not None:
                 try:
                     graph.add_depicts_edge(node_id, entity_id, document_id)
-                    logger.debug(
-                        "diagram_extractor: DEPICTS %r -> entity %r", name, entity_id
-                    )
+                    logger.debug("diagram_extractor: DEPICTS %r -> entity %r", name, entity_id)
                 except Exception as exc:
-                    logger.debug(
-                        "diagram_extractor: DEPICTS edge failed for %r: %s", name, exc
-                    )
+                    logger.debug("diagram_extractor: DEPICTS edge failed for %r: %s", name, exc)
 
 
 async def diagram_extract_handler(document_id: str, job_id: str) -> None:
@@ -326,9 +322,7 @@ async def diagram_extract_handler(document_id: str, job_id: str) -> None:
     Delegates to DiagramExtractorService.extract().
     ServiceUnavailableError propagates to mark job 'failed'.
     """
-    logger.info(
-        "diagram_extract_handler: starting doc=%s job=%s", document_id, job_id
-    )
+    logger.info("diagram_extract_handler: starting doc=%s job=%s", document_id, job_id)
     svc = DiagramExtractorService()
     count = await svc.extract(document_id)
     logger.info(

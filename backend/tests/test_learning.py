@@ -80,12 +80,14 @@ def _make_card(
 
 def test_parse_teachback_response_valid_json():
     """_parse_teachback_response parses a well-formed JSON string."""
-    raw = json.dumps({
-        "score": 75,
-        "correct_points": ["Correct point A"],
-        "missing_points": ["Missing B"],
-        "misconceptions": [],
-    })
+    raw = json.dumps(
+        {
+            "score": 75,
+            "correct_points": ["Correct point A"],
+            "missing_points": ["Missing B"],
+            "misconceptions": [],
+        }
+    )
     result = _parse_teachback_response(raw)
     assert result["score"] == 75
     assert result["correct_points"] == ["Correct point A"]
@@ -94,9 +96,9 @@ def test_parse_teachback_response_valid_json():
 def test_parse_teachback_response_strips_markdown_fences():
     """_parse_teachback_response strips ```json ... ``` fences."""
     raw = (
-        '```json\n'
+        "```json\n"
         '{"score": 80, "correct_points": [], "missing_points": [], "misconceptions": []}\n'
-        '```'
+        "```"
     )
     result = _parse_teachback_response(raw)
     assert result["score"] == 80
@@ -195,21 +197,21 @@ async def test_teachback_returns_score_and_feedback(test_db):
         session.add(card)
         await session.commit()
 
-    llm_response = json.dumps({
-        "score": 75,
-        "correct_points": ["Correctly identified intervals"],
-        "missing_points": ["Did not mention forgetting curve"],
-        "misconceptions": [],
-    })
+    llm_response = json.dumps(
+        {
+            "score": 75,
+            "correct_points": ["Correctly identified intervals"],
+            "missing_points": ["Did not mention forgetting curve"],
+            "misconceptions": [],
+        }
+    )
 
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.generate = AsyncMock(return_value=llm_response)
         mock_get_llm.return_value = mock_llm
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/study/teachback",
                 json={"flashcard_id": card.id, "user_explanation": "It's about spacing reviews."},
@@ -231,17 +233,21 @@ async def test_teachback_score_below_60_creates_misconception_rows(test_db):
         session.add(card)
         await session.commit()
 
-    llm_eval_response = json.dumps({
-        "score": 40,
-        "correct_points": [],
-        "missing_points": ["Everything"],
-        "misconceptions": ["Confuses spaced repetition with massed practice"],
-    })
-    correction_response = json.dumps({
-        "question": "What distinguishes spaced repetition from massed practice?",
-        "answer": "Spaced repetition uses increasing intervals; massed practice is cramming.",
-        "source_excerpt": "Spaced repetition...",
-    })
+    llm_eval_response = json.dumps(
+        {
+            "score": 40,
+            "correct_points": [],
+            "missing_points": ["Everything"],
+            "misconceptions": ["Confuses spaced repetition with massed practice"],
+        }
+    )
+    correction_response = json.dumps(
+        {
+            "question": "What distinguishes spaced repetition from massed practice?",
+            "answer": "Spaced repetition uses increasing intervals; massed practice is cramming.",
+            "source_excerpt": "Spaced repetition...",
+        }
+    )
 
     # S156: rubric call is now the 2nd LLM call; correction flashcard is the 3rd
     rubric_response = "{}"  # invalid rubric JSON -> graceful fallback to null rubric
@@ -253,9 +259,7 @@ async def test_teachback_score_below_60_creates_misconception_rows(test_db):
         )
         mock_get_llm.return_value = mock_llm
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/study/teachback",
                 json={
@@ -290,17 +294,21 @@ async def test_teachback_score_below_60_creates_correction_flashcard(test_db):
         session.add(card)
         await session.commit()
 
-    llm_eval_response = json.dumps({
-        "score": 35,
-        "correct_points": [],
-        "missing_points": [],
-        "misconceptions": ["Wrong definition"],
-    })
-    correction_response = json.dumps({
-        "question": "Correction Q",
-        "answer": "Correction A",
-        "source_excerpt": "...",
-    })
+    llm_eval_response = json.dumps(
+        {
+            "score": 35,
+            "correct_points": [],
+            "missing_points": [],
+            "misconceptions": ["Wrong definition"],
+        }
+    )
+    correction_response = json.dumps(
+        {
+            "question": "Correction Q",
+            "answer": "Correction A",
+            "source_excerpt": "...",
+        }
+    )
 
     # S156: rubric call is now the 2nd LLM call; correction flashcard is the 3rd
     rubric_response = "{}"  # invalid rubric JSON -> graceful fallback to null rubric
@@ -312,9 +320,7 @@ async def test_teachback_score_below_60_creates_correction_flashcard(test_db):
         )
         mock_get_llm.return_value = mock_llm
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/study/teachback",
                 json={"flashcard_id": card.id, "user_explanation": "wrong"},
@@ -344,21 +350,21 @@ async def test_teachback_stores_teachback_result(test_db):
         session.add(card)
         await session.commit()
 
-    llm_response = json.dumps({
-        "score": 90,
-        "correct_points": ["Good"],
-        "missing_points": [],
-        "misconceptions": [],
-    })
+    llm_response = json.dumps(
+        {
+            "score": 90,
+            "correct_points": ["Good"],
+            "missing_points": [],
+            "misconceptions": [],
+        }
+    )
 
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.generate = AsyncMock(return_value=llm_response)
         mock_get_llm.return_value = mock_llm
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             await client.post(
                 "/study/teachback",
                 json={"flashcard_id": card.id, "user_explanation": "Correct explanation."},
@@ -368,9 +374,7 @@ async def test_teachback_stores_teachback_result(test_db):
 
     async with factory() as session:
         result = await session.execute(
-            select(TeachbackResultModel).where(
-                TeachbackResultModel.flashcard_id == card.id
-            )
+            select(TeachbackResultModel).where(TeachbackResultModel.flashcard_id == card.id)
         )
         row = result.scalar_one_or_none()
     assert row is not None

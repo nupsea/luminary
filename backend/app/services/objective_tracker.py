@@ -53,18 +53,20 @@ class ObjectiveTrackerService:
             ).all()
 
             covered_section_ids = {
-                row[0]
-                for row in rows
-                if row[1] is not None and row[1] >= _COVERAGE_THRESHOLD
+                row[0] for row in rows if row[1] is not None and row[1] >= _COVERAGE_THRESHOLD
             }
 
             objs = (
-                await session.execute(
-                    select(LearningObjectiveModel).where(
-                        LearningObjectiveModel.document_id == document_id
+                (
+                    await session.execute(
+                        select(LearningObjectiveModel).where(
+                            LearningObjectiveModel.document_id == document_id
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             if not objs:
                 return
@@ -94,12 +96,16 @@ class ObjectiveTrackerService:
 
         async with get_session_factory()() as session:
             objs = (
-                await session.execute(
-                    select(LearningObjectiveModel).where(
-                        LearningObjectiveModel.document_id == document_id
+                (
+                    await session.execute(
+                        select(LearningObjectiveModel).where(
+                            LearningObjectiveModel.document_id == document_id
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             if not objs:
                 return {
@@ -113,12 +119,16 @@ class ObjectiveTrackerService:
             section_ids = list({obj.section_id for obj in objs})
 
             sections = (
-                await session.execute(
-                    select(SectionModel)
-                    .where(SectionModel.id.in_(section_ids))
-                    .order_by(SectionModel.section_order)
+                (
+                    await session.execute(
+                        select(SectionModel)
+                        .where(SectionModel.id.in_(section_ids))
+                        .order_by(SectionModel.section_order)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             heading_by_id = {s.id: s.heading for s in sections}
             order_by_id = {s.id: s.section_order for s in sections}

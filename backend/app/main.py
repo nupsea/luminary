@@ -124,12 +124,14 @@ async def lifespan(app: FastAPI):
                 logger.info("Ollama reachable at %s", settings.OLLAMA_URL)
     except Exception:
         from app.services.settings_service import _cache as _llm_cache  # noqa: PLC0415
+
         _mode = _llm_cache.get("llm_mode", "private")
         if _mode in ("private", "hybrid"):
             logger.warning(
                 "Ollama unreachable at startup (mode=%s) — local LLM features will be degraded. "
                 "Ensure Ollama is running at: %s",
-                _mode, settings.OLLAMA_URL,
+                _mode,
+                settings.OLLAMA_URL,
             )
         else:
             logger.debug("Ollama not reachable at startup (mode=%s, not needed)", _mode)

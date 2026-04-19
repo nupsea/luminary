@@ -10,7 +10,6 @@ Integration test (marked @pytest.mark.slow):
   - AC3: ingest two tech documents both mentioning the same concept; SAME_CONCEPT edge exists
 """
 
-
 import pytest
 
 from app.services.concept_linker import _compute_match_confidence, _parse_year
@@ -144,16 +143,25 @@ async def test_ac1_same_concept_edge_created(tmp_path, monkeypatch):
             return []
 
         def add_same_concept_edge(
-            self, entity_id_a, entity_id_b, source_doc_id, target_doc_id,
-            confidence, contradiction=False, contradiction_note="", prefer_source=""
+            self,
+            entity_id_a,
+            entity_id_b,
+            source_doc_id,
+            target_doc_id,
+            confidence,
+            contradiction=False,
+            contradiction_note="",
+            prefer_source="",
         ):
-            edges_added.append({
-                "entity_id_a": entity_id_a,
-                "entity_id_b": entity_id_b,
-                "confidence": confidence,
-                "contradiction": contradiction,
-                "contradiction_note": contradiction_note,
-            })
+            edges_added.append(
+                {
+                    "entity_id_a": entity_id_a,
+                    "entity_id_b": entity_id_b,
+                    "confidence": confidence,
+                    "contradiction": contradiction,
+                    "contradiction_note": contradiction_note,
+                }
+            )
 
         def _conn(self):
             pass
@@ -173,7 +181,9 @@ async def test_ac1_same_concept_edge_created(tmp_path, monkeypatch):
 
                     def get_next(self):
                         return self._rows.pop(0)
+
                 return Result()
+
         _conn = _ConnMock()
 
     mock_graph = MockGraphService()
@@ -190,6 +200,7 @@ async def test_ac1_same_concept_edge_created(tmp_path, monkeypatch):
             class Scalars:
                 def all(inner_self):
                     return ["Dependency injection is a design pattern..."] * 2
+
             return Scalars()
 
         def __iter__(self):
@@ -259,30 +270,44 @@ async def test_ac2_contradiction_detection(monkeypatch):
             return {}
 
         def add_same_concept_edge(
-            self, entity_id_a, entity_id_b, source_doc_id, target_doc_id,
-            confidence, contradiction=False, contradiction_note="", prefer_source=""
+            self,
+            entity_id_a,
+            entity_id_b,
+            source_doc_id,
+            target_doc_id,
+            confidence,
+            contradiction=False,
+            contradiction_note="",
+            prefer_source="",
         ):
-            edges_added.append({
-                "contradiction": contradiction,
-                "contradiction_note": contradiction_note,
-                "prefer_source": prefer_source,
-            })
+            edges_added.append(
+                {
+                    "contradiction": contradiction,
+                    "contradiction_note": contradiction_note,
+                    "prefer_source": prefer_source,
+                }
+            )
 
     class MockLLMResponse:
         class _Choice:
             class _Message:
-                content = json.dumps({
-                    "has_contradiction": True,
-                    "note": "A says constructor injection; B says setter injection",
-                    "prefer_source": "b",
-                })
+                content = json.dumps(
+                    {
+                        "has_contradiction": True,
+                        "note": "A says constructor injection; B says setter injection",
+                        "prefer_source": "b",
+                    }
+                )
+
             message = _Message()
+
         choices = [_Choice()]
 
     async def mock_litellm_acompletion(**kwargs):
         return MockLLMResponse()
 
     import app.services.concept_linker as cl_module
+
     monkeypatch.setattr(cl_module.litellm, "acompletion", mock_litellm_acompletion)
 
     mock_graph = MockGraphService()
@@ -297,7 +322,6 @@ async def test_ac2_contradiction_detection(monkeypatch):
 
     monkeypatch.setattr(ConceptLinkerService, "_get_entity_ids_for_doc", mock_get_entity_ids)
 
-
     class MockResult:
         def __init__(self, rows=None):
             self._rows = rows or []
@@ -309,6 +333,7 @@ async def test_ac2_contradiction_detection(monkeypatch):
             class Scalars:
                 def all(inner_self):
                     return ["Constructor injection is preferred in modern Java frameworks."]
+
             return Scalars()
 
         def __iter__(self):
@@ -400,13 +425,20 @@ async def test_ac3_same_concept_edge_in_real_kuzu(tmp_path, monkeypatch):
     class _FakeLLMResp:
         class _Choice:
             class _Message:
-                content = json.dumps({
-                    "has_contradiction": False, "note": "", "prefer_source": "",
-                })
+                content = json.dumps(
+                    {
+                        "has_contradiction": False,
+                        "note": "",
+                        "prefer_source": "",
+                    }
+                )
+
             message = _Message()
+
         choices = [_Choice()]
 
     import app.services.concept_linker as cl_module
+
     monkeypatch.setattr(cl_module.litellm, "acompletion", lambda **kw: _FakeLLMResp())
 
     # Minimal mock session: returns doc_tech_b as other document
@@ -421,6 +453,7 @@ async def test_ac3_same_concept_edge_in_real_kuzu(tmp_path, monkeypatch):
             class S:
                 def all(inner):
                     return ["Dependency injection is a design pattern used in Python."]
+
             return S()
 
         def first(self):

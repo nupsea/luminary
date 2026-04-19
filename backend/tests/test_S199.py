@@ -288,7 +288,7 @@ async def test_migrate_collections_merges_duplicates(test_db):
         # Collection A: 'My Notes' with 3 members
         await session.execute(
             text(
-                "INSERT INTO note_collections (id, name, color, sort_order, created_at, updated_at)"
+                "INSERT INTO collections (id, name, color, sort_order, created_at, updated_at)"
                 " VALUES (:id, :name, :color, 0, :ca, :ua)"
             ),
             {"id": col_a_id, "name": "My Notes", "color": "#6366F1", "ca": now, "ua": now},
@@ -296,7 +296,7 @@ async def test_migrate_collections_merges_duplicates(test_db):
         # Collection B: 'MY-NOTES' with 1 member
         await session.execute(
             text(
-                "INSERT INTO note_collections (id, name, color, sort_order, created_at, updated_at)"
+                "INSERT INTO collections (id, name, color, sort_order, created_at, updated_at)"
                 " VALUES (:id, :name, :color, 0, :ca, :ua)"
             ),
             {"id": col_b_id, "name": "MY-NOTES", "color": "#6366F1", "ca": now, "ua": now},
@@ -314,8 +314,9 @@ async def test_migrate_collections_merges_duplicates(test_db):
             )
             await session.execute(
                 text(
-                    "INSERT INTO note_collection_members (id, note_id, collection_id, added_at)"
-                    " VALUES (:id, :nid, :cid, :aa)"
+                    "INSERT INTO collection_members"
+                    " (id, member_id, collection_id, added_at, member_type)"
+                    " VALUES (:id, :nid, :cid, :aa, 'note')"
                 ),
                 {"id": str(uuid.uuid4()), "nid": note_id, "cid": col_a_id, "aa": now},
             )
@@ -330,8 +331,9 @@ async def test_migrate_collections_merges_duplicates(test_db):
         )
         await session.execute(
             text(
-                "INSERT INTO note_collection_members (id, note_id, collection_id, added_at)"
-                " VALUES (:id, :nid, :cid, :aa)"
+                "INSERT INTO collection_members"
+                " (id, member_id, collection_id, added_at, member_type)"
+                " VALUES (:id, :nid, :cid, :aa, 'note')"
             ),
             {"id": str(uuid.uuid4()), "nid": note_b, "cid": col_b_id, "aa": now},
         )
@@ -348,7 +350,7 @@ async def test_migrate_collections_merges_duplicates(test_db):
 
     # Verify: only one collection remains, named 'MY-NOTES', with all 4 members
     async with factory() as session:
-        result = await session.execute(text("SELECT id, name FROM note_collections"))
+        result = await session.execute(text("SELECT id, name FROM collections"))
         rows = result.all()
         assert len(rows) == 1
         assert rows[0][1] == "MY-NOTES"
@@ -359,9 +361,7 @@ async def test_migrate_collections_merges_duplicates(test_db):
 
         # Count members
         member_result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM note_collection_members WHERE collection_id = :cid"
-            ),
+            text("SELECT COUNT(*) FROM collection_members WHERE collection_id = :cid"),
             {"cid": winner_id},
         )
         assert member_result.scalar() == 4

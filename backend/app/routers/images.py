@@ -113,9 +113,7 @@ async def serve_image_raw(image_id: str) -> FileResponse:
     Returns 404 if image not found in DB or file missing from disk.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(ImageModel).where(ImageModel.id == image_id)
-        )
+        result = await session.execute(select(ImageModel).where(ImageModel.id == image_id))
         img = result.scalar_one_or_none()
 
     if img is None:
@@ -140,9 +138,7 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     # Detect media type from extension
     ext = filename.rsplit(".", maxsplit=1)[-1].lower()
     media_type = (
-        f"image/{ext}"
-        if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"]
-        else "image/png"
+        f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"] else "image/png"
     )
     return FileResponse(str(abs_path), media_type=media_type)
 

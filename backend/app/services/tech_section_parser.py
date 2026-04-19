@@ -49,9 +49,9 @@ def detect_admonition(text: str) -> str | None:
 
 _RE_PART = re.compile(r"^Part\s+[IVXLCDM\d]+\b", re.I)
 _RE_CHAPTER = re.compile(r"^Chapter\s+\d+\b", re.I)
-_RE_SECTION_NMP = re.compile(r"^\d+\.\d+\.\d+\s")   # "1.1.1 Detail"
-_RE_SECTION_NM = re.compile(r"^\d+\.\d+\s")          # "1.1 Overview"
-_RE_SECTION_N = re.compile(r"^\d+\.\s")              # "1. Introduction"
+_RE_SECTION_NMP = re.compile(r"^\d+\.\d+\.\d+\s")  # "1.1.1 Detail"
+_RE_SECTION_NM = re.compile(r"^\d+\.\d+\s")  # "1.1 Overview"
+_RE_SECTION_N = re.compile(r"^\d+\.\s")  # "1. Introduction"
 
 
 def classify_section_level(heading: str) -> int:

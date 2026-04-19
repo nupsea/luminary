@@ -34,7 +34,7 @@ from app.types import ConceptMastery, HeatmapCell, MasteryHeatmapResponse
 
 logger = logging.getLogger(__name__)
 
-_MAX_CONCEPTS = 100   # per document; cap LIKE scans
+_MAX_CONCEPTS = 100  # per document; cap LIKE scans
 _MAX_HEATMAP_SECTIONS = 20
 _MAX_HEATMAP_CONCEPTS = 20
 _MASTERY_FULL_DAYS = 21.0  # stability at which mastery = 1.0
@@ -175,9 +175,7 @@ class MasteryService:
                 exc_info=True,
             )
 
-        chunk_ids = await self._get_chunk_ids_for_concept(
-            cluster_concept, all_doc_ids, session
-        )
+        chunk_ids = await self._get_chunk_ids_for_concept(cluster_concept, all_doc_ids, session)
         cards = await self._get_flashcards_for_chunks(chunk_ids, session)
         weighted_mean = self._compute_weighted_mastery(cards)
         error_count = await self._get_prediction_error_count(chunk_ids, session)
@@ -334,9 +332,7 @@ class MasteryService:
                 else:
                     matching_chunk_ids = []
 
-                cards = await self._get_flashcards_for_chunks(
-                    matching_chunk_ids, session
-                )
+                cards = await self._get_flashcards_for_chunks(matching_chunk_ids, session)
                 if not cards:
                     mastery_val: float | None = None
                     card_count = 0
@@ -345,9 +341,7 @@ class MasteryService:
                         matching_chunk_ids, session
                     )
                     penalty = min(error_count * _PREDICTION_PENALTY, _MAX_PENALTY)
-                    mastery_val = max(
-                        0.0, self._compute_weighted_mastery(cards) - penalty
-                    )
+                    mastery_val = max(0.0, self._compute_weighted_mastery(cards) - penalty)
                     card_count = len(cards)
 
                 cells.append(

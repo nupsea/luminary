@@ -19,6 +19,7 @@ Kill button note: aborting the frontend fetch only cancels the HTTP request on t
 client side. The server subprocess continues until its timeout fires. No cross-process
 kill signal is sent on abort.
 """
+
 import difflib
 import logging
 import shutil
@@ -39,12 +40,8 @@ def _set_resource_limits() -> None:
     try:
         import resource  # not available on Windows
 
-        resource.setrlimit(
-            resource.RLIMIT_AS, (_MEMORY_LIMIT_BYTES, _MEMORY_LIMIT_BYTES)
-        )
-        resource.setrlimit(
-            resource.RLIMIT_CPU, (_TIMEOUT_SECONDS, _TIMEOUT_SECONDS)
-        )
+        resource.setrlimit(resource.RLIMIT_AS, (_MEMORY_LIMIT_BYTES, _MEMORY_LIMIT_BYTES))
+        resource.setrlimit(resource.RLIMIT_CPU, (_TIMEOUT_SECONDS, _TIMEOUT_SECONDS))
     except (AttributeError, ImportError, ValueError):
         pass  # Windows or unsupported platform
 
@@ -155,9 +152,7 @@ class CodeExecutorService:
         prediction_correct: bool | None = None
         prediction_diff: str | None = None
         if expected_output is not None:
-            prediction_correct, prediction_diff = _compare_prediction(
-                expected_output, stdout
-            )
+            prediction_correct, prediction_diff = _compare_prediction(expected_output, stdout)
 
         logger.info(
             "code_execute: language=%s exit_code=%d elapsed_ms=%d",

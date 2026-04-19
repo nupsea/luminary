@@ -3,6 +3,7 @@
 All tests use a deterministic stub for AudioTranscriber to avoid loading the real
 Whisper model (150MB+ download, CPU-heavy inference).
 """
+
 import io
 import uuid
 from pathlib import Path
@@ -106,9 +107,7 @@ async def test_audio_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
 
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("lecture.mp3", io.BytesIO(b"\x00" * 10), "audio/mpeg")},

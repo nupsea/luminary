@@ -85,9 +85,7 @@ def test_search_returns_grouped_results():
     retriever = MagicMock()
     retriever.retrieve = AsyncMock(return_value=chunks)
 
-    session = _mock_session(
-        [[("doc-a", "Paper A", "paper"), ("doc-b", "Paper B", "notes")]]
-    )
+    session = _mock_session([[("doc-a", "Paper A", "paper"), ("doc-b", "Paper B", "notes")]])
 
     app.dependency_overrides[get_db] = _db_override(session)
     app.dependency_overrides[get_retriever] = _retriever_override(retriever)
@@ -130,8 +128,8 @@ def test_search_content_type_filter_applied():
     # Two execute calls: content_type filter, then doc metadata
     session = _mock_session(
         [
-            [("doc-a",)],                        # content_type filter result
-            [("doc-a", "Paper A", "paper")],     # doc metadata result
+            [("doc-a",)],  # content_type filter result
+            [("doc-a", "Paper A", "paper")],  # doc metadata result
         ]
     )
 

@@ -134,7 +134,7 @@ async def test_short_sections_skipped(test_db):
 
     # 5 qualifying + 5 too-short
     await _insert_sections(factory, doc_id, count=5, preview_len=300)  # qualify
-    await _insert_sections(factory, doc_id, count=5, preview_len=50)   # too short
+    await _insert_sections(factory, doc_id, count=5, preview_len=50)  # too short
 
     mock_response = AsyncMock()
     mock_response.choices = [AsyncMock()]
@@ -161,9 +161,12 @@ async def test_ollama_offline_returns_zero(test_db):
     await _insert_document(factory, doc_id)
     await _insert_sections(factory, doc_id, count=3, preview_len=300)
 
-    with patch("litellm.acompletion", side_effect=litellm.ServiceUnavailableError(
-        message="Ollama offline", llm_provider="ollama", model="ollama/mistral"
-    )):
+    with patch(
+        "litellm.acompletion",
+        side_effect=litellm.ServiceUnavailableError(
+            message="Ollama offline", llm_provider="ollama", model="ollama/mistral"
+        ),
+    ):
         svc = SectionSummarizerService()
         result = await svc.generate(doc_id)
 
@@ -184,19 +187,19 @@ async def test_get_sections_endpoint_returns_list(test_db):
     # Pre-insert section summaries directly (bypassing LLM)
     async with factory() as session:
         for i in range(3):
-            session.add(SectionSummaryModel(
-                id=str(uuid.uuid4()),
-                document_id=doc_id,
-                section_id=None,
-                heading=f"Heading {i}",
-                content=f"Summary {i}",
-                unit_index=i,
-            ))
+            session.add(
+                SectionSummaryModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    section_id=None,
+                    heading=f"Heading {i}",
+                    content=f"Summary {i}",
+                    unit_index=i,
+                )
+            )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/summarize/{doc_id}/sections")
 
     assert resp.status_code == 200
@@ -217,9 +220,7 @@ async def test_get_sections_endpoint_returns_list(test_db):
 @pytest.mark.asyncio
 async def test_get_sections_endpoint_empty_for_unknown_doc(test_db):
     """GET /summarize/{id}/sections returns [] for pre-V2 documents (not 404)."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/summarize/{uuid.uuid4()}/sections")
 
     assert resp.status_code == 200

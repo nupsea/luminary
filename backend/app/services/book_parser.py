@@ -190,22 +190,37 @@ _RE_ENDETH = re.compile(r"HERE ENDETH CHAPTER", re.IGNORECASE)
 # Metadata signals
 _METADATA_SIGNALS = frozenset(
     [
-        "contents", "table of contents", "index", "preface", "foreword",
-        "acknowledgements", "acknowledgments", "copyright", "dedication",
-        "about the author", "bibliography", "references", "appendix",
-        "produced by", "project gutenberg", "end of the project gutenberg",
+        "contents",
+        "table of contents",
+        "index",
+        "preface",
+        "foreword",
+        "acknowledgements",
+        "acknowledgments",
+        "copyright",
+        "dedication",
+        "about the author",
+        "bibliography",
+        "references",
+        "appendix",
+        "produced by",
+        "project gutenberg",
+        "end of the project gutenberg",
     ]
 )
 
 _MIN_CHAPTERS = 2
 
+
 def _is_metadata(heading: str) -> bool:
     return heading.lower().strip() in _METADATA_SIGNALS
+
 
 def _clean_heading(heading: str) -> str:
     h = re.sub(r"\s+", " ", heading).strip()
     h = re.sub(r"\.\s*$", "", h).strip()
     return h
+
 
 def _match_any_pattern(text: str) -> int | None:
     for pid, pat, level in _PATTERNS:
@@ -281,7 +296,8 @@ def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
                 continue
             primary.text = primary.text + "\n\n" + consec[i].text
             primary.page_end = max(
-                primary.page_end, consec[i].page_end,
+                primary.page_end,
+                consec[i].page_end,
             )
             drop.add(i)
 
@@ -319,8 +335,11 @@ class BookParser:
             return None
         return ParsedDocument(
             title=file_path.stem.replace("_", " ").title(),
-            format="txt", pages=0, word_count=len(raw_no_meta.split()),
-            sections=sections, raw_text=raw_no_meta,
+            format="txt",
+            pages=0,
+            word_count=len(raw_no_meta.split()),
+            sections=sections,
+            raw_text=raw_no_meta,
         )
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument | None:
@@ -362,8 +381,11 @@ class BookParser:
 
         return ParsedDocument(
             title=file_path.stem.replace("_", " ").title(),
-            format="pdf", pages=total_pages, word_count=len(all_text.split()),
-            sections=sections, raw_text=all_text,
+            format="pdf",
+            pages=total_pages,
+            word_count=len(all_text.split()),
+            sections=sections,
+            raw_text=all_text,
         )
 
     def _parse_docx(self, file_path: Path) -> ParsedDocument | None:
@@ -375,8 +397,11 @@ class BookParser:
             return None
         return ParsedDocument(
             title=file_path.stem.replace("_", " ").title(),
-            format="docx", pages=0, word_count=len(full_text.split()),
-            sections=sections, raw_text=full_text,
+            format="docx",
+            pages=0,
+            word_count=len(full_text.split()),
+            sections=sections,
+            raw_text=full_text,
         )
 
     def _parse_md(self, file_path: Path) -> ParsedDocument | None:
@@ -432,7 +457,6 @@ class BookParser:
             raw_text=raw_text,
         )
 
-
     def _parse_html(self, file_path: Path) -> ParsedDocument | None:
         raw_text = file_path.read_text(encoding="utf-8", errors="replace")
         text = re.sub(r"<[^>]+>", " ", raw_text)
@@ -441,20 +465,23 @@ class BookParser:
             return None
         return ParsedDocument(
             title=file_path.stem.replace("_", " ").title(),
-            format="html", pages=0, word_count=len(text.split()),
-            sections=sections, raw_text=text,
+            format="html",
+            pages=0,
+            word_count=len(text.split()),
+            sections=sections,
+            raw_text=text,
         )
 
     def _strip_gutenberg(self, text: str) -> tuple[str, str]:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         m_start = _RE_PG_START.search(text)
         if m_start:
-            text = text[m_start.end():]
+            text = text[m_start.end() :]
         m_end = _RE_PG_END.search(text)
         if m_end:
-            text = text[:m_end.start()]
+            text = text[: m_end.start()]
         raw_clean = text
-        
+
         # New conservative TOC stripper: only active if "Contents" is found near start.
         if re.search(
             r"^\s*(?:Contents|TABLE OF CONTENTS)\s*$",
@@ -462,12 +489,12 @@ class BookParser:
             re.IGNORECASE | re.MULTILINE,
         ):
             text = self._strip_toc_block(text)
-        
+
         return text, raw_clean
 
     def _strip_toc_block(self, text: str) -> str:
         """Remove TOC block. Stops at the first significant gap to preserve body headers."""
-        cutoff = min(len(text) // 10, 3000) # Smaller window for TOC
+        cutoff = min(len(text) // 10, 3000)  # Smaller window for TOC
         head = text[:cutoff]
         lines = head.splitlines()
         toc_start = toc_end = -1
@@ -476,7 +503,7 @@ class BookParser:
             stripped = line.strip()
             if not stripped:
                 if run >= 3:
-                    break 
+                    break
                 run = 0
                 continue
             if _RE_TOC_LINE.match(line):
@@ -497,7 +524,7 @@ class BookParser:
             text = (
                 "\n".join(lines[:toc_start])
                 + "\n"
-                + "\n".join(lines[toc_end+1:])
+                + "\n".join(lines[toc_end + 1 :])
                 + text[cutoff:]
             )
         return text
@@ -510,17 +537,22 @@ class BookParser:
                 continue
             if len(pat.findall(text)) >= _MIN_CHAPTERS:
                 active_patterns.append((pid, pat, level))
-        
+
         if not active_patterns:
             return None
 
         all_matches = []
         for pid, pat, level in active_patterns:
             for m in pat.finditer(text):
-                all_matches.append({
-                    "start": m.start(), "end": m.end(), "pid": pid, "level": level,
-                    "raw_heading": m.group(0).strip(),
-                })
+                all_matches.append(
+                    {
+                        "start": m.start(),
+                        "end": m.end(),
+                        "pid": pid,
+                        "level": level,
+                        "raw_heading": m.group(0).strip(),
+                    }
+                )
         all_matches.sort(key=lambda x: x["start"])
         if not all_matches:
             return None
@@ -537,7 +569,7 @@ class BookParser:
         sections: list[Section] = []
         for i, m in enumerate(filtered):
             body_start = m["end"]
-            body_end = filtered[i+1]["start"] if i+1 < len(filtered) else len(text)
+            body_end = filtered[i + 1]["start"] if i + 1 < len(filtered) else len(text)
             body_chunk = text[body_start:body_end].lstrip("\n")
             lines = body_chunk.splitlines()
             subtitle = ""
@@ -558,11 +590,15 @@ class BookParser:
                 heading = f"{heading} {subtitle}"
             if _is_metadata(heading):
                 continue
-            sections.append(Section(
-                heading=heading, level=m["level"],
-                text="\n".join(lines[body_offset:]).strip(),
-                page_start=0, page_end=0,
-            ))
+            sections.append(
+                Section(
+                    heading=heading,
+                    level=m["level"],
+                    text="\n".join(lines[body_offset:]).strip(),
+                    page_start=0,
+                    page_end=0,
+                )
+            )
         if not sections or len(sections) < _MIN_CHAPTERS:
             return None
         return _merge_duplicate_sections(sections)

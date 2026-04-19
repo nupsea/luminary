@@ -156,9 +156,7 @@ async def _fetch_phoenix_spans(limit: int = 50) -> list[TraceItem]:
                 items.append(
                     TraceItem(
                         span_id=str(s.get("span_id", s.get("context", {}).get("span_id", ""))),
-                        trace_id=str(
-                            s.get("trace_id", s.get("context", {}).get("trace_id", ""))
-                        ),
+                        trace_id=str(s.get("trace_id", s.get("context", {}).get("trace_id", ""))),
                         operation_name=str(s.get("name", s.get("span_kind", "unknown"))),
                         start_time=start,
                         duration_ms=round(duration_ms, 2),
@@ -218,9 +216,7 @@ async def get_overview(
     total_chunks = chunk_result.scalar_one() or 0
 
     # QA calls today (UTC midnight)
-    today_start = datetime.now(tz=UTC).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     qa_result = await db.execute(
         select(func.count())
         .select_from(QAHistoryModel)
@@ -289,9 +285,7 @@ async def get_eval_runs(
     db: AsyncSession = Depends(get_db),
 ) -> list[EvalRunResponse]:
     """Return the last 10 eval runs per dataset, ordered by run_at desc."""
-    result = await db.execute(
-        select(EvalRunModel).order_by(EvalRunModel.run_at.desc()).limit(50)
-    )
+    result = await db.execute(select(EvalRunModel).order_by(EvalRunModel.run_at.desc()).limit(50))
     runs = result.scalars().all()
 
     # Keep at most 10 per dataset

@@ -103,9 +103,7 @@ async def test_section_summaries_generated_for_all_books(all_books_ingested):
     async with db_module._session_factory() as session:
         for book_name, doc_id in ids.items():
             rows = await session.execute(
-                select(SectionSummaryModel).where(
-                    SectionSummaryModel.document_id == doc_id
-                )
+                select(SectionSummaryModel).where(SectionSummaryModel.document_id == doc_id)
             )
             summaries = rows.scalars().all()
             assert len(summaries) >= 10, (
@@ -129,9 +127,9 @@ async def test_document_summary_uses_fast_path(all_books_ingested):
         for book_name, doc_id in ids.items():
             # Only check if section summaries exist for this book
             section_rows = await session.execute(
-                select(SectionSummaryModel.id).where(
-                    SectionSummaryModel.document_id == doc_id
-                ).limit(1)
+                select(SectionSummaryModel.id)
+                .where(SectionSummaryModel.document_id == doc_id)
+                .limit(1)
             )
             if not section_rows.scalar_one_or_none():
                 continue  # No section summaries — skip fast-path check
@@ -169,9 +167,7 @@ async def test_intent_routing_summary(all_books_ingested):
     assert alice_id, "Alice in Wonderland not in all_books_ingested"
 
     # No LLM mock needed — summary_node serves the cached executive summary directly
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/qa",
             json={
@@ -215,9 +211,7 @@ async def test_intent_routing_factual(all_books_ingested):
 
     # LLM call now happens in stream_answer() (app.services.qa), not chat_graph
     with patch("app.services.qa.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/qa",
                 json={
@@ -246,14 +240,10 @@ async def test_intent_routing_factual(all_books_ingested):
 @pytest.mark.asyncio
 async def test_intent_routing_comparative(all_books_ingested):
     """POST /qa comparative question returns HTTP 200."""
-    mock_llm = _make_mock_llm(
-        "Alice is a curious girl. The Time Traveller is an inventor."
-    )
+    mock_llm = _make_mock_llm("Alice is a curious girl. The Time Traveller is an inventor.")
 
     with patch("app.services.qa.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/qa",
                 json={
@@ -286,9 +276,7 @@ async def test_intent_routing_relational(all_books_ingested):
     )
 
     with patch("app.services.qa.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/qa",
                 json={
@@ -316,9 +304,7 @@ async def test_library_overview_includes_all_three_books(all_books_ingested):
     book_titles = list(ids.keys())
 
     # Mock LLM to return a response that mentions the books
-    answer_text = (
-        "The library contains Alice in Wonderland, The Time Machine, and The Odyssey."
-    )
+    answer_text = "The library contains Alice in Wonderland, The Time Machine, and The Odyssey."
     citations_json = ' {"citations": [], "confidence": "high"}'
 
     async def _fake_stream_lib(*_args, **_kwargs):
@@ -328,9 +314,7 @@ async def test_library_overview_includes_all_three_books(all_books_ingested):
     mock_llm.generate = AsyncMock(return_value=_fake_stream_lib())
 
     with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/summarize/all",
                 json={"mode": "executive", "force_refresh": True},

@@ -11,7 +11,7 @@ import {
   StickyNote, 
   Youtube 
 } from "lucide-react"
-import type { ContentType } from "./types"
+import type { ContentType, LearningStatus } from "./types"
 
 export { Youtube }
 

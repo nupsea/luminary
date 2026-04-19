@@ -107,6 +107,7 @@ def test_dim_mismatch_triggers_drop_and_recreate(tmp_path):
     svc._db = mock_db
 
     import logging
+
     with patch.object(logging.getLogger("app.services.vector_store"), "warning") as mock_warn:
         svc._get_or_create_note_table()
 
@@ -339,4 +340,4 @@ async def test_tag_query_p95_under_100ms_at_1000_notes(test_db):
             times.append(elapsed)
 
     p95 = statistics.quantiles(times, n=20)[18]  # 95th percentile
-    assert p95 < 0.1, f"p95 tag query latency {p95*1000:.1f}ms exceeds 100ms threshold"
+    assert p95 < 0.1, f"p95 tag query latency {p95 * 1000:.1f}ms exceeds 100ms threshold"

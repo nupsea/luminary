@@ -137,9 +137,7 @@ async def test_five_concurrent_uploads_all_reach_terminal_stage(concurrent_db):
     """
     tmp_path = concurrent_db
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Create 5 small text fixture files
         doc_files = []
         for i, content in enumerate(_FIXTURE_TEXTS):
@@ -159,9 +157,7 @@ async def test_five_concurrent_uploads_all_reach_terminal_stage(concurrent_db):
 
         # All must return 200 — no Kuzu lock RuntimeError should surface as 500
         for resp in responses:
-            assert resp.status_code == 200, (
-                f"Ingest returned {resp.status_code}: {resp.text[:200]}"
-            )
+            assert resp.status_code == 200, f"Ingest returned {resp.status_code}: {resp.text[:200]}"
             body = resp.json()
             assert "document_id" in body
             # No lock exception in response body
@@ -186,14 +182,10 @@ async def test_five_concurrent_uploads_all_reach_terminal_stage(concurrent_db):
 
             if asyncio.get_event_loop().time() > deadline:
                 stuck = {k: v for k, v in stages.items() if v not in terminal}
-                pytest.fail(
-                    f"Documents stuck in non-terminal stage after 30s: {stuck}"
-                )
+                pytest.fail(f"Documents stuck in non-terminal stage after 30s: {stuck}")
 
             await asyncio.sleep(0.5)
 
         # Verify all documents ended in a known terminal stage
         for doc_id, stage in stages.items():
-            assert stage in terminal, (
-                f"Document {doc_id} in unexpected stage: {stage}"
-            )
+            assert stage in terminal, f"Document {doc_id} in unexpected stage: {stage}"

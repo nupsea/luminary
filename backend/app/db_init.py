@@ -11,6 +11,8 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     ClipModel,
     ClusterSuggestionModel,
     CodeSnippetModel,
+    CollectionMemberModel,
+    CollectionModel,
     DocumentModel,
     EnrichmentJobModel,
     EvalRunModel,
@@ -23,8 +25,6 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     LearningObjectiveModel,
     LibrarySummaryModel,
     MisconceptionModel,
-    CollectionMemberModel,
-    CollectionModel,
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
@@ -87,9 +87,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # S175: note_sources may have been created with an incorrect FK on document_id
         # during an early implementation attempt. Detect and rebuild if needed.
         # Uses SQLite table-rebuild idiom (no ALTER DROP CONSTRAINT support).
-        fk_rows = (
-            await conn.execute(text("PRAGMA foreign_key_list(note_sources)"))
-        ).fetchall()
+        fk_rows = (await conn.execute(text("PRAGMA foreign_key_list(note_sources)"))).fetchall()
         if any(str(row[2]).lower() == "documents" for row in fk_rows):
             # Old schema has FK on document_id -- rebuild without it
             await conn.execute(
@@ -110,11 +108,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 )
             )
             await conn.execute(text("DROP TABLE note_sources"))
-            await conn.execute(
-                text(
-                    "ALTER TABLE note_sources_rebuild_s175 RENAME TO note_sources"
-                )
-            )
+            await conn.execute(text("ALTER TABLE note_sources_rebuild_s175 RENAME TO note_sources"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(FTS5_DDL))
         await conn.execute(text(NOTES_FTS5_DDL))
@@ -135,11 +129,17 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # We check if collection_members exists; if not, create and migrate.
         try:
             # Check if old table exists
-            table_check = (await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='note_collection_members'")
-            )).fetchone()
+            table_check = (
+                await conn.execute(
+                    text(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name='note_collection_members'"
+                    )
+                )
+            ).fetchone()
             if table_check:
-                # Create the new generic table if it doesn't exist yet (Base.metadata.create_all handles this too)
+                # Create the new generic table if it doesn't exist yet
+                # (Base.metadata.create_all handles this too)
                 await conn.execute(
                     text(
                         "CREATE TABLE IF NOT EXISTS collection_members ("
@@ -155,8 +155,10 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 # Migrate existing note memberships
                 await conn.execute(
                     text(
-                        "INSERT OR IGNORE INTO collection_members (id, collection_id, member_id, member_type, added_at)"
-                        " SELECT id, collection_id, note_id, 'note', added_at FROM note_collection_members"
+                        "INSERT OR IGNORE INTO collection_members "
+                        "(id, collection_id, member_id, member_type, added_at)"
+                        " SELECT id, collection_id, note_id, 'note', added_at "
+                        "FROM note_collection_members"
                     )
                 )
                 # Drop the old table
@@ -245,7 +247,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.execute(
             text(
                 """
-                INSERT OR IGNORE INTO collection_members (id, member_id, collection_id, member_type, added_at)
+                INSERT OR IGNORE INTO collection_members 
+                (id, member_id, collection_id, member_type, added_at)
                 SELECT
                     lower(hex(randomblob(16))) AS id,
                     notes.id AS member_id,
@@ -271,15 +274,11 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # CREATE INDEX IF NOT EXISTS is idempotent.
         await conn.execute(
             text(
-                "CREATE INDEX IF NOT EXISTS idx_note_tag_index_tag_full "
-                "ON note_tag_index(tag_full)"
+                "CREATE INDEX IF NOT EXISTS idx_note_tag_index_tag_full ON note_tag_index(tag_full)"
             )
         )
         await conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS idx_note_tag_index_note_id "
-                "ON note_tag_index(note_id)"
-            )
+            text("CREATE INDEX IF NOT EXISTS idx_note_tag_index_note_id ON note_tag_index(note_id)")
         )
 
         # S162: backfill note_tag_index from existing notes.tags JSON.
@@ -343,9 +342,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # S169: source_content_hash column for incremental collection-based flashcard generation.
         # ALTER TABLE is idempotent -- column is silently ignored if it already exists.
         try:
-            await conn.execute(
-                text("ALTER TABLE flashcards ADD COLUMN source_content_hash TEXT")
-            )
+            await conn.execute(text("ALTER TABLE flashcards ADD COLUMN source_content_hash TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
@@ -375,34 +372,26 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # S179: chunk_classification label for pre-generation classifier.
         try:
-            await conn.execute(
-                text("ALTER TABLE flashcards ADD COLUMN chunk_classification TEXT")
-            )
+            await conn.execute(text("ALTER TABLE flashcards ADD COLUMN chunk_classification TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
         # S188: section_heading for source grounding display on flashcards.
         try:
-            await conn.execute(
-                text("ALTER TABLE flashcards ADD COLUMN section_heading TEXT")
-            )
+            await conn.execute(text("ALTER TABLE flashcards ADD COLUMN section_heading TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
         # S201: content_hash on notes for dedup.
         try:
-            await conn.execute(
-                text("ALTER TABLE notes ADD COLUMN content_hash TEXT")
-            )
+            await conn.execute(text("ALTER TABLE notes ADD COLUMN content_hash TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
         # S183-fix: flashcards.document_id must be nullable for note-sourced cards.
         # Old databases have NOT NULL on this column. Use table-rebuild idiom since
         # SQLite does not support ALTER COLUMN to drop a NOT NULL constraint.
-        col_rows = (
-            await conn.execute(text("PRAGMA table_info(flashcards)"))
-        ).fetchall()
+        col_rows = (await conn.execute(text("PRAGMA table_info(flashcards)"))).fetchall()
         doc_id_col = next((r for r in col_rows if r[1] == "document_id"), None)
         if doc_id_col is not None and doc_id_col[3] == 1:  # notnull == 1 means NOT NULL
             await conn.execute(
@@ -453,9 +442,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 )
             )
             await conn.execute(text("DROP TABLE flashcards"))
-            await conn.execute(
-                text("ALTER TABLE flashcards_rebuild RENAME TO flashcards")
-            )
+            await conn.execute(text("ALTER TABLE flashcards_rebuild RENAME TO flashcards"))
 
         # S206: backfill flashcards_fts from existing flashcards (idempotent).
         # Uses LEFT JOIN on shadow content table to skip cards already indexed.
@@ -510,16 +497,15 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             if not new_slug or old_slug == new_slug:
                 continue
             # Check if target already exists (merge case)
-            existing = (await conn.execute(
-                text("SELECT id FROM canonical_tags WHERE id = :nid"),
-                {"nid": new_slug},
-            )).fetchone()
+            existing = (
+                await conn.execute(
+                    text("SELECT id FROM canonical_tags WHERE id = :nid"),
+                    {"nid": new_slug},
+                )
+            ).fetchone()
             if existing:
                 # Merge: move tag index rows, sum counts, delete old
-                tag_parent = (
-                    "/".join(new_slug.split("/")[:-1])
-                    if "/" in new_slug else ""
-                )
+                tag_parent = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
                 # Remove rows that would cause a UNIQUE constraint violation on (note_id, tag_full)
                 await conn.execute(
                     text(
@@ -549,43 +535,38 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     {"old": old_slug},
                 )
                 # Recount
-                cnt = (await conn.execute(
-                    text(
-                        "SELECT COUNT(DISTINCT note_id) "
-                        "FROM note_tag_index WHERE tag_full = :tf"
-                    ),
-                    {"tf": new_slug},
-                )).scalar() or 0
+                cnt = (
+                    await conn.execute(
+                        text(
+                            "SELECT COUNT(DISTINCT note_id) "
+                            "FROM note_tag_index WHERE tag_full = :tf"
+                        ),
+                        {"tf": new_slug},
+                    )
+                ).scalar() or 0
                 await conn.execute(
-                    text(
-                        "UPDATE canonical_tags "
-                        "SET note_count = :cnt WHERE id = :tid"
-                    ),
+                    text("UPDATE canonical_tags SET note_count = :cnt WHERE id = :tid"),
                     {"cnt": cnt, "tid": new_slug},
                 )
             else:
                 # Rename: update PK via delete+insert
-                row = (await conn.execute(
-                    text(
-                        "SELECT display_name, parent_tag, "
-                        "note_count, created_at "
-                        "FROM canonical_tags WHERE id = :oid"
-                    ),
-                    {"oid": old_slug},
-                )).fetchone()
-                if row:
+                row = (
                     await conn.execute(
                         text(
-                            "DELETE FROM canonical_tags "
-                            "WHERE id = :oid"
+                            "SELECT display_name, parent_tag, "
+                            "note_count, created_at "
+                            "FROM canonical_tags WHERE id = :oid"
                         ),
                         {"oid": old_slug},
                     )
-                    new_display = new_slug.split("/")[-1]
-                    new_parent = (
-                        "/".join(new_slug.split("/")[:-1])
-                        if "/" in new_slug else None
+                ).fetchone()
+                if row:
+                    await conn.execute(
+                        text("DELETE FROM canonical_tags WHERE id = :oid"),
+                        {"oid": old_slug},
                     )
+                    new_display = new_slug.split("/")[-1]
+                    new_parent = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else None
                     await conn.execute(
                         text(
                             "INSERT OR IGNORE INTO canonical_tags "
@@ -602,11 +583,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                         },
                     )
                     # Update tag index rows
-                    ren_parent = (
-                        "/".join(new_slug.split("/")[:-1])
-                        if "/" in new_slug else ""
-                    )
-                    # Remove rows that would cause a UNIQUE constraint violation 
+                    ren_parent = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
+                    # Remove rows that would cause a UNIQUE constraint violation
                     # on (note_id, tag_full)
                     await conn.execute(
                         text(
@@ -633,9 +611,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     )
 
         # Normalize collection names (skip auto-collections)
-        coll_rows = (await conn.execute(
-            text("SELECT id, name FROM collections")
-        )).fetchall()
+        coll_rows = (await conn.execute(text("SELECT id, name FROM collections"))).fetchall()
         for coll_id, coll_name in coll_rows:
             new_name = _norm_coll(coll_name)
             if not new_name or coll_name == new_name:
@@ -647,9 +623,12 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # Normalize document tags (JSON column)
         import json as _json  # noqa: PLC0415
-        doc_rows = (await conn.execute(
-            text("SELECT id, tags FROM documents WHERE tags IS NOT NULL AND tags != '[]'")
-        )).fetchall()
+
+        doc_rows = (
+            await conn.execute(
+                text("SELECT id, tags FROM documents WHERE tags IS NOT NULL AND tags != '[]'")
+            )
+        ).fetchall()
         for doc_id, raw_tags in doc_rows:
             try:
                 tags = _json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
@@ -665,9 +644,11 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 )
 
         # Normalize note tags (JSON column)
-        note_rows = (await conn.execute(
-            text("SELECT id, tags FROM notes WHERE tags IS NOT NULL AND tags != '[]'")
-        )).fetchall()
+        note_rows = (
+            await conn.execute(
+                text("SELECT id, tags FROM notes WHERE tags IS NOT NULL AND tags != '[]'")
+            )
+        ).fetchall()
         for note_id, raw_tags in note_rows:
             try:
                 tags = _json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])

@@ -39,6 +39,7 @@ async def explain_text(req: ExplainRequest) -> StreamingResponse:
 # However here document_id is the second path segment so there is no ambiguity.
 # The static sub-path /terms/{term_id} under /{document_id} also has no conflict.
 
+
 @router.get("/glossary/{document_id}/cached")
 async def get_cached_glossary(document_id: str) -> list[dict]:
     """Return persisted glossary terms without LLM call. Empty list if none generated."""

@@ -72,9 +72,7 @@ def test_deduplication_skips_similar_chunks():
     ]
     result = pack_context(chunks)
     # The text should appear exactly once (deduplicated)
-    assert result.count(original) == 1, (
-        f"Expected near-duplicate to be removed. Result: {result!r}"
-    )
+    assert result.count(original) == 1, f"Expected near-duplicate to be removed. Result: {result!r}"
 
 
 # ---------------------------------------------------------------------------

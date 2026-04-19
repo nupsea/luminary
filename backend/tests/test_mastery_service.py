@@ -223,9 +223,7 @@ async def test_compute_mastery_prediction_error_reduces_mastery(test_db):
             result_with_error = await svc.compute_mastery("closures", [doc_id], session)
 
     # With 1 error, penalty = 0.05
-    assert result_with_error.mastery == pytest.approx(
-        result_no_error.mastery - 0.05, abs=1e-6
-    )
+    assert result_with_error.mastery == pytest.approx(result_no_error.mastery - 0.05, abs=1e-6)
 
 
 @pytest.mark.asyncio

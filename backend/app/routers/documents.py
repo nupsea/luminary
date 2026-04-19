@@ -192,6 +192,7 @@ class ChunkItem(BaseModel):
 class UrlIngestRequest(BaseModel):
     url: str
 
+
 class YouTubeIngestRequest(BaseModel):
     url: str
 
@@ -288,7 +289,10 @@ def _derive_learning_status(
 
 
 _LEARNING_STATUS_ORDER = {
-    "studied": 3, "flashcards_generated": 2, "summarized": 1, "not_started": 0
+    "studied": 3,
+    "flashcards_generated": 2,
+    "summarized": 1,
+    "not_started": 0,
 }
 
 
@@ -523,9 +527,7 @@ async def ingest_document(
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.
         existing = (
-            await session.execute(
-                select(DocumentModel).where(DocumentModel.file_hash == file_hash)
-            )
+            await session.execute(select(DocumentModel).where(DocumentModel.file_hash == file_hash))
         ).scalar_one_or_none()
 
         if existing is not None:
@@ -537,11 +539,17 @@ async def ingest_document(
                 from app.services.summarizer import (  # noqa: PLC0415
                     PREGENERATE_MODES,
                 )
+
                 async with get_session_factory()() as _s:
                     existing_modes = set(
-                        row[0] for row in (await _s.execute(
-                            select(SummaryModel.mode).where(SummaryModel.document_id == existing.id)
-                        )).all()
+                        row[0]
+                        for row in (
+                            await _s.execute(
+                                select(SummaryModel.mode).where(
+                                    SummaryModel.document_id == existing.id
+                                )
+                            )
+                        ).all()
                     )
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
@@ -549,6 +557,7 @@ async def ingest_document(
                         _background_tasks,
                         _run_pregenerate,
                     )
+
                     task = asyncio.create_task(_run_pregenerate(existing.id))
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
@@ -652,8 +661,7 @@ async def ingest_kindle(
         raise HTTPException(
             status_code=422,
             detail=(
-                "No Kindle highlights found. "
-                "Make sure you uploaded a valid My Clippings.txt file."
+                "No Kindle highlights found. Make sure you uploaded a valid My Clippings.txt file."
             ),
         )
 
@@ -720,7 +728,7 @@ async def ingest_url(
     # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
     if not is_youtube_url(body.url):
         from app.services.article_extractor import get_article_extractor  # noqa: PLC0415
-        
+
         try:
             extractor = get_article_extractor()
             parsed = await extractor.extract(body.url)
@@ -768,20 +776,22 @@ async def ingest_url(
             run_ingestion,  # noqa: PLC0415
         )
 
-        _task = asyncio.create_task(run_ingestion(
-            doc_id, 
-            str(dest), 
-            "md", 
-            "tech_article",
-            parsed_document={
-                "title": parsed.title,
-                "format": "md",
-                "pages": 1,
-                "word_count": parsed.word_count,
-                "sections": parsed_sections,
-                "raw_text": parsed.raw_text
-            }
-        ))
+        _task = asyncio.create_task(
+            run_ingestion(
+                doc_id,
+                str(dest),
+                "md",
+                "tech_article",
+                parsed_document={
+                    "title": parsed.title,
+                    "format": "md",
+                    "pages": 1,
+                    "word_count": parsed.word_count,
+                    "sections": parsed_sections,
+                    "raw_text": parsed.raw_text,
+                },
+            )
+        )
         _background_tasks.add(_task)
         _task.add_done_callback(_background_tasks.discard)
         logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
@@ -871,9 +881,7 @@ async def ingest_url(
 async def get_document(document_id: str):
     """Return document detail with sections list."""
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -935,9 +943,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
     Used by the YouTube transcript viewer and any other chunk-level consumer.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -966,9 +972,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
 async def serve_audio_file(document_id: str) -> FileResponse:
     """Stream the raw audio file for audio documents (used by the mini-player)."""
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -987,9 +991,7 @@ async def serve_audio_file(document_id: str) -> FileResponse:
 async def serve_video_file(document_id: str) -> FileResponse:
     """Stream the raw video file for video documents (used by the HTML5 video player)."""
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1010,9 +1012,7 @@ async def serve_document_file(document_id: str) -> FileResponse:
     Returns the file with the appropriate Content-Type based on document format.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1038,9 +1038,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     Returns 400 if the document is not a PDF (format != 'pdf').
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -1050,8 +1048,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
                 detail=f"Document is not a PDF (format={doc.format})",
             )
         section_count_result = await session.execute(
-            select(func.count(SectionModel.id))
-            .where(SectionModel.document_id == document_id)
+            select(func.count(SectionModel.id)).where(SectionModel.document_id == document_id)
         )
         section_count = section_count_result.scalar_one() or 0
 
@@ -1077,9 +1074,7 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     from app.services.epub_service import get_toc_async  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1121,9 +1116,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         raise HTTPException(status_code=400, detail="chapter_index must be >= 0")
 
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -1147,6 +1140,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     # Compute total chapters first (needed to slice sections)
     try:
         from app.services.epub_service import get_toc_async as _get_toc  # noqa: PLC0415
+
         toc = await _get_toc(str(fp))
         total_chapters = len(toc)
     except Exception:
@@ -1249,9 +1243,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
 @router.patch("/{document_id}")
 async def patch_document(document_id: str, body: PatchDocumentRequest):
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -1259,6 +1251,7 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             doc.title = body.title
         if body.tags is not None:
             from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
             doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         if body.content_type is not None:
             doc.content_type = body.content_type
@@ -1274,13 +1267,12 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
 async def patch_document_tags(document_id: str, body: PatchTagsRequest):
     """Replace the tag list for a document."""
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
         from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+
         normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         doc.tags = normalized
         await session.commit()
@@ -1294,9 +1286,7 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
 @router.delete("/{document_id}", status_code=204)
 async def delete_document(document_id: str):
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -1367,9 +1357,7 @@ async def delete_document(document_id: str):
 @router.get("/{document_id}/status")
 async def get_document_status(document_id: str):
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1381,9 +1369,9 @@ async def get_document_status(document_id: str):
         "stage": stage,
         "progress_pct": progress_pct,
         "done": stage == "complete",
-        "error_message": (
-            doc.error_message or "Ingestion failed. Please try again."
-        ) if stage == "error" else None,
+        "error_message": (doc.error_message or "Ingestion failed. Please try again.")
+        if stage == "error"
+        else None,
     }
 
 
@@ -1409,9 +1397,7 @@ async def get_document_diagnostics(document_id: str):
 
         # FTS5 count
         fts_result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"
-            ),
+            text("SELECT COUNT(*) FROM chunks_fts WHERE document_id = :did"),
             {"did": document_id},
         )
         fts_count = fts_result.scalar_one() or 0
@@ -1486,9 +1472,7 @@ async def get_conversation_metadata(document_id: str) -> dict:
     Returns 404 if not found, 400 if content_type != 'conversation'.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         doc = result.scalar_one_or_none()
 
     if doc is None:

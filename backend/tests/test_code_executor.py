@@ -95,7 +95,7 @@ def test_execute_timeout():
 @pytest.mark.skipif(
     sys.platform != "linux",
     reason="RLIMIT_AS memory enforcement only reliable on Linux; "
-           "macOS virtual memory semantics bypass RLIMIT_AS for anonymous allocations.",
+    "macOS virtual memory semantics bypass RLIMIT_AS for anonymous allocations.",
 )
 def test_execute_memory_limit():
     """AC4: x = [0]*10**9 terminates with non-zero exit_code on Linux.

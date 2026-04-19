@@ -34,11 +34,11 @@ from opentelemetry.trace import Span
 
 logger = logging.getLogger(__name__)
 
-_SPAN_KIND   = SpanAttributes.OPENINFERENCE_SPAN_KIND
-_INPUT_VAL   = SpanAttributes.INPUT_VALUE
-_OUTPUT_VAL  = SpanAttributes.OUTPUT_VALUE
+_SPAN_KIND = SpanAttributes.OPENINFERENCE_SPAN_KIND
+_INPUT_VAL = SpanAttributes.INPUT_VALUE
+_OUTPUT_VAL = SpanAttributes.OUTPUT_VALUE
 
-_KIND_CHAIN     = OpenInferenceSpanKindValues.CHAIN.value
+_KIND_CHAIN = OpenInferenceSpanKindValues.CHAIN.value
 _KIND_RETRIEVER = OpenInferenceSpanKindValues.RETRIEVER.value
 
 _initialized = False
@@ -77,6 +77,7 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
 
     if not phoenix_enabled:
         from opentelemetry.sdk.trace import TracerProvider
+
         provider = TracerProvider()
         trace.set_tracer_provider(provider)
         logger.info("Phoenix tracing disabled; using no-op provider")
@@ -97,6 +98,7 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
         # into Settings but does NOT export to os.environ; Phoenix reads the
         # env var directly, so we bridge the gap here.
         from app.config import get_settings  # noqa: PLC0415
+
         os.environ["PHOENIX_GRPC_PORT"] = str(get_settings().PHOENIX_GRPC_PORT)
 
         # If Phoenix is already reachable (e.g. running in Docker), skip
@@ -119,9 +121,7 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
             if _wait_for_phoenix():
                 logger.info("Phoenix UI available at http://localhost:%d", _PHOENIX_PORT)
             else:
-                logger.warning(
-                    "Phoenix did not bind within 15 s — tracing may be incomplete"
-                )
+                logger.warning("Phoenix did not bind within 15 s — tracing may be incomplete")
 
         # Register the TracerProvider for the "luminary" project.
         tracer_provider = register(
@@ -140,11 +140,13 @@ def setup_tracing(phoenix_enabled: bool, data_dir: str = "~/.luminary") -> None:
     except ImportError as exc:
         logger.warning("Phoenix tracing setup failed (missing package): %s", exc)
         from opentelemetry.sdk.trace import TracerProvider
+
         provider = TracerProvider()
         trace.set_tracer_provider(provider)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Phoenix tracing setup failed: %s", exc)
         from opentelemetry.sdk.trace import TracerProvider
+
         provider = TracerProvider()
         trace.set_tracer_provider(provider)
 
@@ -157,6 +159,7 @@ def get_tracer() -> trace.Tracer:
 # ---------------------------------------------------------------------------
 # Span context managers — all use OpenInference semantic conventions
 # ---------------------------------------------------------------------------
+
 
 @contextmanager
 def trace_chain(
@@ -216,9 +219,7 @@ def trace_retrieval(
             span.set_attribute("error.message", str(exc))
             raise
         finally:
-            span.set_attribute(
-                "retrieval.latency_ms", round((time.perf_counter() - t0) * 1000, 1)
-            )
+            span.set_attribute("retrieval.latency_ms", round((time.perf_counter() - t0) * 1000, 1))
 
 
 @contextmanager
@@ -248,9 +249,7 @@ def trace_ingestion_node(
             span.set_attribute("error.message", str(exc))
             raise
         finally:
-            span.set_attribute(
-                "ingestion.latency_ms", round((time.perf_counter() - t0) * 1000, 1)
-            )
+            span.set_attribute("ingestion.latency_ms", round((time.perf_counter() - t0) * 1000, 1))
 
 
 # Backwards-compatible alias — callers in llm.py still reference this.
@@ -277,6 +276,4 @@ def trace_llm_call(
         try:
             yield span
         finally:
-            span.set_attribute(
-                "llm.latency_ms", round((time.perf_counter() - t0) * 1000, 1)
-            )
+            span.set_attribute("llm.latency_ms", round((time.perf_counter() - t0) * 1000, 1))

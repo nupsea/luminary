@@ -280,15 +280,18 @@ class ReadingProgressModel(Base):
     Note: any new delete path in documents.py must also delete these rows
     (no FK CASCADE in SQLite without pragma enforcement).
     """
+
     __tablename__ = "reading_progress"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     section_id: Mapped[str] = mapped_column(String, nullable=False)
-    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False,
-                                                    default=lambda: datetime.now(UTC))
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False,
-                                                   default=lambda: datetime.now(UTC))
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
     view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     __table_args__ = (
@@ -488,9 +491,7 @@ class ImageModel(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
-    __table_args__ = (
-        UniqueConstraint("document_id", "content_hash", name="uq_image_doc_hash"),
-    )
+    __table_args__ = (UniqueConstraint("document_id", "content_hash", name="uq_image_doc_hash"),)
 
 
 class WebReferenceModel(Base):
@@ -528,7 +529,10 @@ class WebReferenceModel(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "document_id", "section_id", "term", "url",
+            "document_id",
+            "section_id",
+            "term",
+            "url",
             name="uq_web_ref_doc_section_term_url",
         ),
     )
@@ -612,7 +616,8 @@ class CollectionModel(Base):
 class CollectionMemberModel(Base):
     """Pivot table: maps members (notes, documents) to collections (many-to-many).
 
-    Duplicate (member_id, collection_id, member_type) triples are silently ignored via ON CONFLICT DO NOTHING.
+    Duplicate (member_id, collection_id, member_type) triples are silently ignored
+    via ON CONFLICT DO NOTHING.
     """
 
     __tablename__ = "collection_members"
@@ -805,9 +810,7 @@ class GlossaryTermModel(Base):
     """Persistent glossary term extracted from a document via LLM."""
 
     __tablename__ = "glossary_terms"
-    __table_args__ = (
-        UniqueConstraint("document_id", "term", name="uq_glossary_doc_term"),
-    )
+    __table_args__ = (UniqueConstraint("document_id", "term", name="uq_glossary_doc_term"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(

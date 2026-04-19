@@ -29,8 +29,19 @@ _RE_PG_END = re.compile(
 
 # Headers that often look like chat names but are just document metadata
 _METADATA_HEADERS = {
-    "title", "author", "release date", "language", "credits", "produced by",
-    "updated", "character", "scene", "location", "time", "date", "table of contents",
+    "title",
+    "author",
+    "release date",
+    "language",
+    "credits",
+    "produced by",
+    "updated",
+    "character",
+    "scene",
+    "location",
+    "time",
+    "date",
+    "table of contents",
 }
 
 # Regex for chat_standard false positives: academic paper labels like
@@ -41,6 +52,7 @@ _RE_NON_SPEAKER = re.compile(
     r"definition|proposition|example|remark|note|step)\b",
     re.IGNORECASE,
 )
+
 
 @dataclass
 class Signature:
@@ -53,6 +65,7 @@ class Signature:
     def __post_init__(self):
         if self.matches is None:
             self.matches = []
+
 
 class UniversalParser:
     """
@@ -144,16 +157,24 @@ class UniversalParser:
             # Minimum score threshold to prevent accidental segmentation
             # Lowered for short test files, but still robust for books
             if not best_sig or best_sig.score < 0.3:
-                logger.debug("UniversalParser: No signature for %s (best=%.2f)", 
-                             file_path, best_sig.score if best_sig else 0.0)
+                logger.debug(
+                    "UniversalParser: No signature for %s (best=%.2f)",
+                    file_path,
+                    best_sig.score if best_sig else 0.0,
+                )
                 return None
 
-            logger.info("UniversalParser: detected %s (%s, score=%.2f, matches=%d)", 
-                        best_sig.doc_type, best_sig.id, best_sig.score, len(best_sig.matches))
+            logger.info(
+                "UniversalParser: detected %s (%s, score=%.2f, matches=%d)",
+                best_sig.doc_type,
+                best_sig.id,
+                best_sig.score,
+                len(best_sig.matches),
+            )
 
             # 2. Segmentation Phase: split the text using the discovered signature
             sections = self._segment(clean_text, best_sig)
-            
+
             if not sections:
                 return None
 
@@ -207,16 +228,16 @@ class UniversalParser:
         probe_start = 0
         if len(text) > 15000:
             probe_start = 5000
-        
+
         probe_len = 60000
         probe_text = text[probe_start : probe_start + probe_len]
-        
+
         best = self._probe(probe_text)
         # If we have a very strong hit in the probe window, use it.
         # Strong hit = monotonic sequence or many markers.
         if best and best.score >= 2.0:
             return best
-        
+
         # Otherwise scan the whole doc to be sure
         full_best = self._probe(text)
         return full_best if not best or (full_best and full_best.score > best.score) else best
@@ -224,7 +245,7 @@ class UniversalParser:
     def _probe(self, probe_text: str) -> Signature | None:
         """Statistical analysis of candidate patterns in a text block."""
         scored_sigs = []
-        
+
         for sig in self.candidates:
             matches = list(sig.pattern.finditer(probe_text))
             if not matches:
@@ -242,24 +263,24 @@ class UniversalParser:
                     if _RE_NON_SPEAKER.match(name):
                         continue
                 valid_matches.append(m)
-            
+
             if not valid_matches:
                 continue
 
             # Base Score: match frequency (normalized: 5 matches = 1.0 base score)
             score = len(valid_matches) / 5.0
-            
+
             # Refinement: Regularity of spacing between markers
             if len(valid_matches) > 2:
                 intervals = [
-                    valid_matches[i].start() - valid_matches[i - 1].start() 
+                    valid_matches[i].start() - valid_matches[i - 1].start()
                     for i in range(1, len(valid_matches))
                 ]
                 avg_interval = sum(intervals) / len(intervals)
                 if avg_interval > 0:
                     variance = sum((x - avg_interval) ** 2 for x in intervals) / len(intervals)
                     std_dev_rel = (variance**0.5) / avg_interval
-                    
+
                     if std_dev_rel < 0.2:  # Extremely regular
                         score *= 2.0
                     elif std_dev_rel < 0.4:  # Very regular
@@ -273,7 +294,7 @@ class UniversalParser:
                     score *= 2.5  # Heavy boost for monotonicity
                 else:
                     score *= 0.2  # Penalize if it looks like numbers but doesn't count
-            
+
             # Special Case: Chat (typically high frequency)
             if sig.doc_type == "chat":
                 if len(valid_matches) > 15:
@@ -290,7 +311,7 @@ class UniversalParser:
 
         if not scored_sigs:
             return None
-            
+
         return max(scored_sigs, key=lambda s: s.score)
 
     def _is_monotonic(self, matches: list[re.Match[str]]) -> bool:
@@ -311,20 +332,20 @@ class UniversalParser:
             # Case 3: Ordinal words (ONE, TWO)
             elif v_str.upper() in _WORD_TO_INT:
                 vals.append(_WORD_TO_INT[v_str.upper()])
-        
+
         if len(vals) < 2:
             return False
-        
+
         # Check for sequence breaks. Allow some noise (Gutenberg TOC often repeats numerals)
         # but the main body should be monotonic.
         increases = 0
         for i in range(1, len(vals)):
-            if vals[i] > vals[i-1]:
+            if vals[i] > vals[i - 1]:
                 increases += 1
-            elif vals[i] == vals[i-1]:
+            elif vals[i] == vals[i - 1]:
                 # Equality might happen in TOCs, but we prefer strict increases
                 pass
-        
+
         return (increases / (len(vals) - 1)) > 0.7 if len(vals) > 1 else False
 
     def _roman_to_int(self, s: str) -> int:
@@ -344,7 +365,7 @@ class UniversalParser:
         sections = []
         # Re-run finditer on the FULL clean text to get all matches
         matches = list(sig.pattern.finditer(text))
-        
+
         # Re-filter matches if it's chat to avoid metadata
         if sig.id == "chat_standard":
             matches = [m for m in matches if m.group(1).lower().strip() not in _METADATA_HEADERS]
@@ -355,7 +376,7 @@ class UniversalParser:
         # If it's a high-frequency chat, group turns into chunks
         if sig.doc_type == "chat" and len(matches) > 50:
             return self._segment_chat_grouped(text, matches)
-        
+
         for i, m in enumerate(matches):
             if sig.id == "markdown_header":
                 heading = m.group(1).strip()
@@ -377,12 +398,21 @@ class UniversalParser:
                         # and check for Title Case or ALL CAPS (subtitles are rarely sentence-case)
                         words = stripped.split()
                         skip_words = {
-                            "a", "an", "the", "and", "but", "or", "for",
-                            "in", "on", "at", "to", "by"
+                            "a",
+                            "an",
+                            "the",
+                            "and",
+                            "but",
+                            "or",
+                            "for",
+                            "in",
+                            "on",
+                            "at",
+                            "to",
+                            "by",
                         }
                         is_title_case = all(
-                            w[0].isupper() or w.lower() in skip_words
-                            for w in words if w
+                            w[0].isupper() or w.lower() in skip_words for w in words if w
                         )
 
                         if (
@@ -413,7 +443,7 @@ class UniversalParser:
                     page_end=0,
                 )
             )
-            
+
         return sections
 
     def _segment_chat_grouped(self, text: str, matches: list[re.Match[str]]) -> list[Section]:
@@ -423,15 +453,16 @@ class UniversalParser:
         for i in range(0, len(matches), chunk_size):
             m_start = matches[i]
             m_end_idx = min(i + chunk_size, len(matches))
-            
+
             next_m = matches[m_end_idx] if m_end_idx < len(matches) else None
             end_pos = next_m.start() if next_m else len(text)
-            
-            heading = f"Transcript Part {(i//chunk_size)+1}: {m_start.group(1)}"
-            body = text[m_start.start():end_pos].strip()
-            
+
+            heading = f"Transcript Part {(i // chunk_size) + 1}: {m_start.group(1)}"
+            body = text[m_start.start() : end_pos].strip()
+
             sections.append(Section(heading=heading, level=1, text=body, page_start=0, page_end=0))
         return sections
+
 
 _WORD_TO_INT = {
     "ONE": 1,

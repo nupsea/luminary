@@ -14,8 +14,8 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.models import (
     ClusterSuggestionModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
+    CollectionMemberModel,
+    CollectionModel,
     NoteModel,
 )
 from app.services.clustering_service import ClusteringService
@@ -192,9 +192,7 @@ async def test_cluster_notes_too_few_vectors(test_db):
     mock_table = MagicMock()
     mock_table.to_pandas.return_value = mock_df
 
-    with patch(
-        "app.services.vector_store.get_lancedb_service"
-    ) as mock_lancedb:
+    with patch("app.services.vector_store.get_lancedb_service") as mock_lancedb:
         mock_lancedb.return_value._get_or_create_note_table.return_value = mock_table
         svc = ClusteringService()
         async with factory() as session:
@@ -245,7 +243,7 @@ async def test_accept_creates_collection(test_db):
         # Collection created
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                select(CollectionModel).where(CollectionModel.id == collection_id)
             )
         ).scalar_one_or_none()
         assert col is not None
@@ -253,14 +251,18 @@ async def test_accept_creates_collection(test_db):
 
         # All 4 members created
         members = (
-            await session.execute(
-                select(NoteCollectionMemberModel).where(
-                    NoteCollectionMemberModel.collection_id == collection_id
+            (
+                await session.execute(
+                    select(CollectionMemberModel).where(
+                        CollectionMemberModel.collection_id == collection_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(members) == 4
-        assert {m.note_id for m in members} == set(note_ids)
+        assert {m.member_id for m in members} == set(note_ids)
 
         # Suggestion status updated
         suggestion = (
@@ -429,24 +431,26 @@ async def test_batch_accept_creates_collections(test_db):
 
     # Verify collections and memberships
     async with factory() as session:
-        for i, (cid, expected_note_ids) in enumerate(
-            zip(created_ids, [note_ids_a, note_ids_b])
-        ):
+        for i, (cid, expected_note_ids) in enumerate(zip(created_ids, [note_ids_a, note_ids_b])):
             col = (
                 await session.execute(
-                    select(NoteCollectionModel).where(NoteCollectionModel.id == cid)
+                    select(CollectionModel).where(CollectionModel.id == cid)
                 )
             ).scalar_one()
             assert col is not None
 
             members = (
-                await session.execute(
-                    select(NoteCollectionMemberModel).where(
-                        NoteCollectionMemberModel.collection_id == cid
+                (
+                    await session.execute(
+                        select(CollectionMemberModel).where(
+                            CollectionMemberModel.collection_id == cid
+                        )
                     )
                 )
-            ).scalars().all()
-            assert {m.note_id for m in members} == set(expected_note_ids)
+                .scalars()
+                .all()
+            )
+            assert {m.member_id for m in members} == set(expected_note_ids)
 
         # Suggestions marked as accepted
         for sid in [sid_a, sid_b]:
@@ -495,7 +499,7 @@ async def test_batch_accept_with_name_override(test_db):
     async with factory() as session:
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(NoteCollectionModel.id == created_ids[0])
+                select(CollectionModel).where(CollectionModel.id == created_ids[0])
             )
         ).scalar_one()
         assert col.name == "MY-CUSTOM-NAME"  # S201: normalize_collection_name applied
@@ -545,8 +549,8 @@ async def test_batch_accept_endpoint(test_db):
     async with factory() as session:
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(
-                    NoteCollectionModel.id == data["collection_ids"][0]
+                select(CollectionModel).where(
+                    CollectionModel.id == data["collection_ids"][0]
                 )
             )
         ).scalar_one()

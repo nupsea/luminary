@@ -67,11 +67,7 @@ def test_parse_prereqs_empty_array():
 
 def test_parse_prereqs_with_fences():
     """Markdown-fenced JSON is stripped and parsed correctly."""
-    raw = (
-        "```json\n"
-        '[{"requires": "closures", "required_by": "decorators", "confidence": 0.9}]\n'
-        "```"
-    )
+    raw = '```json\n[{"requires": "closures", "required_by": "decorators", "confidence": 0.9}]\n```'
     result = _parse_prereqs(raw)
     assert len(result) == 1
     assert result[0]["requires"] == "closures"
@@ -80,11 +76,11 @@ def test_parse_prereqs_with_fences():
 def test_parse_prereqs_multiple_items():
     """Multiple items are returned, below-threshold ones filtered."""
     raw = (
-        '['
+        "["
         '{"requires": "closures", "required_by": "decorators", "confidence": 0.9},'
         '{"requires": "loops", "required_by": "comprehensions", "confidence": 0.4},'
         '{"requires": "functions", "required_by": "closures", "confidence": 0.8}'
-        ']'
+        "]"
     )
     result = _parse_prereqs(raw)
     assert len(result) == 2
@@ -167,9 +163,9 @@ async def test_prereq_edges_written_after_enrich(tmp_path):
     # Mock litellm.acompletion to return a fixed prereq JSON
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = (
-        '[{"requires": "closures", "required_by": "decorators", "confidence": 0.9}]'
-    )
+    mock_response.choices[
+        0
+    ].message.content = '[{"requires": "closures", "required_by": "decorators", "confidence": 0.9}]'
 
     from app.services.prereq_extractor import PrereqExtractorService
 

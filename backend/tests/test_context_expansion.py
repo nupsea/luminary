@@ -123,9 +123,7 @@ async def test_expand_adds_neighbors(test_db):
     # Neighbor scores should be 0.75 * 0.8 = 0.6
     for c in result:
         if c.chunk_id in (chunk_ids[1], chunk_ids[3]):
-            assert abs(c.score - 0.6) < 1e-6, (
-                f"Neighbor score expected 0.6, got {c.score}"
-            )
+            assert abs(c.score - 0.6) < 1e-6, f"Neighbor score expected 0.6, got {c.score}"
             assert c.source == "context_expansion"
 
 
@@ -203,6 +201,4 @@ async def test_expand_capped_at_k_times_2(test_db):
     ]
     result = await _expand_context(input_chunks, k=k)
 
-    assert len(result) <= k * 2, (
-        f"Expected at most {k * 2} chunks, got {len(result)}"
-    )
+    assert len(result) <= k * 2, f"Expected at most {k * 2} chunks, got {len(result)}"

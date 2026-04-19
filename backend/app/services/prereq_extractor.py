@@ -67,11 +67,13 @@ def _parse_prereqs(raw_text: str) -> list[dict]:
             required_by = item.get("required_by")
             confidence = item.get("confidence", 0.0)
             if requires and required_by and float(confidence) >= _CONFIDENCE_THRESHOLD:
-                result.append({
-                    "requires": str(requires),
-                    "required_by": str(required_by),
-                    "confidence": float(confidence),
-                })
+                result.append(
+                    {
+                        "requires": str(requires),
+                        "required_by": str(required_by),
+                        "confidence": float(confidence),
+                    }
+                )
         return result
     except (json.JSONDecodeError, ValueError, TypeError):
         logger.debug("_parse_prereqs: JSON parse failed for raw=%s", raw_text[:200])
@@ -81,9 +83,7 @@ def _parse_prereqs(raw_text: str) -> list[dict]:
 class PrereqExtractorService:
     """Extract prerequisite relationships from section summaries and write to Kuzu."""
 
-    async def extract(
-        self, section_content: str, section_id: str, document_id: str
-    ) -> list[dict]:
+    async def extract(self, section_content: str, section_id: str, document_id: str) -> list[dict]:
         """Call the LLM to extract prerequisite pairs from a section summary.
 
         Returns list of {requires, required_by, confidence} dicts with confidence >= 0.7.
@@ -115,16 +115,12 @@ class PrereqExtractorService:
         """
         async with get_session_factory()() as session:
             summaries_result = await session.execute(
-                select(SectionSummaryModel).where(
-                    SectionSummaryModel.document_id == document_id
-                )
+                select(SectionSummaryModel).where(SectionSummaryModel.document_id == document_id)
             )
             summaries = list(summaries_result.scalars().all())
 
         if not summaries:
-            logger.info(
-                "prereq_extractor: no section summaries for doc=%s, skipping", document_id
-            )
+            logger.info("prereq_extractor: no section summaries for doc=%s, skipping", document_id)
             return 0
 
         graph_svc = get_graph_service()
@@ -135,9 +131,7 @@ class PrereqExtractorService:
 
         for summary in summaries:
             try:
-                pairs = await self.extract(
-                    summary.content, summary.section_id or "", document_id
-                )
+                pairs = await self.extract(summary.content, summary.section_id or "", document_id)
             except litellm.ServiceUnavailableError:
                 raise
             except Exception as exc:
@@ -161,7 +155,9 @@ class PrereqExtractorService:
                     logger.debug(
                         "prereq_extractor: could not resolve entity for pair"
                         " requires=%r required_by=%r in doc=%s",
-                        requires_name, required_by_name, document_id,
+                        requires_name,
+                        required_by_name,
+                        document_id,
                     )
                     continue
 
@@ -183,9 +179,7 @@ class PrereqExtractorService:
         if total_edges > 0 and section_entity_map:
             await self._compute_and_store_difficulty(document_id, section_entity_map)
 
-        logger.info(
-            "prereq_extractor: wrote %d edges for doc=%s", total_edges, document_id
-        )
+        logger.info("prereq_extractor: wrote %d edges for doc=%s", total_edges, document_id)
         return total_edges
 
     async def _compute_and_store_difficulty(
@@ -226,6 +220,7 @@ class PrereqExtractorService:
                 reverse_adj.setdefault(to_id, []).append(from_id)
 
         from collections import deque  # noqa: PLC0415
+
         queue: deque[str] = deque(roots)
         while queue:
             current = queue.popleft()

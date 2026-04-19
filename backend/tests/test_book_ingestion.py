@@ -173,9 +173,7 @@ async def test_book_chunks_do_not_cross_section_boundary(test_db):
     markers = ["CHAPTERONE", "CHAPTERTWO", "CHAPTERTHREE"]
     for chunk in chunks:
         present = [m for m in markers if m in chunk.text]
-        assert len(present) <= 1, (
-            f"Chunk {chunk.id} spans section boundary: contains {present}"
-        )
+        assert len(present) <= 1, f"Chunk {chunk.id} spans section boundary: contains {present}"
 
 
 @pytest.mark.anyio
@@ -190,18 +188,14 @@ async def test_sections_endpoint_returns_chunk_count(test_db):
     state = _make_state(doc_id, THREE_CHAPTER_SECTIONS)
     await _chunk_book(state, state["parsed_document"], doc_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/sections/{doc_id}")
 
     assert resp.status_code == 200
     sections = resp.json()
     assert len(sections) == 3, f"Expected 3 sections, got {len(sections)}"
     for sec in sections:
-        assert sec["chunk_count"] > 0, (
-            f"Section '{sec['heading']}' has chunk_count=0"
-        )
+        assert sec["chunk_count"] > 0, f"Section '{sec['heading']}' has chunk_count=0"
         assert "has_summary" in sec
         assert "section_order" in sec
 

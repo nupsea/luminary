@@ -2,6 +2,7 @@
 
 Returns section-grouped results scoped to a single document_id.
 """
+
 import logging
 import re
 from collections import defaultdict

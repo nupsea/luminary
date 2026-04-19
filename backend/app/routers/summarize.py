@@ -47,8 +47,7 @@ async def get_section_summaries(document_id: str) -> list[dict]:
             .order_by(SectionSummaryModel.unit_index)
         )
         return [
-            {"unit_index": r.unit_index, "heading": r.heading, "content": r.content}
-            for r in rows
+            {"unit_index": r.unit_index, "heading": r.heading, "content": r.content} for r in rows
         ]
 
 
@@ -98,9 +97,7 @@ async def summarize_document(document_id: str, req: SummarizeRequest) -> Streami
     """
     async with get_session_factory()() as session:
         doc = (
-            await session.execute(
-                select(DocumentModel).where(DocumentModel.id == document_id)
-            )
+            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
 
     if doc is None:

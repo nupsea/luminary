@@ -22,7 +22,7 @@ from app.types import StartConceptItem, StartConceptsResponse, StudyPathItem, St
 logger = logging.getLogger(__name__)
 
 _SKIP_STABILITY_THRESHOLD = 14.0  # days -- avg fsrs_stability >= this means "skip"
-_MASTERY_FULL_STABILITY = 21.0    # days -- stability >= this = mastery 1.0
+_MASTERY_FULL_STABILITY = 21.0  # days -- stability >= this = mastery 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +98,15 @@ class StudyPathService:
                 skip = False
                 reason = "no flashcards"
 
-            path_items.append(StudyPathItem(
-                concept=node_name,
-                mastery=round(mastery, 3),
-                skip=skip,
-                reason=reason,
-                avg_stability_days=round(avg_stab, 1),
-            ))
+            path_items.append(
+                StudyPathItem(
+                    concept=node_name,
+                    mastery=round(mastery, 3),
+                    skip=skip,
+                    reason=reason,
+                    avg_stability_days=round(avg_stab, 1),
+                )
+            )
 
         return StudyPathResponse(
             concept=concept,
@@ -134,21 +136,21 @@ class StudyPathService:
         items: list[StartConceptItem] = []
         for concept in candidates:
             # Count flashcards for this concept (approximate via text search)
-            fc_count = await self._count_flashcards_for_concept(
-                document_id, concept, db_session
-            )
+            fc_count = await self._count_flashcards_for_concept(document_id, concept, db_session)
 
             # Prereq chain length = 0 for entry points (no prerequisites)
             # Rationale: they ARE the foundations; studying them has highest ROI
             plural = "s" if fc_count != 1 else ""
             rationale = f"0 prerequisites unskipped; {fc_count} flashcard{plural}"
 
-            items.append(StartConceptItem(
-                concept=concept,
-                prereq_chain_length=0,
-                flashcard_count=fc_count,
-                rationale=rationale,
-            ))
+            items.append(
+                StartConceptItem(
+                    concept=concept,
+                    prereq_chain_length=0,
+                    flashcard_count=fc_count,
+                    rationale=rationale,
+                )
+            )
 
         # Sort: fewest flashcards first (highest ROI -- most to learn)
         items.sort(key=lambda x: x.flashcard_count)
@@ -192,7 +194,9 @@ class StudyPathService:
         except Exception:
             logger.debug(
                 "_get_stabilities_for_concept failed for concept=%r doc=%s",
-                concept, document_id, exc_info=True,
+                concept,
+                document_id,
+                exc_info=True,
             )
             return []
 
@@ -215,14 +219,16 @@ class StudyPathService:
                 return 0
 
             count_result = await db_session.execute(
-                select(func.count()).select_from(FlashcardModel).where(
-                    FlashcardModel.chunk_id.in_(chunk_ids)
-                )
+                select(func.count())
+                .select_from(FlashcardModel)
+                .where(FlashcardModel.chunk_id.in_(chunk_ids))
             )
             return count_result.scalar_one()
         except Exception:
             logger.debug(
                 "_count_flashcards_for_concept failed for concept=%r doc=%s",
-                concept, document_id, exc_info=True,
+                concept,
+                document_id,
+                exc_info=True,
             )
             return 0

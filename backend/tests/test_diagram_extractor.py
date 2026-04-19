@@ -32,6 +32,7 @@ from app.services.graph import KuzuService
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_kuzu(tmp_path: Path) -> KuzuService:
     """Return a fresh KuzuService backed by tmp_path."""
     return KuzuService(str(tmp_path))
@@ -119,7 +120,7 @@ async def test_architecture_diagram_extraction(tmp_path: Path) -> None:
         '], "edges": ['
         '{"from": "Service A", "to": "Service B",'
         '"edge_type": "CONNECTS_TO", "label": "calls"}'
-        ']}'
+        "]}"
     )
 
     with patch("app.services.graph.get_graph_service", return_value=kuzu):
@@ -168,7 +169,7 @@ async def test_sequence_diagram_routing(tmp_path: Path) -> None:
         '{"name": "Server", "node_type": "ACTOR"}'
         '], "edges": ['
         '{"from": "Client", "to": "Server", "edge_type": "SENDS_TO", "message": "POST /login"}'
-        ']}'
+        "]}"
     )
 
     with patch("app.services.graph.get_graph_service", return_value=kuzu):
@@ -215,7 +216,7 @@ async def test_er_diagram_routing(tmp_path: Path) -> None:
         '{"name": "Order", "node_type": "ENTITY_DM"}'
         '], "edges": ['
         '{"from": "User", "to": "Order", "edge_type": "REFERENCES_DM"}'
-        ']}'
+        "]}"
     )
 
     with patch("app.services.graph.get_graph_service", return_value=kuzu):
@@ -263,9 +264,7 @@ async def test_depicts_linkage(tmp_path: Path) -> None:
     kuzu.add_mention(entity_id, doc_id)
 
     # Extract a COMPONENT node named "PostgreSQL" -- should match entity 'postgresql'
-    llm_json = (
-        '{"nodes": [{"name": "PostgreSQL", "node_type": "COMPONENT"}], "edges": []}'
-    )
+    llm_json = '{"nodes": [{"name": "PostgreSQL", "node_type": "COMPONENT"}], "edges": []}'
 
     with patch("app.services.graph.get_graph_service", return_value=kuzu):
         svc = DiagramExtractorService()
@@ -296,9 +295,7 @@ async def test_idempotency(tmp_path: Path) -> None:
     """Calling _write_to_kuzu twice does not duplicate DiagramNode rows."""
     kuzu = _make_kuzu(tmp_path)
 
-    llm_json = (
-        '{"nodes": [{"name": "Cache", "node_type": "COMPONENT"}], "edges": []}'
-    )
+    llm_json = '{"nodes": [{"name": "Cache", "node_type": "COMPONENT"}], "edges": []}'
 
     with patch("app.services.graph.get_graph_service", return_value=kuzu):
         svc = DiagramExtractorService()

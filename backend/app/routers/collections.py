@@ -83,8 +83,17 @@ CollectionTreeItem.model_rebuild()
 
 
 class AddMembersRequest(BaseModel):
-    member_ids: list[str]
+    member_ids: list[str] | None = None
+    note_ids: list[str] | None = None  # Backward compatibility
     member_type: str = "note"  # note | document
+
+    @property
+    def effective_member_ids(self) -> list[str]:
+        if self.member_ids is not None:
+            return self.member_ids
+        if self.note_ids is not None:
+            return self.note_ids
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -106,13 +115,14 @@ def _to_response(col: CollectionModel) -> CollectionResponse:
         updated_at=col.updated_at,
     )
 
+
 # Color palette for auto-collections based on content_type
 _AUTO_COLLECTION_COLORS: dict[str, str] = {
-    "book": "#8B5CF6",       # violet
-    "paper": "#3B82F6",      # blue
+    "book": "#8B5CF6",  # violet
+    "paper": "#3B82F6",  # blue
     "conversation": "#F59E0B",  # amber
-    "notes": "#10B981",      # emerald
-    "code": "#6366F1",       # indigo
+    "notes": "#10B981",  # emerald
+    "code": "#6366F1",  # indigo
 }
 
 # Human-readable doc type suffixes for collection names
@@ -149,9 +159,29 @@ def _make_collection_name(title: str, content_type: str) -> str:
     # For longer titles, extract key words (capitalized, acronyms, proper nouns)
     # Remove common filler words
     filler = {
-        "the", "a", "an", "and", "or", "of", "in", "on", "for", "to", "with",
-        "by", "is", "at", "from", "as", "into", "its", "this", "that", "how",
-        "era", "about",
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "in",
+        "on",
+        "for",
+        "to",
+        "with",
+        "by",
+        "is",
+        "at",
+        "from",
+        "as",
+        "into",
+        "its",
+        "this",
+        "that",
+        "how",
+        "era",
+        "about",
     }
 
     words = re.findall(r"[A-Za-z0-9]+", name)
@@ -189,9 +219,7 @@ async def create_collection(
     if req.parent_collection_id is not None:
         parent = (
             await session.execute(
-                select(CollectionModel).where(
-                    CollectionModel.id == req.parent_collection_id
-                )
+                select(CollectionModel).where(CollectionModel.id == req.parent_collection_id)
             )
         ).scalar_one_or_none()
         if parent is None:
@@ -227,9 +255,7 @@ async def get_collection_tree(
     """Return all collections as a 2-level nested tree with item counts."""
     # Load all collections
     all_cols_result = await session.execute(
-        select(CollectionModel).order_by(
-            CollectionModel.sort_order, CollectionModel.name
-        )
+        select(CollectionModel).order_by(CollectionModel.sort_order, CollectionModel.name)
     )
     all_cols = list(all_cols_result.scalars().all())
 
@@ -242,7 +268,7 @@ async def get_collection_tree(
         ).group_by(CollectionMemberModel.collection_id, CollectionMemberModel.member_type)
     )
     counts_rows = counts_result.all()
-    
+
     note_counts: dict[str, int] = {}
     doc_counts: dict[str, int] = {}
     for cid, mtype, count in counts_rows:
@@ -295,9 +321,7 @@ async def get_auto_collection_by_document(
     """Return the auto-collection for a document, or 404 if none exists."""
     col = (
         await session.execute(
-            select(CollectionModel).where(
-                CollectionModel.auto_document_id == document_id
-            )
+            select(CollectionModel).where(CollectionModel.auto_document_id == document_id)
         )
     ).scalar_one_or_none()
     if col is None:
@@ -314,9 +338,7 @@ async def create_auto_collection(
     # Check if one already exists
     existing = (
         await session.execute(
-            select(CollectionModel).where(
-                CollectionModel.auto_document_id == document_id
-            )
+            select(CollectionModel).where(CollectionModel.auto_document_id == document_id)
         )
     ).scalar_one_or_none()
     if existing is not None:
@@ -324,9 +346,7 @@ async def create_auto_collection(
 
     # Fetch document title
     doc = (
-        await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     ).scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -435,20 +455,17 @@ async def migrate_collection_naming(
                 )
                 # Also delete child collections of loser
                 await session.execute(
-                    delete(CollectionModel).where(
-                        CollectionModel.parent_collection_id == loser.id
-                    )
+                    delete(CollectionModel).where(CollectionModel.parent_collection_id == loser.id)
                 )
-                await session.execute(
-                    delete(CollectionModel).where(CollectionModel.id == loser.id)
-                )
+                await session.execute(delete(CollectionModel).where(CollectionModel.id == loser.id))
 
             merged_count += 1
 
     await session.commit()
     logger.info(
         "Collection naming migration complete: renamed=%d merged=%d",
-        renamed_count, merged_count,
+        renamed_count,
+        merged_count,
     )
     return {"renamed": renamed_count, "merged": merged_count}
 
@@ -459,9 +476,7 @@ async def get_collection(
     session: AsyncSession = Depends(get_db),
 ) -> CollectionResponse:
     col = (
-        await session.execute(
-            select(CollectionModel).where(CollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -475,9 +490,7 @@ async def update_collection(
     session: AsyncSession = Depends(get_db),
 ) -> CollectionResponse:
     col = (
-        await session.execute(
-            select(CollectionModel).where(CollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -507,48 +520,37 @@ async def delete_collection(
 ) -> None:
     """Delete a collection. Member rows are removed; items themselves are NOT deleted."""
     col = (
-        await session.execute(
-            select(CollectionModel).where(CollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     # Delete child collections' members first
     child_ids_result = await session.execute(
-        select(CollectionModel.id).where(
-            CollectionModel.parent_collection_id == collection_id
-        )
+        select(CollectionModel.id).where(CollectionModel.parent_collection_id == collection_id)
     )
     child_ids = [row[0] for row in child_ids_result.all()]
     for child_id in child_ids:
         await session.execute(
-            delete(CollectionMemberModel).where(
-                CollectionMemberModel.collection_id == child_id
-            )
+            delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == child_id)
         )
 
     # Delete members of this collection
     await session.execute(
-        delete(CollectionMemberModel).where(
-            CollectionMemberModel.collection_id == collection_id
-        )
+        delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == collection_id)
     )
 
     # Delete child collections
     for child_id in child_ids:
-        await session.execute(
-            delete(CollectionModel).where(CollectionModel.id == child_id)
-        )
+        await session.execute(delete(CollectionModel).where(CollectionModel.id == child_id))
 
     # Delete the collection itself
-    await session.execute(
-        delete(CollectionModel).where(CollectionModel.id == collection_id)
-    )
+    await session.execute(delete(CollectionModel).where(CollectionModel.id == collection_id))
     await session.commit()
     logger.info("Deleted collection id=%s", collection_id)
 
 
+@router.post("/{collection_id}/notes", status_code=201)
 @router.post("/{collection_id}/members", status_code=201)
 async def add_members_to_collection(
     collection_id: str,
@@ -557,15 +559,18 @@ async def add_members_to_collection(
 ) -> dict:
     """Add members (notes or documents) to a collection. Idempotent."""
     col = (
-        await session.execute(
-            select(CollectionModel).where(CollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    member_ids = req.effective_member_ids
+    if not member_ids:
+        # Pydantic validation: at least one of member_ids or note_ids required
+        raise HTTPException(status_code=422, detail="member_ids or note_ids required")
+
     added = 0
-    for mid in req.member_ids:
+    for mid in member_ids:
         await session.execute(
             text(
                 "INSERT OR IGNORE INTO collection_members"
@@ -583,9 +588,7 @@ async def add_members_to_collection(
         added += 1
 
     await session.commit()
-    logger.info(
-        "Added %d %ss to collection id=%s", added, req.member_type, collection_id
-    )
+    logger.info("Added %d %ss to collection id=%s", added, req.member_type, collection_id)
     return {"added": added, "collection_id": collection_id}
 
 
@@ -633,9 +636,7 @@ async def export_collection(
             slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
             slug = re.sub(r"[^\w-]", "", slug)[:40] or "deck"
             filename = f"{slug}.apkg"
-            headers: dict[str, str] = {
-                "Content-Disposition": f"attachment; filename={filename}"
-            }
+            headers: dict[str, str] = {"Content-Disposition": f"attachment; filename={filename}"}
             if card_count == 0:
                 headers["X-Luminary-Warning"] = (
                     "No flashcards found for this collection -- generate some first"
