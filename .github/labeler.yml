@@ -1,14 +1,19 @@
 backend:
-  - backend/**/*
+  - changed-files:
+      - any-glob-to-any-file: 'backend/**/*'
 
 frontend:
-  - frontend/**/*
+  - changed-files:
+      - any-glob-to-any-file: 'frontend/**/*'
 
 docs:
-  - docs/**/*
-  - README.md
-  - CONTRIBUTING.md
-  - SECURITY.md
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**/*'
+          - 'README.md'
+          - 'CONTRIBUTING.md'
+          - 'SECURITY.md'
 
 github:
-  - .github/**/*
+  - changed-files:
+      - any-glob-to-any-file: '.github/**/*'
