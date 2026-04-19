@@ -101,14 +101,10 @@ def in_memory_keyring():
 
 async def test_default_mode_is_private(test_db):
     """GET /settings/llm returns mode=private with no DB rows written."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         import unittest.mock
 
-        with unittest.mock.patch(
-            "app.routers.settings._fetch_ollama_models", return_value=[]
-        ):
+        with unittest.mock.patch("app.routers.settings._fetch_ollama_models", return_value=[]):
             resp = await client.get("/settings/llm")
 
     assert resp.status_code == 200
@@ -123,12 +119,8 @@ async def test_patch_llm_settings_persists_mode(test_db):
     """PATCH /settings/llm persists mode and provider changes."""
     import unittest.mock
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        with unittest.mock.patch(
-            "app.routers.settings._fetch_ollama_models", return_value=[]
-        ):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch("app.routers.settings._fetch_ollama_models", return_value=[]):
             resp = await client.patch(
                 "/settings/llm",
                 json={"mode": "cloud", "provider": "anthropic"},
@@ -144,9 +136,7 @@ async def test_patch_llm_settings_persists_mode(test_db):
 
 async def test_patch_llm_settings_rejects_unknown_fields(test_db):
     """PATCH /settings/llm returns 422 for unknown field names (extra='forbid')."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.patch(
             "/settings/llm",
             json={"mode": "cloud", "rogue_field": "x"},
@@ -168,9 +158,7 @@ async def test_api_key_stored_as_keychain_sentinel(test_db, in_memory_keyring):
             select(SettingsModel).where(SettingsModel.key == "openai_api_key")
         )
         row = result.scalar_one()
-        assert row.value == _KEYCHAIN_SENTINEL, (
-            f"SQLite stored {row.value!r} instead of sentinel"
-        )
+        assert row.value == _KEYCHAIN_SENTINEL, f"SQLite stored {row.value!r} instead of sentinel"
 
     # Keychain holds the raw value
     stored_in_keychain = in_memory_keyring.get_password("luminary", "openai_api_key")
@@ -244,12 +232,8 @@ async def test_has_key_boolean_true_after_save(test_db):
     async with factory() as session:
         await update_llm_settings(session, openai_api_key="sk-test-key-12345")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        with unittest.mock.patch(
-            "app.routers.settings._fetch_ollama_models", return_value=[]
-        ):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch("app.routers.settings._fetch_ollama_models", return_value=[]):
             resp = await client.get("/settings/llm")
 
     assert resp.status_code == 200

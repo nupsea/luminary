@@ -61,9 +61,7 @@ _UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
 def _assert_detail_str(body: dict) -> None:
     """Assert the response body has a {detail: str} schema."""
     assert "detail" in body, f"Missing 'detail' key in: {body}"
-    assert isinstance(body["detail"], str), (
-        f"'detail' is not a string: {body['detail']!r}"
-    )
+    assert isinstance(body["detail"], str), f"'detail' is not a string: {body['detail']!r}"
 
 
 # ---------------------------------------------------------------------------

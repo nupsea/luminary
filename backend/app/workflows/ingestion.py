@@ -17,8 +17,15 @@ from app.telemetry import trace_chain, trace_ingestion_node
 logger = logging.getLogger(__name__)
 
 ContentType = Literal[
-    "book", "conversation", "notes", "audio", "video", "epub", "kindle_clippings",
-    "tech_book", "tech_article",
+    "book",
+    "conversation",
+    "notes",
+    "audio",
+    "video",
+    "epub",
+    "kindle_clippings",
+    "tech_book",
+    "tech_article",
 ]
 
 _parser = DocumentParser()
@@ -195,8 +202,13 @@ async def classify_node(state: IngestionState) -> IngestionState:
                     llm_result = await get_llm_service().generate(prompt)
                     llm_type = str(llm_result).strip().lower().split()[0]
                     _valid_types = {
-                        "paper", "book", "conversation", "notes",
-                        "code", "tech_book", "tech_article",
+                        "paper",
+                        "book",
+                        "conversation",
+                        "notes",
+                        "code",
+                        "tech_book",
+                        "tech_article",
                     }
                     if llm_type in _valid_types:
                         content_type = llm_type
@@ -225,9 +237,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
-def _chunk_code_file(
-    raw_text: str, file_path: str, doc_id: str
-) -> tuple[list[dict], list[dict]]:
+def _chunk_code_file(raw_text: str, file_path: str, doc_id: str) -> tuple[list[dict], list[dict]]:
     """Parse a code file into function/class chunks using CodeParser.
 
     Returns (chunks_for_db, definitions_with_metadata) where definitions include
@@ -277,9 +287,7 @@ def _chunk_code_file(
     return chunks, chunk_metas
 
 
-async def _chunk_book(
-    state: IngestionState, pd: dict | None, doc_id: str
-) -> IngestionState:
+async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
     """Book-specific chunking: process each section independently with context injection.
 
     Implements Hybrid Contextual strategy:
@@ -386,17 +394,19 @@ async def _chunk_book(
                 # Inject context into the text that will be embedded/indexed
                 enriched_text = context_header + raw_chunk_text
                 chunk_id = str(uuid.uuid4())
-                chunk_models.append(ChunkModel(
-                    id=chunk_id,
-                    document_id=doc_id,
-                    section_id=section_model.id,
-                    text=enriched_text,
-                    token_count=len(enriched_text.split()),
-                    page_number=s.get("page_start", 0),
-                    speaker=None,
-                    chunk_index=chunk_idx,
-                    pdf_page_number=chunk_pdf_page,
-                ))
+                chunk_models.append(
+                    ChunkModel(
+                        id=chunk_id,
+                        document_id=doc_id,
+                        section_id=section_model.id,
+                        text=enriched_text,
+                        token_count=len(enriched_text.split()),
+                        page_number=s.get("page_start", 0),
+                        speaker=None,
+                        chunk_index=chunk_idx,
+                        pdf_page_number=chunk_pdf_page,
+                    )
+                )
                 chunks.append(
                     {
                         "id": chunk_id,
@@ -427,9 +437,7 @@ async def _chunk_book(
     return {**state, "chunks": chunks, "status": "embedding"}
 
 
-async def _chunk_tech_book(
-    state: IngestionState, pd: dict | None, doc_id: str
-) -> IngestionState:
+async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
     """Tech-book chunking: prose splits normally; code blocks are atomic (never sub-split).
 
     For each section:
@@ -587,9 +595,7 @@ async def _chunk_tech_book(
         if is_objective_candidate(s.get("text", ""))
     ]
     if qualifying_sections:
-        task = asyncio.create_task(
-            _run_objective_extraction(doc_id, qualifying_sections)
-        )
+        task = asyncio.create_task(_run_objective_extraction(doc_id, qualifying_sections))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
@@ -666,16 +672,18 @@ async def _chunk_conversation(
             conv_chunks = chunker.chunk(raw_text)
             for idx, cc in enumerate(conv_chunks):
                 chunk_id = str(uuid.uuid4())
-                chunk_models.append(ChunkModel(
-                    id=chunk_id,
-                    document_id=doc_id,
-                    section_id=None,
-                    text=cc.text,
-                    token_count=len(cc.text) // 4,
-                    page_number=0,
-                    speaker=cc.speaker,
-                    chunk_index=idx,
-                ))
+                chunk_models.append(
+                    ChunkModel(
+                        id=chunk_id,
+                        document_id=doc_id,
+                        section_id=None,
+                        text=cc.text,
+                        token_count=len(cc.text) // 4,
+                        page_number=0,
+                        speaker=cc.speaker,
+                        chunk_index=idx,
+                    )
+                )
                 chunks.append(
                     {"id": chunk_id, "document_id": doc_id, "text": cc.text, "index": idx}
                 )
@@ -693,19 +701,19 @@ async def _chunk_conversation(
             raw_chunks_text = splitter.split_text("\n\n".join(all_texts) or raw_text)
             for idx, text in enumerate(raw_chunks_text):
                 chunk_id = str(uuid.uuid4())
-                chunk_models.append(ChunkModel(
-                    id=chunk_id,
-                    document_id=doc_id,
-                    section_id=None,
-                    text=text,
-                    token_count=len(text.split()),
-                    page_number=0,
-                    speaker=None,
-                    chunk_index=idx,
-                ))
-                chunks.append(
-                    {"id": chunk_id, "document_id": doc_id, "text": text, "index": idx}
+                chunk_models.append(
+                    ChunkModel(
+                        id=chunk_id,
+                        document_id=doc_id,
+                        section_id=None,
+                        text=text,
+                        token_count=len(text.split()),
+                        page_number=0,
+                        speaker=None,
+                        chunk_index=idx,
+                    )
                 )
+                chunks.append({"id": chunk_id, "document_id": doc_id, "text": text, "index": idx})
             conversation_metadata = {
                 "speakers": [],
                 "total_turns": 0,
@@ -820,8 +828,18 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                 }
             wav_path = Path(f"/tmp/{doc_id}_audio.wav")
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-y", "-i", str(fp),
-                "-vn", "-ar", "16000", "-ac", "1", "-f", "wav", str(wav_path),
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(fp),
+                "-vn",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-f",
+                "wav",
+                str(wav_path),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -831,8 +849,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                     **state,
                     "status": "error",
                     "error": (
-                        "ffmpeg audio extraction failed. "
-                        "Ensure the video file is a valid MP4."
+                        "ffmpeg audio extraction failed. Ensure the video file is a valid MP4."
                     ),
                 }
             transcribe_fp = wav_path
@@ -846,9 +863,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         transcriber = get_audio_transcriber()
         loop = asyncio.get_running_loop()
         # CPU-bound -- run in thread pool to keep event loop free for status polls
-        segments, duration = await loop.run_in_executor(
-            None, transcriber.transcribe, transcribe_fp
-        )
+        segments, duration = await loop.run_in_executor(None, transcriber.transcribe, transcribe_fp)
 
         # Clean up temp wav extracted from video
         if wav_path is not None:
@@ -924,16 +939,18 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 async with get_session_factory()() as session:
                     chunk_models: list[ChunkModel] = []
                     for c in audio_chunks:
-                        chunk_models.append(ChunkModel(
-                            id=c["id"],
-                            document_id=doc_id,
-                            section_id=None,
-                            text=c["text"],
-                            token_count=len(c["text"].split()),
-                            page_number=0,
-                            speaker=None,
-                            chunk_index=c["index"],
-                        ))
+                        chunk_models.append(
+                            ChunkModel(
+                                id=c["id"],
+                                document_id=doc_id,
+                                section_id=None,
+                                text=c["text"],
+                                token_count=len(c["text"].split()),
+                                page_number=0,
+                                speaker=None,
+                                chunk_index=c["index"],
+                            )
+                        )
                         chunks.append(
                             {
                                 "id": c["id"],
@@ -960,16 +977,18 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 async with get_session_factory()() as session:
                     chunk_models: list[ChunkModel] = []
                     for idx, (rc, meta) in enumerate(zip(raw_chunks, code_metas, strict=False)):
-                        chunk_models.append(ChunkModel(
-                            id=rc["id"],
-                            document_id=doc_id,
-                            section_id=None,
-                            text=rc["text"],
-                            token_count=len(rc["text"].split()),
-                            page_number=meta.get("start_line", 0),
-                            speaker=None,
-                            chunk_index=idx,
-                        ))
+                        chunk_models.append(
+                            ChunkModel(
+                                id=rc["id"],
+                                document_id=doc_id,
+                                section_id=None,
+                                text=rc["text"],
+                                token_count=len(rc["text"].split()),
+                                page_number=meta.get("start_line", 0),
+                                speaker=None,
+                                chunk_index=idx,
+                            )
+                        )
                         chunks.append(
                             {
                                 "id": rc["id"],
@@ -1034,7 +1053,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 chunk_models: list[ChunkModel] = []
                 chunk_idx = 0
                 fmt = state.get("format", "").lower()
-                
+
                 for section_model, s in zip(section_models, raw_sections, strict=False):
                     section_text = s.get("text", "")
                     if not section_text.strip():
@@ -1046,21 +1065,27 @@ async def chunk_node(state: IngestionState) -> IngestionState:
 
                     for text in splitter.split_text(section_text):
                         chunk_id = str(uuid.uuid4())
-                        chunk_models.append(ChunkModel(
-                            id=chunk_id,
-                            document_id=doc_id,
-                            section_id=section_model.id,
-                            text=text,
-                            token_count=len(text.split()),
-                            page_number=s.get("page_start", 0),
-                            speaker=None,
-                            chunk_index=chunk_idx,
-                            pdf_page_number=chunk_pdf_page,
-                        ))
-                        chunks.append({
-                            "id": chunk_id, "document_id": doc_id,
-                            "text": text, "index": chunk_idx,
-                        })
+                        chunk_models.append(
+                            ChunkModel(
+                                id=chunk_id,
+                                document_id=doc_id,
+                                section_id=section_model.id,
+                                text=text,
+                                token_count=len(text.split()),
+                                page_number=s.get("page_start", 0),
+                                speaker=None,
+                                chunk_index=chunk_idx,
+                                pdf_page_number=chunk_pdf_page,
+                            )
+                        )
+                        chunks.append(
+                            {
+                                "id": chunk_id,
+                                "document_id": doc_id,
+                                "text": text,
+                                "index": chunk_idx,
+                            }
+                        )
                         chunk_idx += 1
                 session.add_all(chunk_models)
                 await session.commit()
@@ -1216,6 +1241,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
         entity_count = 0
         try:
             from app.config import get_settings as _get_settings  # noqa: PLC0415
+
             if not _get_settings().GLINER_ENABLED:
                 logger.info(
                     "entity_extract_node: skipped (GLINER_ENABLED=false)",
@@ -1237,13 +1263,15 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # runs on large documents (e.g. 2000+ chunk books).
             # Sample evenly across the document to get representative entities.
             import asyncio as _asyncio
+
             NER_CHUNK_LIMIT = 500
             if len(chunks) > NER_CHUNK_LIMIT:
                 step = len(chunks) // NER_CHUNK_LIMIT
                 ner_chunks = chunks[::step][:NER_CHUNK_LIMIT]
                 logger.info(
                     "NER sampling %d of %d chunks",
-                    len(ner_chunks), len(chunks),
+                    len(ner_chunks),
+                    len(chunks),
                     extra={"doc_id": doc_id},
                 )
             else:
@@ -1251,9 +1279,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # CPU-bound — run in thread pool to keep event loop free for status polls
             loop = _asyncio.get_event_loop()
             content_type = state.get("content_type") or "unknown"
-            entities = await loop.run_in_executor(
-                None, extractor.extract, ner_chunks, content_type
-            )
+            entities = await loop.run_in_executor(None, extractor.extract, ner_chunks, content_type)
             entity_count = len(entities)
 
             graph = get_graph_service()
@@ -1359,9 +1385,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                                 graph.add_tech_relation(id_a, id_b, rel_label, doc_id)
                                 tech_rel_count += 1
                             except ValueError:
-                                logger.debug(
-                                    "Skipped unknown tech relation label: %r", rel_label
-                                )
+                                logger.debug("Skipped unknown tech relation label: %r", rel_label)
                     logger.info(
                         "tech relation edges created: %d",
                         tech_rel_count,
@@ -1384,6 +1408,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                             continue
                         # Create or find the base entity node
                         import uuid as _uuid  # noqa: PLC0415
+
                         base_id = str(_uuid.uuid5(_uuid.NAMESPACE_DNS, f"{doc_id}:{base_name}"))
                         # Upsert base entity if it doesn't exist yet
                         graph.upsert_entity(base_id, base_name, "LIBRARY")
@@ -1435,9 +1460,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
 _background_tasks: set[asyncio.Task] = set()
 
 
-async def _run_objective_extraction(
-    doc_id: str, sections: list[tuple[str, str, str]]
-) -> None:
+async def _run_objective_extraction(doc_id: str, sections: list[tuple[str, str, str]]) -> None:
     """Background task: extract and store learning objectives for qualifying sections.
 
     sections is a list of (section_id, section_heading, section_text) tuples.
@@ -1466,6 +1489,7 @@ async def _run_objective_extraction(
 async def _run_pregenerate(doc_id: str) -> None:
     """Background task: pre-generate summaries and invalidate library cache."""
     from app.services.summarizer import get_summarization_service  # noqa: PLC0415
+
     svc = get_summarization_service()
     try:
         await svc.generate_all_summaries(doc_id)
@@ -1494,9 +1518,7 @@ async def section_summarize_node(state: IngestionState) -> IngestionState:
 
         svc = get_section_summarizer_service()
         count = await svc.generate(doc_id)
-        logger.info(
-            "section_summarize_node: %d units stored", count, extra={"doc_id": doc_id}
-        )
+        logger.info("section_summarize_node: %d units stored", count, extra={"doc_id": doc_id})
         return {**state, "section_summary_count": count}
     except Exception as exc:
         logger.warning(
@@ -1601,7 +1623,8 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
             )
     else:
         logger.info(
-            "enrichment_enqueue_node: skipping image_extract (format=%s has no images)", fmt,
+            "enrichment_enqueue_node: skipping image_extract (format=%s has no images)",
+            fmt,
             extra={"doc_id": doc_id},
         )
 

@@ -38,9 +38,7 @@ class ConfusionDetectorService:
         Uses string comparison against SQLite's stored datetime format
         (YYYY-MM-DD HH:MM:SS.ffffff) by formatting the cutoff without timezone.
         """
-        cutoff = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        cutoff = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime("%Y-%m-%d %H:%M:%S")
         result = await session.execute(
             text(
                 "SELECT id, question, created_at FROM qa_history"

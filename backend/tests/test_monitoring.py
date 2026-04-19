@@ -451,10 +451,7 @@ async def test_model_usage_aggregates_call_counts(test_db):
     _, factory, _ = test_db
 
     doc = _make_document()
-    qa_rows = [
-        _make_qa(doc.id, datetime.now(tz=UTC).replace(tzinfo=None))
-        for _ in range(3)
-    ]
+    qa_rows = [_make_qa(doc.id, datetime.now(tz=UTC).replace(tzinfo=None)) for _ in range(3)]
     # Override model_used for two of them to create a second model
     qa_rows[2].model_used = "openai/gpt-4o"
     async with factory() as session:

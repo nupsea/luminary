@@ -81,13 +81,9 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
         ' "back": "Closures capture variables by reference."}'
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Step 1: Create session
-        with patch(
-            "app.services.feynman_service.get_llm_service"
-        ) as mock_llm_factory:
+        with patch("app.services.feynman_service.get_llm_service") as mock_llm_factory:
             mock_llm = AsyncMock()
             mock_llm.generate = AsyncMock(return_value=opening_message)
             mock_llm_factory.return_value = mock_llm
@@ -121,18 +117,13 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
                 )
         assert resp2.status_code == 200
         # Parse SSE events
-        events = [
-            line[6:] for line in resp2.text.splitlines()
-            if line.startswith("data: ")
-        ]
+        events = [line[6:] for line in resp2.text.splitlines() if line.startswith("data: ")]
         assert len(events) > 0
         last_event = json.loads(events[-1])
         assert last_event.get("done") is True
 
         # Step 3: Complete session
-        with patch(
-            "app.services.flashcard.get_llm_service"
-        ) as mock_fc_llm:
+        with patch("app.services.flashcard.get_llm_service") as mock_fc_llm:
             mock_fc_llm_svc = AsyncMock()
             mock_fc_llm_svc.generate = AsyncMock(return_value=gap_flashcard_json)
             mock_fc_llm.return_value = mock_fc_llm_svc
@@ -145,12 +136,16 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
     # Verify feynman_turns in DB: opening (index 0) + learner (index 1) + tutor (index 2) = 3
     async with factory() as session:
         turns = (
-            await session.execute(
-                select(FeynmanTurnModel)
-                .where(FeynmanTurnModel.session_id == session_id)
-                .order_by(FeynmanTurnModel.turn_index)
+            (
+                await session.execute(
+                    select(FeynmanTurnModel)
+                    .where(FeynmanTurnModel.session_id == session_id)
+                    .order_by(FeynmanTurnModel.turn_index)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert len(turns) >= 3, f"Expected >= 3 turns, got {len(turns)}"
     roles = [t.role for t in turns]
@@ -160,13 +155,17 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
     # Verify feynman flashcards created
     async with factory() as session:
         cards = (
-            await session.execute(
-                select(FlashcardModel).where(
-                    FlashcardModel.document_id == doc_id,
-                    FlashcardModel.source == "feynman",
+            (
+                await session.execute(
+                    select(FlashcardModel).where(
+                        FlashcardModel.document_id == doc_id,
+                        FlashcardModel.source == "feynman",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert len(cards) >= 1
     for card in cards:
@@ -186,9 +185,7 @@ async def test_create_session_offline_returns_503(test_db):
     _engine, _factory, _tmp = test_db
     doc_id = str(uuid.uuid4())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         with patch("app.services.feynman_service.get_llm_service") as mock_llm_factory:
             mock_llm = AsyncMock()
             mock_llm.generate = AsyncMock(
@@ -245,9 +242,7 @@ async def test_list_feynman_sessions(test_db):
         session.add(turn)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/feynman/sessions?document_id={doc_id}")
 
     assert resp.status_code == 200

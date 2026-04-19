@@ -119,12 +119,14 @@ def _make_bloom_l3_response(count: int = 5) -> str:
     cards = []
     for i in range(count):
         bloom = 3 + (i % 4)  # cycles through 3, 4, 5, 6
-        cards.append({
-            "question": f"Why does Ulysses choose to resist the Sirens in Book XII (card {i})?",
-            "answer": f"In Book XII - The Sirens, Ulysses demonstrates wisdom by... (card {i})",
-            "source_excerpt": f"Ulysses ordered his men... (excerpt {i})",
-            "bloom_level": bloom,
-        })
+        cards.append(
+            {
+                "question": f"Why does Ulysses choose to resist the Sirens in Book XII (card {i})?",
+                "answer": f"In Book XII - The Sirens, Ulysses demonstrates wisdom by... (card {i})",
+                "source_excerpt": f"Ulysses ordered his men... (excerpt {i})",
+                "bloom_level": bloom,
+            }
+        )
     return json.dumps(cards)
 
 

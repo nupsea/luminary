@@ -41,9 +41,7 @@ async def test_section_summarize_node_under_5_minutes(all_books_ingested):
     # Delete existing section summaries to force regeneration
     async with db_module._session_factory() as session:
         await session.execute(
-            delete(SectionSummaryModel).where(
-                SectionSummaryModel.document_id == doc_id
-            )
+            delete(SectionSummaryModel).where(SectionSummaryModel.document_id == doc_id)
         )
         await session.commit()
 
@@ -74,9 +72,7 @@ async def test_pregenerate_fast_path_under_3_minutes(all_books_ingested):
     # Ensure section summaries exist
     async with db_module._session_factory() as session:
         count_row = await session.execute(
-            select(SectionSummaryModel.id).where(
-                SectionSummaryModel.document_id == doc_id
-            ).limit(1)
+            select(SectionSummaryModel.id).where(SectionSummaryModel.document_id == doc_id).limit(1)
         )
         has_sections = count_row.scalar_one_or_none() is not None
 
@@ -85,9 +81,7 @@ async def test_pregenerate_fast_path_under_3_minutes(all_books_ingested):
 
     # Delete existing summary rows to force regeneration
     async with db_module._session_factory() as session:
-        await session.execute(
-            delete(SummaryModel).where(SummaryModel.document_id == doc_id)
-        )
+        await session.execute(delete(SummaryModel).where(SummaryModel.document_id == doc_id))
         await session.commit()
 
     from app.services.summarizer import get_summarization_service

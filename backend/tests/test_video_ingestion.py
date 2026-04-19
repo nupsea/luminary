@@ -3,6 +3,7 @@
 Uses stubs for AudioTranscriber and mocks ffmpeg subprocess to avoid
 real model downloads and system ffmpeg dependency.
 """
+
 import io
 import uuid
 from pathlib import Path
@@ -197,8 +198,12 @@ async def test_transcribe_node_passthrough_for_non_video(test_db, tmp_path):
         "file_path": str(doc_file),
         "format": "txt",
         "parsed_document": {
-            "title": "Test", "sections": [], "raw_text": "text",
-            "pages": 0, "word_count": 2, "format": "txt",
+            "title": "Test",
+            "sections": [],
+            "raw_text": "text",
+            "pages": 0,
+            "word_count": 2,
+            "format": "txt",
         },
         "content_type": "book",
         "chunks": None,
@@ -228,9 +233,7 @@ async def test_mp4_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
 
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("lecture.mp4", io.BytesIO(b"\x00" * 100), "video/mp4")},
@@ -242,9 +245,7 @@ async def test_mp4_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):
 
 async def test_video_endpoint_returns_404_for_missing_doc(test_db):
     """GET /documents/{id}/video returns 404 for unknown document."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{uuid.uuid4()}/video")
     assert resp.status_code == 404
 
@@ -270,9 +271,7 @@ async def test_status_endpoint_returns_ffmpeg_error_message(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/status")
 
     assert resp.status_code == 200
@@ -305,8 +304,6 @@ async def test_video_endpoint_returns_400_for_non_video_doc(test_db, tmp_path, m
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/video")
     assert resp.status_code == 400

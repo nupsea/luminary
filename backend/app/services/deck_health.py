@@ -113,9 +113,7 @@ class DeckHealthService:
             # SQLite may return naive datetimes; normalise to UTC-aware for comparison.
             if last_review is not None and stability is not None:
                 lr_aware = (
-                    last_review.replace(tzinfo=UTC)
-                    if last_review.tzinfo is None
-                    else last_review
+                    last_review.replace(tzinfo=UTC) if last_review.tzinfo is None else last_review
                 )
                 if lr_aware < stale_threshold and stability < _STALE_MAX_STABILITY:
                     stale_ids.append(card_id)

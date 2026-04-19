@@ -67,9 +67,8 @@ class TestGutenbergStripping:
             if lines:
                 # At least one real sentence-length line should exist
                 long_lines = [ln for ln in lines if len(ln) > 60]
-                assert long_lines, (
-                    f"Section '{section.heading}' seems to be only TOC: "
-                    + repr(section.text[:200])
+                assert long_lines, f"Section '{section.heading}' seems to be only TOC: " + repr(
+                    section.text[:200]
                 )
 
 
@@ -142,6 +141,7 @@ class TestP3SherlockHolmes:
         assert result is not None
         # At least some headings should start with a roman numeral token
         import re
+
         roman_pat = re.compile(r"^[IVXLCDM]+[\.\s]", re.IGNORECASE)
         assert any(roman_pat.match(s.heading) for s in result.sections), (
             f"No roman-numeral heading found: {[s.heading for s in result.sections[:5]]}"
@@ -369,7 +369,7 @@ def test_alice_chapter_xi_subtitle():
     path = DATA_BOOKS / "alice_in_wonderland.txt"
     if not path.exists():
         pytest.skip("alice_in_wonderland.txt not found")
-    
+
     result = bp.parse(path, "txt")
     assert result is not None
     # Chapter XI is usually the 11th chapter (index 10)
@@ -378,6 +378,7 @@ def test_alice_chapter_xi_subtitle():
     ch11 = next((s for s in result.sections if "CHAPTER XI" in s.heading), None)
     assert ch11 is not None
     assert "Who Stole the Tarts?" in ch11.heading
+
 
 def test_html_parsing(tmp_path):
     html_content = """
@@ -397,7 +398,7 @@ def test_html_parsing(tmp_path):
     """
     html_file = tmp_path / "test_book.html"
     html_file.write_text(html_content)
-    
+
     result = bp.parse(html_file, "html")
     assert result is not None
     assert len(result.sections) == 2

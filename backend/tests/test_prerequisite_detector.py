@@ -106,7 +106,7 @@ def test_duplicate_pairs_keep_highest_confidence():
     """Same pair in two chunks with different markers -> highest confidence kept."""
     chunks = [
         _chunk("Calculus requires understanding of Algebra"),  # confidence 0.9
-        _chunk("Calculus builds on Algebra"),                  # confidence 0.7
+        _chunk("Calculus builds on Algebra"),  # confidence 0.7
     ]
     result = detect_prerequisites(chunks, {"calculus", "algebra"})
     assert len(result) == 1

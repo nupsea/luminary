@@ -83,9 +83,14 @@ async def test_suggest_tags_service_unavailable():
     import litellm
 
     svc = NoteTaggerService()
-    with patch("litellm.acompletion", new=AsyncMock(side_effect=litellm.ServiceUnavailableError(
-        message="Ollama unreachable", llm_provider="ollama", model="mistral"
-    ))):
+    with patch(
+        "litellm.acompletion",
+        new=AsyncMock(
+            side_effect=litellm.ServiceUnavailableError(
+                message="Ollama unreachable", llm_provider="ollama", model="mistral"
+            )
+        ),
+    ):
         result = await svc.suggest_tags("a" * 30)
     assert result == []
 

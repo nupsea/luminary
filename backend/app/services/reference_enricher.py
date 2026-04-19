@@ -121,9 +121,7 @@ class ReferenceEnricherService:
 
         async with get_session_factory()() as session:
             summaries_result = await session.execute(
-                select(SectionSummaryModel).where(
-                    SectionSummaryModel.document_id == document_id
-                )
+                select(SectionSummaryModel).where(SectionSummaryModel.document_id == document_id)
             )
             summaries = list(summaries_result.scalars().all())
 
@@ -191,9 +189,7 @@ class ReferenceEnricherService:
                         url=url,
                         title=str(ref.get("title", ""))[:300],
                         excerpt=str(ref.get("excerpt", "")),
-                        source_quality=str(
-                            ref.get("source_quality", "unknown")
-                        )[:30],
+                        source_quality=str(ref.get("source_quality", "unknown"))[:30],
                         is_llm_suggested=True,
                         is_valid=is_valid,
                         last_checked_at=now if is_valid is not None else None,

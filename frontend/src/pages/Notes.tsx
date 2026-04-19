@@ -510,6 +510,7 @@ interface NoteCardProps {
 function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -570,6 +571,23 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         <div className="cursor-pointer" onClick={onEdit}>
           <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
         </div>
+      )}
+
+      {/* Source back-link — deep-links to the document section this note was created from */}
+      {note.document_id && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            const params = new URLSearchParams({ doc: note.document_id! })
+            if (note.chunk_id) params.set("chunk_id", note.chunk_id)
+            navigate(`/?${params.toString()}`)
+          }}
+          className="flex items-center gap-1.5 self-start rounded-md border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-primary hover:bg-accent hover:text-foreground transition-colors"
+          title="Open source document"
+        >
+          <BookOpen size={11} />
+          Go to source
+        </button>
       )}
 
       {/* Tags -- breadcrumb style: root in text-primary, /child in text-muted-foreground */}
@@ -1289,10 +1307,10 @@ export default function NotesPage() {
           
           if (isCreating && activeCollectionId) {
             // If we're inside a collection, add the new note to it immediately
-            void fetch(`${API_BASE}/collections/${activeCollectionId}/notes`, {
+            void fetch(`${API_BASE}/collections/${activeCollectionId}/members`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ note_ids: [savedNote.id] }),
+              body: JSON.stringify({ member_ids: [savedNote.id], member_type: "note" }),
             }).then(() => {
               void qc.invalidateQueries({ queryKey: ["notes"] })
               void qc.invalidateQueries({ queryKey: ["notes-groups"] })

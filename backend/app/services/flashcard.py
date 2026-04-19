@@ -15,10 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ChunkModel,
+    CollectionMemberModel,
+    CollectionModel,
     DocumentModel,
     FlashcardModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
     NoteModel,
     SectionModel,
 )
@@ -67,7 +67,7 @@ FLASHCARD_USER_TMPL = (
     "bloom_level is an integer 1-6 "
     "(1=remember, 2=understand, 3=apply, "
     "4=analyze, 5=evaluate, 6=create).\n"
-    "The \"answer\" field may use Markdown (bold, lists) for clarity.\n\n"
+    'The "answer" field may use Markdown (bold, lists) for clarity.\n\n'
     "Text:\n{text}\n\n"
     "JSON array:"
 )
@@ -88,8 +88,8 @@ NOTES_CONCEPT_EXTRACT_SYSTEM = (
     "meta-commentary about the notes. "
     "For each accepted concept, assign a type: "
     "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
-    "Output ONLY a JSON object with keys \"domain\" (string) and "
-    "\"concepts\" (array of {\"concept\": \"...\", \"type\": \"...\"}). "
+    'Output ONLY a JSON object with keys "domain" (string) and '
+    '"concepts" (array of {"concept": "...", "type": "..."}). '
     "No explanation, no preamble, no markdown fences."
 )
 
@@ -170,7 +170,7 @@ _BLOOM_L3_INSTRUCTION = (
     "\nBLOOM LEVEL TARGETING: Generate questions at Bloom's Taxonomy Level 3 or higher "
     "(application, analysis, synthesis, evaluation). At least 50% of questions must require "
     "the learner to apply, analyze, or evaluate -- not merely recall or describe. "
-    "For each card, include a \"bloom_level\" integer (1-6) indicating the cognitive level. "
+    'For each card, include a "bloom_level" integer (1-6) indicating the cognitive level. '
     "ANSWER CITATION: Each answer must reference the section or chapter where the concept "
     "appears (e.g., 'In Chapter XII...', 'In the section on X...'). "
 )
@@ -188,9 +188,7 @@ async def _get_section_context_for_chunks(
     if not section_ids:
         return {}
 
-    result = await session.execute(
-        select(SectionModel).where(SectionModel.id.in_(section_ids))
-    )
+    result = await session.execute(select(SectionModel).where(SectionModel.id.in_(section_ids)))
     sections = {s.id: s for s in result.scalars().all()}
 
     # Resolve parent headings (one level up = chapter)
@@ -226,9 +224,7 @@ async def _get_entity_names_for_document(
         from app.services.graph import get_graph_service  # noqa: PLC0415
 
         graph_svc = get_graph_service()
-        by_type = await asyncio.to_thread(
-            graph_svc.get_entities_by_type_for_document, document_id
-        )
+        by_type = await asyncio.to_thread(graph_svc.get_entities_by_type_for_document, document_id)
         names: list[str] = []
         target_types = types or ["PERSON", "PLACE"]
         for t in target_types:
@@ -244,7 +240,8 @@ async def _get_entity_names_for_document(
     except Exception:
         logger.debug(
             "Entity lookup failed for %s; skipping enrichment",
-            document_id, exc_info=True,
+            document_id,
+            exc_info=True,
         )
         return []
 
@@ -325,9 +322,17 @@ async def _fetch_chunks(
     if content_type == "book":
         # Identify sections to skip (preface, intro, etc.)
         skip_terms = [
-            "preface", "introduction", "prologue", "foreword",
-            "about the author", "copyright", "translator",
-            "table of contents", "appendix", "index", "bibliography"
+            "preface",
+            "introduction",
+            "prologue",
+            "foreword",
+            "about the author",
+            "copyright",
+            "translator",
+            "table of contents",
+            "appendix",
+            "index",
+            "bibliography",
         ]
         sections_result = await session.execute(
             select(SectionModel)
@@ -338,8 +343,7 @@ async def _fetch_chunks(
 
         if sections:
             valid_section_ids = [
-                s.id for s in sections
-                if not any(term in s.heading.lower() for term in skip_terms)
+                s.id for s in sections if not any(term in s.heading.lower() for term in skip_terms)
             ]
             # If we filtered everything out, fall back to all sections
             if not valid_section_ids:
@@ -449,8 +453,7 @@ def _parse_concept_extract(raw: str) -> tuple[str, list[dict]]:
             obj = json.loads(raw[start:end])
             domain = str(obj.get("domain", "")).strip()
             concepts = [
-                c for c in obj.get("concepts", [])
-                if isinstance(c, dict) and c.get("concept")
+                c for c in obj.get("concepts", []) if isinstance(c, dict) and c.get("concept")
             ]
             return domain, concepts
         except (json.JSONDecodeError, ValueError):
@@ -770,11 +773,7 @@ def _infer_genre(doc: "DocumentModel | None") -> str:  # type: ignore[name-defin
 
 def _build_genre_system_prompt(genre: str) -> str:
     """Build a genre-aware flashcard generation system prompt."""
-    genre_hint = (
-        f"This is a {genre} document. "
-        if genre != "narrative"
-        else ""
-    )
+    genre_hint = f"This is a {genre} document. " if genre != "narrative" else ""
     quality_rules = (
         "QUALITY RULES for concept-focused questions:\n"
         "- Do NOT write questions whose answer is a proper noun drawn from an analogy or "
@@ -787,8 +786,7 @@ def _build_genre_system_prompt(genre: str) -> str:
         "- Frame questions in terms of WHY or HOW, not WHAT was mentioned in an example.\n"
     )
     return (
-        genre_hint
-        + "You are a learning assistant creating flashcards for active recall. "
+        genre_hint + "You are a learning assistant creating flashcards for active recall. "
         "Generate questions that test understanding of core concepts and principles. "
         "Prefer questions that: (1) ask the learner to explain a concept in their own words, "
         "(2) apply a concept to a new situation, "
@@ -800,12 +798,9 @@ def _build_genre_system_prompt(genre: str) -> str:
         "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
         "'in this book', 'in this document', or any similar reference to the source material. "
         "A flashcard question must make complete sense on its own without seeing the original"
-        " text. "
-        + quality_rules
-        + "Output a JSON array starting with [ and ending with ]. "
+        " text. " + quality_rules + "Output a JSON array starting with [ and ending with ]. "
         "Write no explanation, preamble, or markdown fences."
     )
-
 
 
 async def _fetch_existing_embeddings(
@@ -898,10 +893,7 @@ async def _sync_flashcard_fts(card: FlashcardModel, session: AsyncSession) -> No
         )
     # Insert fresh row
     await session.execute(
-        text(
-            "INSERT INTO flashcards_fts(flashcard_id, question, answer) "
-            "VALUES (:fid, :q, :a)"
-        ),
+        text("INSERT INTO flashcards_fts(flashcard_id, question, answer) VALUES (:fid, :q, :a)"),
         {"fid": card.id, "q": card.question, "a": card.answer},
     )
 
@@ -942,7 +934,7 @@ class FlashcardService:
         """
         from sqlalchemy import or_  # noqa: PLC0415
 
-        from app.models import NoteCollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
+        from app.models import CollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
 
         stmt = select(FlashcardModel)
         _fts_query_used = False
@@ -972,8 +964,9 @@ class FlashcardService:
             stmt = stmt.where(FlashcardModel.document_id == document_id)
 
         if collection_id:
-            member_sub = select(NoteCollectionMemberModel.note_id).where(
-                NoteCollectionMemberModel.collection_id == collection_id
+            member_sub = select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
             )
             stmt = stmt.where(FlashcardModel.note_id.in_(member_sub))
 
@@ -1021,8 +1014,9 @@ class FlashcardService:
             if document_id:
                 stmt_fallback = stmt_fallback.where(FlashcardModel.document_id == document_id)
             if collection_id:
-                member_sub2 = select(NoteCollectionMemberModel.note_id).where(
-                    NoteCollectionMemberModel.collection_id == collection_id
+                member_sub2 = select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_type == "note",
                 )
                 stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(member_sub2))
             if tag:
@@ -1143,9 +1137,7 @@ class FlashcardService:
             # S188: resolve section heading for cards (first chunk's section)
             first_sec = eligible_chunks[0].section_id if eligible_chunks else None
             if first_sec and first_sec in section_ctx:
-                resolved_section_heading = _resolve_section_heading(
-                    eligible_chunks[0], section_ctx
-                )
+                resolved_section_heading = _resolve_section_heading(eligible_chunks[0], section_ctx)
 
         # S188: enrich system prompt with Bloom L3+ targeting and citation instruction
         system_prompt += _BLOOM_L3_INSTRUCTION
@@ -1170,9 +1162,7 @@ class FlashcardService:
         if is_tech and not has_context:
             code_chunks = [c for c in eligible_chunks if c.has_code]
             if code_chunks:
-                code_excerpts = "\n\n".join(
-                    c.text[:1000] for c in code_chunks[:3]
-                )
+                code_excerpts = "\n\n".join(c.text[:1000] for c in code_chunks[:3])
                 extra_instructions += (
                     f"Code blocks from the document:\n{code_excerpts}\n"
                     "Include code examples in questions where appropriate.\n"
@@ -1290,7 +1280,6 @@ class FlashcardService:
 
         return flashcards
 
-
     async def generate_from_notes(
         self,
         tag: str | None,
@@ -1310,16 +1299,13 @@ class FlashcardService:
         llm = get_llm_service()
 
         if note_ids:
-            result = await session.execute(
-                select(NoteModel).where(NoteModel.id.in_(note_ids))
-            )
+            result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
             notes = list(result.scalars().all())
         else:
             result = await session.execute(
                 select(NoteModel).where(
                     text(
-                        "EXISTS (SELECT 1 FROM json_each(notes.tags)"
-                        " WHERE json_each.value = :tag)"
+                        "EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE json_each.value = :tag)"
                     ).bindparams(tag=tag)
                 )
             )
@@ -1424,7 +1410,7 @@ class FlashcardService:
 
         # 1. Fetch collection name
         coll_result = await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+            select(CollectionModel).where(CollectionModel.id == collection_id)
         )
         collection = coll_result.scalar_one_or_none()
         if collection is None:
@@ -1434,8 +1420,9 @@ class FlashcardService:
 
         # 2. Fetch member note_ids
         member_result = await session.execute(
-            select(NoteCollectionMemberModel.note_id).where(
-                NoteCollectionMemberModel.collection_id == collection_id
+            select(CollectionMemberModel.member_id).where(
+                CollectionMemberModel.collection_id == collection_id,
+                CollectionMemberModel.member_type == "note",
             )
         )
         note_ids = [row[0] for row in member_result.all()]
@@ -1445,20 +1432,18 @@ class FlashcardService:
 
         # 3. Process each note sequentially
         for note_id in note_ids:
-            note_result = await session.execute(
-                select(NoteModel).where(NoteModel.id == note_id)
-            )
+            note_result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
             note = note_result.scalar_one_or_none()
             if note is None or not note.content:
                 continue
 
-            content_hash = hashlib.sha256(
-                note.content[:500].encode()
-            ).hexdigest()[:16]
+            content_hash = hashlib.sha256(note.content[:500].encode()).hexdigest()[:16]
 
             if not force_regenerate:
                 count_result = await session.execute(
-                    select(func.count()).select_from(FlashcardModel).where(
+                    select(func.count())
+                    .select_from(FlashcardModel)
+                    .where(
                         FlashcardModel.deck == deck_name,
                         FlashcardModel.source == "note",
                         FlashcardModel.source_content_hash == content_hash,
@@ -1585,9 +1570,7 @@ class FlashcardService:
             if isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
                 raise exc
             if isinstance(exc, BaseException):
-                logger.warning(
-                    "generate_from_gaps: unexpected error for a gap, skipping: %s", exc
-                )
+                logger.warning("generate_from_gaps: unexpected error for a gap, skipping: %s", exc)
         results: list[FlashcardModel | None] = [
             r for r in raw_results if not isinstance(r, BaseException)
         ]
@@ -1605,7 +1588,6 @@ class FlashcardService:
                 len(gaps),
             )
         return len(cards), ids
-
 
     async def generate_from_feynman_gaps(
         self,
@@ -1796,7 +1778,6 @@ class FlashcardService:
 
         return all_cards
 
-
     async def generate_technical(
         self,
         document_id: str,
@@ -1908,7 +1889,6 @@ class FlashcardService:
                 await session.refresh(card)
 
         return flashcards
-
 
     async def generate_cloze(
         self,

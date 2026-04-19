@@ -193,15 +193,17 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
         await session.commit()
 
     # LLM returns one card at the target bloom level
-    llm_response = json.dumps([
-        {
-            "question": "How would you apply X in production?",
-            "answer": "Use X by following steps A, B, C.",
-            "source_excerpt": "X is used in production.",
-            "flashcard_type": "concept_explanation",
-            "bloom_level": 3,
-        }
-    ])
+    llm_response = json.dumps(
+        [
+            {
+                "question": "How would you apply X in production?",
+                "answer": "Use X by following steps A, B, C.",
+                "source_excerpt": "X is used in production.",
+                "flashcard_type": "concept_explanation",
+                "bloom_level": 3,
+            }
+        ]
+    )
     mock_llm = MockLLMService(response=llm_response)
 
     gaps = [

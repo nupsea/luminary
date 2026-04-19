@@ -159,9 +159,7 @@ async def _expand_context(
         content_types: dict[str, str] = {row[0]: row[1] for row in ct_result.fetchall()}
 
         # Check if any chunk qualifies for expansion
-        eligible_docs = {
-            did for did, ct in content_types.items() if ct in _EXPANSION_TYPES
-        }
+        eligible_docs = {did for did, ct in content_types.items() if ct in _EXPANSION_TYPES}
         if not eligible_docs:
             return chunks
 
@@ -467,11 +465,7 @@ class HybridRetriever:
                 "LIMIT :k"
             )
         else:
-            sql = text(
-                "SELECT image_id FROM images_fts "
-                "WHERE images_fts MATCH :query "
-                "LIMIT :k"
-            )
+            sql = text("SELECT image_id FROM images_fts WHERE images_fts MATCH :query LIMIT :k")
 
         try:
             async with get_session_factory()() as session:

@@ -117,7 +117,9 @@ async def classify_node(state: ChatState) -> dict:
 
     logger.info(
         "chat: question=%r scope=%s docs=%d",
-        question[:80], scope, len(doc_ids),
+        question[:80],
+        scope,
+        len(doc_ids),
     )
 
     intent, confidence = classify_intent_heuristic(question)
@@ -129,7 +131,9 @@ async def classify_node(state: ChatState) -> dict:
 
     logger.info(
         "classify_node: intent=%s confidence=%.2f source=%s",
-        intent, confidence, source,
+        intent,
+        confidence,
+        source,
     )
 
     # Query rewriting via Kuzu entities — non-fatal
@@ -373,17 +377,13 @@ async def summary_node(state: ChatState) -> dict:
         }
 
     # Multiple docs but no cached library summary yet — fire background generation
-    logger.info(
-        "summary_node: no library summary found — firing background generation"
-    )
+    logger.info("summary_node: no library summary found — firing background generation")
     task = asyncio.create_task(_generate_library_summary_task())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
     return {
-        "answer": (
-            "The library summary is being generated. Please ask again in a moment."
-        ),
+        "answer": ("The library summary is being generated. Please ask again in a moment."),
         "confidence": "medium",
         "not_found": False,
     }
@@ -394,7 +394,7 @@ async def summary_node(state: ChatState) -> dict:
 # ---------------------------------------------------------------------------
 
 _ENTITY_RE = re.compile(r'["\']([^"\']{2,})["\']')
-_CAPITALIZED_RE = re.compile(r'\b([A-Z][a-zA-Z]{2,})\b')
+_CAPITALIZED_RE = re.compile(r"\b([A-Z][a-zA-Z]{2,})\b")
 
 
 def _extract_entities_from_question(question: str) -> list[str]:
@@ -484,7 +484,8 @@ async def graph_node(state: ChatState) -> dict:
 
     logger.info(
         "graph_node: extracted %d entities, got %d graph lines",
-        len(entity_names), len(graph_lines),
+        len(entity_names),
+        len(graph_lines),
     )
 
     if not graph_lines:
@@ -569,7 +570,7 @@ async def _decompose_comparison(question: str) -> dict | None:
                     "role": "system",
                     "content": (
                         "Extract ALL subjects being compared and the comparison topic. "
-                        'Reply with exactly this JSON (no prose, no markdown): '
+                        "Reply with exactly this JSON (no prose, no markdown): "
                         '{"sides": ["subject1", "subject2", ...], '
                         '"topic": "what is being compared"}. '
                         "sides must have 2 or more entries. "
@@ -599,9 +600,7 @@ async def _decompose_comparison(question: str) -> dict | None:
     return None
 
 
-async def _resolve_side_to_docs(
-    side_name: str, scope_doc_ids: list[str] | None
-) -> list[str]:
+async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None) -> list[str]:
     """Resolve a comparison side (author, character, work title) to document IDs.
 
     Resolution order (results are unioned):
@@ -644,9 +643,7 @@ async def _resolve_side_to_docs(
                 if row[0]:
                     doc_ids.add(row[0])
     except Exception:
-        logger.warning(
-            "_resolve_side_to_docs: Kuzu lookup failed for %r", side_name, exc_info=True
-        )
+        logger.warning("_resolve_side_to_docs: Kuzu lookup failed for %r", side_name, exc_info=True)
 
     # Document title search — catches cases where the side name appears in a title
     try:
@@ -701,7 +698,9 @@ async def comparative_node(state: ChatState) -> dict:
 
         logger.info(
             "comparative_node: %d sides=%s topic=%r",
-            len(sides), sides, topic,
+            len(sides),
+            sides,
+            topic,
         )
 
         resolved: list[list[str]] = await asyncio.gather(
@@ -736,12 +735,11 @@ async def comparative_node(state: ChatState) -> dict:
         section_context = f"Comparing: {side_labels} — topic: {topic}"
 
         for side, docs in zip(sides, resolved):
-            logger.info(
-                "comparative_node: side=%r resolved to %d doc(s)", side, len(docs)
-            )
+            logger.info("comparative_node: side=%r resolved to %d doc(s)", side, len(docs))
         logger.info(
             "comparative_node: retrieving %d chunks per side, total=%d",
-            k_per_side, len(interleaved),
+            k_per_side,
+            len(interleaved),
         )
         return {"chunks": interleaved, "section_context": section_context}
 
@@ -801,12 +799,10 @@ async def _fetch_neighbor_chunks(
     """Fetch immediate neighbors (index-1, index+1) for a chunk to expand context."""
     async with get_session_factory()() as session:
         from app.models import ChunkModel  # noqa: PLC0415
-        stmt = (
-            select(ChunkModel.chunk_index, ChunkModel.text)
-            .where(
-                ChunkModel.document_id == document_id,
-                ChunkModel.chunk_index.in_([chunk_index - 1, chunk_index + 1]),
-            )
+
+        stmt = select(ChunkModel.chunk_index, ChunkModel.text).where(
+            ChunkModel.document_id == document_id,
+            ChunkModel.chunk_index.in_([chunk_index - 1, chunk_index + 1]),
         )
         rows = await session.execute(stmt)
         return [(row.chunk_index, row.text) for row in rows]
@@ -827,7 +823,9 @@ async def search_node(state: ChatState) -> dict:
 
     logger.info(
         "search_node: query=%r scope=%s filter_docs=%s",
-        q[:80], scope, len(effective_doc_ids) if effective_doc_ids else "all",
+        q[:80],
+        scope,
+        len(effective_doc_ids) if effective_doc_ids else "all",
     )
 
     # For library-wide queries use a tighter k to avoid scattered context
@@ -841,17 +839,14 @@ async def search_node(state: ChatState) -> dict:
         chunks, image_ids = await retriever.retrieve_with_images(q, effective_doc_ids, k=k)
 
         # Batch-fetch section summaries for all (document_id, section_heading) pairs
-        pairs = [
-            (c.document_id, c.section_heading)
-            for c in chunks
-            if c.section_heading
-        ]
+        pairs = [(c.document_id, c.section_heading) for c in chunks if c.section_heading]
         section_summary_map = await _fetch_section_summaries(pairs)
 
         # Context Expansion: fetch neighbors for each chunk
         neighbor_tasks = [
             _fetch_neighbor_chunks(c.chunk_id, c.document_id, c.chunk_index)
-            if hasattr(c, "chunk_index") else asyncio.sleep(0, result=[])
+            if hasattr(c, "chunk_index")
+            else asyncio.sleep(0, result=[])
             for c in chunks
         ]
         neighbors_list = await asyncio.gather(*neighbor_tasks)
@@ -871,12 +866,7 @@ async def search_node(state: ChatState) -> dict:
             )
             augmented_text = expanded_text
             if section_summary:
-                augmented_text = (
-                    f"### {c.section_heading}\n"
-                    f"{section_summary}\n"
-                    f"---\n"
-                    f"{expanded_text}"
-                )
+                augmented_text = f"### {c.section_heading}\n{section_summary}\n---\n{expanded_text}"
 
             chunks_dicts.append(
                 {
@@ -987,23 +977,28 @@ async def notes_gap_node(state: ChatState) -> dict:
         from sqlalchemy import select  # noqa: PLC0415
 
         from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import NoteCollectionMemberModel, NoteCollectionModel  # noqa: PLC0415
+        from app.models import CollectionMemberModel, CollectionModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             # Step 1: find auto-collection for this document
-            coll_row = (await session.execute(
-                select(NoteCollectionModel.id).where(
-                    NoteCollectionModel.auto_document_id == document_id
+            coll_row = (
+                await session.execute(
+                    select(CollectionModel.id).where(
+                        CollectionModel.auto_document_id == document_id
+                    )
                 )
-            )).first()
+            ).first()
             if coll_row:
                 auto_collection_id = coll_row[0]
                 # Step 2: fetch note IDs from collection members
-                member_rows = (await session.execute(
-                    select(NoteCollectionMemberModel.note_id).where(
-                        NoteCollectionMemberModel.collection_id == auto_collection_id
+                member_rows = (
+                    await session.execute(
+                        select(CollectionMemberModel.member_id).where(
+                            CollectionMemberModel.collection_id == auto_collection_id,
+                            CollectionMemberModel.member_type == "note",
+                        )
                     )
-                )).fetchall()
+                ).fetchall()
                 note_ids = [r[0] for r in member_rows]
             else:
                 note_ids = []
@@ -1033,7 +1028,8 @@ async def notes_gap_node(state: ChatState) -> dict:
     if len(note_ids) < 3:
         logger.info(
             "notes_gap_node: only %d notes for document %s -- suggesting more",
-            len(note_ids), document_id,
+            len(note_ids),
+            document_id,
         )
         card = {
             "type": "gap_result",
@@ -1109,9 +1105,7 @@ async def socratic_node(state: ChatState) -> dict:
     try:
         retriever = get_retriever()
         filter_ids = [document_id] if document_id else None
-        chunks_retrieved = await retriever.retrieve(
-            "key concept important idea", filter_ids, k=5
-        )
+        chunks_retrieved = await retriever.retrieve("key concept important idea", filter_ids, k=5)
     except Exception:
         logger.warning("socratic_node: retrieval failed", exc_info=True)
 
@@ -1165,8 +1159,13 @@ async def socratic_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.APIConnectionError,
+        litellm.NotFoundError,
+        litellm.RateLimitError,
+        litellm.AuthenticationError,
+    ):
         logger.warning("socratic_node: LLM unavailable")
         card = {
             "type": "quiz_question",
@@ -1231,10 +1230,7 @@ async def teach_back_node(state: ChatState) -> dict:
         logger.warning("teach_back_node: retrieval failed", exc_info=True)
 
     passages = "\n---\n".join(c.text for c in chunks_retrieved[:5])[:3000]
-    user_msg = (
-        f"LEARNER EXPLANATION:\n{question}\n\n"
-        f"AUTHORITATIVE PASSAGES:\n{passages}"
-    )
+    user_msg = f"LEARNER EXPLANATION:\n{question}\n\nAUTHORITATIVE PASSAGES:\n{passages}"
 
     fallback_card = {
         "type": "teach_back_result",
@@ -1281,8 +1277,13 @@ async def teach_back_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-            litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+    except (
+        litellm.ServiceUnavailableError,
+        litellm.APIConnectionError,
+        litellm.NotFoundError,
+        litellm.RateLimitError,
+        litellm.AuthenticationError,
+    ):
         logger.warning("teach_back_node: LLM unavailable")
         card = {
             "type": "teach_back_result",
@@ -1311,9 +1312,7 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
         return {}
     async with get_session_factory()() as session:
         rows = await session.execute(
-            select(DocumentModel.id, DocumentModel.title).where(
-                DocumentModel.id.in_(doc_ids)
-            )
+            select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
         )
         return {row.id: row.title for row in rows}
 
@@ -1331,8 +1330,9 @@ async def _fetch_section_ids_and_pages_for_chunks(
     try:
         async with get_session_factory()() as session:
             rows = await session.execute(
-                select(ChunkModel.id, ChunkModel.section_id, ChunkModel.pdf_page_number)
-                .where(ChunkModel.id.in_(chunk_ids))
+                select(ChunkModel.id, ChunkModel.section_id, ChunkModel.pdf_page_number).where(
+                    ChunkModel.id.in_(chunk_ids)
+                )
             )
             return {row.id: (row.section_id, row.pdf_page_number) for row in rows}
     except Exception:
@@ -1354,7 +1354,8 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
         svc = get_graph_service()
         all_edges = svc.get_same_concept_edges()
         relevant = [
-            e for e in all_edges
+            e
+            for e in all_edges
             if e["contradiction"]
             and (e["source_doc_id"] in doc_ids or e["target_doc_id"] in doc_ids)
         ]
@@ -1371,8 +1372,9 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
         try:
             async with get_session_factory()() as session:
                 rows = await session.execute(
-                    select(DocumentModel.id, DocumentModel.publication_year)
-                    .where(DocumentModel.id.in_(list(all_doc_ids)))
+                    select(DocumentModel.id, DocumentModel.publication_year).where(
+                        DocumentModel.id.in_(list(all_doc_ids))
+                    )
                 )
                 for row in rows:
                     doc_years[row.id] = row.publication_year
@@ -1388,9 +1390,7 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
             elif e["prefer_source"] == "a":
                 year = doc_years.get(e["source_doc_id"])
                 prefer = f" [{year} source preferred]" if year else " (first source preferred)"
-            lines.append(
-                f'- Concept "{e["name_a"]}": {e["contradiction_note"]}{prefer}'
-            )
+            lines.append(f'- Concept "{e["name_a"]}": {e["contradiction_note"]}{prefer}')
         return "\n".join(lines)
     except Exception:
         logger.debug("_fetch_contradiction_context failed", exc_info=True)
@@ -1426,7 +1426,9 @@ async def synthesize_node(state: ChatState) -> dict:
 
     logger.info(
         "synthesize_node: intent=%s chunks=%d section_context=%s",
-        intent, len(chunks_dicts), "yes" if section_context else "no",
+        intent,
+        len(chunks_dicts),
+        "yes" if section_context else "no",
     )
 
     from app.services.context_packer import pack_context  # noqa: PLC0415
@@ -1490,10 +1492,7 @@ async def synthesize_node(state: ChatState) -> dict:
             lines_to_include.insert(0, line)
             word_count += words
         if lines_to_include:
-            history_block = (
-                "Prior conversation (most recent last):\n"
-                + "\n".join(lines_to_include)
-            )
+            history_block = "Prior conversation (most recent last):\n" + "\n".join(lines_to_include)
 
     if history_block:
         prompt = f"{history_block}\n\nContext:\n\n{context}\n\nQuestion: {question}"
@@ -1504,8 +1503,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # For library-wide factual/exploratory queries, instruct the LLM to attribute sources
     if scope == "all" and intent in ("factual", "exploratory"):
         system_prompt = (
-            system_prompt
-            + "\n\nThe user is asking about their entire library. "
+            system_prompt + "\n\nThe user is asking about their entire library. "
             "Answer using only the provided passages. "
             "If the passages come from multiple documents, synthesise across them. "
             "Be explicit about which document each point comes from."
@@ -1530,8 +1528,7 @@ async def synthesize_node(state: ChatState) -> dict:
         web_versions = [s.get("version_info", "") for s in web_snippets if s.get("version_info")]
         if web_versions:
             system_prompt = (
-                system_prompt
-                + "\n\nSome context comes from web sources labeled [Web: ...]. "
+                system_prompt + "\n\nSome context comes from web sources labeled [Web: ...]. "
                 "If the web source mentions a newer version than the local content "
                 "(e.g. 'Python 3.12' vs 'Python 3.9'), explicitly note the discrepancy: "
                 "'Your book covers X [Local]. The current recommendation is Y [Web: domain].' "
@@ -1571,15 +1568,17 @@ async def synthesize_node(state: ChatState) -> dict:
             seen_dedup_keys.add(dedup_key)
 
             chunk_text = c.get("text", "") or ""
-            source_citations_out.append({
-                "chunk_id": cid,
-                "document_id": doc_id,
-                "document_title": doc_title,
-                "section_id": section_id,
-                "section_heading": section_heading,
-                "pdf_page_number": pdf_page,
-                "section_preview_snippet": chunk_text[:150],  # S157: hover tooltip preview
-            })
+            source_citations_out.append(
+                {
+                    "chunk_id": cid,
+                    "document_id": doc_id,
+                    "document_title": doc_title,
+                    "section_id": section_id,
+                    "section_heading": section_heading,
+                    "pdf_page_number": pdf_page,
+                    "section_preview_snippet": chunk_text[:150],  # S157: hover tooltip preview
+                }
+            )
 
     # S158: build TransparencyInfo for the retrieval transparency panel.
     # strategy_used is inferred from primary_strategy and retry state.
@@ -1599,9 +1598,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # Count unique sections across context chunks (using already-fetched chunk_meta).
     section_count = 0
     if chunks_dicts:
-        section_count = len({
-            meta[0] for meta in chunk_meta.values() if meta[0] is not None
-        })
+        section_count = len({meta[0] for meta in chunk_meta.values() if meta[0] is not None})
 
     transparency_info: TransparencyInfo = {
         "strategy_used": strategy_used,
@@ -1617,7 +1614,8 @@ async def synthesize_node(state: ChatState) -> dict:
     retrieval_confidence = "low"
     if chunks_dicts:
         scores = sorted(
-            (c.get("score", 0) for c in chunks_dicts), reverse=True,
+            (c.get("score", 0) for c in chunks_dicts),
+            reverse=True,
         )
         top3_avg = sum(scores[:3]) / min(len(scores), 3)
         # RRF with k=60: max score ~0.033 (rank 1 in both sources).
@@ -1650,7 +1648,8 @@ async def confidence_gate_node(state: ChatState) -> dict:
     retry_attempted = state.get("retry_attempted", False)
     logger.info(
         "confidence_gate_node: confidence=%s retry_attempted=%s",
-        confidence, retry_attempted,
+        confidence,
+        retry_attempted,
     )
     return {}
 
@@ -1763,7 +1762,9 @@ async def augment_node(state: ChatState) -> dict:
 
     logger.info(
         "augment_node: added %d chunks + %d graph lines (total chunks now %d)",
-        len(new_chunks), len(new_section_lines), len(combined_chunks),
+        len(new_chunks),
+        len(new_section_lines),
+        len(combined_chunks),
     )
     return {
         "chunks": combined_chunks,
@@ -1829,10 +1830,7 @@ async def web_augment_node(state: ChatState) -> dict:
 
     # Format snippets as labeled section_context entries
     existing_section_context = state.get("section_context") or ""
-    web_lines = [
-        f"[Web: {s['domain']}]\nTitle: {s['title']}\n{s['content']}"
-        for s in snippets
-    ]
+    web_lines = [f"[Web: {s['domain']}]\nTitle: {s['title']}\n{s['content']}" for s in snippets]
     web_context = "\n\n".join(web_lines)
 
     if existing_section_context:
@@ -1843,7 +1841,8 @@ async def web_augment_node(state: ChatState) -> dict:
     existing_snippets = list(state.get("web_snippets") or [])
     logger.info(
         "web_augment_node: added %d web snippets (total web_calls_used=%d)",
-        len(snippets), web_calls_used + 1,
+        len(snippets),
+        web_calls_used + 1,
     )
     return {
         "section_context": combined,

@@ -12,7 +12,6 @@
     Full graph invocation with any question → no exception raised.
 """
 
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 

@@ -197,9 +197,7 @@ async def test_search_latency_p50_p95(perf_db):
     fixture_a = (FIXTURES_DIR / "time_machine.txt").read_bytes()
     fixture_b = (FIXTURES_DIR / "art_of_unix_ch1.txt").read_bytes()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Ingest 10 documents (5 copies of each fixture, different names)
         deadline = time.perf_counter() + 120.0
         ingested = []
@@ -245,36 +243,23 @@ async def test_ingestion_throughput_10_docs_within_120s(perf_db):
     fixture_a = (FIXTURES_DIR / "time_machine.txt").read_bytes()
     fixture_b = (FIXTURES_DIR / "art_of_unix_ch1.txt").read_bytes()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         wall_start = time.perf_counter()
         deadline = wall_start + 120.0
 
         tasks = []
         for i in range(5):
-            tasks.append(
-                _ingest_and_wait(client, tmp_path, f"tm_{i}.txt", fixture_a, deadline)
-            )
-            tasks.append(
-                _ingest_and_wait(client, tmp_path, f"au_{i}.txt", fixture_b, deadline)
-            )
+            tasks.append(_ingest_and_wait(client, tmp_path, f"tm_{i}.txt", fixture_a, deadline))
+            tasks.append(_ingest_and_wait(client, tmp_path, f"au_{i}.txt", fixture_b, deadline))
 
         results = await asyncio.gather(*tasks)
         wall_elapsed = time.perf_counter() - wall_start
 
         completed = [r for r in results if r is not None]
-        print(
-            f"\nIngestion throughput: {len(completed)}/10 docs completed "
-            f"in {wall_elapsed:.1f}s"
-        )
+        print(f"\nIngestion throughput: {len(completed)}/10 docs completed in {wall_elapsed:.1f}s")
 
-        assert len(completed) == 10, (
-            f"Only {len(completed)}/10 documents completed within 120s"
-        )
-        assert wall_elapsed < 120, (
-            f"10 documents took {wall_elapsed:.1f}s (limit: 120s)"
-        )
+        assert len(completed) == 10, f"Only {len(completed)}/10 documents completed within 120s"
+        assert wall_elapsed < 120, f"10 documents took {wall_elapsed:.1f}s (limit: 120s)"
 
 
 @pytest.mark.slow
@@ -288,24 +273,18 @@ async def test_memory_growth_under_500mb_for_10_docs(perf_db):
     process = psutil.Process()
     rss_before = process.memory_info().rss
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         deadline = time.perf_counter() + 120.0
         tasks = []
         for i in range(5):
-            tasks.append(
-                _ingest_and_wait(client, tmp_path, f"mem_tm_{i}.txt", fixture_a, deadline)
-            )
-            tasks.append(
-                _ingest_and_wait(client, tmp_path, f"mem_au_{i}.txt", fixture_b, deadline)
-            )
+            tasks.append(_ingest_and_wait(client, tmp_path, f"mem_tm_{i}.txt", fixture_a, deadline))
+            tasks.append(_ingest_and_wait(client, tmp_path, f"mem_au_{i}.txt", fixture_b, deadline))
         await asyncio.gather(*tasks)
 
     rss_after = process.memory_info().rss
     growth_mb = (rss_after - rss_before) / (1024 * 1024)
 
-    print(f"\nMemory growth: {growth_mb:.1f}MB (before={rss_before // (1024*1024)}MB)")
+    print(f"\nMemory growth: {growth_mb:.1f}MB (before={rss_before // (1024 * 1024)}MB)")
 
     assert growth_mb < 500, (
         f"Memory grew by {growth_mb:.1f}MB (limit: 500MB) after ingesting 10 documents"

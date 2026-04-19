@@ -110,27 +110,31 @@ async def test_generate_technical_code_chunk_produces_higher_bloom_card(test_db)
     chunk_id = str(uuid.uuid4())
 
     factorial_code = (
-        "def factorial(n):\n"
-        "    if n == 0:\n"
-        "        return 1\n"
-        "    return n * factorial(n-1)"
+        "def factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n-1)"
     )
     async with factory() as session:
         session.add(_make_doc(doc_id))
-        session.add(_make_chunk(
-            chunk_id, doc_id=doc_id,
-            has_code=True,
-            text=factorial_code,
-        ))
+        session.add(
+            _make_chunk(
+                chunk_id,
+                doc_id=doc_id,
+                has_code=True,
+                text=factorial_code,
+            )
+        )
         await session.commit()
 
-    llm_json = json.dumps([{
-        "question": "What does factorial(3) return?",
-        "answer": "6. Call stack: factorial(3)->3*factorial(2)->3*2*factorial(1)->3*2*1=6.",
-        "source_excerpt": "def factorial(n):",
-        "flashcard_type": "trace",
-        "bloom_level": 4,
-    }])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What does factorial(3) return?",
+                "answer": "6. Call stack: factorial(3)->3*factorial(2)->3*2*factorial(1)->3*2*1=6.",
+                "source_excerpt": "def factorial(n):",
+                "flashcard_type": "trace",
+                "bloom_level": 4,
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -163,24 +167,35 @@ async def test_generate_technical_warning_admonition_produces_definition(test_db
 
     async with factory() as session:
         session.add(_make_doc(doc_id))
-        session.add(_make_section(
-            sec_id, doc_id=doc_id,
-            heading="Memory Management",
-            admonition_type="warning",
-        ))
-        session.add(_make_chunk(
-            chunk_id, doc_id=doc_id, section_id=sec_id,
-            text="WARNING: Never delete an object while iterating over it.",
-        ))
+        session.add(
+            _make_section(
+                sec_id,
+                doc_id=doc_id,
+                heading="Memory Management",
+                admonition_type="warning",
+            )
+        )
+        session.add(
+            _make_chunk(
+                chunk_id,
+                doc_id=doc_id,
+                section_id=sec_id,
+                text="WARNING: Never delete an object while iterating over it.",
+            )
+        )
         await session.commit()
 
-    llm_json = json.dumps([{
-        "question": "What should you never do while iterating over an object?",
-        "answer": "Delete it — this causes undefined behaviour.",
-        "source_excerpt": "Never delete an object while iterating.",
-        "flashcard_type": "definition",
-        "bloom_level": 1,
-    }])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What should you never do while iterating over an object?",
+                "answer": "Delete it — this causes undefined behaviour.",
+                "source_excerpt": "Never delete an object while iterating.",
+                "flashcard_type": "definition",
+                "bloom_level": 1,
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -213,29 +228,40 @@ async def test_generate_technical_tradeoff_heading_produces_design_decision(test
 
     async with factory() as session:
         session.add(_make_doc(doc_id))
-        session.add(_make_section(
-            sec_id, doc_id=doc_id,
-            heading="List vs Tuple trade-off",
-        ))
-        session.add(_make_chunk(
-            chunk_id, doc_id=doc_id, section_id=sec_id,
-            text=(
-                "Lists are mutable sequences; tuples are immutable. "
-                "Use tuples for fixed data, lists when you need append/remove."
-            ),
-        ))
+        session.add(
+            _make_section(
+                sec_id,
+                doc_id=doc_id,
+                heading="List vs Tuple trade-off",
+            )
+        )
+        session.add(
+            _make_chunk(
+                chunk_id,
+                doc_id=doc_id,
+                section_id=sec_id,
+                text=(
+                    "Lists are mutable sequences; tuples are immutable. "
+                    "Use tuples for fixed data, lists when you need append/remove."
+                ),
+            )
+        )
         await session.commit()
 
-    llm_json = json.dumps([{
-        "question": "When should you choose a tuple over a list in Python?",
-        "answer": (
-            "Choose a tuple when the data is fixed and must not change; "
-            "its immutability signals intent and allows hashing."
-        ),
-        "source_excerpt": "Lists are mutable; tuples are immutable.",
-        "flashcard_type": "design_decision",
-        "bloom_level": 5,
-    }])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "When should you choose a tuple over a list in Python?",
+                "answer": (
+                    "Choose a tuple when the data is fixed and must not change; "
+                    "its immutability signals intent and allows hashing."
+                ),
+                "source_excerpt": "Lists are mutable; tuples are immutable.",
+                "flashcard_type": "design_decision",
+                "bloom_level": 5,
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -301,13 +327,17 @@ async def test_generate_technical_stores_type_and_bloom_level(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([{
-        "question": "What is Big-O for binary search?",
-        "answer": "O(log n) — the search space halves each step.",
-        "source_excerpt": "Binary search halves the search space.",
-        "flashcard_type": "complexity",
-        "bloom_level": 5,
-    }])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What is Big-O for binary search?",
+                "answer": "O(log n) — the search space halves each step.",
+                "source_excerpt": "Binary search halves the search space.",
+                "flashcard_type": "complexity",
+                "bloom_level": 5,
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -342,19 +372,21 @@ async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db)
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([{
-        "question": "What is the output of print(2 ** 3)?",
-        "answer": "8",
-        "source_excerpt": "2 ** 3",
-        "flashcard_type": "trace",
-        "bloom_level": 4,
-    }])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What is the output of print(2 ** 3)?",
+                "answer": "8",
+                "source_excerpt": "2 ** 3",
+                "flashcard_type": "trace",
+                "bloom_level": 4,
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/flashcards/generate-technical",
                 json={"document_id": doc_id, "scope": "full", "count": 1},
@@ -385,13 +417,17 @@ async def test_generate_technical_coerces_string_bloom_level(test_db):
         await session.commit()
 
     # LLM returns bloom_level as a string "4" instead of int 4
-    llm_json = json.dumps([{
-        "question": "Apply the map function to double each element.",
-        "answer": "list(map(lambda x: x * 2, items))",
-        "source_excerpt": "map(lambda x: x * 2, items)",
-        "flashcard_type": "code_completion",
-        "bloom_level": "4",
-    }])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "Apply the map function to double each element.",
+                "answer": "list(map(lambda x: x * 2, items))",
+                "source_excerpt": "map(lambda x: x * 2, items)",
+                "flashcard_type": "code_completion",
+                "bloom_level": "4",
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):

@@ -17,6 +17,7 @@ import {
   nodeSizeFromCount,
   TAG_GRAPH_PALETTE,
 } from "@/lib/tagGraphUtils"
+import { logger } from "@/lib/logger"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,22 +100,49 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
 
   // Build Sigma whenever nodes/edges change
   useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+
     if (sigmaRef.current) {
       sigmaRef.current.kill()
       sigmaRef.current = null
     }
 
-    const el = canvasRef.current
-    if (!el || isLoading || isError || nodes.length < 3) return
+    if (isLoading || isError || nodes.length < 3) {
+      el.innerHTML = ""
+      return
+    }
 
     const g = buildTagGraphology(nodes, edges)
-    if (g.order === 0) return
+    if (g.order === 0) {
+      el.innerHTML = ""
+      return
+    }
+
+    // Clean container explicitly
+    el.innerHTML = ""
 
     const s = new Sigma(g, el, {
       renderEdgeLabels: false,
       defaultEdgeColor: "#e2e8f0",
       labelSize: 11,
       labelWeight: "normal",
+      allowInvalidContainer: true,
+    })
+
+    // WebGL context lost/restored handlers
+    const canvases = el.querySelectorAll("canvas")
+    const handleContextLost = (e: Event) => {
+      e.preventDefault()
+      logger.warn("[TagGraph] WebGL context lost")
+    }
+    const handleContextRestored = () => {
+      logger.info("[TagGraph] WebGL context restored")
+      try { s.refresh() } catch { /* sigma may be killed */ }
+    }
+    canvases.forEach((c) => {
+      c.addEventListener("webglcontextlost", handleContextLost)
+      c.addEventListener("webglcontextrestored", handleContextRestored)
     })
 
     // Node click -> dispatch cross-tab navigation event
@@ -126,8 +154,13 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
     sigmaRef.current = s
 
     return () => {
+      canvases.forEach((c) => {
+        c.removeEventListener("webglcontextlost", handleContextLost)
+        c.removeEventListener("webglcontextrestored", handleContextRestored)
+      })
       s.kill()
       sigmaRef.current = null
+      if (el) el.innerHTML = ""
     }
   }, [nodes, edges, isLoading, isError])
 

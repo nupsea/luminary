@@ -1,6 +1,5 @@
 """Tests for tech_relation_extractor: pattern-based tech relationship extraction."""
 
-
 from app.services.tech_relation_extractor import extract_tech_relations
 
 

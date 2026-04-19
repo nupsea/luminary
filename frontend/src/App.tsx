@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench } from "lucide-react"
+import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -200,7 +200,7 @@ function Sidebar() {
 
   return (
     <>
-      <nav className="flex h-full w-16 flex-col items-center gap-2 bg-sidebar py-4">
+      <nav className="flex h-full w-[4.5rem] flex-col items-center gap-1 bg-gradient-to-b from-sidebar via-sidebar to-primary/5 py-4 border-r border-border/50">
         {NAV_ITEMS.map(({ to, icon: Icon, label, prefetchKey, prefetchFn }) => (
           <NavLink
             key={to}
@@ -208,8 +208,8 @@ function Sidebar() {
             end={to === "/"}
             className={({ isActive }) =>
               cn(
-                "flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-accent",
-                isActive && "bg-accent",
+                "relative flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl text-sidebar-foreground/60 transition-all duration-200 hover:bg-accent hover:text-sidebar-foreground group",
+                isActive && "bg-accent text-sidebar-foreground",
               )
             }
             title={label}
@@ -219,7 +219,17 @@ function Sidebar() {
               }
             }}
           >
-            <Icon size={20} />
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-primary transition-all" />
+                )}
+                <Icon size={18} className={cn("transition-colors", isActive && "text-primary")} />
+                <span className={cn("text-[9px] font-medium leading-none", isActive ? "text-foreground" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")}>
+                  {label}
+                </span>
+              </>
+            )}
           </NavLink>
         ))}
         <div className="mt-auto flex flex-col items-center gap-2">
@@ -237,6 +247,17 @@ function Sidebar() {
             <Wrench size={14} />
           </NavLink>
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
+          {/* Dark mode toggle */}
+          <button
+            onClick={() => {
+              document.documentElement.classList.toggle("dark")
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground"
+            title="Toggle dark mode"
+          >
+            <Sun size={14} className="dark:hidden" />
+            <Moon size={14} className="hidden dark:block" />
+          </button>
         </div>
       </nav>
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
@@ -252,6 +273,8 @@ function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const chatPanelOpen = useAppStore(s => s.chatPanelOpen)
+  const setChatPanelOpen = useAppStore(s => s.setChatPanelOpen)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
@@ -349,9 +372,9 @@ function AppShell() {
   }, [])
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar />
-      <main className="flex-1 h-full overflow-auto">
+      <main className="flex-1 h-full overflow-auto relative animate-[fadeIn_0.2s_ease-out]">
         <Routes>
           <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
           <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
@@ -359,12 +382,35 @@ function AppShell() {
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
           <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
-          {/* /admin is NOT linked from the nav; accessible via the "Dev Tools" footer link */}
           <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
-          {/* Legacy redirect: /monitoring -> /progress */}
           <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
         </Routes>
       </main>
+
+      {/* Global Sliding Chat Panel Overlay */}
+      <div 
+        className={cn(
+           "fixed top-0 right-0 h-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] border-l border-border bg-background shadow-2xl z-50 transform flex flex-col",
+           chatPanelOpen ? "w-[450px] translate-x-0 opacity-100" : "w-0 translate-x-[200px] opacity-0 pointer-events-none"
+        )}
+      >
+        {chatPanelOpen && (
+           <>
+             <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
+               <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <MessageSquare size={16} className="text-primary"/> Luminary AI
+               </h2>
+               <button onClick={() => setChatPanelOpen(false)} className="rounded-md p-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                  <X size={15}/>
+               </button>
+             </div>
+             <div className="flex-1 overflow-hidden relative">
+               <Suspense fallback={<PageSkeleton />}><Chat /></Suspense>
+             </div>
+           </>
+        )}
+      </div>
+
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )

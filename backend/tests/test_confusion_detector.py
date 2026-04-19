@@ -187,5 +187,3 @@ async def test_detect_gliner_failure_returns_empty(db_session):
         signals = await svc.detect(db_session, threshold=3)
 
     assert signals == []
-
-

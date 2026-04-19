@@ -83,7 +83,12 @@ class NoteGraphService:
 
         with gs._lock:
             self._upsert_note_node_locked(
-                gs._conn, note_id, content, document_id, tags, entities,
+                gs._conn,
+                note_id,
+                content,
+                document_id,
+                tags,
+                entities,
                 source_document_ids or [],
             )
 
@@ -255,23 +260,17 @@ class NoteGraphService:
     # LINKS_TO edges (S171)
     # ------------------------------------------------------------------
 
-    async def upsert_links_to_edge(
-        self, source_id: str, target_id: str, link_type: str
-    ) -> None:
+    async def upsert_links_to_edge(self, source_id: str, target_id: str, link_type: str) -> None:
         """Upsert a LINKS_TO(link_type) edge between two Note nodes in Kuzu.
 
         Fire-and-forget safe: errors are logged and suppressed.
         """
         try:
-            await asyncio.to_thread(
-                self._upsert_links_to_sync, source_id, target_id, link_type
-            )
+            await asyncio.to_thread(self._upsert_links_to_sync, source_id, target_id, link_type)
         except Exception as exc:
             logger.warning("upsert_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
 
-    def _upsert_links_to_sync(
-        self, source_id: str, target_id: str, link_type: str
-    ) -> None:
+    def _upsert_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
         from app.services.graph import get_graph_service  # noqa: PLC0415
 
         gs = get_graph_service()
@@ -295,22 +294,14 @@ class NoteGraphService:
                     {"sid": source_id, "tid": target_id, "lt": link_type},
                 )
 
-    async def delete_links_to_edge(
-        self, source_id: str, target_id: str, link_type: str
-    ) -> None:
+    async def delete_links_to_edge(self, source_id: str, target_id: str, link_type: str) -> None:
         """Delete a LINKS_TO edge from Kuzu. Fire-and-forget safe."""
         try:
-            await asyncio.to_thread(
-                self._delete_links_to_sync, source_id, target_id, link_type
-            )
+            await asyncio.to_thread(self._delete_links_to_sync, source_id, target_id, link_type)
         except Exception as exc:
-            logger.warning(
-                "delete_links_to_edge failed (non-fatal): %s", exc, exc_info=True
-            )
+            logger.warning("delete_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
 
-    def _delete_links_to_sync(
-        self, source_id: str, target_id: str, link_type: str
-    ) -> None:
+    def _delete_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
         from app.services.graph import get_graph_service  # noqa: PLC0415
 
         gs = get_graph_service()
@@ -340,7 +331,7 @@ class NoteGraphService:
             gs._conn.execute(  # type: ignore[union-attr]
                 "MATCH (n:Note {id: $id}) DETACH DELETE n",
                 {"id": note_id},
-        )
+            )
 
     # ------------------------------------------------------------------
     # Query
@@ -368,12 +359,14 @@ class NoteGraphService:
                 )
                 while result.has_next():
                     row = result.get_next()
-                    entities.append({
-                        "name": row[0],
-                        "type": row[1],
-                        "confidence": float(row[2]) if row[2] is not None else 0.0,
-                        "edge_type": "WRITTEN_ABOUT",
-                    })
+                    entities.append(
+                        {
+                            "name": row[0],
+                            "type": row[1],
+                            "confidence": float(row[2]) if row[2] is not None else 0.0,
+                            "edge_type": "WRITTEN_ABOUT",
+                        }
+                    )
             except Exception as exc:
                 logger.warning("get_entities_for_note WRITTEN_ABOUT failed: %s", exc)
 
@@ -385,12 +378,14 @@ class NoteGraphService:
                 )
                 while result.has_next():
                     row = result.get_next()
-                    entities.append({
-                        "name": row[0],
-                        "type": row[1],
-                        "confidence": 1.0,
-                        "edge_type": "TAG_IS_CONCEPT",
-                    })
+                    entities.append(
+                        {
+                            "name": row[0],
+                            "type": row[1],
+                            "confidence": 1.0,
+                            "edge_type": "TAG_IS_CONCEPT",
+                        }
+                    )
             except Exception as exc:
                 logger.warning("get_entities_for_note TAG_IS_CONCEPT failed: %s", exc)
 

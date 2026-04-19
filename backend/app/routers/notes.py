@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import (
-    NoteCollectionMemberModel,
+    CollectionMemberModel,
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
@@ -188,10 +188,14 @@ async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) 
 
     # Load currently indexed tags for this note
     old_rows = (
-        await session.execute(
-            select(NoteTagIndexModel.tag_full).where(NoteTagIndexModel.note_id == note_id)
+        (
+            await session.execute(
+                select(NoteTagIndexModel.tag_full).where(NoteTagIndexModel.note_id == note_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     old_tags: set[str] = set(old_rows)
     new_tags: set[str] = set(tags)
 
@@ -207,9 +211,7 @@ async def _sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) 
             )
         )
         await session.execute(
-            text(
-                "UPDATE canonical_tags SET note_count = MAX(0, note_count - 1) WHERE id = :tag"
-            ),
+            text("UPDATE canonical_tags SET note_count = MAX(0, note_count - 1) WHERE id = :tag"),
             {"tag": tag},
         )
 
@@ -287,9 +289,7 @@ async def _sync_note_sources(
             )
     else:
         # Empty list: remove all source rows for this note
-        await session.execute(
-            delete(NoteSourceModel).where(NoteSourceModel.note_id == note_id)
-        )
+        await session.execute(delete(NoteSourceModel).where(NoteSourceModel.note_id == note_id))
 
 
 async def _upsert_note_graph(
@@ -329,9 +329,7 @@ async def _embed_and_store_note(note_id: str, content: str, document_id: str | N
         # content we embedded is stale -- skip the upsert.
         async with get_session_factory()() as session:
             row = (
-                await session.execute(
-                    select(NoteModel.content).where(NoteModel.id == note_id)
-                )
+                await session.execute(select(NoteModel.content).where(NoteModel.id == note_id))
             ).scalar_one_or_none()
         if row is None:
             logger.debug("Note %s deleted before embedding completed, skipping", note_id)
@@ -376,6 +374,21 @@ async def create_note(
         logger.info("Dedup: returning existing note %s", existing.id)
         return _to_response(existing)
 
+    # S208: Automatic tag saving for new notes if none provided
+    tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
+    if not tags and req.content.strip():
+        from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
+
+        try:
+            raw_tags = await get_note_tagger().suggest_tags(req.content)
+            tags = [_nt for t in raw_tags if (_nt := normalize_tag_slug(t))]
+        except Exception:
+            logger.warning("Auto-tagging failed for note creation", exc_info=True)
+
+    # Set created_at AFTER auto-tagger (which may load ML models and take
+    # seconds) so the 5-second dedup window is measured from commit time,
+    # not from before the slow auto-tag call.
+    now = datetime.now(UTC)
     note = NoteModel(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
@@ -383,14 +396,12 @@ async def create_note(
         section_id=req.section_id,
         content=req.content,
         content_hash=content_hash,
-        tags=(
-            [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
-            if req.tags else req.tags
-        ),
         group_name=req.group_name,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
+        created_at=now,
+        updated_at=now,
     )
+    note.tags = tags
+    logger.info("Auto-tagged new note %s with %d tags", note.id, len(tags))
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
     await _sync_tag_index(note.id, note.tags or [], session)
@@ -448,9 +459,7 @@ async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
         .group_by(NoteModel.group_name)
         .order_by(NoteModel.group_name)
     )
-    groups = [
-        GroupInfo(name=row[0], count=row[1]) for row in group_result.fetchall()
-    ]
+    groups = [GroupInfo(name=row[0], count=row[1]) for row in group_result.fetchall()]
 
     # Tags — use JSON_EACH to explode the JSON array stored in the tags column
     tag_result = await session.execute(
@@ -482,9 +491,7 @@ async def list_notes(
 ) -> list[NoteResponse]:
     """List notes with optional filters."""
     stmt = (
-        select(NoteModel)
-        .where(NoteModel.archived.is_(False))
-        .order_by(NoteModel.updated_at.desc())
+        select(NoteModel).where(NoteModel.archived.is_(False)).order_by(NoteModel.updated_at.desc())
     )
 
     if document_id:
@@ -517,8 +524,9 @@ async def list_notes(
     if collection_id:
         stmt = stmt.where(
             NoteModel.id.in_(
-                select(NoteCollectionMemberModel.note_id).where(
-                    NoteCollectionMemberModel.collection_id == collection_id
+                select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_type == "note",
                 )
             )
         )
@@ -534,9 +542,12 @@ async def list_notes(
         member_rows = (
             await session.execute(
                 select(
-                    NoteCollectionMemberModel.note_id,
-                    NoteCollectionMemberModel.collection_id,
-                ).where(NoteCollectionMemberModel.note_id.in_(note_ids))
+                    CollectionMemberModel.member_id,
+                    CollectionMemberModel.collection_id,
+                ).where(
+                    CollectionMemberModel.member_id.in_(note_ids),
+                    CollectionMemberModel.member_type == "note",
+                )
             )
         ).all()
         for row in member_rows:
@@ -554,10 +565,7 @@ async def list_notes(
         for row in src_rows:
             src_map.setdefault(row[0], []).append(row[1])
 
-    return [
-        _to_response(n, coll_map.get(n.id, []), src_map.get(n.id, []))
-        for n in notes
-    ]
+    return [_to_response(n, coll_map.get(n.id, []), src_map.get(n.id, [])) for n in notes]
 
 
 async def _apply_note_update(
@@ -572,6 +580,7 @@ async def _apply_note_update(
         note.content = req.content
     if req.tags is not None:
         from app.services.naming import normalize_tag_slug as _norm  # noqa: PLC0415
+
         note.tags = [_norm(t) for t in req.tags if _norm(t)]
     if req.group_name is not None:
         note.group_name = req.group_name
@@ -589,10 +598,14 @@ async def _apply_note_update(
     await session.commit()
     # Fetch updated source_document_ids for response
     src_rows = (
-        await session.execute(
-            select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note.id)
+        (
+            await session.execute(
+                select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     # Delete stale vector synchronously so hybrid search doesn't return the
     # old embedding while the background task re-embeds the new content.
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
@@ -602,20 +615,23 @@ async def _apply_note_update(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     graph_task = asyncio.create_task(
-        _upsert_note_graph(
-            note.id, note.content, note.document_id, note.tags or [], list(src_rows)
-        )
+        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [], list(src_rows))
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
     # Re-fetch relevant IDs for a fully populated response
     coll_rows = (
-        await session.execute(
-            select(NoteCollectionMemberModel.collection_id).where(
-                NoteCollectionMemberModel.note_id == note.id
+        (
+            await session.execute(
+                select(CollectionMemberModel.collection_id).where(
+                    CollectionMemberModel.member_id == note.id,
+                    CollectionMemberModel.member_type == "note",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(
@@ -713,21 +729,24 @@ async def preview_note_flashcard_generation(
     from sqlalchemy import func as sa_func  # noqa: PLC0415
 
     from app.models import (  # noqa: PLC0415
+        CollectionMemberModel,
+        CollectionModel,
         FlashcardModel,
-        NoteCollectionMemberModel,
-        NoteCollectionModel,
     )
 
     coll_result = await session.execute(
-        select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+        select(CollectionModel).where(CollectionModel.id == collection_id)
     )
     collection = coll_result.scalar_one_or_none()
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     member_result = await session.execute(
-        select(sa_func.count()).select_from(NoteCollectionMemberModel).where(
-            NoteCollectionMemberModel.collection_id == collection_id
+        select(sa_func.count())
+        .select_from(CollectionMemberModel)
+        .where(
+            CollectionMemberModel.collection_id == collection_id,
+            CollectionMemberModel.member_type == "note",
         )
     )
     total_notes = member_result.scalar_one()
@@ -872,9 +891,7 @@ async def trigger_cluster(
             return {"cached": True, "last_run": last_run.isoformat()}
 
     # Count total notes
-    total_notes = (
-        await session.execute(select(func.count(NoteModel.id)))
-    ).scalar_one()
+    total_notes = (await session.execute(select(func.count(NoteModel.id)))).scalar_one()
 
     # Spawn fire-and-forget task with its own session
     async def _run_clustering() -> None:
@@ -995,7 +1012,7 @@ async def accept_cluster_suggestion(
     suggestion_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Accept a cluster suggestion: create NoteCollection + member rows."""
+    """Accept a cluster suggestion: create Collection + member rows."""
     from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     collection_id = await get_clustering_service().accept_suggestion(suggestion_id, session)
@@ -1061,9 +1078,7 @@ async def autocomplete_notes(
     """
     if not q.strip():
         result = await session.execute(
-            select(NoteModel.id, NoteModel.content)
-            .order_by(NoteModel.updated_at.desc())
-            .limit(8)
+            select(NoteModel.id, NoteModel.content).order_by(NoteModel.updated_at.desc()).limit(8)
         )
     else:
         result = await session.execute(
@@ -1072,10 +1087,7 @@ async def autocomplete_notes(
             .order_by(NoteModel.updated_at.desc())
             .limit(8)
         )
-    return [
-        NoteAutocompleteItem(id=row[0], preview=row[1][:100])
-        for row in result.all()
-    ]
+    return [NoteAutocompleteItem(id=row[0], preview=row[1][:100]) for row in result.all()]
 
 
 @router.post("/{note_id}/links", response_model=NoteLinkItem, status_code=201)
@@ -1099,9 +1111,7 @@ async def create_note_link(
         raise HTTPException(status_code=404, detail="Source note not found")
 
     target = (
-        await session.execute(
-            select(NoteModel).where(NoteModel.id == req.target_note_id)
-        )
+        await session.execute(select(NoteModel).where(NoteModel.id == req.target_note_id))
     ).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="Target note not found")
@@ -1132,9 +1142,7 @@ async def create_note_link(
 
     # Fire-and-forget Kuzu edge upsert
     task = asyncio.create_task(
-        get_note_graph_service().upsert_links_to_edge(
-            note_id, req.target_note_id, req.link_type
-        )
+        get_note_graph_service().upsert_links_to_edge(note_id, req.target_note_id, req.link_type)
     )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -1254,19 +1262,28 @@ async def get_note(
         raise HTTPException(status_code=404, detail="Note not found")
 
     member_rows = (
-        await session.execute(
-            select(NoteCollectionMemberModel.collection_id).where(
-                NoteCollectionMemberModel.note_id == note_id
+        (
+            await session.execute(
+                select(CollectionMemberModel.collection_id).where(
+                    CollectionMemberModel.member_id == note_id,
+                    CollectionMemberModel.member_type == "note",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     # S175: fetch source_document_ids from pivot
     src_rows = (
-        await session.execute(
-            select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note_id)
+        (
+            await session.execute(
+                select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return _to_response(note, list(member_rows), list(src_rows))
 

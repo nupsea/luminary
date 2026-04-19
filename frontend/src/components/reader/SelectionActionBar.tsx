@@ -23,6 +23,7 @@ export interface SourceRef {
   sectionId: string | undefined
   documentId: string
   documentTitle: string
+  pageNumber?: number
 }
 
 /** Maximum character count for highlights. Longer selections can still use other actions. */
@@ -154,12 +155,12 @@ export function SelectionActionBar({
   return (
     <div
       ref={barRef}
-      className="fixed z-[100] flex -translate-x-1/2 -translate-y-full gap-1 rounded-lg border border-border bg-background p-1.5 shadow-xl"
+      className="fixed z-[100] flex -translate-x-1/2 -translate-y-full gap-1 rounded-2xl border border-border/50 bg-background/80 backdrop-blur-xl p-1.5 shadow-2xl transition-all duration-200 ease-out"
       style={{ top: position.top, left: position.left }}
     >
       <button
         onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onExplain(selectedText, "plain"); reset() }}
-        className="rounded px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+        className="rounded-xl px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent/80 transition-colors"
       >
         Explain
       </button>

@@ -278,6 +278,7 @@ def test_migration_backfills_note_sources(client):
 
         # Re-run create_all_tables to trigger migration
         from app.database import get_engine
+
         engine = get_engine()
         await create_all_tables(engine)
 

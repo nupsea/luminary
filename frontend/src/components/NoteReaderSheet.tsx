@@ -103,20 +103,20 @@ async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
 }
 
 async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes`, {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note_ids: [noteId] }),
+    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
   })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/notes failed`)
+  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
 }
 
 async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes/${noteId}`, {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
     method: "DELETE",
   })
   if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${collectionId}/notes/${noteId} failed`)
+    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
 }
 
 async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
@@ -157,6 +157,8 @@ export function NoteReaderSheet({
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const prevNoteId = useRef<string | undefined>(undefined)
+  const prevIsNew = useRef<boolean>(false)
   const qc = useQueryClient()
 
   const adjustHeight = useCallback(() => {
@@ -177,6 +179,7 @@ export function NoteReaderSheet({
       setConfirmDelete(false)
       setSuggestedTags([])
       setIsFetchingTags(false)
+      prevIsNew.current = true
     } else if (note) {
       setEditContent(note.content)
       setEditTags(note.tags ?? [])
@@ -190,35 +193,46 @@ export function NoteReaderSheet({
       )
       setMode("read")
       setConfirmDelete(false)
-      setSuggestedTags([])
-      setIsFetchingTags(false)
+
+      // Only clear suggestions if we're switching to a genuinely different existing note.
+      // Crucially, if we just transitioned from isNew=true to an actual note,
+      // we DON'T clear suggestions because they were likely just fetched by saveMut.
+      const justSaved = prevIsNew.current && !isNew
+      const noteChanged = prevNoteId.current && prevNoteId.current !== note.id
+
+      if (noteChanged && !justSaved) {
+        setSuggestedTags([])
+        setIsFetchingTags(false)
+      }
+      
+      prevNoteId.current = note.id
+      prevIsNew.current = isNew
     }
   }, [note?.id, isNew])
 
-  // Focus textarea when entering edit mode
+  // Trigger tag suggestions on mode change or content threshold
   useEffect(() => {
-    if (mode === "edit" && textareaRef.current) {
-      textareaRef.current.focus()
-      adjustHeight()
+    // If we're in edit mode, or if a newly saved note just switched to read mode
+    const hasEnoughContent = editContent.trim().length > 30
+    const needsTags = !isNew && note && note.tags.length === 0
 
-      // Auto-trigger tag suggestions if note has no tags
-      if (!isNew && note && note.tags.length === 0 && editContent.trim().length > 20) {
-        void handleFetchSuggestions(true)
-      }
+    if (needsTags && hasEnoughContent && suggestedTags.length === 0 && !isFetchingTags) {
+      void handleFetchSuggestions(mode === "edit")
     }
-  }, [mode, adjustHeight, isNew, editContent, note])
+  }, [mode, isNew, note?.id, editContent.length])
 
-  async function handleFetchSuggestions(autoAdd = false) {
-    if (!note && !isNew) return
+  async function handleFetchSuggestions(autoAdd = false, injectedNote?: Note) {
+    const targetNote = injectedNote || note
+    if (!targetNote && !isNew) return
     // Tag suggestions for brand new notes aren't supported yet 
-    if (!note) return 
+    if (!targetNote) return 
 
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setIsFetchingTags(true)
     try {
-      const suggestions = await fetchSuggestedTags(note.id, controller.signal)
+      const suggestions = await fetchSuggestedTags(targetNote.id, controller.signal)
       if (controller.signal.aborted) return
 
       if (autoAdd && editTags.length === 0) {
@@ -233,15 +247,28 @@ export function NoteReaderSheet({
     }
   }
 
-  function handleAddSuggestedTag(tag: string) {
-    setEditTags((prev) => [...new Set([...prev, tag])])
+  async function handleAddSuggestedTag(tag: string) {
+    const newTags = [...new Set([...editTags, tag])]
+    setEditTags(newTags)
     setSuggestedTags((prev) => prev.filter((t) => t !== tag))
+    
+    // If in read mode, we need to save this change immediately
+    if (mode === "read" && note) {
+      try {
+        await patchNote(note.id, { tags: newTags })
+        void qc.invalidateQueries({ queryKey: ["notes"] })
+      } catch {
+        // revert local state on error
+        setEditTags(editTags)
+      }
+    }
   }
 
-  // Adjust height on content change
+  // Adjust height on content change, and focus on enter edit
   useEffect(() => {
     if (mode === "edit") {
       adjustHeight()
+      if (textareaRef.current) textareaRef.current.focus()
     }
   }, [editContent, mode, adjustHeight])
 
@@ -294,6 +321,10 @@ export function NoteReaderSheet({
       void qc.invalidateQueries({ queryKey: ["reader-notes"] })
       if (!isNew) {
         setMode("read")
+      }
+      // Trigger suggestions fetch for new notes so they are ready when the user clicks 'Edit' 
+      if (isNew && savedNote.content.trim().length > 30) {
+        void handleFetchSuggestions(false, savedNote)
       }
       onSaved(savedNote)
     },
@@ -449,25 +480,42 @@ export function NoteReaderSheet({
                   )}
                 </div>
                 {mode === "read" && !isNew ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {note?.tags.length ? (
-                      note.tags.map((t) => {
-                        const parts = t.split("/")
-                        return (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {note?.tags.length ? (
+                        note.tags.map((t) => {
+                          const parts = t.split("/")
+                          return (
+                            <button
+                              key={t}
+                              onClick={() => dispatchTagNavigate(t)}
+                              className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                            >
+                              <span className="text-primary">{parts[0]}</span>
+                              {parts.length > 1 && (
+                                <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                              )}
+                            </button>
+                          )
+                        })
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">No tags</span>
+                      )}
+                    </div>
+                    {suggestedTags.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-medium text-muted-foreground">Suggestions:</span>
+                        {suggestedTags.map((tag) => (
                           <button
-                            key={t}
-                            onClick={() => dispatchTagNavigate(t)}
-                            className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                            key={tag}
+                            onClick={() => void handleAddSuggestedTag(tag)}
+                            className="flex items-center gap-1 rounded-full border border-dashed border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10 transition-colors"
                           >
-                            <span className="text-primary">{parts[0]}</span>
-                            {parts.length > 1 && (
-                              <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
-                            )}
+                            <Check size={9} />
+                            {tag}
                           </button>
-                        )
-                      })
-                    ) : (
-                      <span className="text-xs text-muted-foreground italic">No tags</span>
+                        ))}
+                      </div>
                     )}
                   </div>
                 ) : (

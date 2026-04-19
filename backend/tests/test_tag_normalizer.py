@@ -97,9 +97,7 @@ async def test_scan_creates_suggestion_for_similar_pair(test_db):
     async with factory() as session:
         from sqlalchemy import select
 
-        rows = (
-            await session.execute(select(TagMergeSuggestionModel))
-        ).scalars().all()
+        rows = (await session.execute(select(TagMergeSuggestionModel))).scalars().all()
         assert len(rows) == 1
         row = rows[0]
         assert row.status == "pending"
@@ -206,12 +204,8 @@ async def test_accept_merges_tags_and_creates_alias(test_db):
         await session.commit()
         suggestion_id = suggestion.id
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.post(
-            f"/tags/normalization/suggestions/{suggestion_id}/accept"
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(f"/tags/normalization/suggestions/{suggestion_id}/accept")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -239,9 +233,7 @@ async def test_accept_merges_tags_and_creates_alias(test_db):
         # Suggestion marked accepted
         sug = (
             await session.execute(
-                select(TagMergeSuggestionModel).where(
-                    TagMergeSuggestionModel.id == suggestion_id
-                )
+                select(TagMergeSuggestionModel).where(TagMergeSuggestionModel.id == suggestion_id)
             )
         ).scalar_one()
         assert sug.status == "accepted"
@@ -275,9 +267,7 @@ async def test_reject_sets_status_rejected(test_db):
     async with factory() as session:
         sug = (
             await session.execute(
-                select(TagMergeSuggestionModel).where(
-                    TagMergeSuggestionModel.id == suggestion_id
-                )
+                select(TagMergeSuggestionModel).where(TagMergeSuggestionModel.id == suggestion_id)
             )
         ).scalar_one()
         assert sug.status == "rejected"
@@ -291,5 +281,3 @@ async def test_reject_sets_status_rejected(test_db):
                 select(CanonicalTagModel).where(CanonicalTagModel.id == "artificial-intelligence")
             )
         ).scalar_one_or_none() is not None
-
-

@@ -9,8 +9,8 @@ class Section:
     text: str
     page_start: int
     page_end: int
-    admonition_type: str | None = None   # 'note'|'warning'|'tip'|'caution'|'important' or None
-    parent_heading: str | None = None    # heading string of the logical parent section
+    admonition_type: str | None = None  # 'note'|'warning'|'tip'|'caution'|'important' or None
+    parent_heading: str | None = None  # heading string of the logical parent section
 
 
 @dataclass
@@ -43,8 +43,15 @@ class ScoredChunk:
 # ---------------------------------------------------------------------------
 
 IntentType = Literal[
-    "summary", "factual", "relational", "comparative", "exploratory", "notes", "notes_gap",
-    "socratic", "teach_back",
+    "summary",
+    "factual",
+    "relational",
+    "comparative",
+    "exploratory",
+    "notes",
+    "notes_gap",
+    "socratic",
+    "teach_back",
 ]
 
 
@@ -126,10 +133,11 @@ class TransparencyInfo(TypedDict):
     strategy_used values: 'executive_summary' | 'hybrid_retrieval' |
         'graph_traversal' | 'comparative' | 'augmented_hybrid'
     """
-    strategy_used: str   # how context was retrieved
-    chunk_count: int     # number of unique chunks used as context
-    section_count: int   # number of unique sections those chunks span
-    augmented: bool      # True if augment_node ran (context extended after low confidence)
+
+    strategy_used: str  # how context was retrieved
+    chunk_count: int  # number of unique chunks used as context
+    section_count: int  # number of unique sections those chunks span
+    augmented: bool  # True if augment_node ran (context extended after low confidence)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +165,7 @@ class GapReport(TypedDict):
     gaps: list[str]
     covered: list[str]
     query_used: str
-    weak: list[str]   # S145: concepts in notes with mastery < 0.3
+    weak: list[str]  # S145: concepts in notes with mastery < 0.3
 
 
 # ---------------------------------------------------------------------------
@@ -168,10 +176,10 @@ class GapReport(TypedDict):
 class WebSnippet(TypedDict):
     url: str
     title: str
-    content: str        # first 500 chars of fetched content
+    content: str  # first 500 chars of fetched content
     source_quality: str  # "official_docs" | "spec" | "wiki" | "blog" | "unknown"
-    version_info: str   # e.g. "Python 3.12" or "" if not detected
-    domain: str         # extracted domain for [Web: domain.com] label
+    version_info: str  # e.g. "Python 3.12" or "" if not detected
+    domain: str  # extracted domain for [Web: domain.com] label
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +189,7 @@ class WebSnippet(TypedDict):
 
 class SourceCitation(TypedDict):
     """Chunk-derived citation emitted by synthesize_node for trust/navigation."""
+
     chunk_id: str
     document_id: str
     document_title: str
@@ -219,9 +228,9 @@ class LearningPathResponse(TypedDict):
 @dataclass
 class StudyPathItem:
     concept: str
-    mastery: float        # 0.0 to 1.0 -- avg(fsrs_stability / 21.0) capped at 1.0
-    skip: bool            # True when avg_stability_days >= 14
-    reason: str           # e.g. "avg_stability=18d" or "no flashcards"
+    mastery: float  # 0.0 to 1.0 -- avg(fsrs_stability / 21.0) capped at 1.0
+    skip: bool  # True when avg_stability_days >= 14
+    reason: str  # e.g. "avg_stability=18d" or "no flashcards"
     avg_stability_days: float
 
 
@@ -252,18 +261,18 @@ class StartConceptsResponse(TypedDict):
 @dataclass
 class ConceptMastery:
     concept: str
-    mastery: float           # 0.0 to 1.0; 0.0 + no_flashcards=True means no cards
+    mastery: float  # 0.0 to 1.0; 0.0 + no_flashcards=True means no cards
     card_count: int
-    due_soon: int            # cards due within the next 3 days
+    due_soon: int  # cards due within the next 3 days
     no_flashcards: bool
     document_ids: list[str]
 
 
 @dataclass
 class HeatmapCell:
-    chapter: str             # section heading
+    chapter: str  # section heading
     concept: str
-    mastery: float | None    # None = no flashcards for this (chapter, concept) cell
+    mastery: float | None  # None = no flashcards for this (chapter, concept) cell
     card_count: int
 
 
@@ -310,12 +319,12 @@ class CoverageReport(TypedDict):
 
 
 class TeachBackRubricDimension(TypedDict):
-    score: int          # 0-100
-    evidence: str       # quoted evidence from source or one-sentence comment
+    score: int  # 0-100
+    evidence: str  # quoted evidence from source or one-sentence comment
 
 
 class TeachBackCompletenessDimension(TypedDict):
-    score: int          # 0-100
+    score: int  # 0-100
     missed_points: list[str]  # concise concept phrases the student omitted
 
 

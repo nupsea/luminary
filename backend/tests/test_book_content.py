@@ -64,9 +64,7 @@ class TestBookContentVerification:
 
         for keyword in book_entry["known_keywords"]:
             results = await retriever.keyword_search(keyword, [doc_id], k=5)
-            found_in_text = results and any(
-                keyword.lower() in r.text.lower() for r in results
-            )
+            found_in_text = results and any(keyword.lower() in r.text.lower() for r in results)
             assert len(results) >= 1 and found_in_text, (
                 f'Keyword "{keyword}" returned 0 FTS5 hits for {book_name}'
             )
@@ -83,12 +81,8 @@ class TestBookContentVerification:
         edges = graph_data["edges"]
 
         for entity_a, entity_b in book_entry["known_co_occurrences"]:
-            node_a = next(
-                (n for n in nodes if entity_a.lower() in n["label"].lower()), None
-            )
-            node_b = next(
-                (n for n in nodes if entity_b.lower() in n["label"].lower()), None
-            )
+            node_a = next((n for n in nodes if entity_a.lower() in n["label"].lower()), None)
+            node_b = next((n for n in nodes if entity_b.lower() in n["label"].lower()), None)
             node_a_id = node_a["id"] if node_a else None
             node_b_id = node_b["id"] if node_b else None
 
@@ -113,13 +107,11 @@ class TestBookContentVerification:
             query = entry["query"]
             expected_keyword = entry["expected_keyword"]
             results = retriever.vector_search(query, [doc_id], k=5)
-            found = results and any(
-                expected_keyword.lower() in r.text.lower() for r in results
-            )
+            found = results and any(expected_keyword.lower() in r.text.lower() for r in results)
             assert len(results) >= 1 and found, (
                 f'Query "{query}" did not return any chunk containing '
                 f'"{expected_keyword}" for {book_name}. '
-                f'Top result: {results[0].text[:200] if results else "(no results)"}'
+                f"Top result: {results[0].text[:200] if results else '(no results)'}"
             )
 
     @pytest.mark.parametrize("book_name", [e["name"] for e in MANIFEST])
@@ -153,10 +145,6 @@ class TestBookContentVerification:
             elapsed = all_books_ingested[name]["elapsed_seconds"]
             print(f"{name} ingestion: {elapsed:.1f}s (budget: {budget}s)", flush=True)
             if elapsed > budget:
-                failures.append(
-                    f"'{name}' took {elapsed:.1f}s, budget is {budget}s"
-                )
+                failures.append(f"'{name}' took {elapsed:.1f}s, budget is {budget}s")
         if failures:
-            raise AssertionError(
-                "Ingestion budget exceeded:\n" + "\n".join(failures)
-            )
+            raise AssertionError("Ingestion budget exceeded:\n" + "\n".join(failures))

@@ -55,7 +55,7 @@ def get_layer_for_module(module: str) -> int | None:
     """
     if not module.startswith("app."):
         return None
-    inner = module[len("app."):]
+    inner = module[len("app.") :]
     # Inner might be 'services.qa' or 'config' or 'types'
     first_segment = inner.split(".")[0]
     key = SUBDIR_MAP.get(first_segment, first_segment)

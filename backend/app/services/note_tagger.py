@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _SYSTEM = (
     "You are a tagging assistant. Given a note, suggest up to 5 short, lowercase tags "
     "that best describe its topics. Tags should be 1-3 words, no punctuation. "
-    "Output ONLY a JSON array of strings, e.g. [\"machine learning\", \"python\"]. "
+    'Output ONLY a JSON array of strings, e.g. ["machine learning", "python"]. '
     "Write no explanation, preamble, or markdown fences."
 )
 
@@ -60,8 +60,13 @@ class NoteTaggerService:
             )
             raw = response.choices[0].message.content or ""
             return _parse_tag_list(raw)
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+        except (
+            litellm.ServiceUnavailableError,
+            litellm.APIConnectionError,
+            litellm.NotFoundError,
+            litellm.RateLimitError,
+            litellm.AuthenticationError,
+        ):
             logger.warning("LLM unavailable during note tagging; returning empty tags")
             return []
 

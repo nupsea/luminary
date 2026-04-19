@@ -42,9 +42,7 @@ def test_comparative_keywords_detected():
     comparative_samples = ["compare", "difference between", "versus"]
     for kw in comparative_samples:
         intent, conf = classify_intent_heuristic(f"what is the {kw} between A and B")
-        assert intent == "comparative", (
-            f"Expected 'comparative' for keyword {kw!r}, got {intent!r}"
-        )
+        assert intent == "comparative", f"Expected 'comparative' for keyword {kw!r}, got {intent!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +55,7 @@ def test_relational_keywords_detected():
     relational_samples = ["relation between", "connection between", "what is the relationship"]
     for kw in relational_samples:
         intent, conf = classify_intent_heuristic(f"explain the {kw} between A and B")
-        assert intent == "relational", (
-            f"Expected 'relational' for keyword {kw!r}, got {intent!r}"
-        )
+        assert intent == "relational", f"Expected 'relational' for keyword {kw!r}, got {intent!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +145,7 @@ def test_factual_question_not_relational():
     ]
     for q in factual_questions:
         intent, _ = classify_intent_heuristic(q)
-        assert intent == "relational", (
-            f"Expected relational for {q!r}, got {intent!r}"
-        )
+        assert intent == "relational", f"Expected relational for {q!r}, got {intent!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +169,4 @@ def test_suggestion_pills_route_correctly(pill_text: str, expected_intent: str) 
     assert intent == expected_intent, (
         f"Pill {pill_text!r}: expected intent={expected_intent!r}, got {intent!r}"
     )
-    assert confidence >= 0.9, (
-        f"Pill {pill_text!r}: expected confidence >= 0.9, got {confidence}"
-    )
+    assert confidence >= 0.9, f"Pill {pill_text!r}: expected confidence >= 0.9, got {confidence}"

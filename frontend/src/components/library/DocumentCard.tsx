@@ -2,7 +2,25 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { BookOpen, Check, MessageSquare, Network, Pencil, MoreVertical, StickyNote, Trash2, X, Zap } from "lucide-react"
+import { 
+  Book, 
+  BookOpen, 
+  Bookmark, 
+  Check, 
+  Code, 
+  Cpu, 
+  FileText, 
+  MessageSquare, 
+  Mic, 
+  MoreVertical, 
+  Network, 
+  Newspaper, 
+  Pencil, 
+  StickyNote, 
+  Trash2, 
+  X, 
+  Zap 
+} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
@@ -43,21 +61,36 @@ function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   )
 }
 
-const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string }> = {
-  book: { label: "Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
-  conversation: { label: "Conversation", className: "bg-green-100 text-green-700 hover:bg-green-200" },
-  notes: { label: "Notes", className: "bg-gray-100 text-gray-600 hover:bg-gray-200" },
-  paper: { label: "Paper", className: "bg-purple-100 text-purple-700 hover:bg-purple-200" },
-  code: { label: "Code", className: "bg-orange-100 text-orange-700 hover:bg-orange-200" },
-  audio: { label: "Audio", className: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200" },
-  epub: { label: "EPUB", className: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" },
-  kindle_clippings: { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" },
-  tech_book: { label: "Tech Book", className: "bg-blue-100 text-blue-700 hover:bg-blue-200" },
-  tech_article: { label: "Tech Article", className: "bg-teal-100 text-teal-700 hover:bg-teal-200" },
+const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string; icon: typeof Book }> = {
+  book: { label: "Book", className: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100", icon: Book },
+  conversation: { label: "Chat Log", className: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100", icon: MessageSquare },
+  notes: { label: "Note", className: "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100", icon: StickyNote },
+  paper: { label: "Paper", className: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100", icon: FileText },
+  code: { label: "Code", className: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100", icon: Code },
+  audio: { label: "Audio", className: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100", icon: Mic },
+  epub: { label: "E-Book", className: "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100", icon: BookOpen },
+  kindle_clippings: { label: "Kindle", className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100", icon: Bookmark },
+  tech_book: { label: "Tech Book", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100", icon: Cpu },
+  tech_article: { label: "Article", className: "bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100", icon: Newspaper },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
 const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
+
+// Accent band colors per content type (top-border gradient effect)
+const ACCENT_COLORS: Record<string, string> = {
+  book: "from-indigo-500 to-blue-500",
+  paper: "from-purple-500 to-violet-500",
+  code: "from-orange-500 to-amber-500",
+  epub: "from-indigo-400 to-purple-500",
+  conversation: "from-emerald-500 to-green-500",
+  notes: "from-slate-400 to-gray-500",
+  audio: "from-yellow-500 to-orange-400",
+  kindle_clippings: "from-amber-500 to-yellow-500",
+  tech_book: "from-blue-500 to-cyan-500",
+  tech_article: "from-teal-500 to-emerald-500",
+  youtube: "from-red-500 to-rose-500",
+}
 
 const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "tech_book", "tech_article"]
 
@@ -97,7 +130,7 @@ export function DocumentCard({
   const isYouTube = isYouTubeDoc(doc)
   const isKindleSource = doc.tags.includes("kindle")
   const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
-  const badge = isYouTube ? YOUTUBE_BADGE : (isKindleSource ? KINDLE_SOURCE_BADGE : CONTENT_TYPE_BADGE[doc.content_type])
+  const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : CONTENT_TYPE_BADGE[doc.content_type])
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -183,11 +216,20 @@ export function DocumentCard({
     }
   }
 
+  const accentKey = isYouTube ? "youtube" : doc.content_type
+  const accentGradient = ACCENT_COLORS[accentKey] ?? "from-slate-400 to-gray-500"
+
   return (
     <Card
-      className={`group cursor-pointer select-none transition-colors ${selected ? "border-primary bg-primary/5" : ""}`}
+      className={cn(
+        "group cursor-pointer select-none transition-all duration-200 overflow-hidden",
+        "hover:shadow-lg hover:-translate-y-0.5",
+        selected ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "hover:border-border/80",
+      )}
       onClick={handleCardClick}
     >
+      {/* Accent band */}
+      <div className={cn("h-1 w-full bg-gradient-to-r", accentGradient)} />
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {onSelect && (
@@ -268,10 +310,11 @@ export function DocumentCard({
           }}
           title="Change document type (re-ingest to apply new chunking)"
           className={cn(
-            "rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
+            "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors border shadow-sm",
             badge.className,
           )}
         >
+          {badge.icon && <badge.icon size={10} />}
           {badge.label}
         </button>
 

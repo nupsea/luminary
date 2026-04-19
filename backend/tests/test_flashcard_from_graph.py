@@ -153,13 +153,15 @@ async def test_generate_from_graph_creates_cards_for_related_pair(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([
-        {
-            "question": "How does Time Traveller relate to Weena?",
-            "answer": "The Time Traveller rescues Weena from drowning.",
-            "source_excerpt": "The Time Traveller met Weena.",
-        }
-    ])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "How does Time Traveller relate to Weena?",
+                "answer": "The Time Traveller rescues Weena from drowning.",
+                "source_excerpt": "The Time Traveller met Weena.",
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with (
@@ -169,9 +171,7 @@ async def test_generate_from_graph_creates_cards_for_related_pair(test_db):
     ):
         svc = FlashcardService()
         async with factory() as session:
-            cards = await svc.generate_from_graph(
-                document_id=doc_id, k=5, session=session
-            )
+            cards = await svc.generate_from_graph(document_id=doc_id, k=5, session=session)
 
     assert len(cards) == 1
     assert cards[0].source == "graph"
@@ -197,9 +197,7 @@ async def test_generate_from_graph_returns_empty_when_no_pairs(test_db):
     ):
         svc = FlashcardService()
         async with factory() as session:
-            cards = await svc.generate_from_graph(
-                document_id=doc_id, k=5, session=session
-            )
+            cards = await svc.generate_from_graph(document_id=doc_id, k=5, session=session)
 
     assert cards == []
     assert mock_llm.call_count == 0
@@ -216,13 +214,15 @@ async def test_generate_from_graph_uses_co_occurs_fallback(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([
-        {
-            "question": "What connects Eloi and Morlock?",
-            "answer": "They co-exist in the far future.",
-            "source_excerpt": "Eloi and Morlock.",
-        }
-    ])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What connects Eloi and Morlock?",
+                "answer": "They co-exist in the far future.",
+                "source_excerpt": "Eloi and Morlock.",
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with (
@@ -232,9 +232,7 @@ async def test_generate_from_graph_uses_co_occurs_fallback(test_db):
     ):
         svc = FlashcardService()
         async with factory() as session:
-            cards = await svc.generate_from_graph(
-                document_id=doc_id, k=5, session=session
-            )
+            cards = await svc.generate_from_graph(document_id=doc_id, k=5, session=session)
 
     assert len(cards) == 1
     assert cards[0].source == "graph"
@@ -256,13 +254,15 @@ async def test_post_generate_from_graph_returns_201(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([
-        {
-            "question": "How does Time Traveller relate to Weena?",
-            "answer": "He rescues her.",
-            "source_excerpt": "Met Weena.",
-        }
-    ])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "How does Time Traveller relate to Weena?",
+                "answer": "He rescues her.",
+                "source_excerpt": "Met Weena.",
+            }
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with (
@@ -270,9 +270,7 @@ async def test_post_generate_from_graph_returns_201(test_db):
         patch("app.services.graph.get_graph_service", return_value=_GraphWithPairs()),
         patch("app.services.retriever.get_retriever", return_value=_Retriever(chunk_id, doc_id)),
     ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/flashcards/generate-from-graph",
                 json={"document_id": doc_id, "k": 3},
@@ -290,9 +288,7 @@ async def test_get_entity_pairs_returns_200_with_pairs_key(test_db):
     _, _factory, _ = test_db
 
     with patch("app.services.graph.get_graph_service", return_value=_GraphWithPairs()):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(
                 "/flashcards/entity-pairs",
                 params={"document_id": "any-doc-id"},
@@ -314,9 +310,7 @@ async def test_get_entity_pairs_co_occurs_confidence_is_normalised(test_db):
     _, _factory, _ = test_db
 
     with patch("app.services.graph.get_graph_service", return_value=_GraphWithCoOccurs()):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(
                 "/flashcards/entity-pairs",
                 params={"document_id": "any-doc-id"},

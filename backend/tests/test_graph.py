@@ -366,8 +366,7 @@ def test_schema_creates_tech_edge_tables(graph_svc: KuzuService):
     # CREATE REL TABLE IF NOT EXISTS is idempotent — no error means table exists
     for label in required:
         graph_svc._conn.execute(
-            f"CREATE REL TABLE IF NOT EXISTS {label}"
-            f"(FROM Entity TO Entity, document_id STRING)"
+            f"CREATE REL TABLE IF NOT EXISTS {label}(FROM Entity TO Entity, document_id STRING)"
         )
 
 
@@ -381,8 +380,7 @@ def test_add_tech_relation_implements(graph_svc: KuzuService):
     graph_svc.add_tech_relation("e1", "e2", "IMPLEMENTS", "d1")
 
     result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:IMPLEMENTS]->(b:Entity {id: 'e2'})"
-        " RETURN r.document_id"
+        "MATCH (a:Entity {id: 'e1'})-[r:IMPLEMENTS]->(b:Entity {id: 'e2'}) RETURN r.document_id"
     )
     assert result.has_next()
     assert result.get_next()[0] == "d1"
@@ -398,8 +396,7 @@ def test_add_tech_relation_depends_on(graph_svc: KuzuService):
     graph_svc.add_tech_relation("e1", "e2", "DEPENDS_ON", "d1")
 
     result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:DEPENDS_ON]->(b:Entity {id: 'e2'})"
-        " RETURN r.document_id"
+        "MATCH (a:Entity {id: 'e1'})-[r:DEPENDS_ON]->(b:Entity {id: 'e2'}) RETURN r.document_id"
     )
     assert result.has_next()
 
@@ -434,8 +431,7 @@ def test_add_version_of(graph_svc: KuzuService):
     graph_svc.add_version_of("e1", "e2", "d1")
 
     result = graph_svc._conn.execute(
-        "MATCH (a:Entity {id: 'e1'})-[r:VERSION_OF]->(b:Entity {id: 'e2'})"
-        " RETURN r.document_id"
+        "MATCH (a:Entity {id: 'e1'})-[r:VERSION_OF]->(b:Entity {id: 'e2'}) RETURN r.document_id"
     )
     assert result.has_next()
 
@@ -600,8 +596,8 @@ def test_get_entry_point_concepts_returns_roots(graph_svc: KuzuService):
     graph_svc.upsert_document("d1", "Python 101", "tech_book")
     for eid in ("e1", "e2", "e3"):
         graph_svc.add_mention(eid, "d1")
-    graph_svc.add_prerequisite("e1", "e2", "d1")   # closures requires functions
-    graph_svc.add_prerequisite("e2", "e3", "d1")   # functions requires variables
+    graph_svc.add_prerequisite("e1", "e2", "d1")  # closures requires functions
+    graph_svc.add_prerequisite("e2", "e3", "d1")  # functions requires variables
 
     concepts = graph_svc.get_entry_point_concepts("d1", limit=10)
     assert "variables" in concepts

@@ -238,7 +238,10 @@ class SummarizationService:
         for batch in batches:
             batch_text = "\n\n".join(c.text for c in batch)
             s = await llm.generate(
-                batch_text, system=section_system, model=model, timeout=_MAP_CALL_TIMEOUT,
+                batch_text,
+                system=section_system,
+                model=model,
+                timeout=_MAP_CALL_TIMEOUT,
                 background=True,
             )
             assert isinstance(s, str)
@@ -270,10 +273,7 @@ class SummarizationService:
             rows = list(result.scalars().all())
 
         # Filter out metadata/legal section summary rows
-        qualifying = [
-            row for row in rows
-            if not _is_metadata_section(row.heading, row.content)
-        ]
+        qualifying = [row for row in rows if not _is_metadata_section(row.heading, row.content)]
 
         if len(qualifying) < 3:
             return None
@@ -315,7 +315,7 @@ class SummarizationService:
                     extra={"document_id": document_id, "mode": mode},
                 )
                 # Send full content in a single event — no word-by-word drip
-                yield f'data: {json.dumps({"token": cached.content})}\n\n'
+                yield f"data: {json.dumps({'token': cached.content})}\n\n"
                 done_evt = {"done": True, "summary_id": cached.id, "cached": True}
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
@@ -342,7 +342,7 @@ class SummarizationService:
             collected: list[str] = []
             async for token in token_stream:
                 collected.append(token)
-                yield f'data: {json.dumps({"token": token})}\n\n'
+                yield f"data: {json.dumps({'token': token})}\n\n"
 
             summary_text = "".join(collected)
             summary_id = await self._store_summary(document_id, mode, summary_text)
@@ -488,10 +488,7 @@ class SummarizationService:
                 .where(SummaryModel.mode == "_section_reduce")
             )
             await session.commit()
-        logger.info(
-            "_section_reduce cache invalidated", extra={"document_id": document_id}
-        )
-
+        logger.info("_section_reduce cache invalidated", extra={"document_id": document_id})
 
     # ------------------------------------------------------------------
     # Library-level summary (cross-document synthesis)
@@ -511,9 +508,7 @@ class SummarizationService:
     async def _store_library_summary(self, mode: str, content: str) -> str:
         summary_id = str(uuid.uuid4())
         async with get_session_factory()() as session:
-            session.add(
-                LibrarySummaryModel(id=summary_id, mode=mode, content=content)
-            )
+            session.add(LibrarySummaryModel(id=summary_id, mode=mode, content=content))
             await session.commit()
         return summary_id
 
@@ -594,7 +589,7 @@ class SummarizationService:
             cached = None if force_refresh else await self._fetch_library_cached(mode)
             if cached is not None:
                 logger.info("Serving cached library summary", extra={"mode": mode})
-                yield f'data: {json.dumps({"token": cached.content})}\n\n'
+                yield f"data: {json.dumps({'token': cached.content})}\n\n"
                 done_evt = {"done": True, "summary_id": cached.id, "cached": True}
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
@@ -614,9 +609,10 @@ class SummarizationService:
                 # Single-document library: serve that document's executive summary directly
                 doc_id, content = next(iter(exec_summaries.items()))
                 summary_id = await self._store_library_summary(mode, content)
-                yield f'data: {json.dumps({"token": content})}\n\n'
-                yield f'data: {json.dumps({"done": True, "summary_id": summary_id, 
-                                            "cached": False})}\n\n'
+                yield f"data: {json.dumps({'token': content})}\n\n"
+                yield f"data: {
+                    json.dumps({'done': True, 'summary_id': summary_id, 'cached': False})
+                }\n\n"
                 return
 
             # Fetch document titles
@@ -665,7 +661,7 @@ class SummarizationService:
             collected: list[str] = []
             async for token in token_stream:
                 collected.append(token)
-                yield f'data: {json.dumps({"token": token})}\n\n'
+                yield f"data: {json.dumps({'token': token})}\n\n"
 
             summary_text = "".join(collected)
             summary_id = await self._store_library_summary(mode, summary_text)

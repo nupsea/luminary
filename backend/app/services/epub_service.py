@@ -18,12 +18,35 @@ logger = logging.getLogger(__name__)
 
 # Tags allowed in rendered EPUB HTML
 _ALLOWED_TAGS = [
-    "p", "h1", "h2", "h3", "h4", "h5", "h6",
-    "table", "thead", "tbody", "tfoot", "tr", "td", "th",
-    "ul", "ol", "li",
-    "em", "strong", "code", "pre", "blockquote",
-    "figure", "figcaption",
-    "a", "span", "div", "br", "hr",
+    "p",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "table",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "td",
+    "th",
+    "ul",
+    "ol",
+    "li",
+    "em",
+    "strong",
+    "code",
+    "pre",
+    "blockquote",
+    "figure",
+    "figcaption",
+    "a",
+    "span",
+    "div",
+    "br",
+    "hr",
 ]
 
 # Allow only safe, non-event attributes on whitelisted tags
@@ -37,7 +60,12 @@ _ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
     "span": ["class"],
     "pre": ["class"],
     "code": ["class"],
-    "h1": ["id"], "h2": ["id"], "h3": ["id"], "h4": ["id"], "h5": ["id"], "h6": ["id"],
+    "h1": ["id"],
+    "h2": ["id"],
+    "h3": ["id"],
+    "h4": ["id"],
+    "h5": ["id"],
+    "h6": ["id"],
 }
 
 
@@ -124,11 +152,13 @@ class EpubService:
                 continue
             if not title:
                 title = f"Chapter {idx + 1}"
-            chapters.append({
-                "chapter_index": idx,
-                "title": title,
-                "word_count": word_count,
-            })
+            chapters.append(
+                {
+                    "chapter_index": idx,
+                    "title": title,
+                    "word_count": word_count,
+                }
+            )
             idx += 1
         logger.info("EPUB TOC extracted: %d chapters from %s", len(chapters), file_path)
         return chapters
@@ -181,7 +211,9 @@ class EpubService:
         clean_html = self.sanitize_html(html_str)
         logger.info(
             "EPUB chapter %d rendered: %d words, title=%r",
-            chapter_index, word_count, title,
+            chapter_index,
+            word_count,
+            title,
         )
         return {
             "html": clean_html,

@@ -75,9 +75,9 @@ class LanceDBService:
         if not chunks:
             return
         table = self._get_table()
-        table.merge_insert("chunk_id").when_matched_update_all().when_not_matched_insert_all().execute(
-            chunks
-        )
+        table.merge_insert(
+            "chunk_id"
+        ).when_matched_update_all().when_not_matched_insert_all().execute(chunks)
         logger.info("Upserted %d chunks to LanceDB", len(chunks))
 
     def count_for_document(self, document_id: str) -> int:
@@ -122,7 +122,9 @@ class LanceDBService:
     ) -> None:
         """Upsert a single note embedding keyed on note_id."""
         table = self._get_or_create_note_table()
-        table.merge_insert("note_id").when_matched_update_all().when_not_matched_insert_all().execute(
+        table.merge_insert(
+            "note_id"
+        ).when_matched_update_all().when_not_matched_insert_all().execute(
             [
                 {
                     "note_id": note_id,
@@ -155,7 +157,9 @@ class LanceDBService:
     ) -> None:
         """Upsert a single image description embedding keyed on image_id."""
         table = self._get_image_table()
-        table.merge_insert("image_id").when_matched_update_all().when_not_matched_insert_all().execute(
+        table.merge_insert(
+            "image_id"
+        ).when_matched_update_all().when_not_matched_insert_all().execute(
             [
                 {
                     "image_id": image_id,
@@ -182,10 +186,7 @@ class LanceDBService:
                 id_list = ", ".join(f"'{did}'" for did in document_ids)
                 search = search.where(f"document_id IN ({id_list})", prefilter=True)
             rows = search.to_list()
-            return [
-                row for row in rows
-                if 1.0 - float(row.get("_distance", 1.0)) >= threshold
-            ]
+            return [row for row in rows if 1.0 - float(row.get("_distance", 1.0)) >= threshold]
         except Exception as exc:
             logger.warning("search_image_vectors failed: %s", exc)
             return []

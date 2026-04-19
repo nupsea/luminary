@@ -16,10 +16,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    CollectionMemberModel,
+    CollectionModel,
     DocumentModel,
     FlashcardModel,
-    NoteCollectionMemberModel,
-    NoteCollectionModel,
     NoteModel,
 )
 
@@ -113,11 +113,11 @@ class ExportService:
         self,
         collection_id: str,
         session: AsyncSession,
-    ) -> tuple[NoteCollectionModel, list[str], list[NoteModel]]:
+    ) -> tuple[CollectionModel, list[str], list[NoteModel]]:
         """Return (collection, collection_path, notes_in_collection_and_children)."""
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                select(CollectionModel).where(CollectionModel.id == collection_id)
             )
         ).scalar_one_or_none()
         if col is None:
@@ -127,9 +127,7 @@ class ExportService:
         if col.parent_collection_id:
             parent = (
                 await session.execute(
-                    select(NoteCollectionModel).where(
-                        NoteCollectionModel.id == col.parent_collection_id
-                    )
+                    select(CollectionModel).where(CollectionModel.id == col.parent_collection_id)
                 )
             ).scalar_one_or_none()
             collection_path = [parent.name if parent else "", col.name]
@@ -138,9 +136,7 @@ class ExportService:
 
         # Gather all relevant collection_ids: the collection itself + child collections
         child_ids_result = await session.execute(
-            select(NoteCollectionModel.id).where(
-                NoteCollectionModel.parent_collection_id == collection_id
-            )
+            select(CollectionModel.id).where(CollectionModel.parent_collection_id == collection_id)
         )
         child_ids = [row[0] for row in child_ids_result.all()]
         all_collection_ids = [collection_id, *child_ids]
@@ -148,8 +144,9 @@ class ExportService:
         # Load all note_ids in these collections
         member_rows = (
             await session.execute(
-                select(NoteCollectionMemberModel.note_id).where(
-                    NoteCollectionMemberModel.collection_id.in_(all_collection_ids)
+                select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id.in_(all_collection_ids),
+                    CollectionMemberModel.member_type == "note",
                 )
             )
         ).all()
@@ -159,11 +156,9 @@ class ExportService:
             return col, collection_path, []
 
         notes = list(
-            (
-                await session.execute(
-                    select(NoteModel).where(NoteModel.id.in_(note_ids))
-                )
-            ).scalars().all()
+            (await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids))))
+            .scalars()
+            .all()
         )
         return col, collection_path, notes
 
@@ -229,7 +224,7 @@ class ExportService:
         """
         col = (
             await session.execute(
-                select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                select(CollectionModel).where(CollectionModel.id == collection_id)
             )
         ).scalar_one_or_none()
         if col is None:
@@ -237,11 +232,9 @@ class ExportService:
 
         # Fetch flashcards where deck matches the collection name
         cards = list(
-            (
-                await session.execute(
-                    select(FlashcardModel).where(FlashcardModel.deck == col.name)
-                )
-            ).scalars().all()
+            (await session.execute(select(FlashcardModel).where(FlashcardModel.deck == col.name)))
+            .scalars()
+            .all()
         )
 
         # Build a stable deck_id from the collection name hash

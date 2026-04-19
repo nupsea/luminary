@@ -61,9 +61,7 @@ def mock_llm_calls():
         ),
         patch(
             "app.runtime.chat_graph._decompose_comparison",
-            new=AsyncMock(
-                return_value={"sides": ["side_a", "side_b"], "topic": "comparison"}
-            ),
+            new=AsyncMock(return_value={"sides": ["side_a", "side_b"], "topic": "comparison"}),
         ),
     ):
         yield
@@ -143,8 +141,7 @@ async def _insert_doc(factory, doc_id: str, title: str = "Test Doc") -> None:
 
 @pytest.mark.asyncio
 async def test_summary_node_sets_answer_directly(test_db):
-    """summary_node sets section_context from exec summary so synthesize_node can tailor it.
-    """
+    """summary_node sets section_context from exec summary so synthesize_node can tailor it."""
     _engine, factory, _tmp = test_db
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, doc_id)
@@ -197,9 +194,7 @@ async def test_graph_node_falls_through_on_kuzu_error(test_db):
     mock_service = MagicMock()
     mock_service._conn.execute.side_effect = RuntimeError("Kuzu offline")
 
-    with patch(
-        "app.services.graph.get_graph_service", return_value=mock_service
-    ):
+    with patch("app.services.graph.get_graph_service", return_value=mock_service):
         state = _make_state(
             question="How are Achilles and Patroclus related?",
             intent="relational",
@@ -429,7 +424,7 @@ async def test_summary_intent_end_to_end(test_db):
     events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
     assert events, "No SSE events in response"
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload.get("done") is True, f"Last event is not done: {done_payload}"
     assert done_payload.get("answer"), f"Expected non-empty answer, got: {done_payload}"
     assert done_payload.get("confidence") in ("high", "medium"), (
@@ -460,35 +455,84 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
     chunk_id_3 = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(SectionModel(
-            id=section_id_1, document_id=doc_id, heading="Chapter One",
-            level=1, section_order=0,
-        ))
-        session.add(SectionModel(
-            id=section_id_2, document_id=doc_id, heading="Chapter Two",
-            level=1, section_order=1,
-        ))
-        session.add(ChunkModel(
-            id=chunk_id_1, document_id=doc_id, section_id=section_id_1,
-            text="text1", chunk_index=0, pdf_page_number=5,
-        ))
-        session.add(ChunkModel(
-            id=chunk_id_2, document_id=doc_id, section_id=section_id_2,
-            text="text2", chunk_index=1, pdf_page_number=10,
-        ))
-        session.add(ChunkModel(
-            id=chunk_id_3, document_id=doc_id, section_id=section_id_1,
-            text="text3", chunk_index=2, pdf_page_number=5,
-        ))
+        session.add(
+            SectionModel(
+                id=section_id_1,
+                document_id=doc_id,
+                heading="Chapter One",
+                level=1,
+                section_order=0,
+            )
+        )
+        session.add(
+            SectionModel(
+                id=section_id_2,
+                document_id=doc_id,
+                heading="Chapter Two",
+                level=1,
+                section_order=1,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id=chunk_id_1,
+                document_id=doc_id,
+                section_id=section_id_1,
+                text="text1",
+                chunk_index=0,
+                pdf_page_number=5,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id=chunk_id_2,
+                document_id=doc_id,
+                section_id=section_id_2,
+                text="text2",
+                chunk_index=1,
+                pdf_page_number=10,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id=chunk_id_3,
+                document_id=doc_id,
+                section_id=section_id_1,
+                text="text3",
+                chunk_index=2,
+                pdf_page_number=5,
+            )
+        )
         await session.commit()
 
     chunks = [
-        {"chunk_id": chunk_id_1, "document_id": doc_id, "text": "text1",
-         "section_heading": "Chapter One", "page": 5, "score": 0.9, "source": "vector"},
-        {"chunk_id": chunk_id_2, "document_id": doc_id, "text": "text2",
-         "section_heading": "Chapter Two", "page": 10, "score": 0.8, "source": "vector"},
-        {"chunk_id": chunk_id_3, "document_id": doc_id, "text": "text3",
-         "section_heading": "Chapter One", "page": 5, "score": 0.7, "source": "vector"},
+        {
+            "chunk_id": chunk_id_1,
+            "document_id": doc_id,
+            "text": "text1",
+            "section_heading": "Chapter One",
+            "page": 5,
+            "score": 0.9,
+            "source": "vector",
+        },
+        {
+            "chunk_id": chunk_id_2,
+            "document_id": doc_id,
+            "text": "text2",
+            "section_heading": "Chapter Two",
+            "page": 10,
+            "score": 0.8,
+            "source": "vector",
+        },
+        {
+            "chunk_id": chunk_id_3,
+            "document_id": doc_id,
+            "text": "text3",
+            "section_heading": "Chapter One",
+            "page": 5,
+            "score": 0.7,
+            "source": "vector",
+        },
     ]
     state = _make_state(
         question="What happens in these chapters?",
@@ -510,14 +554,10 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
 
     # S157: section_preview_snippet must be populated from chunk text (first 150 chars)
     for c in source_citations:
-        assert "section_preview_snippet" in c, (
-            f"Missing section_preview_snippet in citation: {c}"
-        )
+        assert "section_preview_snippet" in c, f"Missing section_preview_snippet in citation: {c}"
         snippet = c["section_preview_snippet"]
         assert isinstance(snippet, str), "section_preview_snippet must be a string"
-        assert len(snippet) <= 150, (
-            f"section_preview_snippet exceeds 150 chars: {len(snippet)}"
-        )
+        assert len(snippet) <= 150, f"section_preview_snippet exceeds 150 chars: {len(snippet)}"
     # The first citation (chunk c1, text='text1') has snippet 'text1'
     first_cit = next(c for c in source_citations if c["section_id"] == section_id_1)
     assert first_cit["section_preview_snippet"] == "text1"
@@ -540,27 +580,40 @@ async def test_synthesize_node_emits_transparency_hybrid_retrieval(test_db):
     section_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(SectionModel(
-            id=section_id, document_id=doc_id, heading="Chapter One",
-            level=1, section_order=0,
-        ))
-        session.add(ChunkModel(
-            id=chunk_id, document_id=doc_id, section_id=section_id,
-            text="Some relevant text about the topic.", chunk_index=0, pdf_page_number=3,
-        ))
+        session.add(
+            SectionModel(
+                id=section_id,
+                document_id=doc_id,
+                heading="Chapter One",
+                level=1,
+                section_order=0,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id=chunk_id,
+                document_id=doc_id,
+                section_id=section_id,
+                text="Some relevant text about the topic.",
+                chunk_index=0,
+                pdf_page_number=3,
+            )
+        )
         await session.commit()
 
     state = _make_state(
         question="What is this about?",
-        chunks=[{
-            "chunk_id": chunk_id,
-            "document_id": doc_id,
-            "text": "Some relevant text about the topic.",
-            "section_heading": "Chapter One",
-            "page": 3,
-            "score": 0.9,
-            "source": "vector",
-        }],
+        chunks=[
+            {
+                "chunk_id": chunk_id,
+                "document_id": doc_id,
+                "text": "Some relevant text about the topic.",
+                "section_heading": "Chapter One",
+                "page": 3,
+                "score": 0.9,
+                "source": "vector",
+            }
+        ],
         doc_ids=[doc_id],
         intent="factual",
         primary_strategy="search_node",
@@ -589,23 +642,31 @@ async def test_synthesize_node_transparency_augmented_hybrid(test_db):
 
     chunk_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(ChunkModel(
-            id=chunk_id, document_id=doc_id, section_id=None,
-            text="Extra context from augmentation.", chunk_index=0, pdf_page_number=None,
-        ))
+        session.add(
+            ChunkModel(
+                id=chunk_id,
+                document_id=doc_id,
+                section_id=None,
+                text="Extra context from augmentation.",
+                chunk_index=0,
+                pdf_page_number=None,
+            )
+        )
         await session.commit()
 
     state = _make_state(
         question="What is this about?",
-        chunks=[{
-            "chunk_id": chunk_id,
-            "document_id": doc_id,
-            "text": "Extra context from augmentation.",
-            "section_heading": "",
-            "page": 0,
-            "score": 0.7,
-            "source": "vector",
-        }],
+        chunks=[
+            {
+                "chunk_id": chunk_id,
+                "document_id": doc_id,
+                "text": "Extra context from augmentation.",
+                "section_heading": "",
+                "page": 0,
+                "score": 0.7,
+                "source": "vector",
+            }
+        ],
         doc_ids=[doc_id],
         intent="factual",
         primary_strategy="search_node",

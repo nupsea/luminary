@@ -113,14 +113,20 @@ async def test_service_parses_json_and_creates_cards(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([
-        {"question": "What is a qubit?", "answer": "A quantum bit.", "source_excerpt": "A qubit."},
-        {
-            "question": "What is superposition?",
-            "answer": "A state of being both 0 and 1.",
-            "source_excerpt": "Superposition...",
-        },
-    ])
+    llm_json = json.dumps(
+        [
+            {
+                "question": "What is a qubit?",
+                "answer": "A quantum bit.",
+                "source_excerpt": "A qubit.",
+            },
+            {
+                "question": "What is superposition?",
+                "answer": "A state of being both 0 and 1.",
+                "source_excerpt": "Superposition...",
+            },
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -154,11 +160,7 @@ async def test_service_strips_markdown_fences(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = (
-        "```json\n"
-        '[{"question": "Q1?", "answer": "A1.", "source_excerpt": "src."}]\n'
-        "```"
-    )
+    llm_json = '```json\n[{"question": "Q1?", "answer": "A1.", "source_excerpt": "src."}]\n```'
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -213,7 +215,7 @@ async def test_service_prompt_includes_count(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    mock_llm = _CapturingLLMService(response='[]')
+    mock_llm = _CapturingLLMService(response="[]")
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -241,9 +243,11 @@ async def test_service_prompt_includes_difficulty(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([
-        {"question": "Hard Q?", "answer": "Hard A.", "source_excerpt": "src."},
-    ])
+    llm_json = json.dumps(
+        [
+            {"question": "Hard Q?", "answer": "Hard A.", "source_excerpt": "src."},
+        ]
+    )
     mock_llm = _CapturingLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -278,7 +282,7 @@ async def test_service_prompt_includes_book_guidelines(test_db):
             session.add(_make_chunk(doc_id=doc_id, chunk_index=i))
         await session.commit()
 
-    mock_llm = _CapturingLLMService(response='[]')
+    mock_llm = _CapturingLLMService(response="[]")
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -307,26 +311,38 @@ async def test_service_skips_preface(test_db):
         session.add(_make_doc(doc_id, content_type="book"))
         # Section 1: Preface
         s1_id = str(uuid.uuid4())
-        session.add(SectionModel(
-            id=s1_id, document_id=doc_id, heading="Introduction by the Editor",
-            level=1, section_order=0
-        ))
-        session.add(_make_chunk(
-            doc_id=doc_id, section_id=s1_id, text="This edition was published in..."
-        ))
+        session.add(
+            SectionModel(
+                id=s1_id,
+                document_id=doc_id,
+                heading="Introduction by the Editor",
+                level=1,
+                section_order=0,
+            )
+        )
+        session.add(
+            _make_chunk(doc_id=doc_id, section_id=s1_id, text="This edition was published in...")
+        )
 
         # Section 2: Chapter 1 (Actual content)
         s2_id = str(uuid.uuid4())
-        session.add(SectionModel(
-            id=s2_id, document_id=doc_id, heading="Chapter 1. The Beginning",
-            level=1, section_order=1
-        ))
-        session.add(_make_chunk(
-            doc_id=doc_id, section_id=s2_id, text="The story begins in a far away land..."
-        ))
+        session.add(
+            SectionModel(
+                id=s2_id,
+                document_id=doc_id,
+                heading="Chapter 1. The Beginning",
+                level=1,
+                section_order=1,
+            )
+        )
+        session.add(
+            _make_chunk(
+                doc_id=doc_id, section_id=s2_id, text="The story begins in a far away land..."
+            )
+        )
         await session.commit()
 
-    mock_llm = _CapturingLLMService(response='[]')
+    mock_llm = _CapturingLLMService(response="[]")
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
         svc = FlashcardService()
@@ -385,9 +401,11 @@ async def test_generate_endpoint_returns_201(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = json.dumps([
-        {"question": "Q?", "answer": "A.", "source_excerpt": "src."},
-    ])
+    llm_json = json.dumps(
+        [
+            {"question": "Q?", "answer": "A.", "source_excerpt": "src."},
+        ]
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):

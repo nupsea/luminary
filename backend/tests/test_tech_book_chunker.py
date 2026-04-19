@@ -65,7 +65,7 @@ Final thoughts on Python.
 
 FIFTY_LINE_FUNCTION = (
     "def compute_fibonacci(n: int) -> list[int]:\n"
-    "    \"\"\"Return the first n Fibonacci numbers.\"\"\"\n"
+    '    """Return the first n Fibonacci numbers."""\n'
     + ("    pass  # placeholder line\n" * 47)
     + "    return []\n"
 )

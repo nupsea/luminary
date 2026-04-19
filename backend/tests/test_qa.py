@@ -138,7 +138,7 @@ async def _async_iter(items):
 
 def test_split_response_extracts_answer_and_citations():
     citations = [{"document_title": "Bio", "section_heading": "Cells", "page": 1, "excerpt": "..."}]
-    full_text = 'The cell is alive.' + json.dumps({"citations": citations, "confidence": "high"})
+    full_text = "The cell is alive." + json.dumps({"citations": citations, "confidence": "high"})
     answer, parsed_citations, confidence = _split_response(full_text)
     assert answer == "The cell is alive."
     assert len(parsed_citations) == 1
@@ -179,9 +179,8 @@ def test_split_response_strips_json_label_line():
 
 def test_split_response_strips_instruction_echo():
     citations: list = []
-    full_text = (
-        "ONLY JSON (no prose inside the JSON, do not repeat the answer):\n"
-        + json.dumps({"citations": citations, "confidence": "medium"})
+    full_text = "ONLY JSON (no prose inside the JSON, do not repeat the answer):\n" + json.dumps(
+        {"citations": citations, "confidence": "medium"}
     )
     answer, _, _ = _split_response(full_text)
     assert answer == ""
@@ -264,9 +263,8 @@ async def test_stream_yields_token_events_for_answer(test_db):
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
-            e async for e in svc.stream_answer(
-                "What does mitochondria do?", [doc_id], "single", None
-            )
+            e
+            async for e in svc.stream_answer("What does mitochondria do?", [doc_id], "single", None)
         ]
 
     assert len(events) >= 2
@@ -274,7 +272,7 @@ async def test_stream_yields_token_events_for_answer(test_db):
     assert len(token_events) > 0
     for event in token_events:
         assert event.startswith("data: ")
-        payload = json.loads(event[len("data: "):])
+        payload = json.loads(event[len("data: ") :])
         assert "token" in payload
 
 
@@ -297,12 +295,11 @@ async def test_stream_final_event_contains_citations(test_db):
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
-            e async for e in svc.stream_answer(
-                "What is Newton's 2nd law?", [doc_id], "single", None
-            )
+            e
+            async for e in svc.stream_answer("What is Newton's 2nd law?", [doc_id], "single", None)
         ]
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     assert done_payload["confidence"] == "high"
     assert len(done_payload["citations"]) == 1
@@ -322,7 +319,7 @@ async def test_stream_stores_qa_in_database(test_db):
         svc = QAService()
         events = [e async for e in svc.stream_answer("Who was Napoleon?", [doc_id], "single", None)]
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     qa_id = done_payload["qa_id"]
 
     async with factory() as session:
@@ -348,8 +345,17 @@ async def test_not_found_yields_not_found_event(test_db):
     result = _make_graph_result(
         answer="",
         not_found=True,
-        chunks=[{"chunk_id": "c1", "document_id": "d1", "text": "x",
-                 "section_heading": "S", "page": 1, "score": 0.5, "source": "vector"}],
+        chunks=[
+            {
+                "chunk_id": "c1",
+                "document_id": "d1",
+                "text": "x",
+                "section_heading": "S",
+                "page": 1,
+                "score": 0.5,
+                "source": "vector",
+            }
+        ],
     )
     mock_graph = _make_mock_graph(result)
 
@@ -358,7 +364,7 @@ async def test_not_found_yields_not_found_event(test_db):
         events = [e async for e in svc.stream_answer("Unknown question?", None, "all", None)]
 
     assert len(events) == 1
-    payload = json.loads(events[0][len("data: "):])
+    payload = json.loads(events[0][len("data: ") :])
     assert payload["done"] is True
     assert payload["not_found"] is True
 
@@ -415,7 +421,7 @@ async def test_endpoint_not_found_response(test_db):
     assert resp.status_code == 200
     events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
     assert len(events) == 1
-    payload = json.loads(events[0][len("data: "):])
+    payload = json.loads(events[0][len("data: ") :])
     assert payload["error"] == "no_context"
     assert payload["done"] is True
 
@@ -462,7 +468,7 @@ async def test_qa_no_context(test_db):
 
     data_lines = [e for e in events if e.startswith("data: ")]
     assert len(data_lines) == 1
-    payload = json.loads(data_lines[0][len("data: "):])
+    payload = json.loads(data_lines[0][len("data: ") :])
     assert payload["error"] == "no_context"
     assert payload["done"] is True
 
@@ -477,13 +483,11 @@ async def test_qa_ollama_offline(test_db):
 
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
-        events = [
-            e async for e in svc.stream_answer("What is this about?", None, "all", None)
-        ]
+        events = [e async for e in svc.stream_answer("What is this about?", None, "all", None)]
 
     data_lines = [e for e in events if e.startswith("data: ")]
     assert len(data_lines) == 1
-    payload = json.loads(data_lines[0][len("data: "):])
+    payload = json.loads(data_lines[0][len("data: ") :])
     assert payload["error"] == "llm_unavailable"
     assert payload["type"] == "error"
     assert payload["done"] is True
@@ -541,7 +545,7 @@ async def test_s103_ollama_offline_sse_type_error(test_db):
 
     data_lines = [ln for ln in resp.text.splitlines() if ln.startswith("data: ")]
     assert len(data_lines) == 1, f"Expected 1 error event, got: {data_lines}"
-    payload = json.loads(data_lines[0][len("data: "):])
+    payload = json.loads(data_lines[0][len("data: ") :])
     assert payload.get("type") == "error", f"Expected type='error', got: {payload}"
     assert "LLM unreachable" in payload.get("message", ""), payload
     assert payload.get("done") is True
@@ -586,7 +590,7 @@ async def test_s103_api_connection_error_sse_type_error(test_db):
 
     data_lines = [e for e in events if e.startswith("data: ")]
     assert len(data_lines) == 1
-    payload = json.loads(data_lines[0][len("data: "):])
+    payload = json.loads(data_lines[0][len("data: ") :])
     assert payload.get("type") == "error"
     assert "LLM unreachable" in payload.get("message", "")
     assert payload.get("done") is True
@@ -600,8 +604,12 @@ async def test_qa_with_mock_llm(test_db):
     await _insert_doc(factory, tmp_path, doc_id, "Time Machine")
 
     citations = [
-        {"document_title": "Time Machine", "section_heading": "Chapter 1",
-         "page": 3, "excerpt": "..."}
+        {
+            "document_title": "Time Machine",
+            "section_heading": "Chapter 1",
+            "page": 3,
+            "excerpt": "...",
+        }
     ]
     result = _make_graph_result(
         answer="The Time Traveller invented a machine.",
@@ -613,15 +621,14 @@ async def test_qa_with_mock_llm(test_db):
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
-            e async for e in svc.stream_answer(
-                "What is the time machine?", [doc_id], "single", None
-            )
+            e
+            async for e in svc.stream_answer("What is the time machine?", [doc_id], "single", None)
         ]
 
     token_events = [e for e in events if '"token"' in e]
     assert len(token_events) >= 1
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     assert len(done_payload["citations"]) >= 1
 
@@ -678,7 +685,7 @@ async def test_citations_passed_through_from_graph(test_db):
         svc = QAService()
         events = [e async for e in svc.stream_answer("Compare the two books?", None, "all", None)]
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     titles = {c["document_title"] for c in done_payload["citations"]}
     assert "Alice in Wonderland" in titles
@@ -705,12 +712,11 @@ async def test_citations_no_title_for_single_scope(test_db):
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
-            e async for e in svc.stream_answer(
-                "What is Newton's 2nd law?", [doc_id], "single", None
-            )
+            e
+            async for e in svc.stream_answer("What is Newton's 2nd law?", [doc_id], "single", None)
         ]
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     assert all(c["document_title"] is None for c in done_payload["citations"])
 
@@ -749,11 +755,12 @@ async def test_qa_summary_question_routes_via_graph(test_db):
     with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
         svc = QAService()
         events = [
-            e async for e in svc.stream_answer(
+            e
+            async for e in svc.stream_answer(
                 "Can you summarize this document?", [doc_id], "single", None
             )
         ]
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     assert "summary_node" in done_payload["answer"]

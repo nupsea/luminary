@@ -235,6 +235,4 @@ async def test_near_duplicate_skipped_by_embedding_dedup(test_db):
                 session=session,
             )
 
-    assert cards == [], (
-        f"Expected 0 cards (near-duplicate skipped), got {len(cards)}"
-    )
+    assert cards == [], f"Expected 0 cards (near-duplicate skipped), got {len(cards)}"

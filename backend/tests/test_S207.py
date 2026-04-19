@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import CanonicalTagModel, NoteCollectionModel, NoteTagIndexModel
+from app.models import CanonicalTagModel, CollectionModel, NoteTagIndexModel
 from app.services.clustering_service import ClusteringService
 
 # ---------------------------------------------------------------------------
@@ -56,22 +56,26 @@ async def test_detect_naming_violations_tag_and_collection(test_db):
 
     async with factory() as session:
         # Insert a tag with underscore
-        session.add(CanonicalTagModel(
-            id="machine_learning",
-            display_name="machine_learning",
-            parent_tag=None,
-            note_count=3,
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            CanonicalTagModel(
+                id="machine_learning",
+                display_name="machine_learning",
+                parent_tag=None,
+                note_count=3,
+                created_at=datetime.now(UTC),
+            )
+        )
         # Insert a collection with underscore and mixed case
-        session.add(NoteCollectionModel(
-            id=str(uuid.uuid4()),
-            name="Skill_Issue_Analysis",
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
+        session.add(
+            CollectionModel(
+                id=str(uuid.uuid4()),
+                name="Skill_Issue_Analysis",
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
         violations = await svc.detect_naming_violations(session)
@@ -102,20 +106,24 @@ async def test_detect_naming_violations_duplicate_tags_merge(test_db):
     svc = ClusteringService()
 
     async with factory() as session:
-        session.add(CanonicalTagModel(
-            id="Machine-Learning",
-            display_name="Machine-Learning",
-            parent_tag=None,
-            note_count=2,
-            created_at=datetime.now(UTC),
-        ))
-        session.add(CanonicalTagModel(
-            id="machine_learning",
-            display_name="machine_learning",
-            parent_tag=None,
-            note_count=5,
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            CanonicalTagModel(
+                id="Machine-Learning",
+                display_name="Machine-Learning",
+                parent_tag=None,
+                note_count=2,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            CanonicalTagModel(
+                id="machine_learning",
+                display_name="machine_learning",
+                parent_tag=None,
+                note_count=5,
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
         violations = await svc.detect_naming_violations(session)
@@ -141,57 +149,71 @@ async def test_apply_naming_fixes_renames_tag_and_index(test_db):
     note_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(CanonicalTagModel(
-            id="machine_learning",
-            display_name="machine_learning",
-            parent_tag=None,
-            note_count=1,
-            created_at=datetime.now(UTC),
-        ))
-        session.add(NoteTagIndexModel(
-            note_id=note_id,
-            tag_full="machine_learning",
-            tag_root="machine_learning",
-            tag_parent="",
-        ))
+        session.add(
+            CanonicalTagModel(
+                id="machine_learning",
+                display_name="machine_learning",
+                parent_tag=None,
+                note_count=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            NoteTagIndexModel(
+                note_id=note_id,
+                tag_full="machine_learning",
+                tag_root="machine_learning",
+                tag_parent="",
+            )
+        )
         await session.commit()
 
-        fixes = [{
-            "type": "tag",
-            "id": "machine_learning",
-            "current_name": "machine_learning",
-            "suggested_name": "machine-learning",
-            "action": "rename",
-        }]
+        fixes = [
+            {
+                "type": "tag",
+                "id": "machine_learning",
+                "current_name": "machine_learning",
+                "suggested_name": "machine-learning",
+                "action": "rename",
+            }
+        ]
         result = await svc.apply_naming_fixes(fixes, session)
 
     assert result["tags_renamed"] == 1
 
     # Verify the canonical tag was renamed
     async with factory() as session:
-        row = (await session.execute(
-            text("SELECT id FROM canonical_tags WHERE id = 'machine-learning'")
-        )).fetchone()
+        row = (
+            await session.execute(
+                text("SELECT id FROM canonical_tags WHERE id = 'machine-learning'")
+            )
+        ).fetchone()
         assert row is not None
 
         # Old slug should be gone
-        old_row = (await session.execute(
-            text("SELECT id FROM canonical_tags WHERE id = 'machine_learning'")
-        )).fetchone()
+        old_row = (
+            await session.execute(
+                text("SELECT id FROM canonical_tags WHERE id = 'machine_learning'")
+            )
+        ).fetchone()
         assert old_row is None
 
         # NoteTagIndexModel should be updated
-        idx_row = (await session.execute(
-            text("SELECT tag_full FROM note_tag_index WHERE note_id = :nid"),
-            {"nid": note_id},
-        )).fetchone()
+        idx_row = (
+            await session.execute(
+                text("SELECT tag_full FROM note_tag_index WHERE note_id = :nid"),
+                {"nid": note_id},
+            )
+        ).fetchone()
         assert idx_row is not None
         assert idx_row[0] == "machine-learning"
 
         # Tag alias should be created
-        alias_row = (await session.execute(
-            text("SELECT canonical_tag_id FROM tag_aliases WHERE alias = 'machine_learning'")
-        )).fetchone()
+        alias_row = (
+            await session.execute(
+                text("SELECT canonical_tag_id FROM tag_aliases WHERE alias = 'machine_learning'")
+            )
+        ).fetchone()
         assert alias_row is not None
         assert alias_row[0] == "machine-learning"
 
@@ -209,32 +231,38 @@ async def test_apply_naming_fixes_renames_collection(test_db):
     coll_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(NoteCollectionModel(
-            id=coll_id,
-            name="My_Cool_Notes",
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
+        session.add(
+            CollectionModel(
+                id=coll_id,
+                name="My_Cool_Notes",
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
-        fixes = [{
-            "type": "collection",
-            "id": coll_id,
-            "current_name": "My_Cool_Notes",
-            "suggested_name": "MY-COOL-NOTES",
-            "action": "rename",
-        }]
+        fixes = [
+            {
+                "type": "collection",
+                "id": coll_id,
+                "current_name": "My_Cool_Notes",
+                "suggested_name": "MY-COOL-NOTES",
+                "action": "rename",
+            }
+        ]
         result = await svc.apply_naming_fixes(fixes, session)
 
     assert result["collections_renamed"] == 1
 
     async with factory() as session:
-        row = (await session.execute(
-            text("SELECT name FROM note_collections WHERE id = :cid"),
-            {"cid": coll_id},
-        )).fetchone()
+        row = (
+            await session.execute(
+                text("SELECT name FROM collections WHERE id = :cid"),
+                {"cid": coll_id},
+            )
+        ).fetchone()
         assert row is not None
         assert row[0] == "MY-COOL-NOTES"
 
@@ -279,21 +307,23 @@ async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
 
     async with factory() as session:
         # Old tag should be gone
-        old = (await session.execute(
-            text("SELECT id FROM canonical_tags WHERE id = 'data_science'")
-        )).fetchone()
+        old = (
+            await session.execute(text("SELECT id FROM canonical_tags WHERE id = 'data_science'"))
+        ).fetchone()
         assert old is None
 
         # Normalized tag should exist
-        new = (await session.execute(
-            text("SELECT id FROM canonical_tags WHERE id = 'data-science'")
-        )).fetchone()
+        new = (
+            await session.execute(text("SELECT id FROM canonical_tags WHERE id = 'data-science'"))
+        ).fetchone()
         assert new is not None
 
         # Tag index should be updated
-        idx = (await session.execute(
-            text("SELECT tag_full FROM note_tag_index WHERE note_id = 'note-1'")
-        )).fetchone()
+        idx = (
+            await session.execute(
+                text("SELECT tag_full FROM note_tag_index WHERE note_id = 'note-1'")
+            )
+        ).fetchone()
         assert idx is not None
         assert idx[0] == "data-science"
 
@@ -313,21 +343,25 @@ async def test_detect_no_violations_when_normalized(test_db):
     svc = ClusteringService()
 
     async with factory() as session:
-        session.add(CanonicalTagModel(
-            id="machine-learning",
-            display_name="machine-learning",
-            parent_tag=None,
-            note_count=1,
-            created_at=datetime.now(UTC),
-        ))
-        session.add(NoteCollectionModel(
-            id=str(uuid.uuid4()),
-            name="WELL-NAMED",
-            color="#6366F1",
-            sort_order=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        ))
+        session.add(
+            CanonicalTagModel(
+                id="machine-learning",
+                display_name="machine-learning",
+                parent_tag=None,
+                note_count=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            CollectionModel(
+                id=str(uuid.uuid4()),
+                name="WELL-NAMED",
+                color="#6366F1",
+                sort_order=0,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
         violations = await svc.detect_naming_violations(session)

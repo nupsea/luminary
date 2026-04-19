@@ -89,16 +89,13 @@ async def test_search_by_query(test_db):
         # Sync FTS manually (service helper not called in direct insert)
         await session.execute(
             text(
-                "INSERT INTO flashcards_fts(flashcard_id, question, answer) "
-                "VALUES (:fid, :q, :a)"
+                "INSERT INTO flashcards_fts(flashcard_id, question, answer) VALUES (:fid, :q, :a)"
             ),
             {"fid": card.id, "q": card.question, "a": card.answer},
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/flashcards/search", params={"query": "entanglement"})
         assert resp.status_code == 200
         data = resp.json()
@@ -142,12 +139,8 @@ async def test_search_bloom_level_min(test_db):
         session.add(card_high)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.get(
-            "/flashcards/search", params={"bloom_level_min": 3}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/flashcards/search", params={"bloom_level_min": 3})
         assert resp.status_code == 200
         data = resp.json()
         ids = [item["id"] for item in data["items"]]
@@ -177,19 +170,14 @@ async def test_fts_populated_on_create(test_db):
         await session.commit()
 
         # Verify FTS row exists
-        row = (
-            await session.execute(
-                text("SELECT COUNT(*) FROM flashcards_fts")
-            )
-        ).scalar_one()
+        row = (await session.execute(text("SELECT COUNT(*) FROM flashcards_fts"))).scalar_one()
         assert row >= 1
 
         # Verify searchable via MATCH
         match_row = (
             await session.execute(
                 text(
-                    "SELECT flashcard_id FROM flashcards_fts"
-                    " WHERE flashcards_fts MATCH 'recursion'"
+                    "SELECT flashcard_id FROM flashcards_fts WHERE flashcards_fts MATCH 'recursion'"
                 )
             )
         ).first()
@@ -207,9 +195,7 @@ async def test_search_no_params(test_db):
     """GET /flashcards/search with no params returns 200."""
     _, _, _ = test_db
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/flashcards/search")
         assert resp.status_code == 200
         data = resp.json()
@@ -236,9 +222,7 @@ async def test_search_by_fsrs_state(test_db):
         session.add(card_review)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/flashcards/search", params={"fsrs_state": "new"})
         assert resp.status_code == 200
         data = resp.json()

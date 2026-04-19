@@ -67,9 +67,7 @@ async def get_concept_clusters() -> ConceptLinkedResponse:
     """
     svc = get_graph_service()
     raw = svc.get_concept_clusters()
-    return ConceptLinkedResponse(
-        clusters=[ConceptClusterItem(**c) for c in raw]
-    )
+    return ConceptLinkedResponse(clusters=[ConceptClusterItem(**c) for c in raw])
 
 
 @router.get("/entities/{document_id}")

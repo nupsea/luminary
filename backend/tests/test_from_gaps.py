@@ -110,9 +110,7 @@ async def test_generate_from_gaps_creates_flashcards():
     async with factory() as session:
         from sqlalchemy import select
 
-        result = await session.execute(
-            select(FlashcardModel).where(FlashcardModel.source == "gap")
-        )
+        result = await session.execute(select(FlashcardModel).where(FlashcardModel.source == "gap"))
         cards = result.scalars().all()
 
     assert len(cards) == 2
@@ -162,9 +160,7 @@ async def test_generate_from_gaps_skips_malformed_llm():
     async with factory() as session:
         from sqlalchemy import select
 
-        result = await session.execute(
-            select(FlashcardModel).where(FlashcardModel.source == "gap")
-        )
+        result = await session.execute(select(FlashcardModel).where(FlashcardModel.source == "gap"))
         cards = result.scalars().all()
 
     assert len(cards) == 1
@@ -213,9 +209,7 @@ async def test_gap_card_to_flashcards():
     async with factory() as session:
         from sqlalchemy import select
 
-        result = await session.execute(
-            select(FlashcardModel).where(FlashcardModel.deck == "gaps")
-        )
+        result = await session.execute(select(FlashcardModel).where(FlashcardModel.deck == "gaps"))
         cards = result.scalars().all()
 
     assert len(cards) == 2

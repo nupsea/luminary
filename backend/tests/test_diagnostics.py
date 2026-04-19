@@ -64,13 +64,9 @@ async def _fast_test_db(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_diagnostics_not_found(_fast_test_db):
     """GET /documents/nonexistent-id/diagnostics must return 404."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents/nonexistent-doc-id-abc123/diagnostics")
-    assert resp.status_code == 404, (
-        f"Expected 404, got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code == 404, f"Expected 404, got {resp.status_code}: {resp.text}"
 
 
 # ---------------------------------------------------------------------------
@@ -91,9 +87,7 @@ async def test_diagnostics_counts(book_name: str, all_books_ingested):
 
     doc_id = all_books_ingested[book_name]["doc_id"]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/diagnostics")
 
     assert resp.status_code == 200, (
@@ -120,9 +114,7 @@ async def test_diagnostics_counts(book_name: str, all_books_ingested):
     assert data["chunk_count"] >= chunk_min, (
         f"'{book_name}': chunk_count {data['chunk_count']} < {chunk_min}"
     )
-    assert data["fts_count"] >= fts_min, (
-        f"'{book_name}': fts_count {data['fts_count']} < {fts_min}"
-    )
+    assert data["fts_count"] >= fts_min, f"'{book_name}': fts_count {data['fts_count']} < {fts_min}"
     assert data["vector_count"] >= vector_min, (
         f"'{book_name}': vector_count {data['vector_count']} < {vector_min}"
     )
@@ -139,11 +131,7 @@ async def test_diagnostics_counts(book_name: str, all_books_ingested):
 async def test_ingest_timing_odyssey(all_books_ingested):
     """The Odyssey ingestion must complete within 1800s (30 min budget)."""
     elapsed = all_books_ingested["The Odyssey"]["elapsed_seconds"]
-    budget = next(
-        e["ingest_time_budget_seconds"]
-        for e in MANIFEST
-        if e["name"] == "The Odyssey"
-    )
+    budget = next(e["ingest_time_budget_seconds"] for e in MANIFEST if e["name"] == "The Odyssey")
     print(
         f"\n[The Odyssey] elapsed={elapsed:.1f}s / budget={budget}s",
         flush=True,

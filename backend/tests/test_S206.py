@@ -90,9 +90,7 @@ async def test_search_keyword_in_question(test_db):
         await _sync_flashcard_fts(card, session)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/flashcards/search", params={"query": "photosynthesis"})
         assert resp.status_code == 200
         data = resp.json()
@@ -119,9 +117,7 @@ async def test_search_keyword_in_answer(test_db):
         await _sync_flashcard_fts(card, session)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/flashcards/search", params={"query": "evaporation"})
         assert resp.status_code == 200
         data = resp.json()
@@ -154,9 +150,7 @@ async def test_search_multiword_and_semantics(test_db):
         await _sync_flashcard_fts(card_partial, session)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/flashcards/search", params={"query": "quantum particles"})
         assert resp.status_code == 200
         data = resp.json()
@@ -176,10 +170,8 @@ async def test_search_special_characters_no_error(test_db):
     """Special characters in search query do not raise FTS5 syntax errors."""
     _, _, _ = test_db
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        for q in ['(test)', '"hello"', 'foo:bar', 'a AND b', 'NOT nothing', '{braces}']:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for q in ["(test)", '"hello"', "foo:bar", "a AND b", "NOT nothing", "{braces}"]:
             resp = await client.get("/flashcards/search", params={"query": q})
             assert resp.status_code == 200, f"Failed for query: {q}"
 
@@ -242,9 +234,7 @@ async def test_updated_card_searchable(test_db):
         )
         assert result.first() is not None
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.put(
             f"/flashcards/{card.id}",
             json={"question": "New question about thermodynamics", "answer": "Heat transfer."},
@@ -281,9 +271,7 @@ async def test_deleted_card_not_searchable(test_db):
         await _sync_flashcard_fts(card, session)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Confirm searchable first
         resp = await client.get("/flashcards/search", params={"query": "osmosis"})
         assert card.id in [item["id"] for item in resp.json()["items"]]
@@ -349,12 +337,8 @@ async def test_search_with_filter_combination(test_db):
         await _sync_flashcard_fts(card_review, session)
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.get(
-            "/flashcards/search", params={"query": "DNA", "fsrs_state": "new"}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/flashcards/search", params={"query": "DNA", "fsrs_state": "new"})
         assert resp.status_code == 200
         data = resp.json()
         ids = [item["id"] for item in data["items"]]

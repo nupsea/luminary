@@ -3,7 +3,6 @@
 All tests are synchronous (no DB, no I/O).
 """
 
-
 from app.services.tech_section_parser import (
     assign_parent_headings_dicts,
     classify_section_level,

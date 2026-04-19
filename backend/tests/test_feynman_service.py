@@ -67,7 +67,7 @@ async def test_db(tmp_path, monkeypatch):
 
 def test_parse_gaps_extracts_list():
     raw = (
-        'Good attempt. You missed the key part.\n'
+        "Good attempt. You missed the key part.\n"
         'gaps: ["lexical scope", "closure captures by reference"]'
     )
     result = _parse_gaps(raw)
@@ -85,7 +85,7 @@ def test_parse_gaps_missing_block():
 
 
 def test_strip_gaps_block():
-    raw = "Excellent work!\ngaps: [\"closure\"]"
+    raw = 'Excellent work!\ngaps: ["closure"]'
     stripped = _strip_gaps_block(raw)
     assert "gaps:" not in stripped
     assert "Excellent work!" in stripped
@@ -160,13 +160,17 @@ async def test_complete_session_generates_feynman_flashcards(test_db):
     # Verify flashcard rows in DB
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(FlashcardModel).where(
-                    FlashcardModel.document_id == doc_id,
-                    FlashcardModel.source == "feynman",
+            (
+                await session.execute(
+                    select(FlashcardModel).where(
+                        FlashcardModel.document_id == doc_id,
+                        FlashcardModel.source == "feynman",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert len(rows) >= 2
     for card in rows:
@@ -223,8 +227,7 @@ async def test_create_session_system_prompt_includes_section_summary(test_db):
     # The system prompt passed to LLM must contain the section summary content
     assert len(captured_systems) == 1
     assert unique_content in captured_systems[0], (
-        f"Expected section summary content in system prompt. "
-        f"Got: {captured_systems[0][:200]}"
+        f"Expected section summary content in system prompt. Got: {captured_systems[0][:200]}"
     )
 
 
@@ -234,10 +237,7 @@ async def test_create_session_system_prompt_includes_section_summary(test_db):
 
 
 def test_parse_key_points_extracts_list():
-    raw = (
-        "The concept involves two ideas.\n"
-        'key_points: ["idea one", "idea two"]'
-    )
+    raw = 'The concept involves two ideas.\nkey_points: ["idea one", "idea two"]'
     result = _parse_key_points(raw)
     assert result == ["idea one", "idea two"]
 
@@ -266,8 +266,7 @@ async def test_generate_model_explanation_stores_text(test_db):
     doc_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
     model_answer = (
-        'Closures capture variables from their enclosing scope.'
-        '\nkey_points: ["scope", "capture"]'
+        'Closures capture variables from their enclosing scope.\nkey_points: ["scope", "capture"]'
     )
 
     async with factory() as session:

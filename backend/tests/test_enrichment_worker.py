@@ -1,4 +1,5 @@
 """Unit tests for EnrichmentQueueWorker -- S133."""
+
 import asyncio
 import uuid
 from datetime import UTC, datetime
@@ -46,23 +47,27 @@ async def test_worker_transitions_job_to_done(test_db):
     doc_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="Test",
-            format="pdf",
-            content_type="book",
-            word_count=100,
-            page_count=1,
-            file_path="/fake/test.pdf",
-            stage="enriching",
-        ))
-        session.add(EnrichmentJobModel(
-            id=job_id,
-            document_id=doc_id,
-            job_type="test_type",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Test",
+                format="pdf",
+                content_type="book",
+                word_count=100,
+                page_count=1,
+                file_path="/fake/test.pdf",
+                stage="enriching",
+            )
+        )
+        session.add(
+            EnrichmentJobModel(
+                id=job_id,
+                document_id=doc_id,
+                job_type="test_type",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     called: list[str] = []
@@ -95,23 +100,27 @@ async def test_worker_failed_job_sets_error_message(test_db):
     doc_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="Test",
-            format="pdf",
-            content_type="book",
-            word_count=10,
-            page_count=1,
-            file_path="/fake.pdf",
-            stage="enriching",
-        ))
-        session.add(EnrichmentJobModel(
-            id=job_id,
-            document_id=doc_id,
-            job_type="fail_type",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Test",
+                format="pdf",
+                content_type="book",
+                word_count=10,
+                page_count=1,
+                file_path="/fake.pdf",
+                stage="enriching",
+            )
+        )
+        session.add(
+            EnrichmentJobModel(
+                id=job_id,
+                document_id=doc_id,
+                job_type="fail_type",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     async def failing_handler(document_id: str, j_id: str) -> None:
@@ -141,23 +150,27 @@ async def test_worker_skips_already_active_document(test_db):
     doc_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="Test",
-            format="pdf",
-            content_type="book",
-            word_count=10,
-            page_count=1,
-            file_path="/fake.pdf",
-            stage="enriching",
-        ))
-        session.add(EnrichmentJobModel(
-            id=job_id,
-            document_id=doc_id,
-            job_type="test_type",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Test",
+                format="pdf",
+                content_type="book",
+                word_count=10,
+                page_count=1,
+                file_path="/fake.pdf",
+                stage="enriching",
+            )
+        )
+        session.add(
+            EnrichmentJobModel(
+                id=job_id,
+                document_id=doc_id,
+                job_type="test_type",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     call_count = [0]

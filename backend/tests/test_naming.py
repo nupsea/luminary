@@ -1,6 +1,5 @@
 """Tests for naming convention utilities (S199)."""
 
-
 from app.services.naming import normalize_collection_name, normalize_tag_slug
 
 # ---------------------------------------------------------------------------

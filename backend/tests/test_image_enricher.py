@@ -89,10 +89,13 @@ async def db_engine(tmp_path: Path):
         await conn.run_sync(Base.metadata.create_all)
         # Create images_fts FTS5 table
         from sqlalchemy import text  # noqa: PLC0415
-        await conn.execute(text(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS images_fts "
-            "USING fts5(body, image_id UNINDEXED, document_id UNINDEXED)"
-        ))
+
+        await conn.execute(
+            text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS images_fts "
+                "USING fts5(body, image_id UNINDEXED, document_id UNINDEXED)"
+            )
+        )
     yield engine
     await engine.dispose()
 
@@ -196,10 +199,11 @@ async def test_enrich_sets_description_and_image_type(
 
     # Verify SQLite row updated
     from sqlalchemy import select, text  # noqa: PLC0415
+
     async with session_factory() as session:
-        row = (await session.execute(
-            select(ImageModel).where(ImageModel.id == image_id)
-        )).scalar_one_or_none()
+        row = (
+            await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+        ).scalar_one_or_none()
         assert row is not None
         assert row.image_type == "flowchart"
         assert row.description == "A flowchart showing steps A to B"
@@ -218,9 +222,7 @@ async def test_enrich_sets_description_and_image_type(
 
 
 @pytest.mark.asyncio
-async def test_decorative_image_skips_llm(
-    session_factory, tmp_path: Path
-) -> None:
+async def test_decorative_image_skips_llm(session_factory, tmp_path: Path) -> None:
     """Solid-color image gets image_type='decorative' without any LLM call."""
     doc_id = "doc-decorative"
     image_id = "img-decorative"
@@ -231,15 +233,30 @@ async def test_decorative_image_skips_llm(
     _make_rgb_png(img_path, 200, 200, (200, 200, 200))  # solid color
 
     async with session_factory() as session:
-        session.add(DocumentModel(
-            id=doc_id, title="Doc", file_path="/tmp/x.pdf",
-            format="pdf", content_type="book", stage="complete",
-        ))
-        session.add(ImageModel(
-            id=image_id, document_id=doc_id, chunk_id=None, page=0,
-            path=f"images/{doc_id}/0_0.png", width=200, height=200,
-            content_hash="deco123", image_type=None, description=None,
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Doc",
+                file_path="/tmp/x.pdf",
+                format="pdf",
+                content_type="book",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=image_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=200,
+                height=200,
+                content_hash="deco123",
+                image_type=None,
+                description=None,
+            )
+        )
         await session.commit()
 
     mock_lancedb = MagicMock()
@@ -270,20 +287,20 @@ async def test_decorative_image_skips_llm(
     mock_llm.assert_not_called()
 
     from sqlalchemy import select  # noqa: PLC0415
+
     async with session_factory() as session:
-        row = (await session.execute(
-            select(ImageModel).where(ImageModel.id == image_id)
-        )).scalar_one_or_none()
+        row = (
+            await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+        ).scalar_one_or_none()
         assert row is not None
         assert row.image_type == "decorative"
 
 
 @pytest.mark.asyncio
-async def test_offline_503_propagates(
-    doc_and_image, session_factory, tmp_path: Path
-) -> None:
+async def test_offline_503_propagates(doc_and_image, session_factory, tmp_path: Path) -> None:
     """When vision model returns 503, ServiceUnavailableError propagates."""
     import litellm as _litellm  # noqa: PLC0415
+
     doc_id, image_id, img_path, data_dir = doc_and_image
 
     mock_lancedb = MagicMock()
@@ -315,18 +332,17 @@ async def test_offline_503_propagates(
 
     # ImageModel description must remain null
     from sqlalchemy import select  # noqa: PLC0415
+
     async with session_factory() as session:
-        row = (await session.execute(
-            select(ImageModel).where(ImageModel.id == image_id)
-        )).scalar_one_or_none()
+        row = (
+            await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+        ).scalar_one_or_none()
         assert row is not None
         assert row.description is None
 
 
 @pytest.mark.asyncio
-async def test_images_fts_keyword_search(
-    doc_and_image, session_factory, tmp_path: Path
-) -> None:
+async def test_images_fts_keyword_search(doc_and_image, session_factory, tmp_path: Path) -> None:
     """After enrich(), images_fts MATCH query returns the image_id."""
     doc_id, image_id, img_path, data_dir = doc_and_image
 
@@ -360,6 +376,7 @@ async def test_images_fts_keyword_search(
         await svc.enrich(doc_id)
 
     from sqlalchemy import text  # noqa: PLC0415
+
     async with session_factory() as session:
         result = await session.execute(
             text("SELECT image_id FROM images_fts WHERE images_fts MATCH 'revenue'")
@@ -390,35 +407,55 @@ async def test_image_analyze_handler_enqueues_diagram_extract(
     image_id = "img-enqueue-001"
 
     async with session_factory() as session:
-        session.add(DocumentModel(
-            id=doc_id, title="Enqueue Doc", file_path="/tmp/enqueue.pdf",
-            format="pdf", content_type="book", stage="complete",
-        ))
-        session.add(ImageModel(
-            id=image_id, document_id=doc_id, chunk_id=None, page=0,
-            path=f"images/{doc_id}/0_0.png", width=200, height=200,
-            content_hash="eq123",
-            image_type="architecture_diagram",
-            description="A component diagram showing Service A and Service B",
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Enqueue Doc",
+                file_path="/tmp/enqueue.pdf",
+                format="pdf",
+                content_type="book",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=image_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=200,
+                height=200,
+                content_hash="eq123",
+                image_type="architecture_diagram",
+                description="A component diagram showing Service A and Service B",
+            )
+        )
         await session.commit()
 
     with (
         patch(
             "app.services.image_enricher.ImageEnricherService.enrich",
-            new_callable=AsyncMock, return_value=1,
+            new_callable=AsyncMock,
+            return_value=1,
         ),
         patch("app.database.get_session_factory", return_value=session_factory),
     ):
         await image_analyze_handler(doc_id, "job-enqueue-001")
 
     async with session_factory() as session:
-        jobs = (await session.execute(
-            select(EnrichmentJobModel).where(
-                EnrichmentJobModel.document_id == doc_id,
-                EnrichmentJobModel.job_type == "diagram_extract",
+        jobs = (
+            (
+                await session.execute(
+                    select(EnrichmentJobModel).where(
+                        EnrichmentJobModel.document_id == doc_id,
+                        EnrichmentJobModel.job_type == "diagram_extract",
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(jobs) == 1
     assert jobs[0].status == "pending"
 
@@ -440,42 +477,64 @@ async def test_image_analyze_handler_deduplication_skip(
     image_id = "img-dedup-001"
 
     async with session_factory() as session:
-        session.add(DocumentModel(
-            id=doc_id, title="Dedup Doc", file_path="/tmp/dedup.pdf",
-            format="pdf", content_type="book", stage="complete",
-        ))
-        session.add(ImageModel(
-            id=image_id, document_id=doc_id, chunk_id=None, page=0,
-            path=f"images/{doc_id}/0_0.png", width=200, height=200,
-            content_hash="dd123",
-            image_type="sequence_diagram",
-            description="A sequence diagram for auth flow",
-        ))
-        session.add(EnrichmentJobModel(
-            id=str(_uuid.uuid4()),
-            document_id=doc_id,
-            job_type="diagram_extract",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Dedup Doc",
+                file_path="/tmp/dedup.pdf",
+                format="pdf",
+                content_type="book",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=image_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=200,
+                height=200,
+                content_hash="dd123",
+                image_type="sequence_diagram",
+                description="A sequence diagram for auth flow",
+            )
+        )
+        session.add(
+            EnrichmentJobModel(
+                id=str(_uuid.uuid4()),
+                document_id=doc_id,
+                job_type="diagram_extract",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     with (
         patch(
             "app.services.image_enricher.ImageEnricherService.enrich",
-            new_callable=AsyncMock, return_value=1,
+            new_callable=AsyncMock,
+            return_value=1,
         ),
         patch("app.database.get_session_factory", return_value=session_factory),
     ):
         await image_analyze_handler(doc_id, "job-dedup-001")
 
     async with session_factory() as session:
-        jobs = (await session.execute(
-            select(EnrichmentJobModel).where(
-                EnrichmentJobModel.document_id == doc_id,
-                EnrichmentJobModel.job_type == "diagram_extract",
+        jobs = (
+            (
+                await session.execute(
+                    select(EnrichmentJobModel).where(
+                        EnrichmentJobModel.document_id == doc_id,
+                        EnrichmentJobModel.job_type == "diagram_extract",
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(jobs) == 1  # still only 1, not 2
 
 
@@ -493,35 +552,55 @@ async def test_image_analyze_handler_no_qualifying_images_skips_enqueue(
     image_id = "img-no-diag-001"
 
     async with session_factory() as session:
-        session.add(DocumentModel(
-            id=doc_id, title="No Diag Doc", file_path="/tmp/nodiag.pdf",
-            format="pdf", content_type="book", stage="complete",
-        ))
-        session.add(ImageModel(
-            id=image_id, document_id=doc_id, chunk_id=None, page=0,
-            path=f"images/{doc_id}/0_0.png", width=200, height=200,
-            content_hash="nd123",
-            image_type="chart",
-            description="A bar chart",
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="No Diag Doc",
+                file_path="/tmp/nodiag.pdf",
+                format="pdf",
+                content_type="book",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=image_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=200,
+                height=200,
+                content_hash="nd123",
+                image_type="chart",
+                description="A bar chart",
+            )
+        )
         await session.commit()
 
     with (
         patch(
             "app.services.image_enricher.ImageEnricherService.enrich",
-            new_callable=AsyncMock, return_value=1,
+            new_callable=AsyncMock,
+            return_value=1,
         ),
         patch("app.database.get_session_factory", return_value=session_factory),
     ):
         await image_analyze_handler(doc_id, "job-nodiag-001")
 
     async with session_factory() as session:
-        jobs = (await session.execute(
-            select(EnrichmentJobModel).where(
-                EnrichmentJobModel.document_id == doc_id,
-                EnrichmentJobModel.job_type == "diagram_extract",
+        jobs = (
+            (
+                await session.execute(
+                    select(EnrichmentJobModel).where(
+                        EnrichmentJobModel.document_id == doc_id,
+                        EnrichmentJobModel.job_type == "diagram_extract",
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(jobs) == 0
 
 
@@ -529,15 +608,15 @@ async def test_image_analyze_handler_no_qualifying_images_skips_enqueue(
 # Integration test — requires ollama with llava model
 # ---------------------------------------------------------------------------
 
+
 def _ollama_has_llava() -> bool:
     """Return True if ollama is in PATH and llava model is listed."""
     if not shutil.which("ollama"):
         return False
     import subprocess  # noqa: PLC0415
+
     try:
-        result = subprocess.run(
-            ["ollama", "list"], capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
         return "llava:7b" in result.stdout
     except Exception:
         return False
@@ -566,25 +645,43 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         from sqlalchemy import text  # noqa: PLC0415
-        await conn.execute(text(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS images_fts "
-            "USING fts5(body, image_id UNINDEXED, document_id UNINDEXED)"
-        ))
+
+        await conn.execute(
+            text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS images_fts "
+                "USING fts5(body, image_id UNINDEXED, document_id UNINDEXED)"
+            )
+        )
 
     sf = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     doc_id = "integ-doc"
     image_id = "integ-img-001"
 
     async with sf() as session:
-        session.add(DocumentModel(
-            id=doc_id, title="Integration Doc", file_path="/tmp/x.pdf",
-            format="pdf", content_type="book", stage="complete",
-        ))
-        session.add(ImageModel(
-            id=image_id, document_id=doc_id, chunk_id=None, page=0,
-            path=f"images/{doc_id}/0_0.png", width=300, height=200,
-            content_hash="integ123", image_type=None, description=None,
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Integration Doc",
+                file_path="/tmp/x.pdf",
+                format="pdf",
+                content_type="book",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=image_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=300,
+                height=200,
+                content_hash="integ123",
+                image_type=None,
+                description=None,
+            )
+        )
         await session.commit()
 
     mock_lancedb = MagicMock()
@@ -610,10 +707,11 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     assert count == 1
 
     from sqlalchemy import select  # noqa: PLC0415
+
     async with sf() as session:
-        row = (await session.execute(
-            select(ImageModel).where(ImageModel.id == image_id)
-        )).scalar_one_or_none()
+        row = (
+            await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+        ).scalar_one_or_none()
         assert row is not None
         assert row.description is not None and len(row.description) > 0
         assert row.image_type is not None

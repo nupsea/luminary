@@ -201,12 +201,14 @@ def _attach_costs(models: list[dict]) -> list[dict]:
     for m in models:
         mid = m["id"]
         cost = _MODEL_COSTS.get(mid, {})
-        result.append({
-            **m,
-            "cost_input": cost.get("input"),
-            "cost_output": cost.get("output"),
-            "cost_note": cost.get("note", ""),
-        })
+        result.append(
+            {
+                **m,
+                "cost_input": cost.get("input"),
+                "cost_output": cost.get("output"),
+                "cost_note": cost.get("note", ""),
+            }
+        )
     return result
 
 
@@ -214,13 +216,13 @@ def _attach_costs(models: list[dict]) -> list[dict]:
 # but are no longer usable by new API keys. Confirmed 404/NOT_FOUND in production.
 # Includes both short aliases and their versioned (-001/-002) variants.
 _DEPRECATED_GEMINI_IDS = {
-    "gemini-2.0-flash",           # "no longer available to new users"
-    "gemini-2.0-flash-001",       # versioned variant — same restriction
-    "gemini-2.0-flash-lite",      # "no longer available to new users"
+    "gemini-2.0-flash",  # "no longer available to new users"
+    "gemini-2.0-flash-001",  # versioned variant — same restriction
+    "gemini-2.0-flash-lite",  # "no longer available to new users"
     "gemini-2.0-flash-lite-001",  # versioned variant — confirmed 404
-    "gemini-1.5-flash",           # "not found for API version v1beta"
-    "gemini-1.5-flash-001",       # versioned variant — same restriction
-    "gemini-1.5-flash-002",       # versioned variant — same restriction
+    "gemini-1.5-flash",  # "not found for API version v1beta"
+    "gemini-1.5-flash-001",  # versioned variant — same restriction
+    "gemini-1.5-flash-002",  # versioned variant — same restriction
 }
 
 
@@ -275,6 +277,7 @@ async def list_llm_models(
     """
     if provider == "gemini":
         from app.services.settings_service import _cache  # noqa: PLC0415
+
         api_key = _cache.get("google_api_key", "")
         if not api_key:
             return []
@@ -296,8 +299,8 @@ async def list_llm_models(
 
 
 class WebSearchSettingsResponse(BaseModel):
-    provider: str   # "none" | "brave" | "tavily" | "duckduckgo"
-    enabled: bool   # True when provider != "none"
+    provider: str  # "none" | "brave" | "tavily" | "duckduckgo"
+    enabled: bool  # True when provider != "none"
 
 
 @router.get("/web-search", response_model=WebSearchSettingsResponse)

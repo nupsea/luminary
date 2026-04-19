@@ -89,7 +89,7 @@ def _parse_sse_events(text: str) -> list[dict]:
     for line in text.splitlines():
         if line.startswith("data: "):
             try:
-                events.append(json.loads(line[len("data: "):]))
+                events.append(json.loads(line[len("data: ") :]))
             except json.JSONDecodeError:
                 pass
     return events

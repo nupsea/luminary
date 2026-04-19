@@ -3,7 +3,7 @@
 Covers:
 - GET /collections/by-document/{document_id} returns auto-collection or 404
 - POST /collections/auto/{document_id} creates auto-collection; idempotent
-- NoteCollectionModel.auto_document_id column present
+- CollectionModel.auto_document_id column present
 """
 
 import uuid

@@ -48,23 +48,27 @@ async def test_db(tmp_path, monkeypatch):
 async def _seed_doc_and_sections(factory):
     """Insert a document and section for glossary tests."""
     async with factory() as session:
-        session.add(DocumentModel(
-            id=DOC_ID,
-            title="Test Document",
-            format="txt",
-            content_type="book",
-            word_count=5000,
-            page_count=20,
-            file_path="/tmp/test.txt",
-        ))
-        session.add(SectionModel(
-            id=SEC_ID,
-            document_id=DOC_ID,
-            heading="Introduction",
-            level=1,
-            section_order=0,
-            preview="Entanglement is a quantum phenomenon where particles share state.",
-        ))
+        session.add(
+            DocumentModel(
+                id=DOC_ID,
+                title="Test Document",
+                format="txt",
+                content_type="book",
+                word_count=5000,
+                page_count=20,
+                file_path="/tmp/test.txt",
+            )
+        )
+        session.add(
+            SectionModel(
+                id=SEC_ID,
+                document_id=DOC_ID,
+                heading="Introduction",
+                level=1,
+                section_order=0,
+                preview="Entanglement is a quantum phenomenon where particles share state.",
+            )
+        )
         await session.commit()
 
 
@@ -79,15 +83,19 @@ async def test_extract_glossary_persists_terms(test_db):
     _engine, factory, _tmp = test_db
     await _seed_doc_and_sections(factory)
 
-    glossary_json = json.dumps([
-        {"term": "Entanglement", "definition": "A quantum phenomenon.", "category": "concept"},
-        {"term": "Qubit", "definition": "Quantum bit.", "category": "technical"},
-    ])
+    glossary_json = json.dumps(
+        [
+            {"term": "Entanglement", "definition": "A quantum phenomenon.", "category": "concept"},
+            {"term": "Qubit", "definition": "Quantum bit.", "category": "technical"},
+        ]
+    )
 
     retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[
-        MagicMock(text="Entanglement is a quantum phenomenon where particles share state."),
-    ])
+    retriever.retrieve = AsyncMock(
+        return_value=[
+            MagicMock(text="Entanglement is a quantum phenomenon where particles share state."),
+        ]
+    )
     llm = MagicMock()
     llm.generate = AsyncMock(return_value=glossary_json)
 
@@ -118,13 +126,15 @@ async def test_cached_endpoint_returns_persisted_terms(test_db):
 
     # Seed a glossary term directly
     async with factory() as session:
-        session.add(GlossaryTermModel(
-            id=str(uuid.uuid4()),
-            document_id=DOC_ID,
-            term="Photon",
-            definition="A particle of light.",
-            category="concept",
-        ))
+        session.add(
+            GlossaryTermModel(
+                id=str(uuid.uuid4()),
+                document_id=DOC_ID,
+                term="Photon",
+                definition="A particle of light.",
+                category="concept",
+            )
+        )
         await session.commit()
 
     svc = ExplainService()
@@ -142,13 +152,17 @@ async def test_regenerate_upserts_terms(test_db):
     await _seed_doc_and_sections(factory)
 
     # First generation
-    glossary_json_1 = json.dumps([
-        {"term": "Entanglement", "definition": "Old definition.", "category": "concept"},
-    ])
+    glossary_json_1 = json.dumps(
+        [
+            {"term": "Entanglement", "definition": "Old definition.", "category": "concept"},
+        ]
+    )
     retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[
-        MagicMock(text="Entanglement is quantum."),
-    ])
+    retriever.retrieve = AsyncMock(
+        return_value=[
+            MagicMock(text="Entanglement is quantum."),
+        ]
+    )
     llm = MagicMock()
     llm.generate = AsyncMock(return_value=glossary_json_1)
 
@@ -160,10 +174,12 @@ async def test_regenerate_upserts_terms(test_db):
         await svc.extract_glossary(DOC_ID)
 
     # Second generation with updated definition + new term
-    glossary_json_2 = json.dumps([
-        {"term": "Entanglement", "definition": "Updated definition.", "category": "concept"},
-        {"term": "Superposition", "definition": "Both states at once.", "category": "concept"},
-    ])
+    glossary_json_2 = json.dumps(
+        [
+            {"term": "Entanglement", "definition": "Updated definition.", "category": "concept"},
+            {"term": "Superposition", "definition": "Both states at once.", "category": "concept"},
+        ]
+    )
     llm.generate = AsyncMock(return_value=glossary_json_2)
 
     with (
@@ -188,13 +204,15 @@ async def test_delete_removes_term(test_db):
 
     term_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(GlossaryTermModel(
-            id=term_id,
-            document_id=DOC_ID,
-            term="Photon",
-            definition="A particle of light.",
-            category="concept",
-        ))
+        session.add(
+            GlossaryTermModel(
+                id=term_id,
+                document_id=DOC_ID,
+                term="Photon",
+                definition="A particle of light.",
+                category="concept",
+            )
+        )
         await session.commit()
 
     svc = ExplainService()
@@ -210,9 +228,11 @@ async def test_delete_removes_term(test_db):
 async def test_extract_glossary_parse_error_raises():
     """AC: parse failure raises GlossaryParseError."""
     retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[
-        MagicMock(text="Some text."),
-    ])
+    retriever.retrieve = AsyncMock(
+        return_value=[
+            MagicMock(text="Some text."),
+        ]
+    )
     llm = MagicMock()
     llm.generate = AsyncMock(return_value="not valid json at all")
 

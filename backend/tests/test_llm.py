@@ -47,6 +47,7 @@ async def settings_db(tmp_path, monkeypatch):
     svc_module._cache.update(_DEFAULTS)
     await engine.dispose()
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

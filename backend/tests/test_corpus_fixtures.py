@@ -43,6 +43,7 @@ REQUIRED_THRESHOLD_FIELDS = {
 
 # ── manifest ──────────────────────────────────────────────────────────────────
 
+
 def test_manifest_parses_and_has_required_fields() -> None:
     """manifest.json must parse and each entry must have all required fields."""
     assert MANIFEST_PATH.exists(), f"manifest.json not found at {MANIFEST_PATH}"
@@ -52,13 +53,9 @@ def test_manifest_parses_and_has_required_fields() -> None:
 
     for entry in entries:
         missing = REQUIRED_MANIFEST_FIELDS - set(entry.keys())
-        assert not missing, (
-            f"Book '{entry.get('name', '?')}' is missing fields: {missing}"
-        )
+        assert not missing, f"Book '{entry.get('name', '?')}' is missing fields: {missing}"
         missing_thresh = REQUIRED_THRESHOLD_FIELDS - set(entry["thresholds"].keys())
-        assert not missing_thresh, (
-            f"Book '{entry['name']}' thresholds missing: {missing_thresh}"
-        )
+        assert not missing_thresh, f"Book '{entry['name']}' thresholds missing: {missing_thresh}"
         assert isinstance(entry["known_entities"], list) and entry["known_entities"], (
             f"Book '{entry['name']}' must have non-empty known_entities"
         )
@@ -83,6 +80,7 @@ def test_manifest_parses_and_has_required_fields() -> None:
 
 # ── per-book word count tests ─────────────────────────────────────────────────
 
+
 def _load_manifest() -> list[dict]:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
@@ -91,11 +89,14 @@ def _word_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8", errors="replace").split())
 
 
-@pytest.mark.parametrize("book_name,expected_min", [
-    ("The Time Machine", 30000),
-    ("Alice in Wonderland", 25000),
-    ("The Odyssey", 100000),
-])
+@pytest.mark.parametrize(
+    "book_name,expected_min",
+    [
+        ("The Time Machine", 30000),
+        ("Alice in Wonderland", 25000),
+        ("The Odyssey", 100000),
+    ],
+)
 def test_book_word_count(book_name: str, expected_min: int) -> None:
     """Each book file must exist and meet its minimum word count."""
     manifest = _load_manifest()
@@ -104,8 +105,7 @@ def test_book_word_count(book_name: str, expected_min: int) -> None:
 
     filepath = REPO_ROOT / entry["filepath"]
     assert filepath.exists(), (
-        f"Book file not found: {filepath}\n"
-        f"Run: ./scripts/corpus/setup_books.sh"
+        f"Book file not found: {filepath}\nRun: ./scripts/corpus/setup_books.sh"
     )
 
     count = _word_count(filepath)

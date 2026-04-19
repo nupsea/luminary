@@ -83,7 +83,9 @@ def test_detect_gaps_returns_report(client):
 
     mock_resp = MagicMock()
     mock_resp.choices = [MagicMock()]
-    mock_resp.choices[0].message.content = (
+    mock_resp.choices[
+        0
+    ].message.content = (
         '{"gaps": ["Cheshire Cat invisibility"], "covered": ["Alice and White Rabbit"]}'
     )
 
@@ -163,7 +165,9 @@ def test_alice_gap_detection_slow(all_books_ingested):
 
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
-        mock_resp.choices[0].message.content = (
+        mock_resp.choices[
+            0
+        ].message.content = (
             '{"gaps": ["Queen of Hearts"], "covered": ["White Rabbit", "Mad Hatter"]}'
         )
 

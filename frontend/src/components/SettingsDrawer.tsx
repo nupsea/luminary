@@ -103,6 +103,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const { data: llm } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: fetchLLMSettings,
+    staleTime: 30_000,
     refetchInterval: 30_000,
   })
   const { data: storage, refetch: refetchStorage } = useQuery({
@@ -541,6 +542,7 @@ export function LLMModeBadge({ onClick }: LLMModeBadgeProps) {
   const { data } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: fetchLLMSettings,
+    staleTime: 30_000,
     refetchInterval: 30_000,
   })
   const setLlmMode = useAppStore((s) => s.setLlmMode)

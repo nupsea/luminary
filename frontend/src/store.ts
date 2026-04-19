@@ -21,6 +21,9 @@ interface AppState {
   // S147: Pre-populate Chat input when user selects "Ask in Chat" from SelectionActionBar.
   // S197: autoSubmit flag triggers immediate send on preload consumption.
   chatPreload: { text: string; documentId: string | null; autoSubmit?: boolean } | null
+  // Global sliding chat panel state
+  chatPanelOpen: boolean
+  setChatPanelOpen: (open: boolean) => void
   // S164: Active collection filter for Notes tab.
   activeCollectionId: string | null
   // S165: Active tag filter for Notes tab (hierarchical prefix match).
@@ -67,6 +70,8 @@ export const useAppStore = create<AppState>()(
       reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
       studySectionFilter: null,
       chatPreload: null,
+      chatPanelOpen: false,
+      setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
       activeCollectionId: null,
       activeTag: null,
       notePreload: null,

@@ -56,9 +56,7 @@ async def test_get_mastery_concepts_empty(test_db):
         mock_graph.get_concept_clusters.return_value = []
         mock_graph_factory.return_value = mock_graph
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(
                 "/mastery/concepts",
                 params={"document_ids": str(uuid.uuid4())},
@@ -79,9 +77,7 @@ async def test_get_mastery_heatmap_empty(test_db):
         mock_graph.get_entities_by_type_for_document.return_value = {}
         mock_graph_factory.return_value = mock_graph
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(
                 "/mastery/heatmap",
                 params={"document_id": str(uuid.uuid4())},
@@ -126,15 +122,11 @@ async def test_get_mastery_heatmap_with_data(test_db):
 
     with patch("app.services.mastery_service.get_graph_service") as mock_graph_factory:
         mock_graph = MagicMock()
-        mock_graph.get_entities_by_type_for_document.return_value = {
-            "CONCEPT": ["closures"]
-        }
+        mock_graph.get_entities_by_type_for_document.return_value = {"CONCEPT": ["closures"]}
         mock_graph.get_concept_clusters.return_value = []
         mock_graph_factory.return_value = mock_graph
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(
                 "/mastery/heatmap",
                 params={"document_id": doc_id},
@@ -145,9 +137,7 @@ async def test_get_mastery_heatmap_with_data(test_db):
     assert "Chapter 1: Closures" in data["chapters"]
     assert "closures" in data["concepts"]
     # No flashcards -> mastery should be null
-    cell = next(
-        (c for c in data["cells"] if c["chapter"] == "Chapter 1: Closures"), None
-    )
+    cell = next((c for c in data["cells"] if c["chapter"] == "Chapter 1: Closures"), None)
     assert cell is not None
     assert cell["mastery"] is None
     assert cell["card_count"] == 0

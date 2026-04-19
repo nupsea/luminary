@@ -137,6 +137,7 @@ export function renderOverlayDivs(
   annotationId?: string,
   isActive?: boolean,
 ): void {
+  const fragment = document.createDocumentFragment()
   for (const rect of rects) {
     const div = document.createElement("div")
     div.setAttribute(dataAttr, "1")
@@ -152,8 +153,9 @@ export function renderOverlayDivs(
     div.style.mixBlendMode = "multiply"
     if (annotationId) div.setAttribute("data-annotation-id", annotationId)
     if (isActive) div.setAttribute("data-active-search-match", "1")
-    container.appendChild(div)
+    fragment.appendChild(div)
   }
+  container.appendChild(fragment)
 }
 
 /**

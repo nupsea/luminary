@@ -88,20 +88,24 @@ async def test_cooccurrence_weight(test_db):
 
     async with factory() as session:
         # Canonical tags (note_count values set for ordering)
-        session.add_all([
-            _make_canonical_tag("python", "python", 3),
-            _make_canonical_tag("rust", "rust", 2),
-            _make_canonical_tag("go", "go", 1),
-        ])
+        session.add_all(
+            [
+                _make_canonical_tag("python", "python", 3),
+                _make_canonical_tag("rust", "rust", 2),
+                _make_canonical_tag("go", "go", 1),
+            ]
+        )
         # note_tag_index rows
-        session.add_all([
-            _make_index_row(note1, "python"),
-            _make_index_row(note1, "rust"),
-            _make_index_row(note2, "python"),
-            _make_index_row(note2, "rust"),
-            _make_index_row(note3, "python"),
-            _make_index_row(note3, "go"),
-        ])
+        session.add_all(
+            [
+                _make_index_row(note1, "python"),
+                _make_index_row(note1, "rust"),
+                _make_index_row(note2, "python"),
+                _make_index_row(note2, "rust"),
+                _make_index_row(note3, "python"),
+                _make_index_row(note3, "go"),
+            ]
+        )
         await session.commit()
 
     # Ensure cache is empty before calling
@@ -136,11 +140,13 @@ async def test_cooccurrence_multiple_edges(test_db):
     notes = [str(uuid.uuid4()) for _ in range(3)]
 
     async with factory() as session:
-        session.add_all([
-            _make_canonical_tag("a", "a", 3),
-            _make_canonical_tag("b", "b", 3),
-            _make_canonical_tag("c", "c", 3),
-        ])
+        session.add_all(
+            [
+                _make_canonical_tag("a", "a", 3),
+                _make_canonical_tag("b", "b", 3),
+                _make_canonical_tag("c", "c", 3),
+            ]
+        )
         for note_id in notes:
             for tag in ["a", "b", "c"]:
                 session.add(_make_index_row(note_id, tag))
@@ -210,23 +216,25 @@ async def test_get_tag_graph_endpoint(test_db):
     note2 = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add_all([
-            _make_canonical_tag("x", "x", 2),
-            _make_canonical_tag("y", "y", 2),
-        ])
-        session.add_all([
-            _make_index_row(note1, "x"),
-            _make_index_row(note1, "y"),
-            _make_index_row(note2, "x"),
-            _make_index_row(note2, "y"),
-        ])
+        session.add_all(
+            [
+                _make_canonical_tag("x", "x", 2),
+                _make_canonical_tag("y", "y", 2),
+            ]
+        )
+        session.add_all(
+            [
+                _make_index_row(note1, "x"),
+                _make_index_row(note1, "y"),
+                _make_index_row(note2, "x"),
+                _make_index_row(note2, "y"),
+            ]
+        )
         await session.commit()
 
     invalidate_tag_graph_cache()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/tags/graph")
 
     assert resp.status_code == 200
@@ -246,9 +254,7 @@ async def test_get_tag_graph_endpoint_cache(test_db):
 
     invalidate_tag_graph_cache()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp1 = await client.get("/tags/graph")
         resp2 = await client.get("/tags/graph")
 

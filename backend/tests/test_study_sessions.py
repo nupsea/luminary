@@ -111,9 +111,7 @@ def _make_review_event(
 @pytest.mark.asyncio
 async def test_list_sessions_empty(test_db):
     """Returns empty list with total=0 when no sessions exist."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/study/sessions")
 
     assert resp.status_code == 200
@@ -133,14 +131,10 @@ async def test_list_sessions_pagination(test_db):
 
     async with factory() as session:
         for i in range(5):
-            session.add(
-                _make_session(doc_id=doc_id, started_at=now - timedelta(hours=i))
-            )
+            session.add(_make_session(doc_id=doc_id, started_at=now - timedelta(hours=i)))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/study/sessions?page=1&page_size=2")
 
     assert resp.status_code == 200
@@ -166,9 +160,7 @@ async def test_list_sessions_sorted_desc(test_db):
         session.add(_make_session(doc_id=doc_id, started_at=t_new))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/study/sessions")
 
     assert resp.status_code == 200
@@ -191,9 +183,7 @@ async def test_list_sessions_document_filter(test_db):
         session.add(_make_session(doc_id=doc_b))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/sessions?document_id={doc_a}")
 
     assert resp.status_code == 200
@@ -220,9 +210,7 @@ async def test_list_sessions_accuracy_pct(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/study/sessions")
 
     assert resp.status_code == 200
@@ -257,9 +245,7 @@ async def test_session_cards_returns_review_events(test_db):
         session.add(_make_review_event(sess.id, card2.id, rating="again", is_correct=False))
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/sessions/{sess.id}/cards")
 
     assert resp.status_code == 200
@@ -275,9 +261,7 @@ async def test_session_cards_returns_review_events(test_db):
 @pytest.mark.asyncio
 async def test_session_cards_404_unknown_session(test_db):
     """GET /study/sessions/{id}/cards returns 404 for unknown session_id."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/study/sessions/{uuid.uuid4()}/cards")
 
     assert resp.status_code == 404

@@ -255,9 +255,7 @@ async def test_notes_gap_auto_fetches_from_auto_collection():
         result = await notes_gap_node(state)
 
     # Verify detect_gaps called with the auto-collection note IDs
-    mock_detector.detect_gaps.assert_awaited_once_with(
-        ["n1", "n2", "n3", "n4"], "doc-abc"
-    )
+    mock_detector.detect_gaps.assert_awaited_once_with(["n1", "n2", "n3", "n4"], "doc-abc")
     card = json.loads(result["answer"][8:])
     assert card["auto_collection_id"] == "auto-coll-1"
     assert card["gaps"] == ["Missing concept A"]

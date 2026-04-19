@@ -50,12 +50,10 @@ def _assert_status_schema(body: dict) -> None:
     assert isinstance(body.get("stage"), str), "stage must be a string"
     assert isinstance(body.get("progress_pct"), int), "progress_pct must be an int"
     assert isinstance(body.get("done"), bool), "done must be a bool"
-    assert body.get("error_message") is None or isinstance(
-        body["error_message"], str
-    ), "error_message must be str or null"
-    assert 0 <= body["progress_pct"] <= 100, (
-        f"progress_pct out of range: {body['progress_pct']}"
+    assert body.get("error_message") is None or isinstance(body["error_message"], str), (
+        "error_message must be str or null"
     )
+    assert 0 <= body["progress_pct"] <= 100, f"progress_pct out of range: {body['progress_pct']}"
 
 
 # ---------------------------------------------------------------------------
@@ -356,8 +354,8 @@ async def test_http_status_schema_on_every_poll(upload_db):
             if body.get("done"):
                 break
 
-        assert not schema_violations, (
-            "Schema violations during polling:\n" + "\n".join(schema_violations)
+        assert not schema_violations, "Schema violations during polling:\n" + "\n".join(
+            schema_violations
         )
 
 

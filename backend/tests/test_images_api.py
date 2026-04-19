@@ -1,4 +1,5 @@
 """Integration tests for images API endpoints -- S133."""
+
 import uuid
 from datetime import UTC, datetime
 from io import BytesIO
@@ -45,16 +46,18 @@ async def test_get_images_returns_empty_for_text_doc(test_db):
     engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="Text Book",
-            format="txt",
-            content_type="book",
-            word_count=100,
-            page_count=0,
-            file_path="/fake.txt",
-            stage="complete",
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Text Book",
+                format="txt",
+                content_type="book",
+                word_count=100,
+                page_count=0,
+                file_path="/fake.txt",
+                stage="complete",
+            )
+        )
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -87,27 +90,31 @@ async def test_get_images_returns_stored_image(test_db):
     fake_png.write_bytes(b"fake png content")
 
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="PDF Book",
-            format="pdf",
-            content_type="book",
-            word_count=1000,
-            page_count=10,
-            file_path="/fake.pdf",
-            stage="complete",
-        ))
-        session.add(ImageModel(
-            id=img_id,
-            document_id=doc_id,
-            chunk_id=None,
-            page=0,
-            path=f"images/{doc_id}/0_0.png",
-            width=300,
-            height=200,
-            content_hash="abc123",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="PDF Book",
+                format="pdf",
+                content_type="book",
+                word_count=1000,
+                page_count=10,
+                file_path="/fake.pdf",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=img_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=300,
+                height=200,
+                content_hash="abc123",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -137,27 +144,31 @@ async def test_serve_image_raw_returns_200(test_db):
     png_path.write_bytes(buf.getvalue())
 
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="PDF Book",
-            format="pdf",
-            content_type="book",
-            word_count=100,
-            page_count=1,
-            file_path="/fake.pdf",
-            stage="complete",
-        ))
-        session.add(ImageModel(
-            id=img_id,
-            document_id=doc_id,
-            chunk_id=None,
-            page=0,
-            path=f"images/{doc_id}/0_0.png",
-            width=1,
-            height=1,
-            content_hash="deadbeef",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="PDF Book",
+                format="pdf",
+                content_type="book",
+                word_count=100,
+                page_count=1,
+                file_path="/fake.pdf",
+                stage="complete",
+            )
+        )
+        session.add(
+            ImageModel(
+                id=img_id,
+                document_id=doc_id,
+                chunk_id=None,
+                page=0,
+                path=f"images/{doc_id}/0_0.png",
+                width=1,
+                height=1,
+                content_hash="deadbeef",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -182,23 +193,27 @@ async def test_get_enrichment_returns_jobs(test_db):
     job_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="PDF Book",
-            format="pdf",
-            content_type="book",
-            word_count=100,
-            page_count=1,
-            file_path="/fake.pdf",
-            stage="enriching",
-        ))
-        session.add(EnrichmentJobModel(
-            id=job_id,
-            document_id=doc_id,
-            job_type="image_extract",
-            status="pending",
-            created_at=datetime.now(UTC),
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="PDF Book",
+                format="pdf",
+                content_type="book",
+                word_count=100,
+                page_count=1,
+                file_path="/fake.pdf",
+                stage="enriching",
+            )
+        )
+        session.add(
+            EnrichmentJobModel(
+                id=job_id,
+                document_id=doc_id,
+                job_type="image_extract",
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -217,16 +232,18 @@ async def test_get_enrichment_returns_empty_for_text_doc(test_db):
     doc_id = str(uuid.uuid4())
 
     async with factory() as session:
-        session.add(DocumentModel(
-            id=doc_id,
-            title="Text Book",
-            format="txt",
-            content_type="book",
-            word_count=100,
-            page_count=0,
-            file_path="/fake.txt",
-            stage="complete",
-        ))
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Text Book",
+                format="txt",
+                content_type="book",
+                word_count=100,
+                page_count=0,
+                file_path="/fake.txt",
+                stage="complete",
+            )
+        )
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

@@ -67,10 +67,7 @@ async def _maybe_rewrite_query(
         return question
     try:
         llm = get_llm_service()
-        prompt = (
-            f"Question: {question}\n"
-            f"Available names: {', '.join(entity_names)}"
-        )
+        prompt = f"Question: {question}\nAvailable names: {', '.join(entity_names)}"
         if prior_context:
             prompt = f"Prior exchange:\n{prior_context}\n\n{prompt}"
         result = await llm.generate(prompt, system=_REWRITE_SYSTEM, stream=False)
@@ -119,11 +116,23 @@ def _enrich_citation_titles(
     return citations
 
 
-_SUMMARY_INTENT_KEYWORDS: frozenset[str] = frozenset({
-    "summarize", "summary", "summaries", "overview", "key points",
-    "what is this about", "main idea", "main ideas", "brief", "briefly",
-    "gist", "outline", "recap",
-})
+_SUMMARY_INTENT_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "summarize",
+        "summary",
+        "summaries",
+        "overview",
+        "key points",
+        "what is this about",
+        "main idea",
+        "main ideas",
+        "brief",
+        "briefly",
+        "gist",
+        "outline",
+        "recap",
+    }
+)
 
 
 def _should_use_summary(question: str) -> bool:
@@ -164,9 +173,7 @@ def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str
     for chunk in chunks:
         title = doc_titles.get(chunk.document_id, chunk.document_id)
         heading = chunk.section_heading or "—"
-        parts.append(
-            f"[Document: {title} | Section: {heading} | Page: {chunk.page}]\n{chunk.text}"
-        )
+        parts.append(f"[Document: {title} | Section: {heading} | Page: {chunk.page}]\n{chunk.text}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -303,6 +310,7 @@ class QAService:
             # cause _build_kwargs to use settings.GOOGLE_API_KEY (empty in Docker).
             try:
                 from app.services.settings_service import get_effective_routing  # noqa: PLC0415
+
                 store_model = model or get_effective_routing()[0]
             except Exception:
                 store_model = model or "unknown"
@@ -354,7 +362,8 @@ class QAService:
                     root_span.set_attribute("error.message", "llm_unavailable")
                     logger.warning(
                         "stream_answer: graph error [%s]: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                     )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
@@ -433,11 +442,9 @@ class QAService:
                         )
                     else:
                         # Chunks present but LLM could not find the answer
-                        await self._store_qa(
-                            question, None, [], "low", None, scope, store_model
-                        )
+                        await self._store_qa(question, None, [], "low", None, scope, store_model)
                         root_span.set_attribute("qa.not_found", True)
-                        yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                        yield f"data: {json.dumps({'done': True, 'not_found': True})}\n\n"
                     return
 
             # --- Post-graph: stream answer tokens outside the trace span ---
@@ -485,7 +492,8 @@ class QAService:
                 except Exception as exc:
                     logger.warning(
                         "stream_answer: LLM call failed [%s]: %s",
-                        type(exc).__name__, exc,
+                        type(exc).__name__,
+                        exc,
                     )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
@@ -526,9 +534,8 @@ class QAService:
                     prose_before = full_text[:sentinel_pos].strip()
                     if not prose_before:
                         # True not-found: sentinel at the start of response
-                        await self._store_qa(question, None, [], "low", None,
-                                             scope, store_model)
-                        yield f'data: {json.dumps({"done": True, "not_found": True})}\n\n'
+                        await self._store_qa(question, None, [], "low", None, scope, store_model)
+                        yield f"data: {json.dumps({'done': True, 'not_found': True})}\n\n"
                         return
                     # LLM appended sentinel after a real answer — use the prose portion
                     full_text = prose_before
@@ -559,7 +566,7 @@ class QAService:
                 # Path A — pass-through: strategy node set answer directly
                 answer_text = result.get("answer") or ""
                 for word in answer_text.split():
-                    yield f'data: {json.dumps({"token": word + " "})}\n\n'
+                    yield f"data: {json.dumps({'token': word + ' '})}\n\n"
                 citations = result.get("citations") or []
                 confidence = result.get("confidence") or "low"
 

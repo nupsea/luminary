@@ -232,9 +232,7 @@ def test_cap_per_document_limits_chunks():
     doc_a = str(uuid.uuid4())
     doc_b = str(uuid.uuid4())
 
-    chunks = [
-        {"document_id": doc_a, "text": f"Doc A chunk {i}"} for i in range(3)
-    ] + [
+    chunks = [{"document_id": doc_a, "text": f"Doc A chunk {i}"} for i in range(3)] + [
         {"document_id": doc_b, "text": f"Doc B chunk {i}"} for i in range(3)
     ]
 
@@ -252,8 +250,7 @@ def test_cap_per_document_preserves_order():
     """_cap_per_document preserves original ordering within the cap."""
     doc_id = str(uuid.uuid4())
     chunks = [
-        {"document_id": doc_id, "text": f"chunk {i}", "score": 1.0 - i * 0.1}
-        for i in range(4)
+        {"document_id": doc_id, "text": f"chunk {i}", "score": 1.0 - i * 0.1} for i in range(4)
     ]
 
     result = _cap_per_document(chunks, max_per_doc=2)

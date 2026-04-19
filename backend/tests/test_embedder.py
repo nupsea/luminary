@@ -4,6 +4,7 @@ The integration test (test_encode_returns_correct_shape) is skipped unless the
 bge-small model is already cached at DATA_DIR/models/bge-small/. This avoids
 downloading several GBs of model weights during CI runs.
 """
+
 from pathlib import Path
 
 import pytest

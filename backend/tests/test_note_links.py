@@ -111,9 +111,7 @@ def test_delete_link_returns_204(client):
         "app.services.note_graph.NoteGraphService.delete_links_to_edge",
         new_callable=AsyncMock,
     ):
-        resp = client.delete(
-            f"/notes/{src['id']}/links/{tgt['id']}?link_type=see-also"
-        )
+        resp = client.delete(f"/notes/{src['id']}/links/{tgt['id']}?link_type=see-also")
 
     assert resp.status_code == 204
 

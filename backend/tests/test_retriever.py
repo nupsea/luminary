@@ -131,8 +131,7 @@ def test_rrf_merge_respects_k():
     """rrf_merge returns at most k results."""
     retriever = HybridRetriever()
     vec_results = [
-        ScoredChunk(f"c{i}", "doc1", f"text {i}", "", 0, float(10 - i), "vector")
-        for i in range(10)
+        ScoredChunk(f"c{i}", "doc1", f"text {i}", "", 0, float(10 - i), "vector") for i in range(10)
     ]
 
     merged = retriever.rrf_merge(vec_results, [], k=4)
@@ -256,9 +255,7 @@ async def test_keyword_index_node_populates_fts5(test_db):
     # Verify via direct FTS5 query
     async with engine.begin() as conn:
         result = await conn.execute(
-            text(
-                "SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH 'deep' LIMIT 5"
-            )
+            text("SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH 'deep' LIMIT 5")
         )
         rows = result.fetchall()
 
@@ -377,10 +374,7 @@ def test_diversify_fewer_candidates_than_k():
     """_diversify returns all candidates when fewer than k."""
     from app.services.retriever import _diversify
 
-    chunks = [
-        ScoredChunk(f"c{i}", "d", f"t{i}", "Section A", 0, 0.5, "vector")
-        for i in range(3)
-    ]
+    chunks = [ScoredChunk(f"c{i}", "d", f"t{i}", "Section A", 0, 0.5, "vector") for i in range(3)]
     result = _diversify(chunks, k=10)
     assert len(result) == 3
 

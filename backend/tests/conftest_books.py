@@ -141,9 +141,7 @@ async def _run_all_ingestions(
         async with factory() as session:
             doc = await session.get(DocumentModel, doc_id)
         stage = doc.stage if doc else "missing"
-        assert stage == "complete", (
-            f"Book '{name}' reached stage='{stage}' instead of 'complete'"
-        )
+        assert stage == "complete", f"Book '{name}' reached stage='{stage}' instead of 'complete'"
         assert elapsed <= budget, (
             f"Ingestion of '{name}' took {elapsed:.0f}s, budget is {budget}s. "
             f"Optimise the pipeline before increasing this budget."
@@ -180,9 +178,7 @@ def all_books_ingested(tmp_path_factory):
         assert filepath.exists(), (
             f"Book file not found: {filepath}\nRun: ./scripts/corpus/setup_books.sh"
         )
-        word_count = len(
-            filepath.read_text(encoding="utf-8", errors="replace").split()
-        )
+        word_count = len(filepath.read_text(encoding="utf-8", errors="replace").split())
         assert word_count >= book["word_count_min"], (
             f"Book '{book['name']}' has {word_count} words "
             f"(minimum {book['word_count_min']}). File may be truncated.\n"

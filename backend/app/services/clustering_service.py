@@ -5,7 +5,7 @@ Reads all note embeddings from LanceDB note_vectors_v2, runs sklearn HDBSCAN
 per-cluster confidence scores, generates human-readable collection names via LiteLLM,
 and persists each cluster as a ClusterSuggestionModel row.
 
-Users then accept (creates NoteCollection + members) or reject each suggestion via the API.
+Users then accept (creates Collection + members) or reject each suggestion via the API.
 """
 
 import asyncio
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ClusterSuggestionModel,
-    NoteCollectionModel,
+    CollectionModel,
     NoteModel,
 )
 from app.services.naming import normalize_collection_name, normalize_tag_slug
@@ -106,9 +106,7 @@ class ClusteringService:
             if len(member_matrix) >= 2:
                 sim_matrix = cosine_similarity(member_matrix)
                 n = len(member_matrix)
-                upper_triangle = [
-                    sim_matrix[i, j] for i in range(n) for j in range(i + 1, n)
-                ]
+                upper_triangle = [sim_matrix[i, j] for i in range(n) for j in range(i + 1, n)]
                 confidence_score = float(np.mean(upper_triangle)) if upper_triangle else 0.0
             else:
                 confidence_score = 1.0
@@ -116,9 +114,7 @@ class ClusteringService:
             # Fetch note content excerpts for medoids to build LLM prompt
             note_rows = (
                 await db.execute(
-                    select(NoteModel.id, NoteModel.content).where(
-                        NoteModel.id.in_(medoid_note_ids)
-                    )
+                    select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(medoid_note_ids))
                 )
             ).all()
             excerpts = [row[1][:150] for row in note_rows]
@@ -211,9 +207,7 @@ class ClusteringService:
         if all_note_ids:
             note_rows = (
                 await db.execute(
-                    select(NoteModel.id, NoteModel.content).where(
-                        NoteModel.id.in_(all_note_ids)
-                    )
+                    select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(all_note_ids))
                 )
             ).all()
             note_map = {row[0]: row[1][:200] for row in note_rows}
@@ -221,10 +215,7 @@ class ClusteringService:
         output = []
         for s in suggestions:
             nids = s.note_ids or []
-            previews = [
-                {"note_id": nid, "excerpt": note_map.get(nid, "")}
-                for nid in nids
-            ]
+            previews = [{"note_id": nid, "excerpt": note_map.get(nid, "")} for nid in nids]
             output.append(
                 {
                     "id": s.id,
@@ -239,10 +230,8 @@ class ClusteringService:
             )
         return output
 
-    async def accept_suggestion(
-        self, suggestion_id: str, db: AsyncSession
-    ) -> str | None:
-        """Accept a cluster suggestion: create NoteCollection + members, mark accepted.
+    async def accept_suggestion(self, suggestion_id: str, db: AsyncSession) -> str | None:
+        """Accept a cluster suggestion: create Collection + members, mark accepted.
 
         Returns the new collection_id, or None if suggestion not found.
         """
@@ -255,7 +244,7 @@ class ClusteringService:
 
         # Create NoteCollection
         collection_id = str(uuid.uuid4())
-        collection = NoteCollectionModel(
+        collection = CollectionModel(
             id=collection_id,
             name=normalize_collection_name(suggestion.suggested_name),
             color="#6366F1",
@@ -272,13 +261,14 @@ class ClusteringService:
         for note_id in suggestion.note_ids or []:
             await db.execute(
                 sa_text(
-                    "INSERT OR IGNORE INTO note_collection_members"
-                    " (id, note_id, collection_id, added_at)"
-                    " VALUES (:id, :note_id, :collection_id, :added_at)"
+                    "INSERT OR IGNORE INTO collection_members"
+                    " (id, member_id, member_type, collection_id, added_at)"
+                    " VALUES (:id, :member_id, :member_type, :collection_id, :added_at)"
                 ),
                 {
                     "id": str(uuid.uuid4()),
-                    "note_id": note_id,
+                    "member_id": note_id,
+                    "member_type": "note",
                     "collection_id": collection_id,
                     "added_at": datetime.now(UTC).isoformat(),
                 },
@@ -321,14 +311,10 @@ class ClusteringService:
 
         # Build override maps keyed by suggestion_id
         name_overrides = {
-            it["suggestion_id"]: it["name_override"]
-            for it in items
-            if it.get("name_override")
+            it["suggestion_id"]: it["name_override"] for it in items if it.get("name_override")
         }
         note_ids_overrides = {
-            it["suggestion_id"]: it["note_ids"]
-            for it in items
-            if it.get("note_ids") is not None
+            it["suggestion_id"]: it["note_ids"] for it in items if it.get("note_ids") is not None
         }
 
         from sqlalchemy import text as sa_text  # noqa: PLC0415
@@ -343,7 +329,7 @@ class ClusteringService:
             collection_id = str(uuid.uuid4())
             raw_name = name_overrides.get(sid) or suggestion.suggested_name
             name = normalize_collection_name(raw_name)
-            collection = NoteCollectionModel(
+            collection = CollectionModel(
                 id=collection_id,
                 name=name,
                 color="#6366F1",
@@ -360,13 +346,14 @@ class ClusteringService:
             for note_id in effective_note_ids:
                 await db.execute(
                     sa_text(
-                        "INSERT OR IGNORE INTO note_collection_members"
-                        " (id, note_id, collection_id, added_at)"
-                        " VALUES (:id, :note_id, :collection_id, :added_at)"
+                        "INSERT OR IGNORE INTO collection_members"
+                        " (id, member_id, member_type, collection_id, added_at)"
+                        " VALUES (:id, :member_id, :member_type, :collection_id, :added_at)"
                     ),
                     {
                         "id": str(uuid.uuid4()),
-                        "note_id": note_id,
+                        "member_id": note_id,
+                        "member_type": "note",
                         "collection_id": collection_id,
                         "added_at": datetime.now(UTC).isoformat(),
                     },
@@ -406,9 +393,7 @@ class ClusteringService:
         violations: list[dict] = []
 
         # --- Tags ---
-        tag_rows = (
-            await db.execute(select(CanonicalTagModel))
-        ).scalars().all()
+        tag_rows = (await db.execute(select(CanonicalTagModel))).scalars().all()
 
         # Build normalized-slug -> list of (id, original) for duplicate detection
         tag_norm_map: dict[str, list[str]] = {}
@@ -424,14 +409,16 @@ class ClusteringService:
                 # Simple rename if different
                 original = originals[0]
                 if original != normalized:
-                    violations.append({
-                        "type": "tag",
-                        "id": original,
-                        "current_name": original,
-                        "suggested_name": normalized,
-                        "action": "rename",
-                        "merge_target_id": None,
-                    })
+                    violations.append(
+                        {
+                            "type": "tag",
+                            "id": original,
+                            "current_name": original,
+                            "suggested_name": normalized,
+                            "action": "rename",
+                            "merge_target_id": None,
+                        }
+                    )
             else:
                 # Multiple originals map to the same slug -> merge
                 # Keep the one that is already normalized, or the first one
@@ -441,44 +428,44 @@ class ClusteringService:
                         continue  # already correct
                     if orig == primary and orig != normalized:
                         # Primary needs rename too
-                        violations.append({
-                            "type": "tag",
-                            "id": orig,
-                            "current_name": orig,
-                            "suggested_name": normalized,
-                            "action": "rename",
-                            "merge_target_id": None,
-                        })
+                        violations.append(
+                            {
+                                "type": "tag",
+                                "id": orig,
+                                "current_name": orig,
+                                "suggested_name": normalized,
+                                "action": "rename",
+                                "merge_target_id": None,
+                            }
+                        )
                     else:
-                        violations.append({
-                            "type": "tag",
-                            "id": orig,
-                            "current_name": orig,
-                            "suggested_name": normalized,
-                            "action": "merge",
-                            "merge_target_id": primary if primary == normalized else normalized,
-                        })
+                        violations.append(
+                            {
+                                "type": "tag",
+                                "id": orig,
+                                "current_name": orig,
+                                "suggested_name": normalized,
+                                "action": "merge",
+                                "merge_target_id": primary if primary == normalized else normalized,
+                            }
+                        )
 
         # --- Collections ---
-        coll_rows = (
-            await db.execute(
-                select(NoteCollectionModel).where(
-                    NoteCollectionModel.auto_document_id.is_(None)
-                )
-            )
-        ).scalars().all()
+        coll_rows = (await db.execute(select(CollectionModel))).scalars().all()
 
         for coll in coll_rows:
             normalized = normalize_collection_name(coll.name)
             if normalized and coll.name != normalized:
-                violations.append({
-                    "type": "collection",
-                    "id": coll.id,
-                    "current_name": coll.name,
-                    "suggested_name": normalized,
-                    "action": "rename",
-                    "merge_target_id": None,
-                })
+                violations.append(
+                    {
+                        "type": "collection",
+                        "id": coll.id,
+                        "current_name": coll.name,
+                        "suggested_name": normalized,
+                        "action": "rename",
+                        "merge_target_id": None,
+                    }
+                )
 
         return violations
 
@@ -520,8 +507,7 @@ class ClusteringService:
                             tag_full=new_slug,
                             tag_root=new_slug.split("/")[0],
                             tag_parent=(
-                                "/".join(new_slug.split("/")[:-1])
-                                if "/" in new_slug else ""
+                                "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
                             ),
                         )
                     )
@@ -541,6 +527,7 @@ class ClusteringService:
                         )
                     ).scalar_one_or_none()
                     from sqlalchemy import func  # noqa: PLC0415
+
                     note_count = (
                         await db.execute(
                             select(func.count())
@@ -551,16 +538,19 @@ class ClusteringService:
                     if target_tag:
                         target_tag.note_count = note_count
                     else:
-                        db.add(CanonicalTagModel(
-                            id=new_slug,
-                            display_name=new_slug.split("/")[-1],
-                            parent_tag=new_slug.split("/")[0] if "/" in new_slug else None,
-                            note_count=note_count,
-                            created_at=datetime.now(UTC),
-                        ))
+                        db.add(
+                            CanonicalTagModel(
+                                id=new_slug,
+                                display_name=new_slug.split("/")[-1],
+                                parent_tag=new_slug.split("/")[0] if "/" in new_slug else None,
+                                note_count=note_count,
+                                created_at=datetime.now(UTC),
+                            )
+                        )
 
                     # Create tag alias
                     from app.models import TagAliasModel  # noqa: PLC0415
+
                     existing_alias = (
                         await db.execute(
                             select(TagAliasModel).where(TagAliasModel.alias == old_slug)
@@ -585,13 +575,15 @@ class ClusteringService:
                         parent_tag = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else None
                         await db.delete(old_tag)
                         await db.flush()
-                        db.add(CanonicalTagModel(
-                            id=new_slug,
-                            display_name=display_name,
-                            parent_tag=parent_tag,
-                            note_count=note_count,
-                            created_at=datetime.now(UTC),
-                        ))
+                        db.add(
+                            CanonicalTagModel(
+                                id=new_slug,
+                                display_name=display_name,
+                                parent_tag=parent_tag,
+                                note_count=note_count,
+                                created_at=datetime.now(UTC),
+                            )
+                        )
 
                     # Update tag index rows
                     await db.execute(
@@ -601,14 +593,14 @@ class ClusteringService:
                             tag_full=new_slug,
                             tag_root=new_slug.split("/")[0],
                             tag_parent=(
-                                "/".join(new_slug.split("/")[:-1])
-                                if "/" in new_slug else ""
+                                "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
                             ),
                         )
                     )
 
                     # Create tag alias
                     from app.models import TagAliasModel  # noqa: PLC0415
+
                     existing_alias = (
                         await db.execute(
                             select(TagAliasModel).where(TagAliasModel.alias == old_slug)
@@ -623,9 +615,7 @@ class ClusteringService:
                 coll_id = fix["id"]
                 new_name = fix["suggested_name"]
                 coll = (
-                    await db.execute(
-                        select(NoteCollectionModel).where(NoteCollectionModel.id == coll_id)
-                    )
+                    await db.execute(select(CollectionModel).where(CollectionModel.id == coll_id))
                 ).scalar_one_or_none()
                 if coll:
                     coll.name = new_name

@@ -145,9 +145,7 @@ async def test_sections_endpoint_returns_ordered_list(test_db):
     state = _make_book_state(doc_id)
     await _chunk_book(state, state["parsed_document"], doc_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/sections/{doc_id}")
 
     assert resp.status_code == 200
@@ -193,9 +191,7 @@ async def test_sections_endpoint_chunk_count_matches_db(test_db):
             )
             db_counts[s.id] = len(chunks_result.scalars().all())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/sections/{doc_id}")
 
     assert resp.status_code == 200
@@ -242,9 +238,7 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
     state = _make_conv_state(doc_id)
     await _chunk_conversation(state, state["parsed_document"], doc_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/conversation")
 
     assert resp.status_code == 200
@@ -272,9 +266,7 @@ async def test_conversation_metadata_endpoint_returns_roster(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         bad_resp = await client.get(f"/documents/{book_id}/conversation")
 
     assert bad_resp.status_code == 400

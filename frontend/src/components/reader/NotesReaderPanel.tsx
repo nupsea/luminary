@@ -72,17 +72,6 @@ async function fetchAutoCollection(
   return res.json() as Promise<AutoCollection>
 }
 
-async function createAutoCollection(
-  documentId: string,
-): Promise<AutoCollection> {
-  const res = await fetch(
-    `${API_BASE}/collections/auto/${documentId}`,
-    { method: "POST" },
-  )
-  if (!res.ok) throw new Error("Failed to create auto-collection")
-  return res.json() as Promise<AutoCollection>
-}
-
 async function fetchNotes(collectionId: string): Promise<NoteItem[]> {
   const res = await fetch(
     `${API_BASE}/notes?collection_id=${collectionId}`,
@@ -128,15 +117,12 @@ export function NotesReaderPanel({
   const [sheetNote, setSheetNote] = useState<NoteItem | null>(null)
   const [sheetIsNew, setSheetIsNew] = useState(false)
 
-  // Step 1: ensure auto-collection exists
+  // Step 1: fetch auto-collection if it exists
   useEffect(() => {
     let cancelled = false
     async function ensure() {
       try {
-        let col = await fetchAutoCollection(documentId)
-        if (!col && !cancelled) {
-          col = await createAutoCollection(documentId)
-        }
+        const col = await fetchAutoCollection(documentId)
         if (!cancelled && col) {
           setCollectionId(col.id)
         }

@@ -1,13 +1,13 @@
-"""CRUD endpoints for note collections.
+"""Collection management endpoints.
 
 Routes:
   POST   /collections               -- create a collection
   GET    /collections/tree          -- return full tree (2 levels)
   GET    /collections/{id}          -- get single collection
   PUT    /collections/{id}          -- rename / update a collection
-  DELETE /collections/{id}          -- delete collection (members removed, notes preserved)
-  POST   /collections/{id}/notes    -- add notes to collection (idempotent)
-  DELETE /collections/{id}/notes/{note_id} -- remove a note from collection
+  DELETE /collections/{id}          -- delete collection (members removed, items preserved)
+  POST   /collections/{id}/members  -- add items (notes or docs) to collection (idempotent)
+  DELETE /collections/{id}/members/{id} -- remove an item from collection
 """
 
 import logging
@@ -22,7 +22,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DocumentModel, NoteCollectionMemberModel, NoteCollectionModel
+from app.models import CollectionMemberModel, CollectionModel, DocumentModel
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 from app.services.naming import normalize_collection_name
@@ -75,14 +75,25 @@ class CollectionTreeItem(BaseModel):
     color: str
     icon: str | None
     note_count: int
+    document_count: int
     children: list["CollectionTreeItem"]
 
 
 CollectionTreeItem.model_rebuild()
 
 
-class AddNotesRequest(BaseModel):
-    note_ids: list[str]
+class AddMembersRequest(BaseModel):
+    member_ids: list[str] | None = None
+    note_ids: list[str] | None = None  # Backward compatibility
+    member_type: str = "note"  # note | document
+
+    @property
+    def effective_member_ids(self) -> list[str]:
+        if self.member_ids is not None:
+            return self.member_ids
+        if self.note_ids is not None:
+            return self.note_ids
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +101,7 @@ class AddNotesRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _to_response(col: NoteCollectionModel) -> CollectionResponse:
+def _to_response(col: CollectionModel) -> CollectionResponse:
     return CollectionResponse(
         id=col.id,
         name=col.name,
@@ -104,13 +115,14 @@ def _to_response(col: NoteCollectionModel) -> CollectionResponse:
         updated_at=col.updated_at,
     )
 
+
 # Color palette for auto-collections based on content_type
 _AUTO_COLLECTION_COLORS: dict[str, str] = {
-    "book": "#8B5CF6",       # violet
-    "paper": "#3B82F6",      # blue
+    "book": "#8B5CF6",  # violet
+    "paper": "#3B82F6",  # blue
     "conversation": "#F59E0B",  # amber
-    "notes": "#10B981",      # emerald
-    "code": "#6366F1",       # indigo
+    "notes": "#10B981",  # emerald
+    "code": "#6366F1",  # indigo
 }
 
 # Human-readable doc type suffixes for collection names
@@ -147,9 +159,29 @@ def _make_collection_name(title: str, content_type: str) -> str:
     # For longer titles, extract key words (capitalized, acronyms, proper nouns)
     # Remove common filler words
     filler = {
-        "the", "a", "an", "and", "or", "of", "in", "on", "for", "to", "with",
-        "by", "is", "at", "from", "as", "into", "its", "this", "that", "how",
-        "era", "about",
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "in",
+        "on",
+        "for",
+        "to",
+        "with",
+        "by",
+        "is",
+        "at",
+        "from",
+        "as",
+        "into",
+        "its",
+        "this",
+        "that",
+        "how",
+        "era",
+        "about",
     }
 
     words = re.findall(r"[A-Za-z0-9]+", name)
@@ -187,9 +219,7 @@ async def create_collection(
     if req.parent_collection_id is not None:
         parent = (
             await session.execute(
-                select(NoteCollectionModel).where(
-                    NoteCollectionModel.id == req.parent_collection_id
-                )
+                select(CollectionModel).where(CollectionModel.id == req.parent_collection_id)
             )
         ).scalar_one_or_none()
         if parent is None:
@@ -200,7 +230,7 @@ async def create_collection(
                 detail="Max nesting depth is 2. The parent already has a parent.",
             )
 
-    col = NoteCollectionModel(
+    col = CollectionModel(
         id=str(uuid.uuid4()),
         name=normalize_collection_name(req.name),
         description=req.description,
@@ -222,28 +252,30 @@ async def create_collection(
 async def get_collection_tree(
     session: AsyncSession = Depends(get_db),
 ) -> list[CollectionTreeItem]:
-    """Return all collections as a 2-level nested tree with note counts."""
+    """Return all collections as a 2-level nested tree with item counts."""
     # Load all collections
     all_cols_result = await session.execute(
-        select(NoteCollectionModel).order_by(
-            NoteCollectionModel.sort_order, NoteCollectionModel.name
-        )
+        select(CollectionModel).order_by(CollectionModel.sort_order, CollectionModel.name)
     )
     all_cols = list(all_cols_result.scalars().all())
 
-    # Load note counts per collection
-    count_rows = (
-        await session.execute(
-            select(
-                NoteCollectionMemberModel.collection_id,
-                func.count(NoteCollectionMemberModel.note_id),
-            ).group_by(NoteCollectionMemberModel.collection_id)
-        )
-    ).all()
-    note_counts: dict[str, int] = {row[0]: row[1] for row in count_rows}
+    # Load counts per collection
+    counts_result = await session.execute(
+        select(
+            CollectionMemberModel.collection_id,
+            CollectionMemberModel.member_type,
+            func.count(CollectionMemberModel.member_id),
+        ).group_by(CollectionMemberModel.collection_id, CollectionMemberModel.member_type)
+    )
+    counts_rows = counts_result.all()
 
-    # Build lookup dict
-    by_id: dict[str, NoteCollectionModel] = {c.id: c for c in all_cols}
+    note_counts: dict[str, int] = {}
+    doc_counts: dict[str, int] = {}
+    for cid, mtype, count in counts_rows:
+        if mtype == "note":
+            note_counts[cid] = count
+        elif mtype == "document":
+            doc_counts[cid] = count
 
     # Assemble tree: top-level first, then attach children
     top_level: list[CollectionTreeItem] = []
@@ -256,6 +288,7 @@ async def get_collection_tree(
                     color=child.color,
                     icon=child.icon,
                     note_count=note_counts.get(child.id, 0),
+                    document_count=doc_counts.get(child.id, 0),
                     children=[],
                 )
                 for child in all_cols
@@ -268,12 +301,11 @@ async def get_collection_tree(
                     color=col.color,
                     icon=col.icon,
                     note_count=note_counts.get(col.id, 0),
+                    document_count=doc_counts.get(col.id, 0),
                     children=children,
                 )
             )
 
-    # Suppress unused variable warning from by_id lookup
-    _ = by_id
     return top_level
 
 
@@ -289,9 +321,7 @@ async def get_auto_collection_by_document(
     """Return the auto-collection for a document, or 404 if none exists."""
     col = (
         await session.execute(
-            select(NoteCollectionModel).where(
-                NoteCollectionModel.auto_document_id == document_id
-            )
+            select(CollectionModel).where(CollectionModel.auto_document_id == document_id)
         )
     ).scalar_one_or_none()
     if col is None:
@@ -308,9 +338,7 @@ async def create_auto_collection(
     # Check if one already exists
     existing = (
         await session.execute(
-            select(NoteCollectionModel).where(
-                NoteCollectionModel.auto_document_id == document_id
-            )
+            select(CollectionModel).where(CollectionModel.auto_document_id == document_id)
         )
     ).scalar_one_or_none()
     if existing is not None:
@@ -318,16 +346,14 @@ async def create_auto_collection(
 
     # Fetch document title
     doc = (
-        await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
+        await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     ).scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
     color = _AUTO_COLLECTION_COLORS.get(doc.content_type, "#6366F1")
     col_name = _make_collection_name(doc.title, doc.content_type)
-    col = NoteCollectionModel(
+    col = CollectionModel(
         id=str(uuid.uuid4()),
         name=col_name,
         color=color,
@@ -351,11 +377,11 @@ async def migrate_collection_naming(
     Merges duplicates that collapse to the same normalized form
     (keeps the collection with more members, reassigns members from the other).
     """
-    all_cols_result = await session.execute(select(NoteCollectionModel))
+    all_cols_result = await session.execute(select(CollectionModel))
     all_cols = list(all_cols_result.scalars().all())
 
     # Group by normalized name
-    groups: dict[str, list[NoteCollectionModel]] = {}
+    groups: dict[str, list[CollectionModel]] = {}
     for col in all_cols:
         normalized = normalize_collection_name(col.name)
         if not normalized:
@@ -376,11 +402,11 @@ async def migrate_collection_naming(
         else:
             # Multiple collections collapse to same name -- merge
             # Count members for each to find keeper
-            member_counts: list[tuple[NoteCollectionModel, int]] = []
+            member_counts: list[tuple[CollectionModel, int]] = []
             for col in col_group:
                 count_result = await session.execute(
-                    select(func.count(NoteCollectionMemberModel.note_id)).where(
-                        NoteCollectionMemberModel.collection_id == col.id
+                    select(func.count(CollectionMemberModel.member_id)).where(
+                        CollectionMemberModel.collection_id == col.id
                     )
                 )
                 count = count_result.scalar() or 0
@@ -395,54 +421,51 @@ async def migrate_collection_naming(
 
             # Move members from losers to keeper, then delete losers
             for loser, _ in member_counts[1:]:
-                # Get all member note_ids from loser
+                # Get all members from loser
                 loser_members_result = await session.execute(
-                    select(NoteCollectionMemberModel.note_id).where(
-                        NoteCollectionMemberModel.collection_id == loser.id
-                    )
+                    select(
+                        CollectionMemberModel.member_id,
+                        CollectionMemberModel.member_type,
+                    ).where(CollectionMemberModel.collection_id == loser.id)
                 )
-                loser_note_ids = [row[0] for row in loser_members_result.all()]
+                loser_members = loser_members_result.all()
 
                 # Reassign to keeper (idempotent via INSERT OR IGNORE)
-                for note_id in loser_note_ids:
+                for member_id, member_type in loser_members:
                     await session.execute(
                         text(
-                            "INSERT OR IGNORE INTO note_collection_members"
-                            " (id, note_id, collection_id, added_at)"
-                            " VALUES (:id, :note_id, :collection_id, :added_at)"
+                            "INSERT OR IGNORE INTO collection_members"
+                            " (id, member_id, collection_id, member_type, added_at)"
+                            " VALUES (:id, :member_id, :collection_id, :member_type, :added_at)"
                         ),
                         {
                             "id": str(uuid.uuid4()),
-                            "note_id": note_id,
+                            "member_id": member_id,
                             "collection_id": keeper.id,
+                            "member_type": member_type,
                             "added_at": datetime.now(UTC).isoformat(),
                         },
                     )
 
                 # Delete loser's members and the loser itself
                 await session.execute(
-                    delete(NoteCollectionMemberModel).where(
-                        NoteCollectionMemberModel.collection_id == loser.id
+                    delete(CollectionMemberModel).where(
+                        CollectionMemberModel.collection_id == loser.id
                     )
                 )
                 # Also delete child collections of loser
                 await session.execute(
-                    delete(NoteCollectionModel).where(
-                        NoteCollectionModel.parent_collection_id == loser.id
-                    )
+                    delete(CollectionModel).where(CollectionModel.parent_collection_id == loser.id)
                 )
-                await session.execute(
-                    delete(NoteCollectionModel).where(
-                        NoteCollectionModel.id == loser.id
-                    )
-                )
+                await session.execute(delete(CollectionModel).where(CollectionModel.id == loser.id))
 
             merged_count += 1
 
     await session.commit()
     logger.info(
         "Collection naming migration complete: renamed=%d merged=%d",
-        renamed_count, merged_count,
+        renamed_count,
+        merged_count,
     )
     return {"renamed": renamed_count, "merged": merged_count}
 
@@ -453,9 +476,7 @@ async def get_collection(
     session: AsyncSession = Depends(get_db),
 ) -> CollectionResponse:
     col = (
-        await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -469,9 +490,7 @@ async def update_collection(
     session: AsyncSession = Depends(get_db),
 ) -> CollectionResponse:
     col = (
-        await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -499,84 +518,77 @@ async def delete_collection(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a collection. Member rows are removed; notes themselves are NOT deleted."""
+    """Delete a collection. Member rows are removed; items themselves are NOT deleted."""
     col = (
-        await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     # Delete child collections' members first
     child_ids_result = await session.execute(
-        select(NoteCollectionModel.id).where(
-            NoteCollectionModel.parent_collection_id == collection_id
-        )
+        select(CollectionModel.id).where(CollectionModel.parent_collection_id == collection_id)
     )
     child_ids = [row[0] for row in child_ids_result.all()]
     for child_id in child_ids:
         await session.execute(
-            delete(NoteCollectionMemberModel).where(
-                NoteCollectionMemberModel.collection_id == child_id
-            )
+            delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == child_id)
         )
 
     # Delete members of this collection
     await session.execute(
-        delete(NoteCollectionMemberModel).where(
-            NoteCollectionMemberModel.collection_id == collection_id
-        )
+        delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == collection_id)
     )
 
     # Delete child collections
     for child_id in child_ids:
-        await session.execute(
-            delete(NoteCollectionModel).where(NoteCollectionModel.id == child_id)
-        )
+        await session.execute(delete(CollectionModel).where(CollectionModel.id == child_id))
 
     # Delete the collection itself
-    await session.execute(
-        delete(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
-    )
+    await session.execute(delete(CollectionModel).where(CollectionModel.id == collection_id))
     await session.commit()
     logger.info("Deleted collection id=%s", collection_id)
 
 
 @router.post("/{collection_id}/notes", status_code=201)
-async def add_notes_to_collection(
+@router.post("/{collection_id}/members", status_code=201)
+async def add_members_to_collection(
     collection_id: str,
-    req: AddNotesRequest,
+    req: AddMembersRequest,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Add notes to a collection. Duplicate memberships are silently ignored."""
+    """Add members (notes or documents) to a collection. Idempotent."""
     col = (
-        await session.execute(
-            select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
-        )
+        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
     ).scalar_one_or_none()
     if col is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    member_ids = req.effective_member_ids
+    if not member_ids:
+        # Pydantic validation: at least one of member_ids or note_ids required
+        raise HTTPException(status_code=422, detail="member_ids or note_ids required")
+
     added = 0
-    for note_id in req.note_ids:
+    for mid in member_ids:
         await session.execute(
             text(
-                "INSERT OR IGNORE INTO note_collection_members"
-                " (id, note_id, collection_id, added_at)"
-                " VALUES (:id, :note_id, :collection_id, :added_at)"
+                "INSERT OR IGNORE INTO collection_members"
+                " (id, member_id, collection_id, member_type, added_at)"
+                " VALUES (:id, :member_id, :collection_id, :member_type, :added_at)"
             ),
             {
                 "id": str(uuid.uuid4()),
-                "note_id": note_id,
+                "member_id": mid,
                 "collection_id": collection_id,
+                "member_type": req.member_type,
                 "added_at": datetime.now(UTC).isoformat(),
             },
         )
         added += 1
 
     await session.commit()
-    logger.info("Added %d notes to collection id=%s", added, collection_id)
+    logger.info("Added %d %ss to collection id=%s", added, req.member_type, collection_id)
     return {"added": added, "collection_id": collection_id}
 
 
@@ -603,7 +615,7 @@ async def export_collection(
             data = await svc.export_collection_markdown(collection_id, session)
             col = (
                 await session.execute(
-                    select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                    select(CollectionModel).where(CollectionModel.id == collection_id)
                 )
             ).scalar_one_or_none()
             slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
@@ -618,15 +630,13 @@ async def export_collection(
             data, card_count = await svc.export_collection_anki(collection_id, session)
             col = (
                 await session.execute(
-                    select(NoteCollectionModel).where(NoteCollectionModel.id == collection_id)
+                    select(CollectionModel).where(CollectionModel.id == collection_id)
                 )
             ).scalar_one_or_none()
             slug = col.name.lower().replace(" ", "-") if col else collection_id[:8]
             slug = re.sub(r"[^\w-]", "", slug)[:40] or "deck"
             filename = f"{slug}.apkg"
-            headers: dict[str, str] = {
-                "Content-Disposition": f"attachment; filename={filename}"
-            }
+            headers: dict[str, str] = {"Content-Disposition": f"attachment; filename={filename}"}
             if card_count == 0:
                 headers["X-Luminary-Warning"] = (
                     "No flashcards found for this collection -- generate some first"
@@ -671,17 +681,17 @@ async def archive_stale_notes(
     return {"archived": archived}
 
 
-@router.delete("/{collection_id}/notes/{note_id}", status_code=204)
-async def remove_note_from_collection(
+@router.delete("/{collection_id}/members/{member_id}", status_code=204)
+async def remove_member_from_collection(
     collection_id: str,
-    note_id: str,
+    member_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> None:
-    """Remove a note from a collection (membership only; note is not deleted)."""
+    """Remove a member (note or document) from a collection."""
     await session.execute(
-        delete(NoteCollectionMemberModel).where(
-            NoteCollectionMemberModel.collection_id == collection_id,
-            NoteCollectionMemberModel.note_id == note_id,
+        delete(CollectionMemberModel).where(
+            CollectionMemberModel.collection_id == collection_id,
+            CollectionMemberModel.member_id == member_id,
         )
     )
     await session.commit()

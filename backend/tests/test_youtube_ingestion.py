@@ -3,6 +3,7 @@
 Mocks yt-dlp subprocess calls to avoid requiring a live YouTube connection
 or yt-dlp installation in CI.
 """
+
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -72,9 +73,7 @@ def test_is_youtube_url_invalid_random():
 async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
     """POST /documents/ingest-url returns 503 when yt-dlp is not on PATH."""
     with patch("app.services.youtube_downloader.shutil.which", return_value=None):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
@@ -90,9 +89,7 @@ async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
         return "/usr/bin/yt-dlp" if cmd == "yt-dlp" else None
 
     with patch("app.services.youtube_downloader.shutil.which", side_effect=_mock_which):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
@@ -104,9 +101,7 @@ async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
 async def test_ingest_url_returns_400_for_non_youtube_url(test_db):
     """POST /documents/ingest-url returns 400 for non-YouTube URLs."""
     with patch("app.services.youtube_downloader.shutil.which", return_value="/usr/bin/yt-dlp"):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
                 json={"url": "https://example.com/video.mp4"},
@@ -145,9 +140,7 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
             new=AsyncMock(side_effect=_fake_download_audio),
         ),
     ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=abc123"},
@@ -161,9 +154,8 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     # Verify DB row has source_url and video_title
     async with factory() as session:
         from sqlalchemy import select
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == doc_id)
-        )
+
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
         doc = result.scalar_one_or_none()
 
     assert doc is not None
@@ -195,9 +187,7 @@ async def test_document_list_includes_source_url(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents")
 
     assert resp.status_code == 200
@@ -285,9 +275,7 @@ async def test_get_document_chunks_returns_youtube_chunks(test_db):
             )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/chunks")
 
     assert resp.status_code == 200
@@ -303,9 +291,7 @@ async def test_get_document_chunks_returns_youtube_chunks(test_db):
 
 async def test_get_document_chunks_returns_404_for_missing_document(test_db):
     """GET /documents/{id}/chunks returns 404 when document does not exist."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents/nonexistent-doc-id/chunks")
 
     assert resp.status_code == 404
@@ -333,9 +319,7 @@ async def test_get_document_chunks_returns_empty_for_no_chunks(test_db):
         )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/chunks")
 
     assert resp.status_code == 200
@@ -378,9 +362,7 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
             new=AsyncMock(side_effect=_fake_download_audio),
         ),
     ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=lec001"},
@@ -392,9 +374,7 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
     from sqlalchemy import select as sa_select
 
     async with factory() as session:
-        result = await session.execute(
-            sa_select(DocumentModel).where(DocumentModel.id == doc_id)
-        )
+        result = await session.execute(sa_select(DocumentModel).where(DocumentModel.id == doc_id))
         doc = result.scalar_one_or_none()
 
     assert doc is not None

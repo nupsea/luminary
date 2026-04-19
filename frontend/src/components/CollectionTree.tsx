@@ -63,12 +63,12 @@ async function deleteCollection(id: string): Promise<void> {
 }
 
 async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/notes`, {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note_ids: [noteId] }),
+    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
   })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/notes failed: ${res.status}`)
+  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed: ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -257,11 +257,18 @@ function CollectionTreeItemRow({
           <span className="flex-1 min-w-0 truncate text-sm">{item.name}</span>
         )}
 
-        {/* Note count pill */}
+        {/* Counts pill */}
         {!renaming && (
-          <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            {item.note_count}
-          </span>
+          <div className="ml-auto flex items-center gap-1 shrink-0">
+            {item.document_count > 0 && (
+              <span className="rounded-full bg-blue-100/50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">
+                {item.document_count}d
+              </span>
+            )}
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {item.note_count}n
+            </span>
+          </div>
         )}
 
         {/* Action icons — shown on hover */}

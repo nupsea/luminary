@@ -126,13 +126,15 @@ class DocumentParser:
 
                 text = "\n".join(texts).strip()
                 raw_parts.append(text)
-                sections.append(Section(
-                    heading=ti,
-                    level=lv,
-                    text=text,
-                    page_start=pg,
-                    page_end=page_end,
-                ))
+                sections.append(
+                    Section(
+                        heading=ti,
+                        level=lv,
+                        text=text,
+                        page_start=pg,
+                        page_end=page_end,
+                    )
+                )
 
             if sections:
                 raw_text = "\n".join(raw_parts)
@@ -163,7 +165,10 @@ class DocumentParser:
         h1_min = heading_sizes[0] if heading_sizes else heading_threshold
         logger.info(
             "PDF fallback scan: body_avg=%.1f threshold=%.1f h1_min=%.1f distinct_heading_sizes=%s",
-            body_avg, heading_threshold, h1_min, heading_sizes[:10],
+            body_avg,
+            heading_threshold,
+            h1_min,
+            heading_sizes[:10],
         )
 
         sections = []

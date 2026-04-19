@@ -175,11 +175,11 @@ async def test_stream_collects_tokens_as_sse_events(test_db):
     token_events = events[:-1]
     for event in token_events:
         assert event.startswith("data: ")
-        payload = json.loads(event[len("data: "):])
+        payload = json.loads(event[len("data: ") :])
         assert "token" in payload
 
     # Last event is the done event
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     assert "summary_id" in done_payload
 
@@ -197,7 +197,7 @@ async def test_stream_token_values_match_llm_output(test_db):
         svc = SummarizationService()
         events = [e async for e in svc.stream_summary(doc_id, "executive", None)]
 
-    collected = [json.loads(e[len("data: "):])["token"] for e in events[:-1]]
+    collected = [json.loads(e[len("data: ") :])["token"] for e in events[:-1]]
     assert collected == tokens
 
 
@@ -233,9 +233,7 @@ async def test_large_document_triggers_map_reduce(test_db):
     doc_id = str(uuid.uuid4())
     # Token count > MAP_TOKEN_THRESHOLD to trigger map-reduce
     big_tokens = MAP_TOKEN_THRESHOLD + 1
-    await _insert_doc_and_chunks(
-        factory, tmp_path, doc_id, ["large text"], [big_tokens]
-    )
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["large text"], [big_tokens])
 
     mock_llm = _MockLLMService(response="section summary", tokens=["summary"])
 
@@ -264,13 +262,11 @@ async def test_completed_summary_stored_in_sqlite(test_db):
         svc = SummarizationService()
         events = [e async for e in svc.stream_summary(doc_id, "detailed", None)]
 
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     summary_id = done_payload["summary_id"]
 
     async with factory() as session:
-        result = await session.execute(
-            select(SummaryModel).where(SummaryModel.id == summary_id)
-        )
+        result = await session.execute(select(SummaryModel).where(SummaryModel.id == summary_id))
         stored = result.scalar_one_or_none()
 
     assert stored is not None
@@ -303,9 +299,7 @@ async def test_endpoint_returns_sse_content_type(test_db):
     mock_llm = _MockLLMService(tokens=["result"])
 
     with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
                 f"/summarize/{doc_id}",
                 json={"mode": "one_sentence"},
@@ -324,9 +318,7 @@ async def test_endpoint_streams_token_and_done_events(test_db):
     mock_llm = _MockLLMService(tokens=["tok1", "tok2"])
 
     with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
                 f"/summarize/{doc_id}",
                 json={"mode": "executive"},
@@ -337,7 +329,7 @@ async def test_endpoint_streams_token_and_done_events(test_db):
     assert len(events) >= 2  # at least token events + done
 
     # Last event is done
-    last = json.loads(events[-1][len("data: "):])
+    last = json.loads(events[-1][len("data: ") :])
     assert last["done"] is True
     assert "summary_id" in last
 
@@ -352,9 +344,7 @@ async def test_endpoint_accepts_conversation_mode(test_db):
     mock_llm = _MockLLMService(tokens=[json_output])
 
     with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
                 f"/summarize/{doc_id}",
                 json={"mode": "conversation"},
@@ -364,7 +354,7 @@ async def test_endpoint_accepts_conversation_mode(test_db):
     raw = resp.text
     events = [line for line in raw.splitlines() if line.startswith("data: ")]
     # First event should carry the JSON output as a token
-    first = json.loads(events[0][len("data: "):])
+    first = json.loads(events[0][len("data: ") :])
     assert "token" in first
 
 
@@ -392,7 +382,7 @@ async def test_stream_summary_returns_cached_on_second_call(test_db):
         events = [e async for e in svc.stream_summary(doc_id, "executive", None)]
 
     assert mock_llm.call_count == 1, "LLM was called on second request (cache miss)"
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload.get("cached") is True
 
 
@@ -417,7 +407,7 @@ async def test_force_refresh_bypasses_cache(test_db):
         ]
 
     assert mock_llm.call_count >= 2, "LLM not called on force_refresh=True"
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload.get("cached") is False
 
 
@@ -440,5 +430,5 @@ async def test_glossary_cached_same_as_other_modes(test_db):
         events = [e async for e in svc.stream_summary(doc_id, "glossary", None)]
 
     assert mock_llm.call_count == 1, "LLM called on second glossary request (expected cache hit)"
-    done_payload = json.loads(events[-1][len("data: "):])
+    done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload.get("cached") is True

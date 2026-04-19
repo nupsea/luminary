@@ -134,15 +134,31 @@ export async function buildFontTOC(
   const totalPages = doc.numPages
   const rawItems: { page: number; text: string; size: number }[] = []
 
-  for (let p = 1; p <= totalPages; p++) {
+  // Fetch pages in parallel batches to speed up TOC generation for large PDFs
+  const batchSize = 20
+  for (let start = 1; start <= totalPages; start += batchSize) {
     if (isCancelled()) return []
-    const page = await doc.getPage(p)
-    const content = await page.getTextContent()
-    for (const item of content.items) {
-      if (!("str" in item) || !item.str.trim()) continue
-      const size = item.height > 0 ? item.height : Math.abs(item.transform[3] ?? 0)
-      rawItems.push({ page: p, text: item.str.trim(), size })
+    const end = Math.min(start + batchSize - 1, totalPages)
+    const batchPromises: Promise<void>[] = []
+
+    for (let p = start; p <= end; p++) {
+      batchPromises.push((async () => {
+        const page = await doc.getPage(p)
+        try {
+          const content = await page.getTextContent()
+          for (const item of content.items) {
+            if (!("str" in item) || !item.str.trim()) continue
+            const size = item.height > 0 ? item.height : Math.abs((item.transform as number[])[3] ?? 0)
+            rawItems.push({ page: p, text: item.str.trim(), size })
+          }
+        } finally {
+          page.cleanup()
+        }
+      })())
     }
+    await Promise.all(batchPromises)
+    // S131: Yield to main thread between batches to keep UI responsive
+    await new Promise((resolve) => setTimeout(resolve, 30))
   }
 
   if (rawItems.length === 0) return []

@@ -27,8 +27,8 @@ class AnnotationCreateRequest(BaseModel):
     section_id: str
     chunk_id: str | None = None
     selected_text: str
-    start_offset: int
-    end_offset: int
+    start_offset: int = 0
+    end_offset: int = 0
     color: Literal["yellow", "green", "blue", "pink"] = "yellow"
     note_text: str | None = None
     page_number: int | None = None
@@ -80,12 +80,16 @@ async def list_annotations(document_id: str) -> list[AnnotationResponse]:
     """Return all annotations for a document ordered by created_at asc."""
     async with get_session_factory()() as session:
         rows = (
-            await session.execute(
-                select(AnnotationModel)
-                .where(AnnotationModel.document_id == document_id)
-                .order_by(AnnotationModel.created_at)
+            (
+                await session.execute(
+                    select(AnnotationModel)
+                    .where(AnnotationModel.document_id == document_id)
+                    .order_by(AnnotationModel.created_at)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return [AnnotationResponse.model_validate(r) for r in rows]
 
 

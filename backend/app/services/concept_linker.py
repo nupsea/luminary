@@ -143,8 +143,9 @@ class ConceptLinkerService:
         Returns None if no section summaries exist.
         """
         result = await session.execute(
-            select(SectionSummaryModel.content)
-            .where(SectionSummaryModel.document_id == document_id)
+            select(SectionSummaryModel.content).where(
+                SectionSummaryModel.document_id == document_id
+            )
         )
         rows = result.scalars().all()
         if not rows:
@@ -201,7 +202,8 @@ class ConceptLinkerService:
         except (json.JSONDecodeError, ValueError):
             logger.debug(
                 "_detect_contradiction: JSON parse failed for concept=%r raw=%r",
-                concept_name, raw[:200],
+                concept_name,
+                raw[:200],
             )
             return {"has_contradiction": False, "note": "", "prefer_source": ""}
 
@@ -271,9 +273,7 @@ class ConceptLinkerService:
         source_entity_ids = self._get_entity_ids_for_doc(graph_svc, document_id)
         other_entity_ids: dict[str, dict[str, str]] = {}  # doc_id -> {name -> id}
         for other_doc_id in other_doc_ids:
-            other_entity_ids[other_doc_id] = self._get_entity_ids_for_doc(
-                graph_svc, other_doc_id
-            )
+            other_entity_ids[other_doc_id] = self._get_entity_ids_for_doc(graph_svc, other_doc_id)
 
         for src_ent in source_entities:
             src_name = src_ent["name"]
@@ -343,8 +343,9 @@ class ConceptLinkerService:
         # 5. Parse and store publication_year for this document if not yet set
         try:
             doc_result = await session.execute(
-                select(DocumentModel.publication_year, DocumentModel.id)
-                .where(DocumentModel.id == document_id)
+                select(DocumentModel.publication_year, DocumentModel.id).where(
+                    DocumentModel.id == document_id
+                )
             )
             doc_row = doc_result.first()
             if doc_row and doc_row[0] is None:
@@ -397,9 +398,7 @@ class ConceptLinkerService:
                     mapping[row[0]] = row[1]
             return mapping
         except Exception:
-            logger.debug(
-                "_get_entity_ids_for_doc failed for doc=%s", document_id, exc_info=True
-            )
+            logger.debug("_get_entity_ids_for_doc failed for doc=%s", document_id, exc_info=True)
             return {}
 
 

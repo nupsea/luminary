@@ -99,9 +99,7 @@ class GoalService:
         days_until_target = max((target - today).days, 0)
 
         result = await self._session.execute(
-            select(FlashcardModel).where(
-                FlashcardModel.document_id == goal.document_id
-            )
+            select(FlashcardModel).where(FlashcardModel.document_id == goal.document_id)
         )
         cards = list(result.scalars().all())
 

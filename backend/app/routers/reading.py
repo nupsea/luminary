@@ -40,20 +40,24 @@ async def upsert_reading_progress(body: ReadingProgressRequest) -> ReadingProgre
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc = (await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == body.document_id)
-        )).scalar_one_or_none()
+        doc = (
+            await session.execute(
+                select(DocumentModel.id).where(DocumentModel.id == body.document_id)
+            )
+        ).scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
 
         now = datetime.now(UTC)
 
-        existing = (await session.execute(
-            select(ReadingProgressModel).where(
-                ReadingProgressModel.document_id == body.document_id,
-                ReadingProgressModel.section_id == body.section_id,
+        existing = (
+            await session.execute(
+                select(ReadingProgressModel).where(
+                    ReadingProgressModel.document_id == body.document_id,
+                    ReadingProgressModel.section_id == body.section_id,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
 
         if existing is None:
             row = ReadingProgressModel(

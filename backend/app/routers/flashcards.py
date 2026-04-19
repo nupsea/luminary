@@ -39,9 +39,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     ChunkModel,
+    CollectionModel,
     DocumentModel,
     FlashcardModel,
-    NoteCollectionModel,
     ReviewEventModel,
     SectionModel,
 )
@@ -215,9 +215,7 @@ class SourceContextResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _to_response(
-    card: FlashcardModel, section_id: str | None = None
-) -> FlashcardResponse:
+def _to_response(card: FlashcardModel, section_id: str | None = None) -> FlashcardResponse:
     return FlashcardResponse(
         id=card.id,
         document_id=card.document_id,
@@ -476,7 +474,7 @@ async def generate_technical_flashcards(
 
 class TraceFlashcardRequest(BaseModel):
     question: str  # typically the code block (front of card)
-    answer: str    # correct output + diff explanation (back of card)
+    answer: str  # correct output + diff explanation (back of card)
     source_excerpt: str
     document_id: str | None = None
     chunk_id: str | None = None
@@ -697,8 +695,8 @@ async def list_flashcard_decks(
 ) -> list[DeckItem]:
     """Return all distinct decks with card counts and source type (S169).
 
-    source_type is derived by joining deck name against NoteCollectionModel.name:
-    - "collection" when the deck matches a NoteCollectionModel.name
+    source_type is derived by joining deck name against CollectionModel.name:
+    - "collection" when the deck matches a CollectionModel.name
     - "document" when document_id is non-null (source='document')
     - "note" otherwise (tag-scoped or note_ids-scoped)
     """
@@ -711,15 +709,12 @@ async def list_flashcard_decks(
                 FlashcardModel.source,
                 sa_func.count().label("card_count"),
                 sa_func.max(FlashcardModel.document_id).label("document_id"),
-            )
-            .group_by(FlashcardModel.deck)
+            ).group_by(FlashcardModel.deck)
         )
     ).all()
 
     # Fetch all collection names in one query
-    coll_result = await session.execute(
-        select(NoteCollectionModel.id, NoteCollectionModel.name)
-    )
+    coll_result = await session.execute(select(CollectionModel.id, CollectionModel.name))
     name_to_id = {row[1]: row[0] for row in coll_result.all()}
 
     items: list[DeckItem] = []
@@ -755,9 +750,7 @@ async def export_flashcards_csv(
     session: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """Export all flashcards for a document as a CSV download."""
-    doc_result = await session.execute(
-        select(DocumentModel).where(DocumentModel.id == document_id)
-    )
+    doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     doc = doc_result.scalar_one_or_none()
     document_title = doc.title if doc else ""
 
@@ -808,10 +801,7 @@ async def list_flashcards(
         return [_to_response(row[0], section_id=row[1]) for row in result.all()]
 
     # No section filter — preserve existing no-join path
-    stmt = (
-        select(FlashcardModel)
-        .where(FlashcardModel.document_id == document_id)
-    )
+    stmt = select(FlashcardModel).where(FlashcardModel.document_id == document_id)
     if bloom_level_min is not None:
         stmt = stmt.where(
             FlashcardModel.bloom_level.is_not(None),
@@ -830,9 +820,7 @@ async def update_flashcard(
     session: AsyncSession = Depends(get_db),
 ) -> FlashcardResponse:
     """Update a flashcard's question and/or answer. Sets is_user_edited=True."""
-    result = await session.execute(
-        select(FlashcardModel).where(FlashcardModel.id == card_id)
-    )
+    result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
     card = result.scalar_one_or_none()
     if card is None:
         raise HTTPException(status_code=404, detail="Flashcard not found")
@@ -857,9 +845,7 @@ async def delete_flashcard(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a flashcard by ID."""
-    result = await session.execute(
-        select(FlashcardModel).where(FlashcardModel.id == card_id)
-    )
+    result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
     card = result.scalar_one_or_none()
     if card is None:
         raise HTTPException(status_code=404, detail="Flashcard not found")
@@ -937,18 +923,14 @@ async def get_source_context(
       - ChunkModel.section_id is null (chunk not section-assigned)
       - SectionModel row not found for that section_id
     """
-    fc_result = await session.execute(
-        select(FlashcardModel).where(FlashcardModel.id == card_id)
-    )
+    fc_result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
     card = fc_result.scalar_one_or_none()
     if card is None:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     if card.chunk_id is None:
         raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
 
-    chunk_result = await session.execute(
-        select(ChunkModel).where(ChunkModel.id == card.chunk_id)
-    )
+    chunk_result = await session.execute(select(ChunkModel).where(ChunkModel.id == card.chunk_id))
     chunk = chunk_result.scalar_one_or_none()
     if chunk is None or chunk.section_id is None:
         raise HTTPException(status_code=404, detail="No section found for this flashcard")

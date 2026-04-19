@@ -30,7 +30,7 @@ _SYSTEM_PROMPT = (
     "level {bloom_level} ({bloom_label}). "
     "Avoid these previously asked questions:\n{history}\n\n"
     "Output ONLY a JSON array of objects with keys 'question' and 'bloom_level' (integer). "
-    "Example: [{{\"question\": \"...\", \"bloom_level\": 5}}]. "
+    'Example: [{{"question": "...", "bloom_level": 5}}]. '
     "No explanation, no markdown fences."
 )
 
@@ -103,8 +103,12 @@ class SuggestionService:
         """Bloom level: starts at 5, -1 per 4 asked. Floor=2."""
         factory = get_session_factory()
         async with factory() as session:
-            query = select(func.count()).select_from(ChatSuggestionHistoryModel).where(
-                ChatSuggestionHistoryModel.was_asked.is_(True),
+            query = (
+                select(func.count())
+                .select_from(ChatSuggestionHistoryModel)
+                .where(
+                    ChatSuggestionHistoryModel.was_asked.is_(True),
+                )
             )
             if document_id is not None:
                 query = query.where(ChatSuggestionHistoryModel.document_id == document_id)
@@ -155,7 +159,10 @@ class SuggestionService:
             return "\n---\n".join(summaries) if summaries else ""
 
     def filter_near_duplicates(
-        self, candidates: list[dict], history: list[str], threshold: float = 0.7,
+        self,
+        candidates: list[dict],
+        history: list[str],
+        threshold: float = 0.7,
     ) -> list[dict]:
         """Remove candidates that are near-duplicates of history items."""
         filtered = []
@@ -167,7 +174,9 @@ class SuggestionService:
         return filtered
 
     async def persist_shown(
-        self, suggestions: list[dict], document_id: str | None,
+        self,
+        suggestions: list[dict],
+        document_id: str | None,
     ) -> list[dict]:
         """Persist shown suggestions to history and return with IDs."""
         factory = get_session_factory()
@@ -217,7 +226,9 @@ class SuggestionService:
 
         if document_id is not None:
             system = _SYSTEM_PROMPT.format(
-                bloom_level=target_bloom, bloom_label=bloom_label, history=history_text,
+                bloom_level=target_bloom,
+                bloom_label=bloom_label,
+                history=history_text,
             )
             user = _USER_PROMPT.format(
                 summary=summary[:3000],
@@ -227,7 +238,9 @@ class SuggestionService:
             )
         else:
             system = _CROSS_DOC_SYSTEM.format(
-                bloom_level=target_bloom, bloom_label=bloom_label, history=history_text,
+                bloom_level=target_bloom,
+                bloom_label=bloom_label,
+                history=history_text,
             )
             user = (
                 f"Document summaries:\n{summary[:4000]}\n\n"

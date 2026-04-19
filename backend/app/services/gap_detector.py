@@ -77,9 +77,7 @@ class GapDetectorService:
             async with get_session_factory()() as s:
                 return await self.detect_gaps(note_ids, document_id, k=k, session=s)
 
-        result = await session.execute(
-            select(NoteModel).where(NoteModel.id.in_(note_ids))
-        )
+        result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
         notes = list(result.scalars().all())
         if not notes:
             raise ValueError("No notes found for given IDs")
@@ -145,9 +143,7 @@ class GapDetectorService:
                 if not cm.no_flashcards and cm.mastery < 0.3:
                     weak.append(concept)
         except Exception:
-            logger.debug(
-                "detect_gaps: mastery weak-spot check failed, skipping", exc_info=True
-            )
+            logger.debug("detect_gaps: mastery weak-spot check failed, skipping", exc_info=True)
 
         logger.info(
             "detect_gaps: doc=%s notes=%d gaps=%d covered=%d weak=%d",

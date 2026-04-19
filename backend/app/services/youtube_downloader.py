@@ -3,6 +3,7 @@
 Uses subprocess (not the yt-dlp Python API) to match the project pattern
 for system tools (see: ffmpeg use in ingestion.py).
 """
+
 import asyncio
 import json
 import logging
@@ -41,7 +42,10 @@ async def fetch_metadata(url: str) -> dict:
     Raises RuntimeError on non-zero exit or invalid JSON.
     """
     proc = await asyncio.create_subprocess_exec(
-        "yt-dlp", "--dump-json", "--no-download", url,
+        "yt-dlp",
+        "--dump-json",
+        "--no-download",
+        url,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -61,8 +65,13 @@ async def download_audio(url: str, dest_stem: Path) -> None:
     """
     proc = await asyncio.create_subprocess_exec(
         "yt-dlp",
-        "-x", "--audio-format", "wav", "--audio-quality", "0",
-        "-o", f"{dest_stem}.%(ext)s",
+        "-x",
+        "--audio-format",
+        "wav",
+        "--audio-quality",
+        "0",
+        "-o",
+        f"{dest_stem}.%(ext)s",
         url,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,

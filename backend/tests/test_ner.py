@@ -45,8 +45,12 @@ def test_entity_types_list():
 def test_entity_types_includes_tech_types():
     """AC1: ENTITY_TYPES includes the 6 new tech-specific label types (S135)."""
     required_tech = {
-        "LIBRARY", "DESIGN_PATTERN", "ALGORITHM",
-        "DATA_STRUCTURE", "PROTOCOL", "API_ENDPOINT",
+        "LIBRARY",
+        "DESIGN_PATTERN",
+        "ALGORITHM",
+        "DATA_STRUCTURE",
+        "PROTOCOL",
+        "API_ENDPOINT",
     }
     assert required_tech.issubset(set(ENTITY_TYPES))
 
@@ -97,9 +101,7 @@ def test_extract_normalizes_name_to_lowercase(extractor: EntityExtractor):
 def test_extract_generates_deterministic_id(extractor: EntityExtractor):
     """Same entity name + document_id produces the same UUID."""
     mock_model = MagicMock()
-    mock_model.batch_predict_entities.return_value = [
-        [{"text": "Curie", "label": "PERSON"}]
-    ]
+    mock_model.batch_predict_entities.return_value = [[{"text": "Curie", "label": "PERSON"}]]
     extractor._model = mock_model
 
     chunks = [_make_chunk("Text", chunk_id="c1", doc_id="d1")]
@@ -123,9 +125,7 @@ def test_extract_skips_empty_chunks(extractor: EntityExtractor):
 
 def test_extract_assigns_chunk_and_doc_ids(extractor: EntityExtractor):
     mock_model = MagicMock()
-    mock_model.batch_predict_entities.return_value = [
-        [{"text": "Berlin", "label": "PLACE"}]
-    ]
+    mock_model.batch_predict_entities.return_value = [[{"text": "Berlin", "label": "PLACE"}]]
     extractor._model = mock_model
 
     chunks = [_make_chunk("Berlin text", chunk_id="chunk-42", doc_id="doc-99")]
@@ -140,9 +140,7 @@ def test_extract_strips_context_header(extractor: EntityExtractor):
     mock_model = MagicMock()
     # If the header is NOT stripped, the mock will receive the full text
     # with the header. We'll check the call arguments.
-    mock_model.batch_predict_entities.return_value = [
-        [{"text": "Berlin", "label": "PLACE"}]
-    ]
+    mock_model.batch_predict_entities.return_value = [[{"text": "Berlin", "label": "PLACE"}]]
     extractor._model = mock_model
 
     header = "[The Great Gatsby > Chapter 1] "
@@ -183,9 +181,7 @@ def test_tech_noise_filter_rejects_generic_library_terms(extractor: EntityExtrac
 def test_tech_noise_filter_allows_legitimate_library_names(extractor: EntityExtractor):
     """Legitimate library names like 'numpy', 'react' pass the noise filter."""
     mock_model = MagicMock()
-    mock_model.batch_predict_entities.return_value = [
-        [{"text": "numpy", "label": "LIBRARY"}]
-    ]
+    mock_model.batch_predict_entities.return_value = [[{"text": "numpy", "label": "LIBRARY"}]]
     extractor._model = mock_model
 
     chunks = [_make_chunk("import numpy for array operations")]
@@ -206,9 +202,7 @@ def test_code_block_boost_code_chunk_uses_lower_threshold(extractor: EntityExtra
     the lower threshold for code chunks in a tech document.
     """
     mock_model = MagicMock()
-    mock_model.batch_predict_entities.return_value = [
-        [{"text": "numpy", "label": "LIBRARY"}]
-    ]
+    mock_model.batch_predict_entities.return_value = [[{"text": "numpy", "label": "LIBRARY"}]]
     extractor._model = mock_model
 
     code_chunk = _make_chunk("import numpy", has_code=True)
@@ -216,8 +210,9 @@ def test_code_block_boost_code_chunk_uses_lower_threshold(extractor: EntityExtra
 
     # Verify the lower threshold (0.55) was used for the code chunk
     calls = mock_model.batch_predict_entities.call_args_list
-    thresholds_used = [call.kwargs.get("threshold", call.args[2] if len(call.args) > 2 else None)
-                       for call in calls]
+    thresholds_used = [
+        call.kwargs.get("threshold", call.args[2] if len(call.args) > 2 else None) for call in calls
+    ]
     assert 0.55 in thresholds_used, (
         f"Expected CODE_THRESHOLD=0.55 to be used for code chunk; calls: {calls}"
     )
@@ -233,11 +228,10 @@ def test_code_block_boost_prose_chunk_uses_higher_threshold(extractor: EntityExt
     extractor.extract([prose_chunk], content_type="tech_book")
 
     calls = mock_model.batch_predict_entities.call_args_list
-    thresholds_used = [call.kwargs.get("threshold", call.args[2] if len(call.args) > 2 else None)
-                       for call in calls]
-    assert 0.65 in thresholds_used, (
-        f"Expected PROSE_THRESHOLD=0.65 for prose chunk; calls: {calls}"
-    )
+    thresholds_used = [
+        call.kwargs.get("threshold", call.args[2] if len(call.args) > 2 else None) for call in calls
+    ]
+    assert 0.65 in thresholds_used, f"Expected PROSE_THRESHOLD=0.65 for prose chunk; calls: {calls}"
 
 
 def test_non_tech_content_type_excludes_tech_types(extractor: EntityExtractor):
@@ -277,9 +271,7 @@ def test_tech_content_type_includes_all_types(extractor: EntityExtractor):
 
 
 @pytest.mark.skipif(
-    not __import__("os").path.exists(
-        __import__("os").path.expanduser("~/.luminary/models/gliner")
-    ),
+    not __import__("os").path.exists(__import__("os").path.expanduser("~/.luminary/models/gliner")),
     reason="GLiNER model not cached in DATA_DIR/models/gliner — skipping integration test",
 )
 def test_extract_from_fixture_paragraph(tmp_path):

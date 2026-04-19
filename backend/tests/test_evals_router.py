@@ -62,9 +62,7 @@ async def test_get_results_empty_when_no_file(test_db, tmp_path, monkeypatch):
     nonexistent = tmp_path / "nonexistent_scores_history.jsonl"
     monkeypatch.setattr(evals_module, "_SCORES_HISTORY_PATH", nonexistent)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/evals/results")
 
     assert resp.status_code == 200
@@ -112,9 +110,7 @@ async def test_get_results_returns_latest_per_dataset(test_db, tmp_path, monkeyp
 
     monkeypatch.setattr(evals_module, "_SCORES_HISTORY_PATH", history_path)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/evals/results")
 
     assert resp.status_code == 200
@@ -145,9 +141,7 @@ async def test_post_run_returns_202(test_db, monkeypatch):
     # Close the coroutine explicitly to suppress 'coroutine was never awaited' warnings.
     monkeypatch.setattr(evals_module, "_fire_and_forget", lambda coro: coro.close())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/evals/run", json={"dataset": "book"})
 
     assert resp.status_code == 202
@@ -159,9 +153,7 @@ async def test_post_run_returns_202(test_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_post_run_invalid_dataset(test_db):
     """POST /evals/run with invalid dataset returns HTTP 404."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/evals/run", json={"dataset": "invalid"})
 
     assert resp.status_code == 404
@@ -177,9 +169,7 @@ async def test_post_run_per_book_dataset(test_db, monkeypatch, dataset):
 
     monkeypatch.setattr(evals_module, "_fire_and_forget", lambda coro: coro.close())
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/evals/run", json={"dataset": dataset})
 
     assert resp.status_code == 202

@@ -148,14 +148,14 @@ class NoteSearchService:
         # We only do this for FTS-only results or if we want extra rigor.
         # Actually, let's just trust FTS if it's fresh, but here we'll verify
         # that if it's a "miss" in the test, it's because the content changed.
-        
+
         # Refined strategy: The test fails because FTS returns a hit for old terms.
         # If we check the CURRENT content of the notes in the merged list, we can
         # drop those that no longer match the query terms.
-        
+
         safe_query = _sanitize_fts_query(query).lower()
         query_terms = set(safe_query.split())
-        
+
         final_results = []
         for r in merged:
             content_lower = r.content.lower()
@@ -176,7 +176,7 @@ class NoteSearchService:
             len(fts_results),
             len(vector_results),
             len(merged),
-            len(final_results)
+            len(final_results),
         )
         return final_results[:k]
 

@@ -52,9 +52,7 @@ class SmartTagNormalizerService:
         Skips pairs already linked in TagAliasModel (in either direction).
         """
         # Load all canonical tags
-        result = await session.execute(
-            select(CanonicalTagModel).order_by(CanonicalTagModel.id)
-        )
+        result = await session.execute(select(CanonicalTagModel).order_by(CanonicalTagModel.id))
         tags = list(result.scalars().all())
 
         if len(tags) < 2:
@@ -72,9 +70,7 @@ class SmartTagNormalizerService:
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
         display_names = [t.display_name for t in tags]
-        raw_embeddings = await asyncio.to_thread(
-            get_embedding_service().encode, display_names
-        )
+        raw_embeddings = await asyncio.to_thread(get_embedding_service().encode, display_names)
         # EmbeddingService returns L2-normalized embeddings (normalize_embeddings=True)
         # so cosine similarity = dot product
         embeddings = np.array(raw_embeddings, dtype=np.float32)  # (N, D)
@@ -100,9 +96,7 @@ class SmartTagNormalizerService:
 
                 # Skip if already linked as aliases
                 if frozenset([tag_a.id, tag_b.id]) in linked_pairs:
-                    logger.debug(
-                        "Skipping already-aliased pair (%s, %s)", tag_a.id, tag_b.id
-                    )
+                    logger.debug("Skipping already-aliased pair (%s, %s)", tag_a.id, tag_b.id)
                     continue
 
                 # Skip if a suggestion already exists for this pair (any status)
@@ -146,9 +140,7 @@ class SmartTagNormalizerService:
         logger.info("Tag normalization scan complete: %d new suggestions", created)
         return created
 
-    async def get_pending_suggestions(
-        self, session: AsyncSession
-    ) -> list[TagSuggestionDetail]:
+    async def get_pending_suggestions(self, session: AsyncSession) -> list[TagSuggestionDetail]:
         """Return all pending suggestions with expanded tag_a and tag_b info."""
         result = await session.execute(
             select(TagMergeSuggestionModel)
@@ -168,9 +160,7 @@ class SmartTagNormalizerService:
         tags_result = await session.execute(
             select(CanonicalTagModel).where(CanonicalTagModel.id.in_(tag_ids))
         )
-        tag_by_id: dict[str, CanonicalTagModel] = {
-            t.id: t for t in tags_result.scalars().all()
-        }
+        tag_by_id: dict[str, CanonicalTagModel] = {t.id: t for t in tags_result.scalars().all()}
 
         details: list[TagSuggestionDetail] = []
         for s in suggestions:
@@ -208,35 +198,23 @@ class SmartTagNormalizerService:
         """
         suggestion = (
             await session.execute(
-                select(TagMergeSuggestionModel).where(
-                    TagMergeSuggestionModel.id == suggestion_id
-                )
+                select(TagMergeSuggestionModel).where(TagMergeSuggestionModel.id == suggestion_id)
             )
         ).scalar_one_or_none()
         if suggestion is None:
             raise ValueError(f"Suggestion {suggestion_id!r} not found")
         if suggestion.status != "pending":
-            raise ValueError(
-                f"Suggestion {suggestion_id!r} is already {suggestion.status}"
-            )
+            raise ValueError(f"Suggestion {suggestion_id!r} is already {suggestion.status}")
 
         target_id = suggestion.suggested_canonical_id
-        source_id = (
-            suggestion.tag_a_id
-            if suggestion.tag_b_id == target_id
-            else suggestion.tag_b_id
-        )
+        source_id = suggestion.tag_a_id if suggestion.tag_b_id == target_id else suggestion.tag_b_id
         return suggestion, source_id, target_id
 
-    async def reject_suggestion(
-        self, suggestion_id: str, session: AsyncSession
-    ) -> None:
+    async def reject_suggestion(self, suggestion_id: str, session: AsyncSession) -> None:
         """Set suggestion status to rejected."""
         suggestion = (
             await session.execute(
-                select(TagMergeSuggestionModel).where(
-                    TagMergeSuggestionModel.id == suggestion_id
-                )
+                select(TagMergeSuggestionModel).where(TagMergeSuggestionModel.id == suggestion_id)
             )
         ).scalar_one_or_none()
         if suggestion is None:

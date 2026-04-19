@@ -51,9 +51,16 @@ ENTITY_TYPES = [
 ]
 
 # Tech entity types that require extra noise filtering
-_TECH_ENTITY_TYPES: frozenset[str] = frozenset({
-    "LIBRARY", "DESIGN_PATTERN", "ALGORITHM", "DATA_STRUCTURE", "PROTOCOL", "API_ENDPOINT",
-})
+_TECH_ENTITY_TYPES: frozenset[str] = frozenset(
+    {
+        "LIBRARY",
+        "DESIGN_PATTERN",
+        "ALGORITHM",
+        "DATA_STRUCTURE",
+        "PROTOCOL",
+        "API_ENDPOINT",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Noise-filter constants
@@ -61,82 +68,264 @@ _TECH_ENTITY_TYPES: frozenset[str] = frozenset({
 
 # English pronouns — personal, possessive, reflexive, demonstrative, archaic.
 # These should never be extracted as named entities.
-_PRONOUNS: frozenset[str] = frozenset({
-    # first person
-    "i", "me", "my", "mine", "myself",
-    "we", "us", "our", "ours", "ourselves",
-    # second person
-    "you", "your", "yours", "yourself", "yourselves",
-    # third person singular
-    "he", "him", "his", "himself",
-    "she", "her", "hers", "herself",
-    "it", "its", "itself",
-    # third person plural
-    "they", "them", "their", "theirs", "themselves",
-    # relative / interrogative
-    "who", "whom", "whose", "which", "what",
-    # demonstrative
-    "this", "that", "these", "those",
-    # indefinite
-    "one", "ones", "someone", "anyone", "everyone", "nobody", "somebody",
-    # archaic (common in classical literature translations)
-    "thee", "thou", "thy", "thine", "ye",
-})
+_PRONOUNS: frozenset[str] = frozenset(
+    {
+        # first person
+        "i",
+        "me",
+        "my",
+        "mine",
+        "myself",
+        "we",
+        "us",
+        "our",
+        "ours",
+        "ourselves",
+        # second person
+        "you",
+        "your",
+        "yours",
+        "yourself",
+        "yourselves",
+        # third person singular
+        "he",
+        "him",
+        "his",
+        "himself",
+        "she",
+        "her",
+        "hers",
+        "herself",
+        "it",
+        "its",
+        "itself",
+        # third person plural
+        "they",
+        "them",
+        "their",
+        "theirs",
+        "themselves",
+        # relative / interrogative
+        "who",
+        "whom",
+        "whose",
+        "which",
+        "what",
+        # demonstrative
+        "this",
+        "that",
+        "these",
+        "those",
+        # indefinite
+        "one",
+        "ones",
+        "someone",
+        "anyone",
+        "everyone",
+        "nobody",
+        "somebody",
+        # archaic (common in classical literature translations)
+        "thee",
+        "thou",
+        "thy",
+        "thine",
+        "ye",
+    }
+)
 
 # Possessive words that should not open a multi-word entity span.
 # e.g. "his father", "my house", "their city" → all noise.
-_POSSESSIVE_OPENERS: frozenset[str] = frozenset({
-    "his", "her", "my", "our", "your", "their", "its", "thy",
-})
+_POSSESSIVE_OPENERS: frozenset[str] = frozenset(
+    {
+        "his",
+        "her",
+        "my",
+        "our",
+        "your",
+        "their",
+        "its",
+        "thy",
+    }
+)
 
 # Generic single-word place nouns — meaningful only with a proper modifier.
-_GENERIC_PLACES: frozenset[str] = frozenset({
-    "area", "avenue", "bay", "beach", "camp", "castle", "cave", "city",
-    "coast", "corner", "country", "county", "court", "dale", "district",
-    "field", "forest", "hall", "harbor", "hill", "home", "house", "island",
-    "lake", "land", "location", "mountain", "nation", "ocean", "palace",
-    "passage", "place", "plain", "region", "river", "road", "room", "sea",
-    "shore", "spot", "state", "street", "town", "valley", "village", "zone",
-})
+_GENERIC_PLACES: frozenset[str] = frozenset(
+    {
+        "area",
+        "avenue",
+        "bay",
+        "beach",
+        "camp",
+        "castle",
+        "cave",
+        "city",
+        "coast",
+        "corner",
+        "country",
+        "county",
+        "court",
+        "dale",
+        "district",
+        "field",
+        "forest",
+        "hall",
+        "harbor",
+        "hill",
+        "home",
+        "house",
+        "island",
+        "lake",
+        "land",
+        "location",
+        "mountain",
+        "nation",
+        "ocean",
+        "palace",
+        "passage",
+        "place",
+        "plain",
+        "region",
+        "river",
+        "road",
+        "room",
+        "sea",
+        "shore",
+        "spot",
+        "state",
+        "street",
+        "town",
+        "valley",
+        "village",
+        "zone",
+    }
+)
 
 # Generic single-word organisation nouns — too vague without a proper name.
-_GENERIC_ORGS: frozenset[str] = frozenset({
-    "agency", "association", "board", "bureau", "club", "committee",
-    "company", "corporation", "council", "department", "enterprise",
-    "firm", "foundation", "group", "guild", "institution", "ministry",
-    "office", "organization", "party", "society", "team", "union",
-})
+_GENERIC_ORGS: frozenset[str] = frozenset(
+    {
+        "agency",
+        "association",
+        "board",
+        "bureau",
+        "club",
+        "committee",
+        "company",
+        "corporation",
+        "council",
+        "department",
+        "enterprise",
+        "firm",
+        "foundation",
+        "group",
+        "guild",
+        "institution",
+        "ministry",
+        "office",
+        "organization",
+        "party",
+        "society",
+        "team",
+        "union",
+    }
+)
 
 # Generic single-word tech terms that GLiNER commonly mis-extracts as LIBRARY,
 # DESIGN_PATTERN, ALGORITHM, or DATA_STRUCTURE.  These are programming vocabulary
 # words, not specific library or algorithm names.
-_TECH_NOISE_LIBRARY: frozenset[str] = frozenset({
-    "class", "function", "method", "object", "type", "interface",
-    "module", "package", "library", "framework", "tool", "service",
-    "system", "component", "layer", "api", "endpoint", "protocol",
-    "abstract", "instance", "variable", "attribute", "property",
-    "constructor", "decorator", "iterator", "generator", "callback",
-    "handler", "middleware", "controller", "model", "view", "template",
-    "schema", "query", "index", "table", "column", "row", "field",
-    "value", "key", "data", "struct", "enum", "union",
-    "array", "list", "map", "set", "dict", "tuple", "string", "number",
-    "boolean", "null", "undefined", "void", "error", "exception",
-    "thread", "process", "task", "event", "stream", "buffer", "socket",
-    "request", "response", "header", "body", "path", "status",
-})
+_TECH_NOISE_LIBRARY: frozenset[str] = frozenset(
+    {
+        "class",
+        "function",
+        "method",
+        "object",
+        "type",
+        "interface",
+        "module",
+        "package",
+        "library",
+        "framework",
+        "tool",
+        "service",
+        "system",
+        "component",
+        "layer",
+        "api",
+        "endpoint",
+        "protocol",
+        "abstract",
+        "instance",
+        "variable",
+        "attribute",
+        "property",
+        "constructor",
+        "decorator",
+        "iterator",
+        "generator",
+        "callback",
+        "handler",
+        "middleware",
+        "controller",
+        "model",
+        "view",
+        "template",
+        "schema",
+        "query",
+        "index",
+        "table",
+        "column",
+        "row",
+        "field",
+        "value",
+        "key",
+        "data",
+        "struct",
+        "enum",
+        "union",
+        "array",
+        "list",
+        "map",
+        "set",
+        "dict",
+        "tuple",
+        "string",
+        "number",
+        "boolean",
+        "null",
+        "undefined",
+        "void",
+        "error",
+        "exception",
+        "thread",
+        "process",
+        "task",
+        "event",
+        "stream",
+        "buffer",
+        "socket",
+        "request",
+        "response",
+        "header",
+        "body",
+        "path",
+        "status",
+    }
+)
 
 # A DATE must match at least one of these patterns; bare integers are rejected.
 _DATE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(1[0-9]{3}|20[0-2][0-9])\b"),                        # 1000–2029
-    re.compile(r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
-               r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
-               r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b", re.I),   # month names
-    re.compile(r"\b\d+(st|nd|rd|th)\b", re.I),                          # ordinals
-    re.compile(r"\b(bc|ad|bce|ce)\b", re.I),                            # era markers
+    re.compile(r"\b(1[0-9]{3}|20[0-2][0-9])\b"),  # 1000–2029
+    re.compile(
+        r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+        r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
+        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+        re.I,
+    ),  # month names
+    re.compile(r"\b\d+(st|nd|rd|th)\b", re.I),  # ordinals
+    re.compile(r"\b(bc|ad|bce|ce)\b", re.I),  # era markers
     re.compile(r"\b(century|decade|millennium|millennia)\b", re.I),
     re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I),
     re.compile(r"\b(spring|summer|autumn|fall|winter)\b", re.I),
-    re.compile(r"\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b"),              # 12/31/1999
+    re.compile(r"\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b"),  # 12/31/1999
 ]
 
 # Minimum character length for a single-token entity name.
@@ -155,6 +344,7 @@ _NER_BATCH_SIZE = 8
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_valid_entity(name: str, entity_type: str) -> bool:
     """Return False for clearly noisy entity candidates."""
@@ -219,6 +409,7 @@ def get_entity_extractor() -> "EntityExtractor":
 # ---------------------------------------------------------------------------
 # EntityExtractor
 # ---------------------------------------------------------------------------
+
 
 class EntityExtractor:
     _model = None
@@ -379,7 +570,9 @@ class EntityExtractor:
             if dropped:
                 logger.info(
                     "Frequency filter dropped %d single-chunk entities (threshold=%d, chunks=%d)",
-                    dropped, _MIN_CHUNK_FREQ, len(chunks),
+                    dropped,
+                    _MIN_CHUNK_FREQ,
+                    len(chunks),
                 )
 
         logger.info(

@@ -149,7 +149,7 @@ async def load_llm_settings(db: AsyncSession) -> None:
             _cache[key] = ""
         elif raw_value.startswith(_PLAINTEXT_PREFIX):
             # No-keyring fallback path (e.g. Docker) — strip prefix and use directly
-            _cache[key] = raw_value[len(_PLAINTEXT_PREFIX):]
+            _cache[key] = raw_value[len(_PLAINTEXT_PREFIX) :]
         elif _is_xor_encrypted(raw_value):
             # Legacy XOR-encrypted entry — try to migrate to OS keychain or plaintext prefix
             try:
@@ -293,8 +293,7 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
 
     if not api_key:
         raise ValueError(
-            f"Cloud LLM key not configured for {provider}. "
-            "Go to Settings to add your API key."
+            f"Cloud LLM key not configured for {provider}. Go to Settings to add your API key."
         )
 
     return f"{prefix}/{cloud_model}", api_key
@@ -317,5 +316,6 @@ def get_litellm_kwargs(background: bool = False) -> dict:
         kwargs["api_key"] = api_key
     elif model.startswith("ollama/"):
         from app.config import get_settings  # noqa: PLC0415
+
         kwargs["api_base"] = get_settings().OLLAMA_URL
     return kwargs

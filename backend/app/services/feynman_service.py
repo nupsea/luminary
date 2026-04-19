@@ -48,7 +48,7 @@ _FEYNMAN_SYSTEM_TMPL = (
     "identify misunderstandings or missing concepts, "
     "then ask one targeted follow-up question. "
     "NEVER give the answer directly -- guide the learner to discover it. "
-    "At the END of your response, output a line: gaps: [\"gap1\", \"gap2\"] "
+    'At the END of your response, output a line: gaps: ["gap1", "gap2"] '
     "listing concepts the learner misunderstood or omitted in this message. "
     "Output an empty list if the explanation was complete. "
     "Keep the gaps list concise (1-4 items max)."
@@ -219,9 +219,7 @@ class FeynmanService:
 
             # Fallback to section preview
             result2 = await session.execute(
-                select(SectionModel)
-                .where(SectionModel.id == section_id)
-                .limit(1)
+                select(SectionModel).where(SectionModel.id == section_id).limit(1)
             )
             section = result2.scalar_one_or_none()
             if section and section.preview:
@@ -259,8 +257,13 @@ class FeynmanService:
                 system=system_prompt,
                 stream=False,
             )
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError) as exc:
+        except (
+            litellm.ServiceUnavailableError,
+            litellm.APIConnectionError,
+            litellm.NotFoundError,
+            litellm.RateLimitError,
+            litellm.AuthenticationError,
+        ) as exc:
             raise HTTPException(
                 status_code=503,
                 detail="LLM unavailable. Check Settings — if using Ollama, run: ollama serve",
@@ -384,8 +387,13 @@ class FeynmanService:
                     if "\ngaps:" not in accumulated and "gaps:" not in accumulated[-20:]:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError) as exc:
+        except (
+            litellm.ServiceUnavailableError,
+            litellm.APIConnectionError,
+            litellm.NotFoundError,
+            litellm.RateLimitError,
+            litellm.AuthenticationError,
+        ) as exc:
             logger.warning("Feynman stream_turn: LLM unavailable: %s", exc)
             # Learner turn was flushed but not committed; roll back so no orphan row
             await db_session.rollback()
@@ -450,7 +458,7 @@ class FeynmanService:
         all_gaps: list[str] = []
         seen: set[str] = set()
         for turn in tutor_turns:
-            for gap in (turn.gaps_identified or []):
+            for gap in turn.gaps_identified or []:
                 if gap and gap not in seen:
                     seen.add(gap)
                     all_gaps.append(gap)
@@ -461,6 +469,7 @@ class FeynmanService:
 
         if all_gaps:
             from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
+
             fc_svc = get_flashcard_service()
             try:
                 _count, flashcard_ids = await fc_svc.generate_from_feynman_gaps(
@@ -468,14 +477,20 @@ class FeynmanService:
                     document_id=feynman_session.document_id,
                     session=db_session,
                 )
-            except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-                    litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError):
+            except (
+                litellm.ServiceUnavailableError,
+                litellm.APIConnectionError,
+                litellm.NotFoundError,
+                litellm.RateLimitError,
+                litellm.AuthenticationError,
+            ):
                 logger.warning(
                     "Feynman complete_session: LLM unavailable; skipping flashcard generation"
                 )
 
         # Fire-and-forget objective coverage update
         from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
+
         tracker = get_objective_tracker_service()
         _fire_and_forget(tracker.update_coverage(feynman_session.document_id))
 
@@ -568,8 +583,13 @@ class FeynmanService:
                     if not kp_started:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (litellm.ServiceUnavailableError, litellm.APIConnectionError,
-                litellm.NotFoundError, litellm.RateLimitError, litellm.AuthenticationError) as exc:
+        except (
+            litellm.ServiceUnavailableError,
+            litellm.APIConnectionError,
+            litellm.NotFoundError,
+            litellm.RateLimitError,
+            litellm.AuthenticationError,
+        ) as exc:
             logger.warning("generate_model_explanation: LLM unavailable: %s", exc)
             await db_session.rollback()
             error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
@@ -585,9 +605,7 @@ class FeynmanService:
         try:
             await db_session.commit()
         except Exception:  # noqa: BLE001
-            logger.warning(
-                "generate_model_explanation: commit failed for session=%s", session_id
-            )
+            logger.warning("generate_model_explanation: commit failed for session=%s", session_id)
             await db_session.rollback()
 
         logger.info(

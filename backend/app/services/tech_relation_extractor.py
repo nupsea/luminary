@@ -127,10 +127,7 @@ def extract_tech_relations(
         if imported:
             # Find other known entities mentioned in this chunk
             chunk_lower = text.lower()
-            chunk_entities = [
-                n for n in known_names
-                if n in chunk_lower and n not in imported
-            ]
+            chunk_entities = [n for n in known_names if n in chunk_lower and n not in imported]
             for lib in imported:
                 for other in chunk_entities:
                     if other != lib:

@@ -308,9 +308,7 @@ async def test_generate_for_uncovered_calls_flashcard_service(test_db):
     mock_svc = AsyncMock()
     mock_svc.generate = AsyncMock(return_value=[])
 
-    with patch(
-        "app.services.flashcard.get_flashcard_service", return_value=mock_svc
-    ):
+    with patch("app.services.flashcard.get_flashcard_service", return_value=mock_svc):
         async with factory() as session:
             svc = DeckHealthService()
             total = await svc.generate_for_uncovered(doc_id, [section_id], session)
