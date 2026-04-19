@@ -7,9 +7,10 @@ Endpoints:
 """
 
 import logging
+import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -52,6 +53,48 @@ class EnrichmentJobItem(BaseModel):
     completed_at: str | None
     error_message: str | None
     created_at: str
+
+
+class UploadResponse(BaseModel):
+    path: str
+    filename: str
+
+
+@router.post("/images/notes", response_model=UploadResponse)
+async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
+    """Upload an image for a note (e.g. from paste or screenshot).
+
+    Saves to DATA_DIR/images/notes/{uuid}_{filename}.
+    Returns the __LUMINARY_IMG__ prefixed path for Markdown resolution.
+    """
+    settings = get_settings()
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    notes_img_dir = data_dir / "images" / "notes"
+    notes_img_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate file type
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+    # Generate unique filename
+    ext = Path(file.filename or "image.png").suffix or ".png"
+    unique_filename = f"{uuid.uuid4()}{ext}"
+    target_path = notes_img_dir / unique_filename
+
+    try:
+        content = await file.read()
+        with open(target_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        logger.error("Failed to save note image: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to save image file")
+
+    # Returns the pseudo-path that MarkdownRenderer.tsx resolves to API_BASE
+    return UploadResponse(
+        path=f"__LUMINARY_IMG__/notes/{unique_filename}",
+        filename=unique_filename,
+    )
 
 
 @router.get("/documents/{document_id}/images", response_model=ImageListResponse)

@@ -437,6 +437,47 @@ export function NoteReaderSheet({
                   <textarea
                     ref={textareaRef}
                     value={editContent}
+                    onPaste={async (e) => {
+                      const items = e.clipboardData.items
+                      for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.indexOf("image") !== -1) {
+                          e.preventDefault()
+                          const file = items[i].getAsFile()
+                          if (!file) continue
+
+                          const formData = new FormData()
+                          formData.append("file", file)
+
+                          try {
+                            const res = await fetch(`${API_BASE}/images/notes`, {
+                              method: "POST",
+                              body: formData,
+                            })
+                            if (!res.ok) throw new Error("Upload failed")
+                            const data = (await res.json()) as { path: string }
+
+                            const imgMarkdown = `![Pasted Image](${data.path})`
+                            const start = textareaRef.current?.selectionStart ?? editContent.length
+                            const end = textareaRef.current?.selectionEnd ?? editContent.length
+                            const newContent =
+                              editContent.substring(0, start) +
+                              imgMarkdown +
+                              editContent.substring(end)
+
+                            setEditContent(newContent)
+
+                            // Restore focus and move cursor
+                            setTimeout(() => {
+                              const newPos = start + imgMarkdown.length
+                              textareaRef.current?.setSelectionRange(newPos, newPos)
+                              textareaRef.current?.focus()
+                            }, 0)
+                          } catch (err) {
+                            console.error("Paste image failed", err)
+                          }
+                        }
+                      }
+                    }}
                     onChange={(e) => setEditContent(e.target.value)}
                     placeholder="Write your note in Markdown..."
                     className="w-full resize-none overflow-hidden rounded border-none bg-background py-1 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
