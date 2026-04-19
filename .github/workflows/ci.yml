@@ -14,8 +14,8 @@ jobs:
       - name: Check Branch Name
         run: |
           BRANCH_NAME=$(echo ${{ github.ref }} | sed 's/refs\/heads\///')
-          if [[ ! $BRANCH_NAME =~ ^(feature\/|bugfix\/|hotfix\/|chore\/|docs\/).+ ]]; then
-            echo "Error: Branch name '$BRANCH_NAME' does not follow the convention (feature/..., bugfix/..., hotfix/..., chore/..., docs/...)!"
+          if [[ ! $BRANCH_NAME =~ ^(feature\/|bugfix\/|hotfix\/|chore\/|docs\/|feat\/).+ ]]; then
+            echo "Error: Branch name '$BRANCH_NAME' does not follow the convention (feature/..., bugfix/..., hotfix/..., chore/..., docs/..., feat/...)!"
             exit 1
           fi
 
