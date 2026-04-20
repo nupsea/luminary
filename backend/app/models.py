@@ -1,7 +1,17 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -824,5 +834,83 @@ class GlossaryTermModel(Base):
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Engagement: Streaks, XP, Achievements, Focus Sessions (Phase 7)
+# ---------------------------------------------------------------------------
+
+
+class StudyStreakModel(Base):
+    """Tracks daily study streak and freeze tokens for the local user."""
+
+    __tablename__ = "study_streaks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    current_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    longest_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_study_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
+    streak_freezes_available: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    streak_freezes_used_this_week: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    week_start_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class XPLedgerModel(Base):
+    """Individual XP award events -- append-only ledger."""
+
+    __tablename__ = "xp_ledger"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    xp_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    detail_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class AchievementModel(Base):
+    """Tracks unlock state and progress for each achievement."""
+
+    __tablename__ = "achievements"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    icon_name: Mapped[str] = mapped_column(String(50), nullable=False, default="trophy")
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    progress_current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_target: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    unlocked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class FocusSessionModel(Base):
+    """A timed focus session (Pomodoro-style)."""
+
+    __tablename__ = "focus_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    planned_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    actual_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    session_type: Mapped[str] = mapped_column(String(20), nullable=False, default="study")
+    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    xp_awarded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )

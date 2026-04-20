@@ -418,6 +418,24 @@ async def create_note(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
+
+    # Fire-and-forget XP award for note creation.
+    async def _award_note_xp() -> None:
+        try:
+            from app.database import get_session_factory  # noqa: PLC0415
+            from app.services.engagement_service import EngagementService  # noqa: PLC0415
+
+            async with get_session_factory()() as xp_session:
+                svc = EngagementService(xp_session)
+                await svc.award_note_xp(note.id, len(tags))
+                await xp_session.commit()
+        except Exception:
+            logger.warning("Failed to award XP for note creation", exc_info=True)
+
+    _xp_task = asyncio.create_task(_award_note_xp())
+    _background_tasks.add(_xp_task)
+    _xp_task.add_done_callback(_background_tasks.discard)
+
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note, source_document_ids=req.source_document_ids)
 

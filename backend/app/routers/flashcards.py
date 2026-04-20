@@ -905,6 +905,23 @@ async def review_flashcard(
         _background_tasks.add(_task)
         _task.add_done_callback(_background_tasks.discard)
 
+    # Fire-and-forget XP award for the review.
+    async def _award_review_xp() -> None:
+        try:
+            from app.database import get_session_factory  # noqa: PLC0415
+            from app.services.engagement_service import EngagementService  # noqa: PLC0415
+
+            async with get_session_factory()() as xp_session:
+                svc = EngagementService(xp_session)
+                await svc.award_flashcard_xp(req.rating, card_id)
+                await xp_session.commit()
+        except Exception:
+            logger.warning("Failed to award XP for flashcard review", exc_info=True)
+
+    _xp_task = asyncio.create_task(_award_review_xp())
+    _background_tasks.add(_xp_task)
+    _xp_task.add_done_callback(_background_tasks.discard)
+
     logger.info("Reviewed flashcard", extra={"card_id": card_id, "rating": req.rating})
     return _to_response(card)
 

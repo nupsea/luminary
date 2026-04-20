@@ -14,6 +14,7 @@ import { cn } from "./lib/utils"
 import { useAppStore } from "./store"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
+import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
@@ -99,6 +100,14 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchKey: ["documents", undefined, null, "newest", 1, 20],
     prefetchFn: prefetchDocuments,
   },
+  { to: "/notes", icon: StickyNote, label: "Notes" },
+  {
+    to: "/study",
+    icon: BarChart2,
+    label: "Study",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchDueCards,
+  },
   {
     to: "/chat",
     icon: MessageSquare,
@@ -107,14 +116,6 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchFn: prefetchLLMSettings,
   },
   { to: "/viz", icon: Network, label: "Viz" },
-  {
-    to: "/study",
-    icon: BarChart2,
-    label: "Study",
-    prefetchKey: ["study-due"],
-    prefetchFn: prefetchDueCards,
-  },
-  { to: "/notes", icon: StickyNote, label: "Notes" },
   {
     to: "/progress",
     icon: TrendingUp,
@@ -232,7 +233,11 @@ function Sidebar() {
             )}
           </NavLink>
         ))}
-        <div className="mt-auto flex flex-col items-center gap-2">
+        {/* Streak & XP widget */}
+        <div className="mt-auto mb-2">
+          <StreakXPWidget />
+        </div>
+        <div className="flex flex-col items-center gap-2">
           {/* Dev Tools link -- hidden from nav, accessible via this small icon at the bottom */}
           <NavLink
             to="/admin"

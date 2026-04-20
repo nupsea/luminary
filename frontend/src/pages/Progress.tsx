@@ -23,6 +23,7 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StudyHabitsSection } from "@/components/StudyHabitsSection"
 import { logger } from "@/lib/logger"
 import { API_BASE } from "@/lib/config"
 import { GoalsPanel } from "./Study"
@@ -589,6 +590,9 @@ export default function Progress() {
           </ResponsiveContainer>
         )}
       </section>
+
+      {/* Study Habits: streaks, XP, achievements (Phase 7) */}
+      <StudyHabitsSection />
 
       {/* Notes over time chart */}
       {notes.length > 0 && (
