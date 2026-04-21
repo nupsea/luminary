@@ -554,14 +554,17 @@ export function LLMModeBadge({ onClick }: LLMModeBadgeProps) {
   }, [data, setLlmMode])
 
   const mode = data?.mode ?? "private"
+  const ollamaDown = mode === "private" && data?.processing_mode === "unavailable"
   const dotColor =
-    mode === "cloud" ? "bg-blue-500" : mode === "hybrid" ? "bg-purple-500" : "bg-green-500"
+    ollamaDown ? "bg-red-500" : mode === "cloud" ? "bg-blue-500" : mode === "hybrid" ? "bg-purple-500" : "bg-green-500"
   const label =
-    mode === "cloud"
-      ? `Cloud: ${data?.model ?? ""}`
-      : mode === "hybrid"
-        ? `Hybrid: ${data?.model ?? ""}`
-        : "Private"
+    ollamaDown
+      ? "Private (Ollama offline)"
+      : mode === "cloud"
+        ? `Cloud: ${data?.model ?? ""}`
+        : mode === "hybrid"
+          ? `Hybrid: ${data?.model ?? ""}`
+          : "Private"
 
   return (
     <button

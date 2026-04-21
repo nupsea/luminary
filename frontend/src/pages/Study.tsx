@@ -23,6 +23,7 @@ import {
   Layers,
   Loader2,
   Pencil,
+  Eye,
   PlayCircle,
   Plus,
   StickyNote,
@@ -2024,14 +2025,17 @@ function FlashcardManager({
 
 export default function Study() {
   const navigate = useNavigate()
-  const { 
-    activeDocumentId, 
-    setActiveDocument, 
-    activeCollectionId, 
+  const {
+    activeDocumentId,
+    setActiveDocument,
+    activeCollectionId,
     setActiveCollectionId,
+    studySessionId,
+    setStudySessionId,
   } = useAppStore()
-  
+
   const [isStudying, setIsStudying] = useState(false)
+  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
   const [isHistoryView, setIsHistoryView] = useState(false)
   const [studyFilters, setStudyFilters] = useState<any>(null)
   
@@ -2054,13 +2058,17 @@ export default function Study() {
     setIsStudying(true)
   }
 
-  if (isStudying) {
+  if (isStudying || resumeSessionId) {
     return (
       <StudySession
         documentId={activeDocumentId}
         collectionId={activeCollectionId}
         filters={studyFilters}
-        onExit={() => setIsStudying(false)}
+        resumeSessionId={resumeSessionId}
+        onExit={() => {
+          setIsStudying(false)
+          setResumeSessionId(null)
+        }}
       />
     )
   }
@@ -2106,6 +2114,33 @@ export default function Study() {
       </div>
 
       <div className="flex-1 overflow-auto p-8 lg:p-12">
+        {/* Resume banner for incomplete teach-back sessions */}
+        {studySessionId && !isStudying && !resumeSessionId && (
+          <div className="mb-6 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-5 py-4">
+            <div className="flex items-center gap-3">
+              <Eye size={18} className="text-primary" />
+              <div>
+                <p className="text-sm font-medium text-foreground">You have an incomplete study session</p>
+                <p className="text-xs text-muted-foreground">Continue where you left off or view your teach-back results.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setResumeSessionId(studySessionId)}
+                className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Continue Session
+              </button>
+              <button
+                onClick={() => setStudySessionId(null)}
+                className="rounded-md border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {isHistoryView ? (
           <div className="mx-auto max-w-5xl">
             <h2 className="mb-8 text-2xl font-bold tracking-tight">Recent Sessions</h2>

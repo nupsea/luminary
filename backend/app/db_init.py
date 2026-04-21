@@ -212,6 +212,10 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S194: URL validation status for web references
             "ALTER TABLE web_references ADD COLUMN is_valid INTEGER",
             "ALTER TABLE web_references ADD COLUMN last_checked_at DATETIME",
+            # Async teach-back evaluation status
+            "ALTER TABLE teachback_results ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'",
+            # Link teach-back results to study sessions for persistence
+            "ALTER TABLE teachback_results ADD COLUMN session_id TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

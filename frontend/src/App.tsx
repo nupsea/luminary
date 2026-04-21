@@ -3,10 +3,11 @@ import {
   QueryClient,
   QueryClientProvider,
   useIsFetching,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon } from "lucide-react"
+import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -276,6 +277,7 @@ function Sidebar() {
 
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
+  const [ollamaWarningDismissed, setOllamaWarningDismissed] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
   const chatPanelOpen = useAppStore(s => s.chatPanelOpen)
@@ -283,6 +285,21 @@ function AppShell() {
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
+
+  // Surface a global warning when Ollama is unreachable in private mode
+  const { data: llmData } = useQuery<{
+    processing_mode: string
+    mode: string
+  }>({
+    queryKey: ["llm-settings"],
+    queryFn: prefetchLLMSettings as () => Promise<{ processing_mode: string; mode: string }>,
+    staleTime: 30_000,
+  })
+  const ollamaUnavailable = llmData?.mode === "private" && llmData?.processing_mode === "unavailable"
+  // Reset dismissed state when Ollama comes back online
+  useEffect(() => {
+    if (!ollamaUnavailable) setOllamaWarningDismissed(false)
+  }, [ollamaUnavailable])
 
   // S118: review reminder notifications
   useReviewNotification()
@@ -380,6 +397,17 @@ function AppShell() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar />
       <main className="flex-1 h-full overflow-auto relative animate-[fadeIn_0.2s_ease-out]">
+        {ollamaUnavailable && !ollamaWarningDismissed && (
+          <div className="mx-4 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span className="flex-1">
+              Ollama is not running. LLM features (chat, teach-back, flashcard generation) are unavailable. Start it with: <code className="font-mono font-semibold">ollama serve</code>
+            </span>
+            <button onClick={() => setOllamaWarningDismissed(true)} className="shrink-0 hover:text-amber-900 dark:hover:text-amber-100" aria-label="Dismiss">
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
           <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />

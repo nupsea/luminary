@@ -12,6 +12,7 @@ import { ChevronDown, ChevronUp, ExternalLink, Loader2, Check, AlertTriangle, X 
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { ClozeCard } from "@/components/ClozeCard"
+import { useAppStore } from "@/store"
 
 // ---------------------------------------------------------------------------
 // Web Speech API types (not included in all TS lib targets)
@@ -295,14 +296,6 @@ function SourcePanel({ card }: SourcePanelProps) {
 
 type Rating = "again" | "hard" | "good" | "easy"
 
-interface TeachbackResult {
-  score: number
-  correct_points: string[]
-  missing_points: string[]
-  misconceptions: string[]
-  correction_flashcard_id: string | null
-}
-
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -355,17 +348,60 @@ async function endSession(sessionId: string): Promise<void> {
   await fetch(`${API_BASE}/study/sessions/${sessionId}/end`, { method: "POST" })
 }
 
-async function submitTeachback(
+// ---------------------------------------------------------------------------
+// Async teach-back API (non-blocking evaluation)
+// ---------------------------------------------------------------------------
+
+interface PendingTeachback {
+  id: string           // teachback_result_id from backend
+  flashcardId: string
+  question: string
+}
+
+interface TeachbackResultItem {
+  id: string
+  status: "pending" | "complete" | "error"
+  flashcard_id: string
+  question: string
+  score: number | null
+  correct_points: string[]
+  missing_points: string[]
+  misconceptions: string[]
+  correction_flashcard_id: string | null
+  rubric: {
+    accuracy: { score: number; evidence: string }
+    completeness: { score: number; missed_points: string[] }
+    clarity: { score: number; evidence: string }
+  } | null
+}
+
+async function submitTeachbackAsync(
   flashcardId: string,
   userExplanation: string,
-): Promise<TeachbackResult> {
-  const res = await fetch(`${API_BASE}/study/teachback`, {
+  sessionId: string | null = null,
+): Promise<{ id: string }> {
+  const res = await fetch(`${API_BASE}/study/teachback/async`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ flashcard_id: flashcardId, user_explanation: userExplanation }),
+    body: JSON.stringify({ flashcard_id: flashcardId, user_explanation: userExplanation, session_id: sessionId }),
   })
-  if (!res.ok) throw new Error("Teachback request failed")
-  return res.json() as Promise<TeachbackResult>
+  if (!res.ok) throw new Error("Teachback submit failed")
+  return res.json() as Promise<{ id: string }>
+}
+
+async function fetchTeachbackResults(ids: string[]): Promise<TeachbackResultItem[]> {
+  if (ids.length === 0) return []
+  const res = await fetch(`${API_BASE}/study/teachback/results?ids=${ids.join(",")}`)
+  if (!res.ok) throw new Error("Failed to fetch teachback results")
+  const data = (await res.json()) as { results: TeachbackResultItem[] }
+  return data.results
+}
+
+async function fetchSessionTeachbackResults(sessionId: string): Promise<TeachbackResultItem[]> {
+  const res = await fetch(`${API_BASE}/study/sessions/${sessionId}/teachback-results`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { results: TeachbackResultItem[] }
+  return data.results
 }
 
 // ---------------------------------------------------------------------------
@@ -375,18 +411,14 @@ async function submitTeachback(
 interface TeachbackPanelProps {
   card: Flashcard
   onNext: () => void
+  onSubmitAsync: (cardId: string, question: string, explanation: string) => void
 }
 
-function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
+function TeachbackPanel({ card, onNext, onSubmitAsync }: TeachbackPanelProps) {
   const [explanation, setExplanation] = useState("")
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [result, setResult] = useState<TeachbackResult | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   // Tracks whether the current stop was user-initiated (manual) vs natural end.
-  // The Web Speech API always fires onend after stop(); without this guard,
-  // a manual stop followed by the user typing before onend fires would have
-  // onend overwrite those edits with the stale finalTranscript.
   const manualStopRef = useRef(false)
 
   // Clean up recognition on unmount
@@ -422,14 +454,10 @@ function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
           interim += segment
         }
       }
-      // Show final + current interim in textarea in real-time
       setExplanation(finalTranscript + interim)
     }
 
     recognition.onend = () => {
-      // On natural end: commit final transcript (drops trailing interim).
-      // On manual stop: skip setExplanation so user edits made after clicking
-      // stop are not overwritten by the stale finalTranscript closure value.
       if (!manualStopRef.current) {
         setExplanation(finalTranscript)
       }
@@ -447,77 +475,15 @@ function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
     setIsRecording(true)
   }
 
-  async function handleSubmit() {
+  function handleSubmit() {
     if (!explanation.trim()) return
-    setIsSubmitting(true)
-    try {
-      const res = await submitTeachback(card.id, explanation)
-      setResult(res)
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  function scoreBadgeClass(score: number): string {
-    if (score >= 80) return "bg-green-100 text-green-700"
-    if (score >= 60) return "bg-amber-100 text-amber-700"
-    return "bg-red-100 text-red-700"
-  }
-
-  if (result) {
-    return (
-      <div className="flex w-full max-w-2xl flex-col gap-4">
-        <p className="text-base font-medium text-foreground">{card.question}</p>
-        <div className="flex items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-sm font-bold ${scoreBadgeClass(result.score)}`}>
-            Score: {result.score}/100
-          </span>
-        </div>
-
-        {result.correct_points.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <p className="text-xs font-semibold text-green-700">Correct points</p>
-            {result.correct_points.map((p, i) => (
-              <div key={i} className="flex items-start gap-1.5 text-sm text-foreground">
-                <Check size={14} className="mt-0.5 shrink-0 text-green-600" />
-                {p}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {result.missing_points.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <p className="text-xs font-semibold text-amber-700">Missing points</p>
-            {result.missing_points.map((p, i) => (
-              <div key={i} className="flex items-start gap-1.5 text-sm text-foreground">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
-                {p}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {result.misconceptions.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <p className="text-xs font-semibold text-red-700">Misconceptions</p>
-            {result.misconceptions.map((p, i) => (
-              <div key={i} className="flex items-start gap-1.5 text-sm text-foreground">
-                <XIcon size={14} className="mt-0.5 shrink-0 text-red-500" />
-                {p}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <button
-          onClick={onNext}
-          className="self-start rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          Next card
-        </button>
-      </div>
-    )
+    // Capture values before advancing -- component will unmount on onNext()
+    const cardId = card.id
+    const question = card.question
+    const text = explanation.trim()
+    // Fire async submit in parent (runs in background), then advance immediately
+    onSubmitAsync(cardId, question, text)
+    onNext()
   }
 
   return (
@@ -552,12 +518,11 @@ function TeachbackPanel({ card, onNext }: TeachbackPanelProps) {
         <p className="text-xs text-destructive">Recording... click the mic again to stop.</p>
       )}
       <button
-        onClick={() => void handleSubmit()}
-        disabled={isSubmitting || !explanation.trim()}
-        className="flex items-center gap-2 self-start rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        onClick={handleSubmit}
+        disabled={!explanation.trim()}
+        className="self-start rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
       >
-        {isSubmitting && <Loader2 size={14} className="animate-spin" />}
-        Submit
+        Submit & Next
       </button>
     </div>
   )
@@ -656,6 +621,195 @@ const RATINGS: { label: string; value: Rating; className: string }[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// TeachbackResultsPanel — poll and display async teach-back evaluations
+// ---------------------------------------------------------------------------
+
+function scoreBadgeClass(score: number): string {
+  if (score >= 80) return "bg-green-100 text-green-700"
+  if (score >= 60) return "bg-amber-100 text-amber-700"
+  return "bg-red-100 text-red-700"
+}
+
+interface TeachbackStats {
+  allDone: boolean
+  completedCount: number
+  avgScore: number
+  passCount: number // score >= 60
+}
+
+function useTeachbackPolling(pending: PendingTeachback[]): {
+  results: TeachbackResultItem[] | undefined
+  stats: TeachbackStats
+} {
+  const realIds = pending
+    .map((t) => t.id)
+    .filter((id) => !id.startsWith("temp-") && !id.startsWith("error-"))
+  const hasUnresolved = pending.some(
+    (t) => t.id.startsWith("temp-") || t.id.startsWith("error-")
+  )
+  const { data: results } = useQuery({
+    queryKey: ["teachback-results", ...realIds],
+    queryFn: () => fetchTeachbackResults(realIds),
+    refetchInterval: (query) => {
+      if (hasUnresolved) return 2000
+      const items = query.state.data
+      if (!items) return 2000
+      return items.every((r) => r.status !== "pending") ? false : 2000
+    },
+    enabled: realIds.length > 0 || hasUnresolved,
+    refetchOnMount: "always",
+  })
+
+  const completed = results?.filter((r) => r.status === "complete") ?? []
+  const allDone =
+    !hasUnresolved &&
+    results != null &&
+    results.length === realIds.length &&
+    results.every((r) => r.status !== "pending")
+  const avgScore = completed.length > 0
+    ? Math.round(completed.reduce((s, r) => s + (r.score ?? 0), 0) / completed.length)
+    : 0
+  const passCount = completed.filter((r) => (r.score ?? 0) >= 60).length
+
+  return {
+    results,
+    stats: { allDone, completedCount: completed.length, avgScore, passCount },
+  }
+}
+
+function TeachbackResultsPanel({ pending, stats, results }: {
+  pending: PendingTeachback[]
+  stats: TeachbackStats
+  results: TeachbackResultItem[] | undefined
+}) {
+  const hasUnresolved = pending.some(
+    (t) => t.id.startsWith("temp-") || t.id.startsWith("error-")
+  )
+
+  return (
+    <div className="flex w-full max-w-2xl flex-col gap-4">
+      {/* Summary bar */}
+      {stats.allDone && stats.completedCount > 0 && (
+        <div className="rounded-lg border border-border bg-card/50 p-3 text-center">
+          <span className="text-sm text-muted-foreground">Average score: </span>
+          <span className={`text-lg font-bold ${stats.avgScore >= 80 ? "text-green-600" : stats.avgScore >= 60 ? "text-amber-600" : "text-red-600"}`}>
+            {stats.avgScore}/100
+          </span>
+          <span className="ml-3 text-sm text-muted-foreground">
+            ({stats.passCount}/{stats.completedCount} passed)
+          </span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Teach-Back Results</h3>
+        {!stats.allDone && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 size={12} className="animate-spin" />
+            Evaluating...
+          </span>
+        )}
+      </div>
+
+      {pending.map((tb) => {
+        // Submit POST failed entirely
+        if (tb.id.startsWith("error-")) {
+          return (
+            <div key={tb.id} className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">{tb.question}</p>
+              <p className="mt-2 text-xs text-amber-700">Submission failed. Check if Ollama is running.</p>
+            </div>
+          )
+        }
+
+        // POST hasn't completed yet -- still waiting for real ID
+        if (tb.id.startsWith("temp-")) {
+          return (
+            <div key={tb.id} className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">{tb.question}</p>
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" />
+                Submitting...
+              </div>
+            </div>
+          )
+        }
+
+        const result = results?.find((r) => r.id === tb.id)
+
+        if (!result || result.status === "pending") {
+          return (
+            <div key={tb.id} className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">{tb.question}</p>
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" />
+                Evaluating your explanation...
+              </div>
+            </div>
+          )
+        }
+
+        if (result.status === "error") {
+          return (
+            <div key={tb.id} className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">{tb.question}</p>
+              <p className="mt-2 text-xs text-amber-700">Evaluation failed. The result could not be generated.</p>
+            </div>
+          )
+        }
+
+        return (
+          <div key={tb.id} className="rounded-lg border border-border bg-card p-4">
+            <p className="text-sm font-medium text-foreground">{result.question || tb.question}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <span className={`rounded-full px-3 py-0.5 text-xs font-bold ${scoreBadgeClass(result.score ?? 0)}`}>
+                {result.score}/100
+              </span>
+            </div>
+
+            {result.correct_points.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1">
+                <p className="text-xs font-semibold text-green-700">Correct</p>
+                {result.correct_points.map((p, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-xs text-foreground">
+                    <Check size={12} className="mt-0.5 shrink-0 text-green-600" />
+                    {p}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {result.missing_points.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1">
+                <p className="text-xs font-semibold text-amber-700">Missing</p>
+                {result.missing_points.map((p, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-xs text-foreground">
+                    <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
+                    {p}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {result.misconceptions.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1">
+                <p className="text-xs font-semibold text-red-700">Misconceptions</p>
+                {result.misconceptions.map((p, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-xs text-foreground">
+                    <XIcon size={12} className="mt-0.5 shrink-0 text-red-500" />
+                    {p}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SessionComplete screen
 // ---------------------------------------------------------------------------
 
@@ -664,24 +818,44 @@ interface SessionCompleteProps {
   correct: number
   nextReviewDate: string | null
   onBack: () => void
+  onClear: () => void
+  onStartNext: () => void
+  pendingTeachbacks: PendingTeachback[]
 }
 
-function SessionComplete({ reviewed, correct, nextReviewDate, onBack }: SessionCompleteProps) {
-  const pct = reviewed === 0 ? 0 : Math.round((correct / reviewed) * 100)
+function SessionComplete({
+  reviewed, correct, nextReviewDate, onBack, onClear, onStartNext, pendingTeachbacks,
+}: SessionCompleteProps) {
+  const hasTeachbacks = pendingTeachbacks.length > 0
+  const { results, stats } = useTeachbackPolling(pendingTeachbacks)
+
+  // For teach-back mode, derive accuracy from evaluation results
+  const displayCorrect = hasTeachbacks ? stats.passCount : correct
+  const displayReviewed = hasTeachbacks ? stats.completedCount || reviewed : reviewed
+  const pct = displayReviewed === 0 ? 0 : Math.round((displayCorrect / displayReviewed) * 100)
+  const showStats = !hasTeachbacks || stats.completedCount > 0
 
   return (
-    <div className="flex flex-col items-center gap-6 text-center">
-      <h2 className="text-2xl font-bold text-foreground">Session Complete!</h2>
-      <div className="flex gap-8">
-        <div className="flex flex-col items-center">
-          <span className="text-3xl font-bold text-foreground">{reviewed}</span>
-          <span className="text-sm text-muted-foreground">Cards reviewed</span>
+    <div className="flex flex-col items-center gap-6 overflow-auto px-4 py-6">
+      {stats.allDone || !hasTeachbacks ? (
+        <h2 className="text-2xl font-bold text-foreground">Session Complete!</h2>
+      ) : (
+        <h2 className="text-2xl font-bold text-foreground">Evaluating Your Answers...</h2>
+      )}
+
+      {showStats && (
+        <div className="flex gap-8 text-center">
+          <div className="flex flex-col items-center">
+            <span className="text-3xl font-bold text-foreground">{displayReviewed}</span>
+            <span className="text-sm text-muted-foreground">Cards reviewed</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <span className={`text-3xl font-bold ${pct >= 60 ? "text-green-600" : "text-amber-600"}`}>{pct}%</span>
+            <span className="text-sm text-muted-foreground">Passed</span>
+          </div>
         </div>
-        <div className="flex flex-col items-center">
-          <span className="text-3xl font-bold text-green-600">{pct}%</span>
-          <span className="text-sm text-muted-foreground">Correct</span>
-        </div>
-      </div>
+      )}
+
       {nextReviewDate && (
         <p className="text-sm text-muted-foreground">
           Next review:{" "}
@@ -690,12 +864,40 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack }: SessionC
           </span>
         </p>
       )}
-      <button
-        onClick={onBack}
-        className="rounded bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-      >
-        Back to Study
-      </button>
+
+      {/* Teach-back results section */}
+      {hasTeachbacks && (
+        <TeachbackResultsPanel pending={pendingTeachbacks} stats={stats} results={results} />
+      )}
+
+      <div className="flex items-center gap-3">
+        {stats.allDone && hasTeachbacks && (
+          <button
+            onClick={onStartNext}
+            className="rounded bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Start Next Set
+          </button>
+        )}
+        <button
+          onClick={onBack}
+          className={`rounded px-6 py-2 text-sm font-medium ${
+            stats.allDone && hasTeachbacks
+              ? "border border-border text-muted-foreground hover:bg-accent"
+              : "bg-primary text-primary-foreground hover:bg-primary/90"
+          }`}
+        >
+          Back to Study
+        </button>
+        {hasTeachbacks && (
+          <button
+            onClick={onClear}
+            className="text-xs text-muted-foreground underline hover:text-foreground"
+          >
+            Clear Session
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -713,20 +915,22 @@ interface StudySessionProps {
     note_ids?: string[]
   }
   onExit: () => void
+  /** When set, skip card fetching and show results for this session */
+  resumeSessionId?: string | null
 }
 
 type SessionState = "loading" | "studying" | "complete" | "empty"
 
-export function StudySession({ documentId, collectionId, filters, onExit }: StudySessionProps) {
+export function StudySession({ documentId, collectionId, filters, onExit, resumeSessionId }: StudySessionProps) {
   const [sessionState, setSessionState] = useState<SessionState>("loading")
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(resumeSessionId ?? null)
   const [queue, setQueue] = useState<Flashcard[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showAnswer, setShowAnswer] = useState(false)
   const [reviewed, setReviewed] = useState(0)
   const [correct, setCorrect] = useState(0)
   const [isRating, setIsRating] = useState(false)
-  const [teachbackMode, setTeachbackMode] = useState(false)
+  const [teachbackMode, setTeachbackMode] = useState(!!resumeSessionId)
   // S138: track last rating to show SourcePanel on "again"
   const [lastRating, setLastRating] = useState<Rating | null>(null)
   // Track next review date as minimum due_date across remaining cards
@@ -735,20 +939,74 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
   const [sourceContext, setSourceContext] = useState<SourceContext | null>(null)
   const [sourceContextLoading, setSourceContextLoading] = useState(false)
   const dismissedSourceContextIds = useRef(new Set<string>())
+  // Re-queue: track cards already re-queued to avoid infinite loops (max 1 retry per card)
+  const requeuedCardIds = useRef(new Set<string>())
+  // Async teach-back: track pending evaluations
+  const [pendingTeachbacks, setPendingTeachbacks] = useState<PendingTeachback[]>([])
+  // Persisted session tracking
+  const { setStudySessionId } = useAppStore()
 
-  const total = queue.length
+  // In resume mode, total = remaining cards + already reviewed; in normal mode, queue has all cards
+  const [resumedPreviousCount, setResumedPreviousCount] = useState(0)
+  const total = queue.length + resumedPreviousCount
+
+  // Resume mode: load previous results + remaining cards
+  useEffect(() => {
+    if (!resumeSessionId) return
+    let cancelled = false
+
+    async function resumeInit() {
+      try {
+        // Fetch previous results and remaining due cards in parallel
+        const [prevResults, cards] = await Promise.all([
+          fetchSessionTeachbackResults(resumeSessionId!),
+          fetchDueCards(documentId || null, collectionId || null, filters || {}),
+        ])
+        if (cancelled) return
+
+        // Reconstruct pending teachbacks from previous results
+        const previousTeachbacks = prevResults.map((r) => ({
+          id: r.id,
+          flashcardId: r.flashcard_id,
+          question: r.question,
+        }))
+        setPendingTeachbacks(previousTeachbacks)
+        setReviewed(prevResults.length)
+        setResumedPreviousCount(prevResults.length)
+
+        // Filter out cards already answered in this session
+        const answeredCardIds = new Set(prevResults.map((r) => r.flashcard_id))
+        const remainingCards = cards.filter((c) => !answeredCardIds.has(c.id))
+
+        if (remainingCards.length > 0) {
+          setQueue(remainingCards)
+          setSessionState("studying")
+        } else {
+          // No remaining cards -- show results
+          setSessionState("complete")
+        }
+      } catch {
+        if (!cancelled) setSessionState("complete") // fallback to results view
+      }
+    }
+
+    void resumeInit()
+    return () => { cancelled = true }
+  }, [resumeSessionId, documentId, collectionId, filters])
 
   useEffect(() => {
+    if (resumeSessionId) return // skip normal init in resume mode
     let cancelled = false
 
     async function init() {
       try {
         const [sid, cards] = await Promise.all([
-          startSession(documentId ?? null), // startSession still just needs a docId if it's doc-focused, or null for general
+          startSession(documentId ?? null),
           fetchDueCards(documentId || null, collectionId || null, filters || {}),
         ])
         if (cancelled) return
         setSessionId(sid)
+        setStudySessionId(sid) // persist for tab-switch recovery
         setQueue(cards)
         setSessionState(cards.length === 0 ? "empty" : "studying")
       } catch {
@@ -760,7 +1018,45 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     return () => {
       cancelled = true
     }
-  }, [documentId, collectionId, filters])
+  }, [documentId, collectionId, filters, resumeSessionId, setStudySessionId])
+
+  // Teach-back re-queue: poll for completed evaluations during active session
+  // and re-add cards with low scores (< 60) to the queue for a second attempt
+  const REQUEUE_THRESHOLD = 60
+  const realTeachbackIds = pendingTeachbacks
+    .map((t) => t.id)
+    .filter((id) => !id.startsWith("temp-") && !id.startsWith("error-"))
+  const { data: liveResults } = useQuery({
+    queryKey: ["teachback-live-poll", ...realTeachbackIds],
+    queryFn: () => fetchTeachbackResults(realTeachbackIds),
+    refetchInterval: (query) => {
+      if (sessionState !== "studying" || !teachbackMode) return false
+      const items = query.state.data
+      if (!items) return 3000
+      return items.some((r) => r.status === "pending") ? 3000 : false
+    },
+    enabled: sessionState === "studying" && teachbackMode && realTeachbackIds.length > 0,
+  })
+
+  // When a teach-back result completes with a low score, re-add the card to the queue
+  useEffect(() => {
+    if (!liveResults || sessionState !== "studying") return
+    for (const r of liveResults) {
+      if (
+        r.status === "complete" &&
+        r.score !== null &&
+        r.score < REQUEUE_THRESHOLD &&
+        !requeuedCardIds.current.has(r.flashcard_id)
+      ) {
+        requeuedCardIds.current.add(r.flashcard_id)
+        // Find the original card data from the queue or pending teachbacks
+        const originalCard = queue.find((c) => c.id === r.flashcard_id)
+        if (originalCard) {
+          setQueue((prev) => [...prev, originalCard])
+        }
+      }
+    }
+  }, [liveResults, sessionState, queue])
 
   async function handleRate(rating: Rating) {
     if (!sessionId || isRating) return
@@ -784,6 +1080,12 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
       }
 
       setLastRating(rating)
+
+      // Re-queue "again"-rated cards for a second attempt later in the session
+      if (rating === "again" && !requeuedCardIds.current.has(card.id)) {
+        requeuedCardIds.current.add(card.id)
+        setQueue((prev) => [...prev, card])
+      }
 
       // S155: lazy-fetch source context after "again" or "hard" (AC7)
       if (rating === "again" || rating === "hard") {
@@ -851,6 +1153,29 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     void advanceCard()
   }
 
+  function handleTeachbackSubmit(cardId: string, question: string, explanation: string) {
+    // Generate a temporary ID for immediate tracking; replace with real ID when POST completes
+    const tempId = `temp-${Date.now()}-${cardId}`
+    setPendingTeachbacks((prev) => [
+      ...prev,
+      { id: tempId, flashcardId: cardId, question },
+    ])
+    // Fire POST in background -- swap temp ID for real ID using tempId as stable key
+    void submitTeachbackAsync(cardId, explanation, sessionId)
+      .then(({ id }) => {
+        setPendingTeachbacks((prev) =>
+          prev.map((t) => (t.id === tempId ? { ...t, id } : t))
+        )
+      })
+      .catch((err) => {
+        console.warn("Teachback async submit failed", err)
+        // Mark as failed so results panel can show an error for this entry
+        setPendingTeachbacks((prev) =>
+          prev.map((t) => (t.id === tempId ? { ...t, id: `error-${tempId}` } : t))
+        )
+      })
+  }
+
   function handleTeachbackNext() {
     const nextIndex = currentIndex + 1
     setReviewed(reviewed + 1)
@@ -862,7 +1187,7 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     } else {
       setCurrentIndex(nextIndex)
       setShowAnswer(false)
-      setTeachbackMode(false)
+      // Keep teachbackMode -- don't reset between cards
     }
   }
 
@@ -870,7 +1195,13 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     if (sessionId && sessionState !== "complete") {
       await endSession(sessionId)
     }
-    onExit()
+    // If there are pending teach-back evaluations, show the results screen
+    // instead of exiting so the user can see their results
+    if (pendingTeachbacks.length > 0) {
+      setSessionState("complete")
+    } else {
+      onExit()
+    }
   }
 
   if (sessionState === "loading") {
@@ -897,12 +1228,43 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
 
   if (sessionState === "complete") {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full items-center justify-center overflow-auto py-8">
         <SessionComplete
           reviewed={reviewed}
           correct={correct}
           nextReviewDate={nextReviewDate}
           onBack={onExit}
+          onClear={() => {
+            setStudySessionId(null)
+            onExit()
+          }}
+          onStartNext={() => {
+            // Reset session state for a new round; keep studySessionId for continuity
+            setQueue([])
+            setCurrentIndex(0)
+            setReviewed(0)
+            setCorrect(0)
+            setPendingTeachbacks([])
+            setResumedPreviousCount(0)
+            requeuedCardIds.current.clear()
+            setSessionState("loading")
+            // Re-trigger init by creating a new session
+            void (async () => {
+              try {
+                const [sid, cards] = await Promise.all([
+                  startSession(documentId ?? null),
+                  fetchDueCards(documentId || null, collectionId || null, filters || {}),
+                ])
+                setSessionId(sid)
+                setStudySessionId(sid)
+                setQueue(cards)
+                setSessionState(cards.length === 0 ? "empty" : "studying")
+              } catch {
+                setSessionState("empty")
+              }
+            })()
+          }}
+          pendingTeachbacks={pendingTeachbacks}
         />
       </div>
     )
@@ -915,24 +1277,30 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     <div className="flex h-full flex-col items-center gap-6 overflow-auto px-6 py-8">
       <ProgressBar done={reviewed} total={total} />
 
-      {/* Mode toggle */}
-      <div className="flex rounded-md border border-border text-sm">
-        <button
-          onClick={() => { setTeachbackMode(false); setShowAnswer(false) }}
-          className={`rounded-l-md px-4 py-1.5 transition-colors ${!teachbackMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
-        >
-          Flashcard
-        </button>
-        <button
-          onClick={() => setTeachbackMode(true)}
-          className={`rounded-r-md px-4 py-1.5 transition-colors ${teachbackMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
-        >
-          Teach-back
-        </button>
-      </div>
+      {/* Mode toggle -- locked once a teach-back or rating has been submitted */}
+      {reviewed === 0 && pendingTeachbacks.length === 0 ? (
+        <div className="flex rounded-md border border-border text-sm">
+          <button
+            onClick={() => { setTeachbackMode(false); setShowAnswer(false) }}
+            className={`rounded-l-md px-4 py-1.5 transition-colors ${!teachbackMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
+          >
+            Flashcard
+          </button>
+          <button
+            onClick={() => setTeachbackMode(true)}
+            className={`rounded-r-md px-4 py-1.5 transition-colors ${teachbackMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
+          >
+            Teach-back
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-md border border-border px-4 py-1.5 text-sm font-medium text-foreground">
+          {teachbackMode ? "Teach-back" : "Flashcard"} mode
+        </div>
+      )}
 
       {teachbackMode ? (
-        <TeachbackPanel card={currentCard} onNext={handleTeachbackNext} />
+        <TeachbackPanel key={currentCard.id} card={currentCard} onNext={handleTeachbackNext} onSubmitAsync={handleTeachbackSubmit} />
       ) : (
         <>
           {/* S154: dispatch to ClozeCard for cloze flashcard_type with valid blanks */}

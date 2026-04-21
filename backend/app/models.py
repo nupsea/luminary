@@ -190,6 +190,10 @@ class TeachbackResultModel(Base):
     misconceptions: Mapped[list] = mapped_column(JSON, default=list)
     # S156: structured rubric JSON; null when rubric LLM call fails or for legacy rows
     rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Async evaluation: "pending" | "complete" | "error"
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    # Link to study session for persistence across tab switches
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

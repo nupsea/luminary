@@ -417,10 +417,14 @@ export default function Chat() {
     staleTime: 30_000,
   })
 
-  // Pre-populate from global store when user arrives from Learning tab
+  // Pre-populate from global store when user arrives from Learning tab.
+  // Use a ref to avoid re-populating after the user explicitly clears
+  // the document selection (clicking the X button).
+  const docSelectorTouched = useRef(false)
   useEffect(() => {
-    if (activeDocumentId && !selectedDocId) {
+    if (activeDocumentId && !selectedDocId && !docSelectorTouched.current) {
       setSelectedDocId(activeDocumentId)
+      setScope("single")
     }
   }, [activeDocumentId, selectedDocId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -519,6 +523,8 @@ export default function Chat() {
     setMessages([])
     setQaError(null)
     setWebCallsUsed(0)
+    // Reset touch flag so pre-populate from activeDocumentId works on next visit
+    docSelectorTouched.current = false
   }
 
   function autoResize() {
@@ -723,22 +729,21 @@ export default function Chat() {
           docList={docList}
           selectedDocId={selectedDocId}
           onSelect={(docId) => {
+            docSelectorTouched.current = true
             if (docId === null) {
               // S196: Clear -> revert to "All documents" -- preserve conversation
-              if (scope === "single") {
-                setScope("all")
-                setSelectedDocId(null)
-                if (messages.length > 0) {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `divider-${Date.now()}`,
-                      role: "assistant" as const,
-                      text: "Switched to All documents",
-                      type: "divider" as const,
-                    },
-                  ])
-                }
+              setScope("all")
+              setSelectedDocId(null)
+              if (scope === "single" && messages.length > 0) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `divider-${Date.now()}`,
+                    role: "assistant" as const,
+                    text: "Switched to All documents",
+                    type: "divider" as const,
+                  },
+                ])
               }
             } else if (selectedDocId === null || scope === "all") {
               // S196: Transition: all -> single -- insert divider, preserve conversation

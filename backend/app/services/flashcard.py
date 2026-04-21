@@ -13,6 +13,7 @@ import litellm
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -26,6 +27,13 @@ from app.services.llm import get_llm_service
 from app.telemetry import trace_chain
 
 logger = logging.getLogger(__name__)
+
+
+def _get_generation_model() -> str | None:
+    """Return the model override for generation tasks, or None to use default."""
+    m = get_settings().LITELLM_GENERATION_MODEL
+    return m if m else None
+
 
 FLASHCARD_SYSTEM = (
     "You are a learning assistant creating flashcards for active recall. "
@@ -1187,7 +1195,10 @@ class FlashcardService:
             if section_heading:
                 span.set_attribute("flashcard.section_heading", section_heading)
 
-            raw = await llm.generate(prompt, system=system_prompt, stream=False)
+            raw = await llm.generate(
+                prompt, system=system_prompt,
+                model=_get_generation_model(), stream=False,
+            )
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
@@ -1333,7 +1344,9 @@ class FlashcardService:
             span.set_attribute("flashcard.difficulty", difficulty)
 
             raw_concepts = await llm.generate(
-                extract_prompt, system=NOTES_CONCEPT_EXTRACT_SYSTEM, stream=False
+                extract_prompt,
+                system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+                model=_get_generation_model(), stream=False,
             )
             domain, concepts = _parse_concept_extract(raw_concepts)
             concepts = concepts[:count]
@@ -1350,7 +1363,9 @@ class FlashcardService:
                 text=combined_text,
             )
             raw = await llm.generate(
-                card_prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM, stream=False
+                card_prompt,
+                system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+                model=_get_generation_model(), stream=False,
             )
             cards_data = _parse_llm_response(raw, "notes")
             span.set_attribute("flashcard.generated_count", len(cards_data))
@@ -1462,6 +1477,7 @@ class FlashcardService:
                     text=combined_text,
                 ),
                 system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+                model=_get_generation_model(),
                 stream=False,
             )
             domain, concepts = _parse_concept_extract(raw_concepts)
@@ -1479,6 +1495,7 @@ class FlashcardService:
                     text=combined_text,
                 ),
                 system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+                model=_get_generation_model(),
                 stream=False,
             )
             cards_data = _parse_llm_response(raw, note_id)
@@ -1538,7 +1555,10 @@ class FlashcardService:
         async def _generate_one(gap: str) -> FlashcardModel | None:
             async with semaphore:
                 prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
-                raw = await llm.generate(prompt, system=GAP_FLASHCARD_SYSTEM, stream=False)
+                raw = await llm.generate(
+                    prompt, system=GAP_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(), stream=False,
+                )
                 item = _parse_gap_flashcard(raw, gap)
                 if item is None:
                     return None
@@ -1608,7 +1628,10 @@ class FlashcardService:
         async def _generate_one(gap: str) -> FlashcardModel | None:
             async with semaphore:
                 prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
-                raw = await llm.generate(prompt, system=GAP_FLASHCARD_SYSTEM, stream=False)
+                raw = await llm.generate(
+                    prompt, system=GAP_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(), stream=False,
+                )
                 item = _parse_gap_flashcard(raw, gap)
                 if item is None:
                     return None
@@ -1716,7 +1739,10 @@ class FlashcardService:
                     context=context,
                     count=cards_per_pair,
                 )
-                raw = await llm.generate(prompt, system=GRAPH_FLASHCARD_SYSTEM, stream=False)
+                raw = await llm.generate(
+                    prompt, system=GRAPH_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(), stream=False,
+                )
                 cards_data = _parse_llm_response(raw, document_id)
 
                 now = datetime.now(UTC)
@@ -1838,7 +1864,10 @@ class FlashcardService:
             span.set_attribute("flashcard.requested_count", count)
             span.set_attribute("flashcard.mode", "technical")
 
-            raw = await llm.generate(prompt, system=TECH_FLASHCARD_SYSTEM, stream=False)
+            raw = await llm.generate(
+                prompt, system=TECH_FLASHCARD_SYSTEM,
+                model=_get_generation_model(), stream=False,
+            )
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
@@ -1935,7 +1964,10 @@ class FlashcardService:
             span.set_attribute("flashcard.requested_count", count)
             span.set_attribute("flashcard.mode", "cloze")
 
-            raw = await llm.generate(prompt, system=CLOZE_SYSTEM, stream=False)
+            raw = await llm.generate(
+                prompt, system=CLOZE_SYSTEM,
+                model=_get_generation_model(), stream=False,
+            )
             items = _parse_cloze_llm_response(raw)
 
             if not items:
@@ -1943,7 +1975,10 @@ class FlashcardService:
                     "generate_cloze: no valid cards on first attempt for section=%s, retrying",
                     section_id,
                 )
-                raw2 = await llm.generate(prompt, system=CLOZE_SYSTEM, stream=False)
+                raw2 = await llm.generate(
+                prompt, system=CLOZE_SYSTEM,
+                model=_get_generation_model(), stream=False,
+            )
                 items = _parse_cloze_llm_response(raw2)
 
             span.set_attribute("flashcard.generated_count", len(items))

@@ -5,12 +5,15 @@ Routes:
   POST /study/sessions/start         — create a new study session
   POST /study/sessions/{id}/end      — close a session and return summary
   GET  /study/gaps/{document_id}     — weak flashcard areas grouped by section
-  POST /study/teachback              — LLM evaluation of user's teach-back explanation
+  POST /study/teachback              — LLM evaluation of user's teach-back explanation (sync)
+  POST /study/teachback/async        — submit teach-back for background evaluation
+  GET  /study/teachback/results      — batch-poll teach-back results by IDs
   GET  /study/stats/{document_id}    — progress stats: mastery, retention, streak
   GET  /study/history                — daily study activity for the last N days
   GET  /study/struggling             — cards with >= N 'again' ratings in last M days
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -23,7 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -53,6 +56,16 @@ router = APIRouter(prefix="/study", tags=["study"])
 
 _GAP_STABILITY_THRESHOLD = 2.0
 _GAP_MIN_REPS = 1
+
+# Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
+    """Schedule coroutine as fire-and-forget background task with strong ref."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 _TEACHBACK_SYSTEM = (
     "You are a Socratic tutor evaluating a student's explanation. "
@@ -200,6 +213,7 @@ def _compute_gaps(
 class TeachbackRequest(BaseModel):
     flashcard_id: str
     user_explanation: str
+    session_id: str | None = None
 
 
 class RubricDimensionResponse(BaseModel):
@@ -225,6 +239,31 @@ class TeachbackResponse(BaseModel):
     misconceptions: list[str]
     correction_flashcard_id: str | None = None
     rubric: TeachbackRubricResponse | None = None  # S156: null when rubric LLM call fails
+
+
+class TeachbackSubmitResponse(BaseModel):
+    """Returned by POST /study/teachback/async -- evaluation runs in background."""
+
+    id: str
+
+
+class TeachbackResultItem(BaseModel):
+    """Single item in batch-poll response."""
+
+    id: str
+    status: str  # "pending" | "complete" | "error"
+    flashcard_id: str
+    question: str = ""
+    score: int | None = None
+    correct_points: list[str] = []
+    missing_points: list[str] = []
+    misconceptions: list[str] = []
+    correction_flashcard_id: str | None = None
+    rubric: TeachbackRubricResponse | None = None
+
+
+class TeachbackResultsBatchResponse(BaseModel):
+    results: list[TeachbackResultItem]
 
 
 class SectionStabilityItem(BaseModel):
@@ -1156,6 +1195,299 @@ async def teachback(
         correction_flashcard_id=correction_card_id,
         rubric=rubric_response,
     )
+
+
+# ---------------------------------------------------------------------------
+# Async teach-back: submit + background evaluate + batch poll
+# ---------------------------------------------------------------------------
+
+
+def _score_to_rating(score: int) -> str:
+    """Map teach-back score (0-100) to FSRS rating for spaced repetition."""
+    if score >= 80:
+        return "good"
+    if score >= 60:
+        return "hard"
+    return "again"
+
+
+async def _evaluate_teachback_bg(
+    tb_id: str,
+    card_id: str,
+    card_answer: str,
+    card_document_id: str,
+    card_question: str,
+    user_explanation: str,
+    session_id: str | None = None,
+) -> None:
+    """Background coroutine: evaluate teach-back and update the row.
+
+    Uses its own DB session (invariant I-1: no shared AsyncSession across tasks).
+    After scoring, creates an FSRS review + ReviewEventModel so teach-back
+    results feed into spaced repetition and session progress stats.
+    """
+    logger.info("Teachback bg task started for %s", tb_id)
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        try:
+            llm = get_llm_service()
+
+            # LLM call 1: evaluation
+            prompt = _TEACHBACK_USER_TMPL.format(
+                answer=card_answer,
+                explanation=user_explanation,
+            )
+            raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
+            parsed = _parse_teachback_response(raw)
+            score = parsed.get("score", 0)
+            correct_points: list[str] = parsed.get("correct_points", [])
+            missing_points: list[str] = parsed.get("missing_points", [])
+            misconceptions: list[str] = parsed.get("misconceptions", [])
+
+            # LLM call 2: rubric (graceful fallback)
+            rubric_dict: dict | None = None
+            try:
+                rubric_prompt = _RUBRIC_USER_TMPL.format(
+                    source_context=card_answer,
+                    explanation=user_explanation,
+                )
+                raw_rubric = await llm.generate(
+                    prompt=rubric_prompt, system=_RUBRIC_SYSTEM,
+                )
+                rubric_dict = _parse_rubric(raw_rubric)
+            except Exception:  # noqa: BLE001
+                logger.warning("Rubric LLM call failed for teachback=%s", tb_id)
+
+            # Update the pending row
+            result = await session.execute(
+                select(TeachbackResultModel).where(TeachbackResultModel.id == tb_id)
+            )
+            tb_row = result.scalar_one_or_none()
+            if tb_row is None:
+                logger.error("Teachback row %s disappeared", tb_id)
+                return
+
+            tb_row.score = score
+            tb_row.correct_points = correct_points
+            tb_row.missing_points = missing_points
+            tb_row.misconceptions = misconceptions
+            tb_row.rubric_json = rubric_dict
+            tb_row.status = "complete"
+
+            # FSRS review: map score to rating and schedule the card
+            rating = _score_to_rating(score)
+            fsrs = get_fsrs_service()
+            await fsrs.schedule(card_id, rating, session)
+
+            # Create ReviewEventModel so session end_session tallies include this card
+            if session_id:
+                event = ReviewEventModel(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    flashcard_id=card_id,
+                    rating=rating,
+                    is_correct=rating != "again",
+                )
+                session.add(event)
+
+            # Misconceptions + correction flashcard (same logic as sync endpoint)
+            if score < 60 and misconceptions:
+                # Load card for document_id
+                card_result = await session.execute(
+                    select(FlashcardModel).where(FlashcardModel.id == card_id)
+                )
+                card = card_result.scalar_one_or_none()
+                if card:
+                    for m_text in misconceptions:
+                        misconception = MisconceptionModel(
+                            id=str(uuid.uuid4()),
+                            document_id=card_document_id,
+                            flashcard_id=card_id,
+                            user_answer=user_explanation,
+                            error_type="misconception",
+                            correction_note=m_text,
+                        )
+                        session.add(misconception)
+                    await _generate_correction_flashcard(
+                        card=card,
+                        misconception=misconceptions[0],
+                        session=session,
+                    )
+
+            await session.commit()
+            logger.info(
+                "Teachback bg evaluated",
+                extra={"teachback_id": tb_id, "score": score, "fsrs_rating": rating},
+            )
+
+        except Exception:
+            logger.exception("Teachback background evaluation failed for %s", tb_id)
+            try:
+                result = await session.execute(
+                    select(TeachbackResultModel).where(
+                        TeachbackResultModel.id == tb_id
+                    )
+                )
+                tb_row = result.scalar_one_or_none()
+                if tb_row:
+                    tb_row.status = "error"
+                    await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to mark teachback %s as error", tb_id)
+
+
+@router.post("/teachback/async", response_model=TeachbackSubmitResponse)
+async def teachback_async(
+    req: TeachbackRequest,
+    session: AsyncSession = Depends(get_db),
+) -> TeachbackSubmitResponse:
+    """Submit teach-back for background evaluation. Returns immediately."""
+    # Validate flashcard
+    card_result = await session.execute(
+        select(FlashcardModel).where(FlashcardModel.id == req.flashcard_id)
+    )
+    card = card_result.scalar_one_or_none()
+    if card is None:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+
+    # Persist pending row
+    tb_id = str(uuid.uuid4())
+    tb_row = TeachbackResultModel(
+        id=tb_id,
+        flashcard_id=card.id,
+        user_explanation=req.user_explanation,
+        score=0,
+        correct_points=[],
+        missing_points=[],
+        misconceptions=[],
+        status="pending",
+        session_id=req.session_id,
+    )
+    session.add(tb_row)
+    await session.commit()
+    logger.info("Teachback async submitted: id=%s flashcard=%s", tb_id, card.id)
+
+    # Fire background evaluation
+    _fire_and_forget(
+        _evaluate_teachback_bg(
+            tb_id=tb_id,
+            card_id=card.id,
+            card_answer=card.answer,
+            card_document_id=card.document_id,
+            card_question=card.question,
+            user_explanation=req.user_explanation,
+            session_id=req.session_id,
+        )
+    )
+
+    return TeachbackSubmitResponse(id=tb_id)
+
+
+@router.get("/teachback/results", response_model=TeachbackResultsBatchResponse)
+async def get_teachback_results(
+    ids: str = Query(..., description="Comma-separated teachback result IDs"),
+    session: AsyncSession = Depends(get_db),
+) -> TeachbackResultsBatchResponse:
+    """Batch-poll teach-back results by IDs."""
+    id_list = [i.strip() for i in ids.split(",") if i.strip()]
+    if not id_list:
+        return TeachbackResultsBatchResponse(results=[])
+
+    # Fetch results joined with flashcard for question text
+    stmt = (
+        select(TeachbackResultModel, FlashcardModel.question)
+        .join(
+            FlashcardModel,
+            TeachbackResultModel.flashcard_id == FlashcardModel.id,
+            isouter=True,
+        )
+        .where(TeachbackResultModel.id.in_(id_list))
+    )
+    rows = (await session.execute(stmt)).all()
+
+    items: list[TeachbackResultItem] = []
+    for tb, question in rows:
+        rubric_response: TeachbackRubricResponse | None = None
+        if tb.status == "complete" and tb.rubric_json is not None:
+            try:
+                rubric_response = TeachbackRubricResponse(
+                    accuracy=RubricDimensionResponse(**tb.rubric_json["accuracy"]),
+                    completeness=RubricCompletenessResponse(
+                        **tb.rubric_json["completeness"]
+                    ),
+                    clarity=RubricDimensionResponse(**tb.rubric_json["clarity"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                rubric_response = None
+
+        items.append(
+            TeachbackResultItem(
+                id=tb.id,
+                status=tb.status,
+                flashcard_id=tb.flashcard_id,
+                question=question or "",
+                score=tb.score if tb.status == "complete" else None,
+                correct_points=tb.correct_points if tb.status == "complete" else [],
+                missing_points=tb.missing_points if tb.status == "complete" else [],
+                misconceptions=tb.misconceptions if tb.status == "complete" else [],
+                rubric=rubric_response,
+            )
+        )
+
+    return TeachbackResultsBatchResponse(results=items)
+
+
+@router.get(
+    "/sessions/{session_id}/teachback-results",
+    response_model=TeachbackResultsBatchResponse,
+)
+async def get_session_teachback_results(
+    session_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> TeachbackResultsBatchResponse:
+    """Get all teach-back results for a study session."""
+    stmt = (
+        select(TeachbackResultModel, FlashcardModel.question)
+        .join(
+            FlashcardModel,
+            TeachbackResultModel.flashcard_id == FlashcardModel.id,
+            isouter=True,
+        )
+        .where(TeachbackResultModel.session_id == session_id)
+        .order_by(TeachbackResultModel.created_at)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    items: list[TeachbackResultItem] = []
+    for tb, question in rows:
+        rubric_response: TeachbackRubricResponse | None = None
+        if tb.status == "complete" and tb.rubric_json is not None:
+            try:
+                rubric_response = TeachbackRubricResponse(
+                    accuracy=RubricDimensionResponse(**tb.rubric_json["accuracy"]),
+                    completeness=RubricCompletenessResponse(
+                        **tb.rubric_json["completeness"]
+                    ),
+                    clarity=RubricDimensionResponse(**tb.rubric_json["clarity"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                rubric_response = None
+
+        items.append(
+            TeachbackResultItem(
+                id=tb.id,
+                status=tb.status,
+                flashcard_id=tb.flashcard_id,
+                question=question or "",
+                score=tb.score if tb.status == "complete" else None,
+                correct_points=tb.correct_points if tb.status == "complete" else [],
+                missing_points=tb.missing_points if tb.status == "complete" else [],
+                misconceptions=tb.misconceptions if tb.status == "complete" else [],
+                rubric=rubric_response,
+            )
+        )
+
+    return TeachbackResultsBatchResponse(results=items)
 
 
 @router.get("/stats/{document_id}", response_model=StudyStatsResponse)
