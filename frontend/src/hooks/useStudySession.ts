@@ -21,6 +21,7 @@ import {
   deleteStudySession,
   fetchDueCards,
   fetchSessionTeachbackResults,
+  reopenSession,
   startSession,
 } from "@/lib/studyApi"
 import { useAppStore } from "@/store"
@@ -105,6 +106,23 @@ export function useStudySession(
   useEffect(() => {
     sessionIdRef.current = sessionId
   }, [sessionId])
+  // Track progress without retriggering the unmount effect. Used to decide
+  // whether an exit should finalize the session (no progress / all done) or
+  // leave it open so the user can Continue from session history later.
+  const reviewedRef = useRef(0)
+  useEffect(() => {
+    reviewedRef.current = reviewed
+  }, [reviewed])
+  const remainingRef = useRef(0)
+  useEffect(() => {
+    remainingRef.current = Math.max(queue.length - currentIndex, 0)
+  }, [queue.length, currentIndex])
+
+  // A session is "partially answered" when the user has answered at least one
+  // card but still has unanswered cards in the queue. Exiting such a session
+  // should leave it open (ended_at stays null) so Continue appears in history.
+  const hasPartialProgress = () =>
+    reviewedRef.current > 0 && remainingRef.current > 0
 
   // One-time init (handles both resume and fresh start). The didStartRef guard
   // keeps us StrictMode-safe; the `cancelled` flag suppresses state writes if
@@ -117,7 +135,9 @@ export function useStudySession(
     async function init() {
       try {
         if (resumeSessionId) {
-          // Resume: no new session, load prior results + remaining cards.
+          // Resume: clear ended_at on the backend (no-op if already null),
+          // then load prior results + remaining due cards.
+          await reopenSession(resumeSessionId).catch(() => {})
           const [prevResults, cards] = await Promise.all([
             fetchSessionTeachbackResults(resumeSessionId),
             fetchDueCards(documentId || null, collectionId || null, {
@@ -187,11 +207,14 @@ export function useStudySession(
 
   // Unmount safety net: if the component is destroyed mid-session (e.g. user
   // navigates away), close the session on the backend so it doesn't linger.
+  // Exception: if the user has partial progress (answered some, still has
+  // more), keep the session open so Continue appears in history.
   useEffect(() => {
     return () => {
       const sid = sessionIdRef.current
       const state = sessionStateRef.current
       if (sid && state !== "complete" && state !== "empty") {
+        if (reviewedRef.current > 0 && remainingRef.current > 0) return
         void endSession(sid).catch(() => {})
       }
     }
@@ -207,11 +230,15 @@ export function useStudySession(
   const exit = useCallback(
     async (onExit: () => void) => {
       if (sessionId && sessionStateRef.current !== "complete") {
-        await endSession(sessionId).catch(() => {})
+        // Keep partial-progress sessions open so they remain resumable.
+        if (!hasPartialProgress()) {
+          await endSession(sessionId).catch(() => {})
+        }
       }
       setStudySessionId(null)
       onExit()
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sessionId, setStudySessionId],
   )
 

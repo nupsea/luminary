@@ -203,6 +203,14 @@ export function SessionManager({ onContinueTeachback }: SessionManagerProps) {
     queryFn: () =>
       fetchSessions(completedPage, 20, { mode: "teachback", status: "complete" }),
     enabled: tab === "completed",
+    // Poll while any completed row still has evaluations in flight. This
+    // catches the case where a user exited a session mid-evaluation and the
+    // background scorer is still working.
+    refetchInterval: (query) => {
+      if (tab !== "completed") return false
+      const items = query.state.data?.items ?? []
+      return items.some((s) => s.has_pending_evaluations) ? 2_000 : false
+    },
   })
 
   const deleteMutation = useMutation({

@@ -70,6 +70,7 @@ export interface StudySessionItem {
   collection_id: string | null
   collection_name: string | null
   mode: string
+  has_pending_evaluations?: boolean
 }
 
 export interface SessionListResponse {
@@ -143,6 +144,13 @@ export async function submitReview(
 
 export async function endSession(sessionId: string): Promise<void> {
   await fetch(`${API_BASE}/study/sessions/${sessionId}/end`, { method: "POST" })
+}
+
+export async function reopenSession(sessionId: string): Promise<void> {
+  await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/reopen`,
+    { method: "POST" },
+  )
 }
 
 export async function deleteStudySession(sessionId: string): Promise<void> {

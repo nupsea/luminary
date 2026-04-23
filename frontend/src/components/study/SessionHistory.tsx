@@ -42,6 +42,12 @@ export function SessionHistory({
         mode: "teachback",
       }),
     staleTime: 5_000,
+    // Keep refreshing while any row still has teach-back evaluations in flight
+    // (e.g. user exited a session mid-evaluation). Stops once all resolve.
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? []
+      return items.some((s) => s.has_pending_evaluations) ? 2_000 : false
+    },
   })
 
   const invalidateAll = () => {

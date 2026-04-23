@@ -163,6 +163,7 @@ class SessionListItem(BaseModel):
     collection_id: str | None = None
     collection_name: str | None = None
     mode: str
+    has_pending_evaluations: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -820,20 +821,29 @@ async def end_session(
     )
     events = events_result.scalars().all()
 
-    # Check for teachback results -- use average score instead of binary pass/fail
-    tb_result = await db.execute(
+    # Pull all teach-back rows (pending + complete). Pending rows mean the
+    # background evaluator has not yet scored the answer -- we still count them
+    # toward cards_reviewed (the user did answer) but leave accuracy provisional
+    # until the last evaluation lands. _evaluate_teachback_bg finalizes the
+    # tally when the last pending row flips to "complete".
+    tb_all_result = await db.execute(
         select(TeachbackResultModel).where(
             TeachbackResultModel.session_id == session_id,
-            TeachbackResultModel.status == "complete",
         )
     )
-    tb_rows = tb_result.scalars().all()
+    tb_rows = tb_all_result.scalars().all()
+    tb_complete = [tb for tb in tb_rows if tb.status == "complete"]
+    tb_pending_count = sum(1 for tb in tb_rows if tb.status == "pending")
 
     if tb_rows:
-        scores = [tb.score for tb in tb_rows if tb.score is not None]
+        scores = [tb.score for tb in tb_complete if tb.score is not None]
         cards_reviewed = len(tb_rows)
         cards_correct = sum(1 for s in scores if s >= 60)
-        accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+        if tb_pending_count > 0:
+            # Provisional: accuracy is unknown until evaluations finish.
+            accuracy_pct: float | None = None
+        else:
+            accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
     else:
         cards_reviewed = len(events)
         cards_correct = sum(1 for e in events if e.is_correct)
@@ -853,15 +863,39 @@ async def end_session(
             "cards_reviewed": cards_reviewed,
             "cards_correct": cards_correct,
             "accuracy_pct": accuracy_pct,
+            "pending_evaluations": tb_pending_count,
         },
     )
     return SessionSummary(
         session_id=sess.id,
         cards_reviewed=cards_reviewed,
         cards_correct=cards_correct,
-        accuracy_pct=accuracy_pct,
+        accuracy_pct=accuracy_pct if accuracy_pct is not None else 0.0,
         ended_at=sess.ended_at,
     )
+
+
+@router.post("/sessions/{session_id}/reopen", status_code=204)
+async def reopen_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Clear ended_at on a session so the user can Continue adding answers.
+
+    Tallies are reset; _finalize_session_tally_if_ready recomputes them the
+    next time the session is ended and all evaluations are complete.
+    """
+    result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    sess.ended_at = None
+    sess.cards_correct = 0
+    sess.accuracy_pct = None
+    await db.commit()
+    logger.info("Study session reopened", extra={"session_id": session_id})
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
@@ -1286,6 +1320,26 @@ async def list_sessions(
         for coll in colls_result.scalars().all():
             coll_names[coll.id] = coll.name
 
+    # Map session_id -> pending teach-back count so the UI knows which rows
+    # still need polling. Single grouped query beats N+1.
+    session_ids = [s.id for s in sessions]
+    pending_by_session: dict[str, int] = {}
+    if session_ids:
+        pending_result = await db.execute(
+            select(
+                TeachbackResultModel.session_id,
+                func.count().label("n"),
+            )
+            .where(
+                TeachbackResultModel.session_id.in_(session_ids),
+                TeachbackResultModel.status == "pending",
+            )
+            .group_by(TeachbackResultModel.session_id)
+        )
+        pending_by_session = {
+            sid: n for sid, n in pending_result.all() if sid is not None
+        }
+
     items: list[SessionListItem] = []
     for sess in sessions:
         duration: float | None = None
@@ -1305,6 +1359,7 @@ async def list_sessions(
                 collection_id=sess.collection_id,
                 collection_name=coll_names.get(sess.collection_id) if sess.collection_id else None,
                 mode=sess.mode,
+                has_pending_evaluations=pending_by_session.get(sess.id, 0) > 0,
             )
         )
 
@@ -1467,6 +1522,50 @@ def _score_to_rating(score: int) -> str:
     return "again"
 
 
+async def _finalize_session_tally_if_ready(
+    session: AsyncSession,
+    session_id: str,
+) -> None:
+    """Recompute session tally once the last pending teach-back completes.
+
+    Called from the background evaluator after writing a teach-back result.
+    No-op if the session hasn't been ended yet, or if there are still pending
+    evaluations (they will trigger the final update themselves).
+    """
+    sess_result = await session.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = sess_result.scalar_one_or_none()
+    if sess is None or sess.ended_at is None:
+        return
+
+    tb_result = await session.execute(
+        select(TeachbackResultModel).where(
+            TeachbackResultModel.session_id == session_id,
+        )
+    )
+    tb_rows = tb_result.scalars().all()
+    if not tb_rows:
+        return
+    if any(tb.status == "pending" for tb in tb_rows):
+        return
+
+    complete = [tb for tb in tb_rows if tb.status == "complete"]
+    scores = [tb.score for tb in complete if tb.score is not None]
+    sess.cards_reviewed = len(tb_rows)
+    sess.cards_correct = sum(1 for s in scores if s >= 60)
+    sess.accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+    logger.info(
+        "Study session tally finalized",
+        extra={
+            "session_id": session_id,
+            "cards_reviewed": sess.cards_reviewed,
+            "cards_correct": sess.cards_correct,
+            "accuracy_pct": sess.accuracy_pct,
+        },
+    )
+
+
 async def _evaluate_teachback_bg(
     tb_id: str,
     card_id: str,
@@ -1513,8 +1612,27 @@ async def _evaluate_teachback_bg(
     except Exception:  # noqa: BLE001
         logger.warning("Rubric LLM call failed for teachback=%s", tb_id)
 
-    # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
     rating = _score_to_rating(score)
+
+    # LLM call 3: correction flashcard (if any) -- generated BEFORE the write
+    # transaction. Holding the SQLite write lock while an LLM call is in flight
+    # starves concurrent HTTP inserts past busy_timeout.
+    correction_payload: dict | None = None
+    correction_card: FlashcardModel | None = None
+    if score < 60 and misconceptions:
+        session_factory = get_session_factory()
+        async with session_factory() as read_session:
+            card_result = await read_session.execute(
+                select(FlashcardModel).where(FlashcardModel.id == card_id)
+            )
+            correction_card = card_result.scalar_one_or_none()
+        if correction_card:
+            correction_payload = await _llm_correction_card_payload(
+                card=correction_card,
+                misconception=misconceptions[0],
+            )
+
+    # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
     async with _teachback_eval_sem:
         session_factory = get_session_factory()
         async with session_factory() as session:
@@ -1552,29 +1670,33 @@ async def _evaluate_teachback_bg(
                     )
                     session.add(event)
 
-                # Misconceptions + correction flashcard
-                if score < 60 and misconceptions:
-                    card_result = await session.execute(
-                        select(FlashcardModel).where(FlashcardModel.id == card_id)
-                    )
-                    card = card_result.scalar_one_or_none()
-                    if card:
-                        if card_document_id:
-                            for m_text in misconceptions:
-                                misconception = MisconceptionModel(
-                                    id=str(uuid.uuid4()),
-                                    document_id=card_document_id,
-                                    flashcard_id=card_id,
-                                    user_answer=user_explanation,
-                                    error_type="misconception",
-                                    correction_note=m_text,
-                                )
-                                session.add(misconception)
-                        await _generate_correction_flashcard(
-                            card=card,
-                            misconception=misconceptions[0],
+                # Misconceptions + correction flashcard (LLM already resolved above)
+                if score < 60 and misconceptions and correction_card:
+                    if card_document_id:
+                        for m_text in misconceptions:
+                            misconception = MisconceptionModel(
+                                id=str(uuid.uuid4()),
+                                document_id=card_document_id,
+                                flashcard_id=card_id,
+                                user_answer=user_explanation,
+                                error_type="misconception",
+                                correction_note=m_text,
+                            )
+                            session.add(misconception)
+                    if correction_payload is not None:
+                        _insert_correction_flashcard(
+                            card=correction_card,
+                            payload=correction_payload,
                             session=session,
                         )
+
+                # Self-heal session tally: if the parent session has already
+                # been ended by the user (e.g. they navigated away mid-eval)
+                # and this was the last pending evaluation, recompute
+                # cards_correct / accuracy_pct on the session row so session
+                # history reflects the final scores.
+                if session_id:
+                    await _finalize_session_tally_if_ready(session, session_id)
 
                 await session.commit()
                 logger.info(
@@ -2094,12 +2216,16 @@ def _parse_teachback_response(raw: str) -> dict:
         return {"score": 0, "correct_points": [], "missing_points": [], "misconceptions": []}
 
 
-async def _generate_correction_flashcard(
+async def _llm_correction_card_payload(
     card: FlashcardModel,
     misconception: str,
-    session: AsyncSession,
-) -> str | None:
-    """Generate and store a correction flashcard targeting a specific misconception."""
+) -> dict | None:
+    """Run the LLM call for a correction flashcard -- no DB I/O.
+
+    Split out from _generate_correction_flashcard so the LLM round-trip can
+    happen OUTSIDE the SQLite write transaction. Holding the write lock during
+    an LLM call starves concurrent HTTP inserts past the busy_timeout.
+    """
     llm = get_llm_service()
     prompt = _CORRECTION_USER_TMPL.format(
         misconception=misconception,
@@ -2120,15 +2246,23 @@ async def _generate_correction_flashcard(
 
     if not isinstance(data, dict):
         return None
+    return data
 
+
+def _insert_correction_flashcard(
+    card: FlashcardModel,
+    payload: dict,
+    session: AsyncSession,
+) -> str:
+    """Insert a correction flashcard row -- caller must have the LLM payload."""
     new_id = str(uuid.uuid4())
     correction = FlashcardModel(
         id=new_id,
         document_id=card.document_id,
         chunk_id=card.chunk_id,
-        question=data.get("question", f"Correction: {card.question}"),
-        answer=data.get("answer", card.answer),
-        source_excerpt=data.get("source_excerpt", ""),
+        question=payload.get("question", f"Correction: {card.question}"),
+        answer=payload.get("answer", card.answer),
+        source_excerpt=payload.get("source_excerpt", ""),
         fsrs_state="new",
         fsrs_stability=0.0,
         fsrs_difficulty=0.0,
@@ -2138,6 +2272,23 @@ async def _generate_correction_flashcard(
     )
     session.add(correction)
     return new_id
+
+
+async def _generate_correction_flashcard(
+    card: FlashcardModel,
+    misconception: str,
+    session: AsyncSession,
+) -> str | None:
+    """LLM-generate and persist a correction flashcard.
+
+    Kept for the sync /teachback endpoint which already runs outside the
+    background semaphore path. New code should call the split helpers so the
+    LLM call happens outside the DB transaction.
+    """
+    payload = await _llm_correction_card_payload(card, misconception)
+    if payload is None:
+        return None
+    return _insert_correction_flashcard(card, payload, session)
 
 
 # ---------------------------------------------------------------------------

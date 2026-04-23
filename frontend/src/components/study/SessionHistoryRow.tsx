@@ -81,6 +81,14 @@ export function SessionHistoryRow({
     queryKey: ["session-teachback-results", session.id],
     queryFn: () => fetchSessionTeachbackResults(session.id),
     enabled: isExpanded,
+    // Keep the expanded view live while evaluations land. Polls at 2s,
+    // stops when no rows are pending.
+    refetchInterval: (query) => {
+      if (!isExpanded) return false
+      const items = query.state.data
+      if (!items) return session.has_pending_evaluations ? 2_000 : false
+      return items.some((r) => r.status === "pending") ? 2_000 : false
+    },
   })
 
   return (
@@ -108,6 +116,12 @@ export function SessionHistoryRow({
             {!isComplete && (
               <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                 In progress
+              </span>
+            )}
+            {isComplete && session.has_pending_evaluations && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+                <Loader2 size={10} className="animate-spin" />
+                Evaluating
               </span>
             )}
           </span>
@@ -142,14 +156,18 @@ export function SessionHistoryRow({
           className="flex items-center gap-1"
           onClick={(e) => e.stopPropagation()}
         >
-          {onResume && !isComplete && (
+          {onResume && (
             <button
               onClick={() => onResume(session.id)}
               className="flex items-center gap-1 rounded-md bg-violet-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-violet-700"
-              title="Continue this teach-back session"
+              title={
+                isComplete
+                  ? "Reopen this teach-back session to add more answers"
+                  : "Continue this teach-back session"
+              }
             >
               <PlayCircle size={11} />
-              Continue
+              {isComplete ? "Resume" : "Continue"}
             </button>
           )}
           {!confirmDelete ? (
