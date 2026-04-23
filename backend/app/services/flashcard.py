@@ -1184,6 +1184,8 @@ class FlashcardService:
             text=combined_text,
         )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         with trace_chain(
             "flashcard.generate",
             input_value=f"doc={document_id} scope={scope} count={count} difficulty={difficulty}",
@@ -1335,6 +1337,8 @@ class FlashcardService:
             text=combined_text,
         )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         with trace_chain(
             "flashcard.generate_from_notes",
             input_value=f"tag={tag} note_ids={note_ids} count={count} difficulty={difficulty}",
@@ -1470,6 +1474,9 @@ class FlashcardService:
                     continue
 
             combined_text = note.content[:_CHUNK_CHAR_LIMIT]
+
+            await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
             # Pass 1: extract typed concepts.
             raw_concepts = await llm.generate(
                 NOTES_CONCEPT_EXTRACT_TMPL.format(
@@ -1581,6 +1588,7 @@ class FlashcardService:
                     created_at=now,
                 )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks
         raw_results = await asyncio.gather(
             *[_generate_one(g) for g in gaps], return_exceptions=True
         )
@@ -1655,6 +1663,7 @@ class FlashcardService:
                     created_at=now,
                 )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks
         raw_results = await asyncio.gather(
             *[_generate_one(g) for g in gaps], return_exceptions=True
         )
@@ -1777,6 +1786,7 @@ class FlashcardService:
                     )
                 return cards
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks
         raw_results = await asyncio.gather(
             *[_generate_one(a, b, label) for a, b, label, _conf in pairs],
             return_exceptions=True,
@@ -1854,6 +1864,8 @@ class FlashcardService:
             admonition_type=admonition_type or "(none)",
             text=combined_text,
         )
+
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
         with trace_chain(
             "flashcard.generate_technical",
@@ -1955,6 +1967,8 @@ class FlashcardService:
             return []
 
         prompt = CLOZE_USER_TMPL.format(count=count, text=combined_text)
+
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
         with trace_chain(
             "flashcard.generate_cloze",

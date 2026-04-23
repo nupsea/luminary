@@ -196,6 +196,8 @@ class FlashcardAuditService:
         if not tasks:
             return 0
 
+        await db.commit()  # Release read locks to prevent WAL deadlocks during concurrent LLM calls
+
         # Run all LLM calls concurrently, then write results to DB sequentially
         llm_results: list[LLMResult] = await asyncio.gather(*tasks)
 

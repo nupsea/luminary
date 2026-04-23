@@ -18,6 +18,7 @@ import {
   type Flashcard,
   type TeachbackResultItem,
   endSession,
+  deleteStudySession,
   fetchDueCards,
   fetchSessionTeachbackResults,
   startSession,
@@ -154,7 +155,10 @@ export function useStudySession(
             limit: cardLimit,
           }),
         ])
-        if (cancelled) return
+        if (cancelled) {
+          void deleteStudySession(sid).catch(() => {})
+          return
+        }
 
         setSessionId(sid)
         setStudySessionId(sid)
