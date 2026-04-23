@@ -23,8 +23,8 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import case, func, or_, select
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -263,6 +263,7 @@ class TeachbackResultItem(BaseModel):
     status: str  # "pending" | "complete" | "error"
     flashcard_id: str
     question: str = ""
+    expected_answer: str = ""
     score: int | None = None
     correct_points: list[str] = []
     missing_points: list[str] = []
@@ -926,7 +927,16 @@ async def get_collection_study_dashboard(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> StudyCollectionDashboardResponse:
-    """Return a summary of study status for all material in a collection (S192)."""
+    """Return a summary of study status for all material in a collection (S192).
+
+    Rewritten to use SQL aggregates and a small fixed number of queries regardless
+    of tag count, sub-enclave count, or tree depth. Previously this endpoint could
+    issue 20+ sequential queries per click.
+    """
+    from collections import defaultdict
+
+    from app.routers.documents import _safe_tags
+
     # 1. Fetch collection name
     coll_result = await session.execute(
         select(CollectionModel.name).where(CollectionModel.id == collection_id)
@@ -935,120 +945,280 @@ async def get_collection_study_dashboard(
     if not coll_name:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # 2. Resolve all documents and notes in this hierarchy
-    doc_ids, note_ids = await _resolve_collection_members(collection_id, session)
+    # 2. Load the collection tree once and build parent->children adjacency in Python.
+    # Collections are small (typically < 200 rows) so this beats recursive CTEs for
+    # clarity and keeps query count flat regardless of tree depth.
+    all_colls_rows = (
+        await session.execute(
+            select(CollectionModel.id, CollectionModel.parent_collection_id)
+        )
+    ).all()
+    children_of: dict[str | None, list[str]] = defaultdict(list)
+    for cid, pid in all_colls_rows:
+        children_of[pid].append(cid)
 
-    # 3. Aggregate flashcard stats across all documents (and any note-sourced cards)
+    def _descendants(root: str) -> set[str]:
+        out = {root}
+        stack = [root]
+        while stack:
+            cur = stack.pop()
+            for child in children_of.get(cur, ()):
+                if child not in out:
+                    out.add(child)
+                    stack.append(child)
+        return out
+
+    hierarchy_ids = _descendants(collection_id)
+    direct_children = children_of.get(collection_id, [])
+
+    # For sub-enclave counts: compute each direct child's full descendant set and
+    # track which descendants roll up to which sub-enclave root.
+    descendants_by_child: dict[str, set[str]] = {
+        child_id: _descendants(child_id) for child_id in direct_children
+    }
+
+    # 3. Fetch all members (docs + notes) of every collection in the hierarchy,
+    # plus every direct-child subtree. One query.
+    all_relevant_coll_ids = set(hierarchy_ids)
+    for desc in descendants_by_child.values():
+        all_relevant_coll_ids.update(desc)
+
+    members_rows = (
+        await session.execute(
+            select(
+                CollectionMemberModel.collection_id,
+                CollectionMemberModel.member_id,
+                CollectionMemberModel.member_type,
+            ).where(CollectionMemberModel.collection_id.in_(list(all_relevant_coll_ids)))
+        )
+    ).all()
+
+    # Bucket by hierarchy membership.
+    doc_ids: set[str] = set()
+    note_ids: set[str] = set()
+    for coll_id, member_id, member_type in members_rows:
+        if coll_id in hierarchy_ids:
+            if member_type == "document":
+                doc_ids.add(member_id)
+            elif member_type == "note":
+                note_ids.add(member_id)
+
+    # 4. Flashcard aggregate stats -- one query, no rows pulled into memory.
     now = datetime.now(UTC)
-    cards_stmt = select(FlashcardModel).where(
-        or_(
-            FlashcardModel.document_id.in_(doc_ids) if doc_ids else False,
-            FlashcardModel.note_id.in_(note_ids) if note_ids else False,
-        )
-    )
-    cards_result = await session.execute(cards_stmt)
-    all_cards = list(cards_result.scalars().all())
-
-    due_today = sum(1 for c in all_cards if c.due_date and c.due_date.replace(tzinfo=UTC) <= now)
-    new_today = sum(1 for c in all_cards if c.fsrs_state == "new")
-
-    # Mastery % = cards with stability > 30 days
-    mastered = sum(1 for c in all_cards if c.fsrs_stability > 30.0)
-    mastery_pct = round(mastered / len(all_cards) * 100, 1) if all_cards else 0.0
-
-    # 4. Topics (tags) aggregation
-    # We want tags that are present in either documents or notes of this collection.
-    # For each tag, we want:
-    # - card_count: flashcards linked to docs with this tag OR notes with this tag
-    #   (within the collection)
-    # - note_count: notes in the collection with this tag
-
-    tag_to_docs: dict[str, set[str]] = {}
-    tag_to_notes: dict[str, set[str]] = {}
-
-    # (a) Process documents in collection
+    where_clauses = []
     if doc_ids:
-        docs_stmt = select(DocumentModel.id, DocumentModel.tags).where(
-            DocumentModel.id.in_(doc_ids)
-        )
-        docs_rows = (await session.execute(docs_stmt)).all()
-        for did, dtags in docs_rows:
-            from app.routers.documents import _safe_tags
-
-            dtags_list = _safe_tags(dtags)
-            for t in dtags_list:
-                tag_to_docs.setdefault(t, set()).add(did)
-
-    # (b) Process notes in collection
+        where_clauses.append(FlashcardModel.document_id.in_(list(doc_ids)))
     if note_ids:
-        note_tag_stmt = select(NoteTagIndexModel.tag_full, NoteTagIndexModel.note_id).where(
-            NoteTagIndexModel.note_id.in_(note_ids)
-        )
-        note_tag_rows = (await session.execute(note_tag_stmt)).all()
-        for t, nid in note_tag_rows:
-            tag_to_notes.setdefault(t, set()).add(nid)
+        where_clauses.append(FlashcardModel.note_id.in_(list(note_ids)))
 
-    # (c) Build topics list
+    if where_clauses:
+        stats_row = (
+            await session.execute(
+                select(
+                    func.count(FlashcardModel.id).label("total"),
+                    func.sum(
+                        case(
+                            (
+                                (FlashcardModel.due_date.is_not(None))
+                                & (FlashcardModel.due_date <= now),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ).label("due_today"),
+                    func.sum(
+                        case((FlashcardModel.fsrs_state == "new", 1), else_=0)
+                    ).label("new_today"),
+                    func.sum(
+                        case((FlashcardModel.fsrs_stability > 30.0, 1), else_=0)
+                    ).label("mastered"),
+                ).where(or_(*where_clauses))
+            )
+        ).one()
+        total = int(stats_row.total or 0)
+        due_today = int(stats_row.due_today or 0)
+        new_today = int(stats_row.new_today or 0)
+        mastered = int(stats_row.mastered or 0)
+    else:
+        total = due_today = new_today = mastered = 0
+
+    mastery_pct = round(mastered / total * 100, 1) if total else 0.0
+
+    # 5. Topics: build tag->docs/notes maps, then a single aggregate query for card
+    # counts per doc and per note. Replaces the old N+1 count loop.
+    tag_to_docs: dict[str, set[str]] = defaultdict(set)
+    tag_to_notes: dict[str, set[str]] = defaultdict(set)
+
+    if doc_ids:
+        docs_tag_rows = (
+            await session.execute(
+                select(DocumentModel.id, DocumentModel.tags).where(
+                    DocumentModel.id.in_(list(doc_ids))
+                )
+            )
+        ).all()
+        for did, dtags in docs_tag_rows:
+            for t in _safe_tags(dtags):
+                tag_to_docs[t].add(did)
+
+    if note_ids:
+        note_tag_rows = (
+            await session.execute(
+                select(NoteTagIndexModel.tag_full, NoteTagIndexModel.note_id).where(
+                    NoteTagIndexModel.note_id.in_(list(note_ids))
+                )
+            )
+        ).all()
+        for t, nid in note_tag_rows:
+            tag_to_notes[t].add(nid)
+
+    # Count cards per document and per note in ONE query each (two queries total).
+    cards_per_doc: dict[str, int] = {}
+    if doc_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.document_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.document_id.in_(list(doc_ids)))
+                .group_by(FlashcardModel.document_id)
+            )
+        ).all()
+        cards_per_doc = {did: int(cnt) for did, cnt in rows}
+
+    cards_per_note: dict[str, int] = {}
+    if note_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.note_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.note_id.in_(list(note_ids)))
+                .group_by(FlashcardModel.note_id)
+            )
+        ).all()
+        cards_per_note = {nid: int(cnt) for nid, cnt in rows}
+
     all_tags = set(tag_to_docs.keys()) | set(tag_to_notes.keys())
     topics: list[CollectionTopic] = []
-
     for t in all_tags:
-        t_doc_ids = list(tag_to_docs.get(t, set()))
-        t_note_ids = list(tag_to_notes.get(t, set()))
-
-        # Count flashcards for this tag in this collection
-        # Card belongs if: (doc in t_doc_ids) OR (note in t_note_ids)
-        card_count_stmt = select(func.count(FlashcardModel.id)).where(
-            or_(
-                FlashcardModel.document_id.in_(t_doc_ids) if t_doc_ids else False,
-                FlashcardModel.note_id.in_(t_note_ids) if t_note_ids else False,
-            )
+        card_count = sum(cards_per_doc.get(d, 0) for d in tag_to_docs.get(t, ())) + sum(
+            cards_per_note.get(n, 0) for n in tag_to_notes.get(t, ())
         )
-        card_count = (await session.execute(card_count_stmt)).scalar() or 0
-
-        note_count = len(t_note_ids)
+        note_count = len(tag_to_notes.get(t, ()))
         if card_count > 0 or note_count > 0:
-            topics.append(CollectionTopic(tag=t, card_count=card_count, note_count=note_count))
-
-    # Sort by card_count desc, then note_count desc
+            topics.append(
+                CollectionTopic(tag=t, card_count=card_count, note_count=note_count)
+            )
     topics.sort(key=lambda x: (x.card_count, x.note_count), reverse=True)
     topics = topics[:10]
 
-    # 5. Sources list
+    # 6. Sources list. SUBSTR on note.content avoids streaming large note bodies
+    # over the wire only to slice the first line.
     sources: list[CollectionSource] = []
     if doc_ids:
-        docs_result = await session.execute(
-            select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
-        )
-        for did, dtitle in docs_result:
+        doc_title_rows = (
+            await session.execute(
+                select(DocumentModel.id, DocumentModel.title).where(
+                    DocumentModel.id.in_(list(doc_ids))
+                )
+            )
+        ).all()
+        for did, dtitle in doc_title_rows:
             sources.append(CollectionSource(id=did, title=dtitle, type="document"))
     if note_ids:
-        notes_result = await session.execute(
-            select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(note_ids))
-        )
-        for nid, ncontent in notes_result:
-            ntitle = ncontent.split("\n")[0][:60] or "Untitled Note"
+        note_snippet_rows = (
+            await session.execute(
+                select(
+                    NoteModel.id,
+                    func.substr(NoteModel.content, 1, 120).label("snippet"),
+                ).where(NoteModel.id.in_(list(note_ids)))
+            )
+        ).all()
+        for nid, snippet in note_snippet_rows:
+            ntitle = (snippet or "").split("\n")[0][:60] or "Untitled Note"
             sources.append(CollectionSource(id=nid, title=ntitle, type="note"))
 
-    # 6. Sub-collections
-    child_stmt = select(CollectionModel.id, CollectionModel.name).where(
-        CollectionModel.parent_collection_id == collection_id
-    )
-    children = (await session.execute(child_stmt)).all()
-    sub_collections: list[CollectionSubEnclave] = []
+    # 7. Sub-enclaves: for each direct child we already know its full descendant set.
+    # Map descendant collection ID -> sub-enclave root, then bucket the members rows
+    # we already fetched. One pass, zero extra queries.
+    desc_to_root: dict[str, str] = {}
+    for child_id, desc_set in descendants_by_child.items():
+        for d in desc_set:
+            desc_to_root.setdefault(d, child_id)
 
-    for cid, cname in children:
-        # Get total card count for this sub-enclave
-        c_doc_ids, c_note_ids = await _resolve_collection_members(cid, session)
-        count_stmt = select(func.count(FlashcardModel.id)).where(
-            or_(
-                FlashcardModel.document_id.in_(c_doc_ids) if c_doc_ids else False,
-                FlashcardModel.note_id.in_(c_note_ids) if c_note_ids else False,
+    sub_doc_ids: dict[str, set[str]] = defaultdict(set)
+    sub_note_ids: dict[str, set[str]] = defaultdict(set)
+    for coll_id, member_id, member_type in members_rows:
+        root = desc_to_root.get(coll_id)
+        if root is None:
+            continue
+        if member_type == "document":
+            sub_doc_ids[root].add(member_id)
+        elif member_type == "note":
+            sub_note_ids[root].add(member_id)
+
+    # Child card counts reuse cards_per_doc / cards_per_note -- but those only cover
+    # hierarchy_ids members. Sub-enclave members can include docs/notes outside the
+    # parent hierarchy (when a child enclave directly holds an item the parent does
+    # not). Top up with one extra pair of queries for any missing IDs.
+    missing_doc_ids = (
+        set().union(*sub_doc_ids.values()) if sub_doc_ids else set()
+    ) - doc_ids
+    missing_note_ids = (
+        set().union(*sub_note_ids.values()) if sub_note_ids else set()
+    ) - note_ids
+    if missing_doc_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.document_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.document_id.in_(list(missing_doc_ids)))
+                .group_by(FlashcardModel.document_id)
             )
+        ).all()
+        for did, cnt in rows:
+            cards_per_doc[did] = int(cnt)
+    if missing_note_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.note_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.note_id.in_(list(missing_note_ids)))
+                .group_by(FlashcardModel.note_id)
+            )
+        ).all()
+        for nid, cnt in rows:
+            cards_per_note[nid] = int(cnt)
+
+    child_name_map: dict[str, str] = {}
+    if direct_children:
+        name_rows = (
+            await session.execute(
+                select(CollectionModel.id, CollectionModel.name).where(
+                    CollectionModel.id.in_(direct_children)
+                )
+            )
+        ).all()
+        child_name_map = {cid: name for cid, name in name_rows}
+
+    sub_collections: list[CollectionSubEnclave] = []
+    for child_id in direct_children:
+        count = sum(cards_per_doc.get(d, 0) for d in sub_doc_ids.get(child_id, ())) + sum(
+            cards_per_note.get(n, 0) for n in sub_note_ids.get(child_id, ())
         )
-        total_cards_count = (await session.execute(count_stmt)).scalar() or 0
         sub_collections.append(
-            CollectionSubEnclave(id=cid, name=cname, card_count=total_cards_count)
+            CollectionSubEnclave(
+                id=child_id,
+                name=child_name_map.get(child_id, ""),
+                card_count=count,
+            )
         )
 
     return StudyCollectionDashboardResponse(
@@ -1505,9 +1675,9 @@ async def get_teachback_results(
     if not id_list:
         return TeachbackResultsBatchResponse(results=[])
 
-    # Fetch results joined with flashcard for question text
+    # Fetch results joined with flashcard for question + expected answer text
     stmt = (
-        select(TeachbackResultModel, FlashcardModel.question)
+        select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
         .join(
             FlashcardModel,
             TeachbackResultModel.flashcard_id == FlashcardModel.id,
@@ -1518,7 +1688,7 @@ async def get_teachback_results(
     rows = (await session.execute(stmt)).all()
 
     items: list[TeachbackResultItem] = []
-    for tb, question in rows:
+    for tb, question, expected_answer in rows:
         rubric_response: TeachbackRubricResponse | None = None
         if tb.status == "complete" and tb.rubric_json is not None:
             try:
@@ -1538,6 +1708,7 @@ async def get_teachback_results(
                 status=tb.status,
                 flashcard_id=tb.flashcard_id,
                 question=question or "",
+                expected_answer=expected_answer or "",
                 score=tb.score if tb.status == "complete" else None,
                 correct_points=tb.correct_points if tb.status == "complete" else [],
                 missing_points=tb.missing_points if tb.status == "complete" else [],
@@ -1560,7 +1731,7 @@ async def get_session_teachback_results(
 ) -> TeachbackResultsBatchResponse:
     """Get all teach-back results for a study session."""
     stmt = (
-        select(TeachbackResultModel, FlashcardModel.question)
+        select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
         .join(
             FlashcardModel,
             TeachbackResultModel.flashcard_id == FlashcardModel.id,
@@ -1572,7 +1743,7 @@ async def get_session_teachback_results(
     rows = (await session.execute(stmt)).all()
 
     items: list[TeachbackResultItem] = []
-    for tb, question in rows:
+    for tb, question, expected_answer in rows:
         rubric_response: TeachbackRubricResponse | None = None
         if tb.status == "complete" and tb.rubric_json is not None:
             try:
@@ -1592,6 +1763,7 @@ async def get_session_teachback_results(
                 status=tb.status,
                 flashcard_id=tb.flashcard_id,
                 question=question or "",
+                expected_answer=expected_answer or "",
                 score=tb.score if tb.status == "complete" else None,
                 correct_points=tb.correct_points if tb.status == "complete" else [],
                 missing_points=tb.missing_points if tb.status == "complete" else [],

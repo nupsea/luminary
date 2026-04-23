@@ -43,6 +43,7 @@ export interface TeachbackResultItem {
   status: "pending" | "complete" | "error"
   flashcard_id: string
   question: string
+  expected_answer?: string
   score: number | null
   correct_points: string[]
   missing_points: string[]
@@ -108,9 +109,12 @@ export async function fetchDueCards(
     tag?: string
     document_ids?: string[]
     note_ids?: string[]
+    limit?: number
   } = {},
 ): Promise<Flashcard[]> {
-  const params = new URLSearchParams({ limit: "50" })
+  const params = new URLSearchParams({
+    limit: String(filters.limit ?? 50),
+  })
   if (documentId) params.set("document_id", documentId)
   if (collectionId) params.set("collection_id", collectionId)
   if (filters.tag) params.set("tag", filters.tag)

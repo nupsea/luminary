@@ -12,7 +12,7 @@
  */
 
 import { AnimatePresence, motion } from "framer-motion"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import {
   ChevronDown,
   ChevronUp,
@@ -24,15 +24,12 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { ClozeCard } from "@/components/ClozeCard"
-import { useAppStore } from "@/store"
+import { useStudySession } from "@/hooks/useStudySession"
 import {
   type Flashcard,
   type Rating,
   type SourceContext,
-  startSession,
-  fetchDueCards,
   submitReview,
-  endSession,
   fetchSourceContext,
 } from "@/lib/studyApi"
 import { API_BASE } from "@/lib/config"
@@ -380,13 +377,31 @@ interface StudySessionProps {
 
 type SessionState = "loading" | "studying" | "complete" | "empty"
 
+const FLASHCARD_CARD_LIMIT = 50
+
 export function StudySession({ documentId, collectionId, filters, onExit }: StudySessionProps) {
-  const [sessionState, setSessionState] = useState<SessionState>("loading")
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [queue, setQueue] = useState<Flashcard[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
+  const {
+    sessionState,
+    sessionId,
+    queue,
+    currentIndex,
+    reviewed,
+    total,
+    setQueue,
+    setCurrentIndex,
+    setReviewed,
+    completeSession,
+    exit,
+    beginNew,
+  } = useStudySession({
+    mode: "flashcard",
+    documentId,
+    collectionId,
+    filters,
+    cardLimit: FLASHCARD_CARD_LIMIT,
+  })
+
   const [showAnswer, setShowAnswer] = useState(false)
-  const [reviewed, setReviewed] = useState(0)
   const [correct, setCorrect] = useState(0)
   const [isRating, setIsRating] = useState(false)
   const [lastRating, setLastRating] = useState<Rating | null>(null)
@@ -395,34 +410,6 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
   const [sourceContextLoading, setSourceContextLoading] = useState(false)
   const dismissedSourceContextIds = useRef(new Set<string>())
   const requeuedCardIds = useRef(new Set<string>())
-  const { setStudySessionId } = useAppStore()
-
-  const initialTotalRef = useRef<number>(0)
-  const total = initialTotalRef.current
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function init() {
-      try {
-        const [sid, cards] = await Promise.all([
-          startSession(documentId ?? null, "flashcard", collectionId ?? null),
-          fetchDueCards(documentId || null, collectionId || null, filters || {}),
-        ])
-        if (cancelled) return
-        setSessionId(sid)
-        setStudySessionId(sid)
-        setQueue(cards)
-        initialTotalRef.current = cards.length
-        setSessionState(cards.length === 0 ? "empty" : "studying")
-      } catch {
-        if (!cancelled) setSessionState("empty")
-      }
-    }
-
-    void init()
-    return () => { cancelled = true }
-  }, [documentId, collectionId, filters, setStudySessionId])
 
   async function handleRate(rating: Rating) {
     if (!sessionId || isRating) return
@@ -462,8 +449,7 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
         if (rating === "hard") {
           const nextIdx = currentIndex + 1
           if (nextIdx >= queue.length) {
-            await endSession(sessionId)
-            setSessionState("complete")
+            await completeSession()
           } else {
             setCurrentIndex(nextIdx)
             setShowAnswer(false)
@@ -476,8 +462,7 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
       // "good" / "easy": advance immediately
       const nextIdx = currentIndex + 1
       if (nextIdx >= queue.length) {
-        await endSession(sessionId)
-        setSessionState("complete")
+        await completeSession()
       } else {
         setCurrentIndex(nextIdx)
         setShowAnswer(false)
@@ -493,8 +478,7 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     setSourceContextLoading(false)
     const nextIdx = currentIndex + 1
     if (nextIdx >= queue.length) {
-      if (sessionId) await endSession(sessionId)
-      setSessionState("complete")
+      await completeSession()
     } else {
       setCurrentIndex(nextIdx)
       setShowAnswer(false)
@@ -508,12 +492,8 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     void advanceCard()
   }
 
-  async function handleBackToStudy() {
-    if (sessionId && sessionState !== "complete") {
-      await endSession(sessionId)
-    }
-    setStudySessionId(null)
-    onExit()
+  function handleBackToStudy() {
+    void exit(onExit)
   }
 
   if (sessionState === "loading") {
@@ -546,35 +526,16 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
           reviewed={reviewed}
           correct={correct}
           nextReviewDate={nextReviewDate}
-          onBack={() => { setStudySessionId(null); onExit() }}
+          onBack={() => void exit(onExit)}
           onStartNext={() => {
-            setQueue([])
-            setCurrentIndex(0)
-            setReviewed(0)
             setCorrect(0)
             setLastRating(null)
             setShowAnswer(false)
             setNextReviewDate(null)
             setSourceContext(null)
-            initialTotalRef.current = 0
             requeuedCardIds.current.clear()
             dismissedSourceContextIds.current.clear()
-            setSessionState("loading")
-            void (async () => {
-              try {
-                const [sid, cards] = await Promise.all([
-                  startSession(documentId ?? null, "flashcard", collectionId ?? null),
-                  fetchDueCards(documentId || null, collectionId || null, filters || {}),
-                ])
-                setSessionId(sid)
-                setStudySessionId(sid)
-                setQueue(cards)
-                initialTotalRef.current = cards.length
-                setSessionState(cards.length === 0 ? "empty" : "studying")
-              } catch {
-                setSessionState("empty")
-              }
-            })()
+            beginNew()
           }}
         />
       </div>

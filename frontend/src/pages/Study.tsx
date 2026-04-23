@@ -1896,6 +1896,28 @@ export default function Study() {
     setStudyMode("teachback")
   }
 
+  // Walk the nested collection tree to find a name by id.
+  const findCollectionName = (
+    items: any[],
+    id: string | null,
+  ): string | null => {
+    if (!id) return null
+    for (const item of items) {
+      if (item.id === id) return item.name ?? null
+      if (item.children?.length) {
+        const found = findCollectionName(item.children, id)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  const activeDocTitle =
+    docList.find((d) => d.id === activeDocumentId)?.title ?? null
+  const activeCollectionName = findCollectionName(collections, activeCollectionId)
+  const subjectLabel =
+    activeCollectionName || activeDocTitle || null
+
   const handleExit = () => {
     setStudyMode(null)
     setResumeTeachbackId(null)
@@ -1922,6 +1944,7 @@ export default function Study() {
         filters={studyFilters}
         onExit={handleExit}
         resumeSessionId={resumeTeachbackId}
+        subjectLabel={subjectLabel}
       />
     )
   }

@@ -32,17 +32,13 @@ import {
 } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { useAppStore } from "@/store"
+import { useStudySession } from "@/hooks/useStudySession"
 import {
   type Flashcard,
   type PendingTeachback,
   type TeachbackResultItem,
-  startSession,
-  fetchDueCards,
-  endSession,
   submitTeachbackAsync,
   fetchTeachbackResults,
-  fetchSessionTeachbackResults,
   scoreBadgeClass,
 } from "@/lib/studyApi"
 
@@ -344,16 +340,20 @@ function TeachbackPanel({
 
       {/* Evaluating spinner */}
       {showEvaluating && (
-        <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 p-4">
           <div className="flex items-center gap-2">
             <Loader2 size={16} className="animate-spin text-violet-500" />
-            <span className="text-sm text-muted-foreground">Evaluating your explanation...</span>
+            <span className="text-sm text-muted-foreground">
+              Evaluating your explanation...
+            </span>
           </div>
           <button
             onClick={onNext}
-            className="self-start text-xs text-muted-foreground underline hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:bg-accent"
+            title="Results will appear in the session summary"
           >
-            Skip to next card (results will appear in session summary)
+            Next Card
+            <ArrowRight size={12} />
           </button>
         </div>
       )}
@@ -637,6 +637,7 @@ interface SessionCompleteProps {
   onBack: () => void
   onStartNext: () => void
   pendingTeachbacks: PendingTeachback[]
+  subjectLabel?: string | null
 }
 
 function SessionComplete({
@@ -644,6 +645,7 @@ function SessionComplete({
   onBack,
   onStartNext,
   pendingTeachbacks,
+  subjectLabel,
 }: SessionCompleteProps) {
   const { results, stats } = useTeachbackPolling(pendingTeachbacks)
 
@@ -657,9 +659,25 @@ function SessionComplete({
             <MessageSquare size={28} className="text-violet-600 dark:text-violet-400" />
           </div>
           <h2 className="text-2xl font-bold text-foreground">Session Complete</h2>
+          {subjectLabel && (
+            <p className="text-sm text-muted-foreground">
+              Teach-back on{" "}
+              <span className="font-medium text-foreground">{subjectLabel}</span>
+            </p>
+          )}
         </div>
       ) : (
-        <h2 className="text-2xl font-bold text-foreground">Evaluating Your Answers...</h2>
+        <div className="flex flex-col items-center gap-1">
+          <h2 className="text-2xl font-bold text-foreground">
+            Evaluating Your Answers...
+          </h2>
+          {subjectLabel && (
+            <p className="text-sm text-muted-foreground">
+              Teach-back on{" "}
+              <span className="font-medium text-foreground">{subjectLabel}</span>
+            </p>
+          )}
+        </div>
       )}
 
       {stats.completedCount > 0 && (
@@ -731,9 +749,12 @@ interface TeachbackSessionProps {
   }
   onExit: () => void
   resumeSessionId?: string | null
+  subjectLabel?: string | null
 }
 
-type SessionState = "loading" | "studying" | "complete" | "empty"
+// Teach-back is deliberate and slow; capping the queue keeps sessions focused
+// and prevents a surprise 50-question marathon when many cards are due.
+const TEACHBACK_CARD_LIMIT = 10
 
 export function TeachbackSession({
   documentId,
@@ -741,88 +762,40 @@ export function TeachbackSession({
   filters,
   onExit,
   resumeSessionId,
+  subjectLabel,
 }: TeachbackSessionProps) {
-  const [sessionState, setSessionState] = useState<SessionState>("loading")
-  const [sessionId, setSessionId] = useState<string | null>(resumeSessionId ?? null)
-  const [queue, setQueue] = useState<Flashcard[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [reviewed, setReviewed] = useState(0)
   const [pendingTeachbacks, setPendingTeachbacks] = useState<PendingTeachback[]>([])
-  const { setStudySessionId } = useAppStore()
 
-  const initialTotalRef = useRef<number>(0)
-  const total = initialTotalRef.current
-
-  // Resume mode: load previous results + remaining cards
-  useEffect(() => {
-    if (!resumeSessionId) return
-    let cancelled = false
-
-    async function resumeInit() {
-      try {
-        const [prevResults, cards] = await Promise.all([
-          fetchSessionTeachbackResults(resumeSessionId!),
-          fetchDueCards(documentId || null, collectionId || null, filters || {}),
-        ])
-        if (cancelled) return
-
-        const previousTeachbacks = prevResults.map((r) => ({
+  const {
+    sessionState,
+    sessionId,
+    queue,
+    currentIndex,
+    reviewed,
+    total,
+    setCurrentIndex,
+    setReviewed,
+    setSessionState,
+    completeSession,
+    exit,
+    beginNew,
+  } = useStudySession({
+    mode: "teachback",
+    documentId,
+    collectionId,
+    filters,
+    cardLimit: TEACHBACK_CARD_LIMIT,
+    resumeSessionId,
+    onResumeLoaded: (prev) => {
+      setPendingTeachbacks(
+        prev.map((r) => ({
           id: r.id,
           flashcardId: r.flashcard_id,
           question: r.question,
-        }))
-        setPendingTeachbacks(previousTeachbacks)
-        setReviewed(prevResults.length)
-
-        const answeredCardIds = new Set(prevResults.map((r) => r.flashcard_id))
-        const remainingCards = cards.filter((c) => !answeredCardIds.has(c.id))
-
-        initialTotalRef.current = prevResults.length + remainingCards.length
-
-        if (remainingCards.length > 0) {
-          setQueue(remainingCards)
-          setSessionState("studying")
-        } else {
-          setSessionState("complete")
-        }
-      } catch {
-        if (!cancelled) setSessionState("complete")
-      }
-    }
-
-    void resumeInit()
-    return () => {
-      cancelled = true
-    }
-  }, [resumeSessionId, documentId, collectionId, filters])
-
-  // Normal init (non-resume)
-  useEffect(() => {
-    if (resumeSessionId) return
-    let cancelled = false
-
-    async function init() {
-      try {
-        const [sid, cards] = await Promise.all([
-          startSession(documentId ?? null, "teachback", collectionId ?? null),
-          fetchDueCards(documentId || null, collectionId || null, filters || {}),
-        ])
-        if (cancelled) return
-        setSessionId(sid)
-        setStudySessionId(sid)
-        setQueue(cards)
-        initialTotalRef.current = cards.length
-        setSessionState(cards.length === 0 ? "empty" : "studying")
-      } catch {
-        if (!cancelled) setSessionState("empty")
-      }
-    }
-
-    void init()
-    return () => {
-      cancelled = true
-    }
-  }, [documentId, collectionId, filters, resumeSessionId, setStudySessionId])
+        })),
+      )
+    },
+  })
 
   // Poll for live results during active session
   const realTeachbackIds = pendingTeachbacks
@@ -859,25 +832,24 @@ export function TeachbackSession({
     const nextIndex = currentIndex + 1
     setReviewed((r) => r + 1)
     if (nextIndex >= queue.length) {
-      void (async () => {
-        if (sessionId) await endSession(sessionId)
-        setSessionState("complete")
-      })()
+      void completeSession()
     } else {
       setCurrentIndex(nextIndex)
     }
   }
 
   async function handleBackToStudy() {
-    if (sessionId && sessionState !== "complete") {
-      await endSession(sessionId)
+    // If the user has submitted teach-backs that are still evaluating, keep
+    // them on the complete screen so they can see the scores come in instead
+    // of bouncing back to the list.
+    if (
+      pendingTeachbacks.length > 0 &&
+      sessionState !== "complete"
+    ) {
+      await completeSession()
+      return
     }
-    if (pendingTeachbacks.length > 0 && sessionState !== "complete") {
-      setSessionState("complete")
-    } else {
-      setStudySessionId(null)
-      onExit()
-    }
+    await exit(onExit)
   }
 
   if (sessionState === "loading") {
@@ -892,7 +864,14 @@ export function TeachbackSession({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
         <MessageSquare size={40} className="text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">No cards due for teach-back right now.</p>
+        {subjectLabel && (
+          <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+            {subjectLabel}
+          </p>
+        )}
+        <p className="text-sm text-muted-foreground">
+          No cards due for teach-back right now.
+        </p>
         <button
           onClick={onExit}
           className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
@@ -908,32 +887,11 @@ export function TeachbackSession({
       <div className="flex h-full items-start justify-center overflow-auto py-8">
         <SessionComplete
           reviewed={reviewed}
-          onBack={() => {
-            setStudySessionId(null)
-            onExit()
-          }}
+          subjectLabel={subjectLabel}
+          onBack={() => void exit(onExit)}
           onStartNext={() => {
-            setQueue([])
-            setCurrentIndex(0)
-            setReviewed(0)
             setPendingTeachbacks([])
-            initialTotalRef.current = 0
-            setSessionState("loading")
-            void (async () => {
-              try {
-                const [sid, cards] = await Promise.all([
-                  startSession(documentId ?? null, "teachback", collectionId ?? null),
-                  fetchDueCards(documentId || null, collectionId || null, filters || {}),
-                ])
-                setSessionId(sid)
-                setStudySessionId(sid)
-                setQueue(cards)
-                initialTotalRef.current = cards.length
-                setSessionState(cards.length === 0 ? "empty" : "studying")
-              } catch {
-                setSessionState("empty")
-              }
-            })()
+            beginNew()
           }}
           pendingTeachbacks={pendingTeachbacks}
         />
@@ -968,16 +926,24 @@ export function TeachbackSession({
   return (
     <div className="flex h-full flex-col items-center gap-6 overflow-auto bg-background px-6 py-8">
       {/* Header */}
-      <div className="flex w-full max-w-2xl items-center justify-between">
-        <div className="flex items-center gap-2">
-          <MessageSquare size={18} className="text-violet-500" />
-          <span className="text-sm font-semibold text-violet-600 dark:text-violet-400">
-            Teach-back Session
+      <div className="flex w-full max-w-2xl flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MessageSquare size={18} className="text-violet-500" />
+            <span className="text-sm font-semibold text-violet-600 dark:text-violet-400">
+              Teach-back Session
+            </span>
+          </div>
+          <span className="rounded-full bg-violet-100 px-3 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+            Card {currentIndex + 1} of {queue.length}
           </span>
         </div>
-        <span className="rounded-full bg-violet-100 px-3 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
-          Card {currentIndex + 1} of {queue.length}
-        </span>
+        {subjectLabel && (
+          <p className="text-xs text-muted-foreground">
+            Subject:{" "}
+            <span className="font-medium text-foreground">{subjectLabel}</span>
+          </p>
+        )}
       </div>
 
       <ProgressBar done={reviewed} total={total} />
