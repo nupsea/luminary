@@ -52,7 +52,7 @@ function formatDate(iso: string): string {
 
 interface ActiveSessionCardProps {
   session: StudySessionItem
-  onContinue: (sessionId: string) => void
+  onContinue: (sessionId: string, documentId: string | null, collectionId: string | null) => void
   onDelete: (sessionId: string) => void
   isDeleting: boolean
 }
@@ -138,7 +138,7 @@ function ActiveSessionCard({
 
       <div className="flex items-center gap-2 pt-1">
         <button
-          onClick={() => onContinue(session.id)}
+          onClick={() => onContinue(session.id, session.document_id, session.collection_id)}
           className="flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700"
         >
           <PlayCircle size={16} />
@@ -180,7 +180,7 @@ function ActiveSessionCard({
 // ---------------------------------------------------------------------------
 
 interface SessionManagerProps {
-  onContinueTeachback: (sessionId: string) => void
+  onContinueTeachback: (sessionId: string, documentId: string | null, collectionId: string | null) => void
 }
 
 export function SessionManager({ onContinueTeachback }: SessionManagerProps) {

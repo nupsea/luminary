@@ -1996,9 +1996,20 @@ export default function Study() {
         ) : (
           /* Landing page: session manager + collection grid */
           <div className="flex flex-col gap-10">
-            {/* Active / completed sessions */}
             <SessionManager
-              onContinueTeachback={(sessionId) => handleStartTeachback(null, sessionId)}
+              onContinueTeachback={(sessionId, documentId, collectionId) => {
+                if (documentId) setActiveDocument(documentId)
+                if (collectionId) setActiveCollectionId(collectionId)
+                
+                const filters: any = {}
+                if (documentId) filters.document_id = documentId
+                if (collectionId) filters.collection_id = collectionId
+                
+                handleStartTeachback(
+                  Object.keys(filters).length > 0 ? filters : null,
+                  sessionId
+                )
+              }}
             />
 
             {/* Focused Enclaves heading */}

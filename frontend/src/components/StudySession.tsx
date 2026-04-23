@@ -375,7 +375,7 @@ interface StudySessionProps {
   onExit: () => void
 }
 
-type SessionState = "loading" | "studying" | "complete" | "empty"
+
 
 const FLASHCARD_CARD_LIMIT = 50
 

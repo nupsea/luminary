@@ -230,6 +230,14 @@ function TeachbackResultCard({ result: r }: TeachbackResultCardProps) {
                 {r.user_explanation}
               </blockquote>
             )}
+            {r.rubric && (
+              <div className="mt-2 flex flex-col gap-1 text-[11px] text-muted-foreground">
+                <div className="rounded-md bg-muted/30 p-2">
+                  <span className="font-semibold text-foreground">Clarity: </span>
+                  {r.rubric.clarity.evidence}
+                </div>
+              </div>
+            )}
             {r.missing_points && r.missing_points.length > 0 && (
               <div className="mt-2 text-[11px] text-muted-foreground">
                 <span className="font-semibold">Missing: </span>

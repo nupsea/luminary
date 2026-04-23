@@ -125,6 +125,12 @@ function InlineTeachbackFeedback({ result }: { result: TeachbackResultItem }) {
           {passed ? "Good explanation!" : "Needs improvement"}
         </span>
       </div>
+      
+      {result.rubric && (
+        <div className="flex flex-col gap-1 rounded-md bg-muted/40 p-2 text-xs">
+          <div><span className="font-semibold">Clarity:</span> {result.rubric.clarity.evidence}</div>
+        </div>
+      )}
 
       {result.correct_points.length > 0 && (
         <div className="flex flex-col gap-0.5">
@@ -775,7 +781,6 @@ export function TeachbackSession({
     total,
     setCurrentIndex,
     setReviewed,
-    setSessionState,
     completeSession,
     exit,
     beginNew,
