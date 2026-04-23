@@ -309,6 +309,16 @@ async def generate_flashcards(
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> list[FlashcardResponse]:
     """Generate flashcards for a document using LLM."""
+    logger.info(
+        "Flashcard generation requested",
+        extra={
+            "document_id": req.document_id,
+            "scope": req.scope,
+            "count": req.count,
+            "difficulty": req.difficulty,
+            "has_context": bool(req.context),
+        },
+    )
     try:
         cards = await service.generate(
             document_id=req.document_id,

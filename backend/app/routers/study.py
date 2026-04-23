@@ -23,6 +23,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +60,10 @@ _GAP_MIN_REPS = 1
 
 # Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+# Serialize background teachback evaluations to avoid SQLite "database is locked"
+# when multiple concurrent tasks try to write (invariant I-1).
+_teachback_eval_sem = asyncio.Semaphore(1)
 
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
@@ -120,12 +125,14 @@ _RUBRIC_USER_TMPL = (
 
 class StartSessionRequest(BaseModel):
     document_id: str | None = None
+    collection_id: str | None = None
     mode: str = "flashcard"
 
 
 class SessionResponse(BaseModel):
     id: str
     document_id: str | None
+    collection_id: str | None = None
     started_at: datetime
     ended_at: datetime | None
     cards_reviewed: int
@@ -153,6 +160,8 @@ class SessionListItem(BaseModel):
     accuracy_pct: float | None
     document_id: str | None
     document_title: str | None
+    collection_id: str | None = None
+    collection_name: str | None = None
     mode: str
 
     model_config = {"from_attributes": True}
@@ -260,6 +269,7 @@ class TeachbackResultItem(BaseModel):
     misconceptions: list[str] = []
     correction_flashcard_id: str | None = None
     rubric: TeachbackRubricResponse | None = None
+    user_explanation: str | None = None
 
 
 class TeachbackResultsBatchResponse(BaseModel):
@@ -772,6 +782,7 @@ async def start_session(
     sess = StudySessionModel(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
+        collection_id=req.collection_id,
         started_at=datetime.now(UTC),
         cards_reviewed=0,
         cards_correct=0,
@@ -782,7 +793,12 @@ async def start_session(
     await session.refresh(sess)
     logger.info(
         "Study session started",
-        extra={"session_id": sess.id, "document_id": req.document_id},
+        extra={
+            "session_id": sess.id,
+            "document_id": req.document_id,
+            "collection_id": req.collection_id,
+            "mode": req.mode,
+        },
     )
     return SessionResponse.model_validate(sess)
 
@@ -803,9 +819,24 @@ async def end_session(
     )
     events = events_result.scalars().all()
 
-    cards_reviewed = len(events)
-    cards_correct = sum(1 for e in events if e.is_correct)
-    accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
+    # Check for teachback results -- use average score instead of binary pass/fail
+    tb_result = await db.execute(
+        select(TeachbackResultModel).where(
+            TeachbackResultModel.session_id == session_id,
+            TeachbackResultModel.status == "complete",
+        )
+    )
+    tb_rows = tb_result.scalars().all()
+
+    if tb_rows:
+        scores = [tb.score for tb in tb_rows if tb.score is not None]
+        cards_reviewed = len(tb_rows)
+        cards_correct = sum(1 for s in scores if s >= 60)
+        accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+    else:
+        cards_reviewed = len(events)
+        cards_correct = sum(1 for e in events if e.is_correct)
+        accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
 
     sess.ended_at = datetime.now(UTC)
     sess.cards_reviewed = cards_reviewed
@@ -830,6 +861,32 @@ async def end_session(
         accuracy_pct=accuracy_pct,
         ended_at=sess.ended_at,
     )
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a study session and all associated review events and teachback results."""
+    result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    await db.execute(
+        sa_delete(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
+    )
+    await db.execute(
+        sa_delete(TeachbackResultModel).where(
+            TeachbackResultModel.session_id == session_id
+        )
+    )
+    await db.delete(sess)
+    await db.commit()
+    logger.info("Study session deleted", extra={"session_id": session_id})
 
 
 async def _resolve_collection_members(
@@ -1009,6 +1066,13 @@ async def get_collection_study_dashboard(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     document_id: str | None = None,
+    collection_id: str | None = Query(
+        default=None, description="Filter sessions to a specific collection/enclave"
+    ),
+    mode: str | None = Query(default=None, description="Filter by mode: flashcard, teachback"),
+    status: str | None = Query(
+        default=None, description="Filter by status: incomplete (no ended_at), complete"
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -1017,6 +1081,14 @@ async def list_sessions(
     base_stmt = select(StudySessionModel)
     if document_id:
         base_stmt = base_stmt.where(StudySessionModel.document_id == document_id)
+    if collection_id:
+        base_stmt = base_stmt.where(StudySessionModel.collection_id == collection_id)
+    if mode:
+        base_stmt = base_stmt.where(StudySessionModel.mode == mode)
+    if status == "incomplete":
+        base_stmt = base_stmt.where(StudySessionModel.ended_at.is_(None))
+    elif status == "complete":
+        base_stmt = base_stmt.where(StudySessionModel.ended_at.is_not(None))
 
     count_result = await db.execute(select(func.count()).select_from(base_stmt.subquery()))
     total = count_result.scalar_one()
@@ -1035,6 +1107,15 @@ async def list_sessions(
         for doc in docs_result.scalars().all():
             doc_titles[doc.id] = doc.title
 
+    coll_ids = {s.collection_id for s in sessions if s.collection_id}
+    coll_names: dict[str, str] = {}
+    if coll_ids:
+        colls_result = await db.execute(
+            select(CollectionModel).where(CollectionModel.id.in_(coll_ids))
+        )
+        for coll in colls_result.scalars().all():
+            coll_names[coll.id] = coll.name
+
     items: list[SessionListItem] = []
     for sess in sessions:
         duration: float | None = None
@@ -1051,6 +1132,8 @@ async def list_sessions(
                 accuracy_pct=sess.accuracy_pct,
                 document_id=sess.document_id,
                 document_title=doc_titles.get(sess.document_id) if sess.document_id else None,
+                collection_id=sess.collection_id,
+                collection_name=coll_names.get(sess.collection_id) if sess.collection_id else None,
                 mode=sess.mode,
             )
         )
@@ -1151,16 +1234,19 @@ async def teachback(
     # If score < 60 and there are misconceptions, create MisconceptionModel rows
     # and a correction flashcard
     if score < 60 and misconceptions:
-        for m_text in misconceptions:
-            misconception = MisconceptionModel(
-                id=str(uuid.uuid4()),
-                document_id=card.document_id,
-                flashcard_id=card.id,
-                user_answer=req.user_explanation,
-                error_type="misconception",
-                correction_note=m_text,
-            )
-            session.add(misconception)
+        # Only persist misconceptions when document_id is set;
+        # note-sourced flashcards have document_id=None.
+        if card.document_id:
+            for m_text in misconceptions:
+                misconception = MisconceptionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=card.document_id,
+                    flashcard_id=card.id,
+                    user_answer=req.user_explanation,
+                    error_type="misconception",
+                    correction_note=m_text,
+                )
+                session.add(misconception)
 
         # Generate a correction flashcard targeting the first misconception
         correction_card_id = await _generate_correction_flashcard(
@@ -1227,113 +1313,128 @@ async def _evaluate_teachback_bg(
     results feed into spaced repetition and session progress stats.
     """
     logger.info("Teachback bg task started for %s", tb_id)
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        try:
-            llm = get_llm_service()
 
-            # LLM call 1: evaluation
-            prompt = _TEACHBACK_USER_TMPL.format(
-                answer=card_answer,
-                explanation=user_explanation,
-            )
-            raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
-            parsed = _parse_teachback_response(raw)
-            score = parsed.get("score", 0)
-            correct_points: list[str] = parsed.get("correct_points", [])
-            missing_points: list[str] = parsed.get("missing_points", [])
-            misconceptions: list[str] = parsed.get("misconceptions", [])
+    # LLM calls happen outside the semaphore so they don't block other evals.
+    llm = get_llm_service()
 
-            # LLM call 2: rubric (graceful fallback)
-            rubric_dict: dict | None = None
+    # LLM call 1: evaluation
+    prompt = _TEACHBACK_USER_TMPL.format(
+        answer=card_answer,
+        explanation=user_explanation,
+    )
+    raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
+    parsed = _parse_teachback_response(raw)
+    score = parsed.get("score", 0)
+    correct_points: list[str] = parsed.get("correct_points", [])
+    missing_points: list[str] = parsed.get("missing_points", [])
+    misconceptions: list[str] = parsed.get("misconceptions", [])
+
+    # LLM call 2: rubric (graceful fallback)
+    rubric_dict: dict | None = None
+    try:
+        rubric_prompt = _RUBRIC_USER_TMPL.format(
+            source_context=card_answer,
+            explanation=user_explanation,
+        )
+        raw_rubric = await llm.generate(
+            prompt=rubric_prompt, system=_RUBRIC_SYSTEM,
+        )
+        rubric_dict = _parse_rubric(raw_rubric)
+    except Exception:  # noqa: BLE001
+        logger.warning("Rubric LLM call failed for teachback=%s", tb_id)
+
+    # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
+    rating = _score_to_rating(score)
+    async with _teachback_eval_sem:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
             try:
-                rubric_prompt = _RUBRIC_USER_TMPL.format(
-                    source_context=card_answer,
-                    explanation=user_explanation,
-                )
-                raw_rubric = await llm.generate(
-                    prompt=rubric_prompt, system=_RUBRIC_SYSTEM,
-                )
-                rubric_dict = _parse_rubric(raw_rubric)
-            except Exception:  # noqa: BLE001
-                logger.warning("Rubric LLM call failed for teachback=%s", tb_id)
-
-            # Update the pending row
-            result = await session.execute(
-                select(TeachbackResultModel).where(TeachbackResultModel.id == tb_id)
-            )
-            tb_row = result.scalar_one_or_none()
-            if tb_row is None:
-                logger.error("Teachback row %s disappeared", tb_id)
-                return
-
-            tb_row.score = score
-            tb_row.correct_points = correct_points
-            tb_row.missing_points = missing_points
-            tb_row.misconceptions = misconceptions
-            tb_row.rubric_json = rubric_dict
-            tb_row.status = "complete"
-
-            # FSRS review: map score to rating and schedule the card
-            rating = _score_to_rating(score)
-            fsrs = get_fsrs_service()
-            await fsrs.schedule(card_id, rating, session)
-
-            # Create ReviewEventModel so session end_session tallies include this card
-            if session_id:
-                event = ReviewEventModel(
-                    id=str(uuid.uuid4()),
-                    session_id=session_id,
-                    flashcard_id=card_id,
-                    rating=rating,
-                    is_correct=rating != "again",
-                )
-                session.add(event)
-
-            # Misconceptions + correction flashcard (same logic as sync endpoint)
-            if score < 60 and misconceptions:
-                # Load card for document_id
-                card_result = await session.execute(
-                    select(FlashcardModel).where(FlashcardModel.id == card_id)
-                )
-                card = card_result.scalar_one_or_none()
-                if card:
-                    for m_text in misconceptions:
-                        misconception = MisconceptionModel(
-                            id=str(uuid.uuid4()),
-                            document_id=card_document_id,
-                            flashcard_id=card_id,
-                            user_answer=user_explanation,
-                            error_type="misconception",
-                            correction_note=m_text,
-                        )
-                        session.add(misconception)
-                    await _generate_correction_flashcard(
-                        card=card,
-                        misconception=misconceptions[0],
-                        session=session,
-                    )
-
-            await session.commit()
-            logger.info(
-                "Teachback bg evaluated",
-                extra={"teachback_id": tb_id, "score": score, "fsrs_rating": rating},
-            )
-
-        except Exception:
-            logger.exception("Teachback background evaluation failed for %s", tb_id)
-            try:
+                # Update the pending row
                 result = await session.execute(
                     select(TeachbackResultModel).where(
                         TeachbackResultModel.id == tb_id
                     )
                 )
                 tb_row = result.scalar_one_or_none()
-                if tb_row:
-                    tb_row.status = "error"
-                    await session.commit()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to mark teachback %s as error", tb_id)
+                if tb_row is None:
+                    logger.error("Teachback row %s disappeared", tb_id)
+                    return
+
+                tb_row.score = score
+                tb_row.correct_points = correct_points
+                tb_row.missing_points = missing_points
+                tb_row.misconceptions = misconceptions
+                tb_row.rubric_json = rubric_dict
+                tb_row.status = "complete"
+
+                # FSRS review: schedule the card
+                fsrs = get_fsrs_service()
+                await fsrs.schedule(card_id, rating, session)
+
+                # Create ReviewEventModel so end_session tallies include this card
+                if session_id:
+                    event = ReviewEventModel(
+                        id=str(uuid.uuid4()),
+                        session_id=session_id,
+                        flashcard_id=card_id,
+                        rating=rating,
+                        is_correct=rating != "again",
+                    )
+                    session.add(event)
+
+                # Misconceptions + correction flashcard
+                if score < 60 and misconceptions:
+                    card_result = await session.execute(
+                        select(FlashcardModel).where(FlashcardModel.id == card_id)
+                    )
+                    card = card_result.scalar_one_or_none()
+                    if card:
+                        if card_document_id:
+                            for m_text in misconceptions:
+                                misconception = MisconceptionModel(
+                                    id=str(uuid.uuid4()),
+                                    document_id=card_document_id,
+                                    flashcard_id=card_id,
+                                    user_answer=user_explanation,
+                                    error_type="misconception",
+                                    correction_note=m_text,
+                                )
+                                session.add(misconception)
+                        await _generate_correction_flashcard(
+                            card=card,
+                            misconception=misconceptions[0],
+                            session=session,
+                        )
+
+                await session.commit()
+                logger.info(
+                    "Teachback bg evaluated",
+                    extra={
+                        "teachback_id": tb_id,
+                        "score": score,
+                        "fsrs_rating": rating,
+                    },
+                )
+
+            except Exception:
+                logger.exception(
+                    "Teachback background evaluation failed for %s", tb_id
+                )
+                try:
+                    await session.rollback()
+                    result = await session.execute(
+                        select(TeachbackResultModel).where(
+                            TeachbackResultModel.id == tb_id
+                        )
+                    )
+                    tb_row = result.scalar_one_or_none()
+                    if tb_row:
+                        tb_row.status = "error"
+                        await session.commit()
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Failed to mark teachback %s as error", tb_id
+                    )
 
 
 @router.post("/teachback/async", response_model=TeachbackSubmitResponse)
@@ -1349,6 +1450,17 @@ async def teachback_async(
     card = card_result.scalar_one_or_none()
     if card is None:
         raise HTTPException(status_code=404, detail="Flashcard not found")
+
+    # Ensure the study session is marked as teachback mode
+    if req.session_id:
+        sess_result = await session.execute(
+            select(StudySessionModel).where(
+                StudySessionModel.id == req.session_id
+            )
+        )
+        study_sess = sess_result.scalar_one_or_none()
+        if study_sess and study_sess.mode != "teachback":
+            study_sess.mode = "teachback"
 
     # Persist pending row
     tb_id = str(uuid.uuid4())
@@ -1431,6 +1543,7 @@ async def get_teachback_results(
                 missing_points=tb.missing_points if tb.status == "complete" else [],
                 misconceptions=tb.misconceptions if tb.status == "complete" else [],
                 rubric=rubric_response,
+                user_explanation=tb.user_explanation if tb.status == "complete" else None,
             )
         )
 
@@ -1484,6 +1597,7 @@ async def get_session_teachback_results(
                 missing_points=tb.missing_points if tb.status == "complete" else [],
                 misconceptions=tb.misconceptions if tb.status == "complete" else [],
                 rubric=rubric_response,
+                user_explanation=tb.user_explanation if tb.status == "complete" else None,
             )
         )
 

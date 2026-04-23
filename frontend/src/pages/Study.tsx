@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useState } from "react"
+import { useState } from "react"
 import {
   AlertCircle,
   BookOpen,
@@ -22,9 +22,9 @@ import {
   CornerDownRight,
   Layers,
   Loader2,
+  MessageSquare,
   Pencil,
-  Eye,
-  PlayCircle,
+
   Plus,
   StickyNote,
   Trash2,
@@ -48,7 +48,10 @@ import { Progress } from "@/components/ui/progress"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { useAppStore } from "@/store"
 import { StudySession } from "@/components/StudySession"
+import { TeachbackSession } from "@/components/TeachbackSession"
+import { SessionManager } from "@/components/SessionManager"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
+import { SessionHistory } from "@/components/study/SessionHistory"
 
 
 // ---------------------------------------------------------------------------
@@ -199,33 +202,7 @@ interface CoverageReport {
   gaps: BloomGap[]
 }
 
-interface StudySessionItem {
-  id: string
-  started_at: string
-  ended_at: string | null
-  duration_minutes: number | null
-  cards_reviewed: number
-  cards_correct: number
-  accuracy_pct: number | null
-  document_id: string | null
-  document_title: string | null
-  mode: string
-}
-
-interface SessionListResponse {
-  items: StudySessionItem[]
-  total: number
-  page: number
-  page_size: number
-}
-
-interface SessionCardDetail {
-  flashcard_id: string
-  question: string
-  rating: string
-  is_correct: boolean
-  reviewed_at: string
-}
+// StudySessionItem, SessionListResponse, SessionCardDetail moved to @/lib/studyApi.ts
 
 // ---------------------------------------------------------------------------
 // API
@@ -293,17 +270,8 @@ async function fetchStrugglingCards(documentId: string): Promise<StrugglingCard[
   return res.json() as Promise<StrugglingCard[]>
 }
 
-async function fetchSessions(page: number, pageSize: number): Promise<SessionListResponse> {
-  const res = await fetch(`${API_BASE}/study/sessions?page=${page}&page_size=${pageSize}`)
-  if (!res.ok) throw new Error("Failed to load session history")
-  return res.json() as Promise<SessionListResponse>
-}
-
-async function fetchSessionCards(sessionId: string): Promise<SessionCardDetail[]> {
-  const res = await fetch(`${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/cards`)
-  if (!res.ok) throw new Error("Failed to load session cards")
-  return res.json() as Promise<SessionCardDetail[]>
-}
+// fetchSessions, fetchSessionCards, TeachbackResultItem, fetchSessionTeachbackResults,
+// deleteStudySession moved to @/lib/studyApi.ts and @/components/SessionManager.tsx
 
 async function fetchStudyStats(documentId: string): Promise<any> {
   const res = await fetch(`${API_BASE}/study/stats/${documentId}`)
@@ -1647,179 +1615,7 @@ export function GoalsPanel({ docs }: GoalsPanelProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// SessionHistoryTab
-// ---------------------------------------------------------------------------
-
-function SessionHistoryTab() {
-  const [page, setPage] = useState(1)
-  const PAGE_SIZE = 20
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null)
-
-  const { data, isLoading, isError } = useQuery<SessionListResponse, Error>({
-    queryKey: ["study-sessions", page],
-    queryFn: () => fetchSessions(page, PAGE_SIZE),
-  })
-
-  const { data: sessionCards, isLoading: cardsLoading, isError: cardsError } = useQuery<SessionCardDetail[], Error>({
-    queryKey: ["session-cards", expandedSessionId],
-    queryFn: () => fetchSessionCards(expandedSessionId!),
-    enabled: expandedSessionId !== null,
-  })
-
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1
-
-  function formatDate(iso: string): string {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
-
-  function formatDuration(mins: number | null): string {
-    if (mins === null) return "-"
-    if (mins < 1) return "< 1 min"
-    return `${Math.round(mins)} min`
-  }
-
-  function formatAccuracy(pct: number | null): string {
-    return pct !== null ? `${pct}%` : "-"
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col gap-2">
-        {[1, 2, 3].map((n) => (
-          <div key={n} className="h-10 animate-pulse rounded-md bg-muted" />
-        ))}
-      </div>
-    )
-  }
-
-  if (isError) {
-    return (
-      <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        Failed to load session history. Please try refreshing.
-      </div>
-    )
-  }
-
-  if (!data || data.items.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-sm text-muted-foreground">
-          No study sessions recorded yet. Complete a session to see history here.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/50 text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2 font-medium">Date</th>
-              <th className="px-4 py-2 font-medium">Duration</th>
-              <th className="px-4 py-2 font-medium">Cards</th>
-              <th className="px-4 py-2 font-medium">Accuracy</th>
-              <th className="px-4 py-2 font-medium">Document</th>
-              <th className="px-4 py-2 font-medium">Mode</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((sess) => (
-              <Fragment key={sess.id}>
-                <tr
-                  className="cursor-pointer border-b border-border hover:bg-accent/30"
-                  onClick={() =>
-                    setExpandedSessionId(expandedSessionId === sess.id ? null : sess.id)
-                  }
-                >
-                  <td className="px-4 py-2 text-foreground">{formatDate(sess.started_at)}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{formatDuration(sess.duration_minutes)}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{sess.cards_reviewed}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{formatAccuracy(sess.accuracy_pct)}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{sess.document_title ?? "-"}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{sess.mode}</td>
-                </tr>
-                {expandedSessionId === sess.id && (
-                  <tr key={`${sess.id}-detail`} className="border-b border-border bg-muted/20">
-                    <td colSpan={6} className="px-4 py-3">
-                      {cardsLoading ? (
-                        <div className="flex flex-col gap-1">
-                          {[1, 2].map((n) => (
-                            <div key={n} className="h-8 animate-pulse rounded bg-muted" />
-                          ))}
-                        </div>
-                      ) : cardsError ? (
-                        <p className="text-sm text-red-600">Failed to load card details.</p>
-                      ) : !sessionCards || sessionCards.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No card events recorded for this session.</p>
-                      ) : (
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-left text-muted-foreground">
-                              <th className="pb-1 pr-4 font-medium">Question</th>
-                              <th className="pb-1 pr-4 font-medium">Rating</th>
-                              <th className="pb-1 font-medium">Result</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {sessionCards.map((card) => (
-                              <tr key={card.flashcard_id} className="border-t border-border/50">
-                                <td className="py-1 pr-4 max-w-xs truncate text-foreground">
-                                  {card.question}
-                                </td>
-                                <td className="py-1 pr-4 text-muted-foreground capitalize">{card.rating}</td>
-                                <td className="py-1">
-                                  {card.is_correct ? (
-                                    <span className="text-green-600">Correct</span>
-                                  ) : (
-                                    <span className="text-red-500">Incorrect</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="rounded border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
-          >
-            Previous
-          </button>
-          <span>Page {page} of {totalPages}</span>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="rounded border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
-          >
-            Next
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
+// SessionHistoryTab replaced by SessionManager component
 
 // ---------------------------------------------------------------------------
 // DocPicker
@@ -1855,12 +1651,14 @@ function DocPicker({
 // FlashcardManager (Standalone view for document-centric study)
 // ---------------------------------------------------------------------------
 
-function FlashcardManager({ 
-  documentId, 
-  onStartStudy 
-}: { 
-  documentId: string; 
-  onStartStudy: (filters?: any) => void 
+function FlashcardManager({
+  documentId,
+  onStartStudy,
+  onStartTeachback,
+}: {
+  documentId: string;
+  onStartStudy: (filters?: any) => void;
+  onStartTeachback: (filters?: any, resumeId?: string) => void;
 }) {
   const [page, setPage] = useState(1)
   const qc = useQueryClient()
@@ -1944,17 +1742,46 @@ function FlashcardManager({
                 </div>
               </div>
 
-              <button 
-                onClick={() => onStartStudy({ document_id: documentId })}
-                className="flex items-center justify-center gap-2 rounded-xl bg-primary py-4 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-xl active:scale-[0.98]"
-              >
-                <PlayCircle size={18} fill="currentColor" />
-                Start Studying This Document
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => onStartStudy({ document_id: documentId })}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all hover:bg-blue-700 hover:shadow-xl active:scale-[0.98]"
+                >
+                  <Zap size={18} />
+                  Flashcard Review
+                </button>
+                <button
+                  onClick={() => onStartTeachback({ document_id: documentId })}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 py-4 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition-all hover:bg-violet-700 hover:shadow-xl active:scale-[0.98]"
+                >
+                  <MessageSquare size={18} />
+                  Teach-back Session
+                </button>
+              </div>
             </div>
             {/* Subtle glow effect */}
             <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-[100px]" />
          </Card>
+      )}
+
+      {/* Always-visible study launch bar */}
+      {!(stats && (stats.due_today > 0 || stats.new_today > 0)) && cards.length > 0 && (
+        <div className="flex gap-3">
+          <button
+            onClick={() => onStartStudy({ document_id: documentId })}
+            className="flex items-center gap-2 rounded-xl border border-blue-600/30 bg-blue-600/10 px-5 py-3 text-sm font-semibold text-blue-600 transition-all hover:bg-blue-600 hover:text-white active:scale-[0.98] dark:text-blue-400 dark:hover:text-white"
+          >
+            <Zap size={16} />
+            Flashcard Review
+          </button>
+          <button
+            onClick={() => onStartTeachback({ document_id: documentId })}
+            className="flex items-center gap-2 rounded-xl border border-violet-600/30 bg-violet-600/10 px-5 py-3 text-sm font-semibold text-violet-600 transition-all hover:bg-violet-600 hover:text-white active:scale-[0.98] dark:text-violet-400 dark:hover:text-white"
+          >
+            <MessageSquare size={16} />
+            Teach-back Session
+          </button>
+        </div>
       )}
 
       <div className="flex flex-wrap items-start justify-between gap-6">
@@ -1964,7 +1791,7 @@ function FlashcardManager({
           </h2>
           <p className="text-sm text-muted-foreground">Managing {totalCards} flashcards for this document</p>
         </div>
-        
+
         <GenerateButton 
           documentId={documentId}
           sections={docData?.sections || []}
@@ -2015,6 +1842,14 @@ function FlashcardManager({
           <WeakAreasPanel documentId={documentId} onSelectSection={() => {}} />
         </div>
       </div>
+
+      {/* Session history scoped to this document */}
+      <SessionHistory
+        scope={{ kind: "document", id: documentId }}
+        onResumeTeachback={(sid) =>
+          onStartTeachback({ document_id: documentId }, sid)
+        }
+      />
     </div>
   )
 }
@@ -2030,22 +1865,19 @@ export default function Study() {
     setActiveDocument,
     activeCollectionId,
     setActiveCollectionId,
-    studySessionId,
-    setStudySessionId,
   } = useAppStore()
 
-  const [isStudying, setIsStudying] = useState(false)
-  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
-  const [isHistoryView, setIsHistoryView] = useState(false)
+  const [studyMode, setStudyMode] = useState<"flashcard" | "teachback" | null>(null)
+  const [resumeTeachbackId, setResumeTeachbackId] = useState<string | null>(null)
   const [studyFilters, setStudyFilters] = useState<any>(null)
-  
+
   const { data: collections = [], isLoading: loadingCollections } = useQuery({
     queryKey: ["collections-list"],
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/collections/tree`)
       if (!res.ok) return []
       return res.json() as Promise<any[]>
-    }
+    },
   })
 
   const { data: docList = [] } = useQuery<DocListItem[]>({
@@ -2053,122 +1885,102 @@ export default function Study() {
     queryFn: fetchDocList,
   })
 
-  const handleStartStudy = (filters?: any) => {
+  const handleStartFlashcard = (filters?: any) => {
     setStudyFilters(filters)
-    setIsStudying(true)
+    setStudyMode("flashcard")
   }
 
-  if (isStudying || resumeSessionId) {
+  const handleStartTeachback = (filters?: any, resumeId?: string) => {
+    setStudyFilters(filters ?? null)
+    setResumeTeachbackId(resumeId ?? null)
+    setStudyMode("teachback")
+  }
+
+  const handleExit = () => {
+    setStudyMode(null)
+    setResumeTeachbackId(null)
+    setStudyFilters(null)
+  }
+
+  // ---- Active session routes ------------------------------------------------
+  if (studyMode === "flashcard") {
     return (
       <StudySession
         documentId={activeDocumentId}
         collectionId={activeCollectionId}
         filters={studyFilters}
-        resumeSessionId={resumeSessionId}
-        onExit={() => {
-          setIsStudying(false)
-          setResumeSessionId(null)
-        }}
+        onExit={handleExit}
       />
     )
   }
 
+  if (studyMode === "teachback") {
+    return (
+      <TeachbackSession
+        documentId={activeDocumentId}
+        collectionId={activeCollectionId}
+        filters={studyFilters}
+        onExit={handleExit}
+        resumeSessionId={resumeTeachbackId}
+      />
+    )
+  }
+
+  // ---- Main study dashboard -------------------------------------------------
   return (
     <div className="flex h-full flex-col bg-background">
-      {/* Universal Header */}
+      {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
         <div className="flex items-center gap-8">
-          <h1 
+          <h1
             className="cursor-pointer text-xl font-bold tracking-tight text-foreground"
             onClick={() => {
               setActiveCollectionId(null)
               setActiveDocument(null)
-              setIsHistoryView(false)
             }}
           >
             Study
           </h1>
-          
-          <DocPicker 
-            docs={docList} 
-            activeId={activeDocumentId} 
+
+          <DocPicker
+            docs={docList}
+            activeId={activeDocumentId}
             onSelect={(id) => {
               setActiveDocument(id)
               if (id) setActiveCollectionId(null)
-              setIsHistoryView(false)
-            }} 
+            }}
           />
-        </div>
-        
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setIsHistoryView(!isHistoryView)}
-            className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wider transition-all ${
-              isHistoryView ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-secondary/70'
-            }`}
-          >
-            <CalendarDays size={14} />
-            History
-          </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto p-8 lg:p-12">
-        {/* Resume banner for incomplete teach-back sessions */}
-        {studySessionId && !isStudying && !resumeSessionId && (
-          <div className="mb-6 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-5 py-4">
-            <div className="flex items-center gap-3">
-              <Eye size={18} className="text-primary" />
-              <div>
-                <p className="text-sm font-medium text-foreground">You have an incomplete study session</p>
-                <p className="text-xs text-muted-foreground">Continue where you left off or view your teach-back results.</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setResumeSessionId(studySessionId)}
-                className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                Continue Session
-              </button>
-              <button
-                onClick={() => setStudySessionId(null)}
-                className="rounded-md border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isHistoryView ? (
-          <div className="mx-auto max-w-5xl">
-            <h2 className="mb-8 text-2xl font-bold tracking-tight">Recent Sessions</h2>
-            <SessionHistoryTab />
-          </div>
-        ) : activeCollectionId ? (
+        {activeCollectionId ? (
           <CollectionStudyDashboard
             collectionId={activeCollectionId}
             onBack={() => setActiveCollectionId(null)}
-            onStartStudy={handleStartStudy}
-            onGenerateFromGraph={() => {
-              // Enclave-level synthesis placeholder: 
-              // In a real app, we'd fetch all doc IDs in the collection and trigger synthesis for each.
-              // For now, let's toast that it is starting.
-              toast.info("Synthesizing enclave knowledge across documents...")
-            }}
-            onGenerateCloze={() => {
-              toast.info("Generating cloze deletions for enclave notes...")
-            }}
+            onStartStudy={handleStartFlashcard}
+            onStartTeachback={(filters, resumeId) =>
+              handleStartTeachback(filters, resumeId)
+            }
             onNavigateToCollection={(id) => setActiveCollectionId(id)}
           />
         ) : activeDocumentId ? (
-          <FlashcardManager documentId={activeDocumentId} onStartStudy={handleStartStudy} />
+          <FlashcardManager
+            documentId={activeDocumentId}
+            onStartStudy={handleStartFlashcard}
+            onStartTeachback={(f) => handleStartTeachback(f)}
+          />
         ) : (
-          /* Collection Grid - Compact Version */
+          /* Landing page: session manager + collection grid */
           <div className="flex flex-col gap-10">
+            {/* Active / completed sessions */}
+            <SessionManager
+              onContinueTeachback={(sessionId) => handleStartTeachback(null, sessionId)}
+            />
+
+            {/* Focused Enclaves heading */}
             <div className="flex flex-col gap-2 max-w-2xl">
-              <motion.h1 
+              <motion.h1
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="text-3xl font-bold tracking-tight text-foreground"
@@ -2189,7 +2001,7 @@ export default function Study() {
                 {(() => {
                   const flatten = (items: any[], parentName: string | null = null): any[] => {
                     let result: any[] = []
-                    items.forEach(item => {
+                    items.forEach((item) => {
                       result.push({ ...item, _parentName: parentName, _isNested: parentName !== null })
                       if (item.children && item.children.length > 0) {
                         result = result.concat(flatten(item.children, item.name))
@@ -2210,9 +2022,7 @@ export default function Study() {
                         setActiveDocument(null)
                       }}
                       className={`group relative cursor-pointer overflow-hidden rounded-3xl border p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl ${
-                        coll._isNested
-                          ? 'border-primary/20 bg-card/30'
-                          : 'border-border bg-card/40'
+                        coll._isNested ? "border-primary/20 bg-card/30" : "border-border bg-card/40"
                       }`}
                     >
                       {coll._isNested && (
@@ -2230,20 +2040,19 @@ export default function Study() {
                           {coll.description || "Synthesize knowledge across documents and notes."}
                         </p>
                       </div>
-                      {/* Source counts */}
                       <div className="mt-4 flex items-center gap-3">
-                        {(coll.document_count > 0 || coll.note_count > 0) ? (
+                        {coll.document_count > 0 || coll.note_count > 0 ? (
                           <>
                             {coll.document_count > 0 && (
                               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                 <BookOpen size={12} className="text-blue-500/70" />
-                                {coll.document_count} {coll.document_count === 1 ? 'doc' : 'docs'}
+                                {coll.document_count} {coll.document_count === 1 ? "doc" : "docs"}
                               </span>
                             )}
                             {coll.note_count > 0 && (
                               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                 <StickyNote size={12} className="text-amber-500/70" />
-                                {coll.note_count} {coll.note_count === 1 ? 'note' : 'notes'}
+                                {coll.note_count} {coll.note_count === 1 ? "note" : "notes"}
                               </span>
                             )}
                             {coll.children && coll.children.length > 0 && (
@@ -2266,10 +2075,10 @@ export default function Study() {
                     </motion.div>
                   ))
                 })()}
-                
+
                 <motion.button
-                   onClick={() => navigate("/notes")}
-                   className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
+                  onClick={() => navigate("/notes")}
+                  className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
                 >
                   <Plus size={24} className="group-hover:scale-110 transition-transform" />
                   <div className="text-center">

@@ -158,6 +158,7 @@ class StudySessionModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cards_reviewed: Mapped[int] = mapped_column(Integer, default=0)
