@@ -1,16 +1,16 @@
 /**
- * useStudySession -- consolidated lifecycle for a study session.
+ * useStudySession -- in-session state holder and lifecycle actions.
  *
- * Owns: start-session, StrictMode-safe single init, fetchDueCards with mode
- * limit, empty→auto-end, resume flow, unmount→auto-end-if-incomplete, and the
- * "begin next" reset used by the SessionComplete screen.
+ * This hook does NOT create sessions. Session creation happens in
+ * `prepareStudySession` (studySessionService.ts), which is called by event
+ * handlers BEFORE this component mounts. The hook receives a prepared session
+ * and manages the user's interaction with it (queue position, reviewed count,
+ * completion, exit, start-new).
  *
- * Does NOT own per-card rating/teachback state; those stay with the caller.
- *
- * This exists because StudySession and TeachbackSession previously had two
- * parallel copies of this logic, and every lifecycle bug (double session,
- * lingering IN PROGRESS, resume races, card-limit drift) had to be fixed in
- * two places. See also: I-style patterns in architecture.md.
+ * Why: prior versions created sessions inside `useEffect([])`. Any mount
+ * (StrictMode, parent key change, HMR, fast navigation) would spawn a new
+ * backend session. Moving creation out of the mount effect makes session
+ * creation strictly tied to user intent: one click, one call, one session.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -18,33 +18,25 @@ import {
   type Flashcard,
   type TeachbackResultItem,
   endSession,
-  deleteStudySession,
-  fetchDueCards,
-  fetchSessionTeachbackResults,
-  reopenSession,
-  startSession,
 } from "@/lib/studyApi"
+import {
+  type PreparedStudySession,
+  type PrepareStudySessionOptions,
+  prepareStudySession,
+} from "@/lib/studySessionService"
 import { useAppStore } from "@/store"
 
 export type SessionState = "loading" | "studying" | "complete" | "empty"
 
-export type StudyMode = "flashcard" | "teachback"
-
-export interface StudyFilters {
-  tag?: string
-  document_ids?: string[]
-  note_ids?: string[]
-}
-
-export interface UseStudySessionOptions {
-  mode: StudyMode
-  documentId?: string | null
-  collectionId?: string | null
-  filters?: StudyFilters
-  cardLimit: number
-  /** If set, the hook loads prior teach-back results and surfaces them via onResumeLoaded. */
-  resumeSessionId?: string | null
-  /** Invoked once with the prior teach-back results when resuming a session. */
+export interface UseStudySessionInput {
+  /** Session prepared by prepareStudySession. */
+  initial:
+    | { kind: "studying"; session: PreparedStudySession }
+    | { kind: "complete"; session: PreparedStudySession }
+    | { kind: "empty" }
+  /** Options used for beginNew (Start New Session after completion). */
+  scopeForBeginNew: PrepareStudySessionOptions
+  /** Invoked once after a resume so the caller can seed pending-teach-back UI. */
   onResumeLoaded?: (prev: TeachbackResultItem[]) => void
 }
 
@@ -56,169 +48,58 @@ export interface UseStudySessionResult {
   reviewed: number
   total: number
   currentCard: Flashcard | null
-  /** Mutators the caller uses to drive card-level advancement / requeue. */
   setQueue: React.Dispatch<React.SetStateAction<Flashcard[]>>
   setCurrentIndex: React.Dispatch<React.SetStateAction<number>>
   setReviewed: React.Dispatch<React.SetStateAction<number>>
   setSessionState: React.Dispatch<React.SetStateAction<SessionState>>
-  /** End the session on the backend and move to "complete". */
   completeSession: () => Promise<void>
-  /** End the session (if still open) and invoke onExit. Use from a Back button. */
   exit: (onExit: () => void) => Promise<void>
-  /** Reset all state and start a fresh session in-place (Start New Session). */
-  beginNew: () => void
+  beginNew: () => Promise<void>
 }
 
 export function useStudySession(
-  options: UseStudySessionOptions,
+  input: UseStudySessionInput,
 ): UseStudySessionResult {
-  const {
-    mode,
-    documentId,
-    collectionId,
-    filters,
-    cardLimit,
-    resumeSessionId,
-    onResumeLoaded,
-  } = options
-
-  const [sessionState, setSessionState] = useState<SessionState>("loading")
-  const [sessionId, setSessionId] = useState<string | null>(
-    resumeSessionId ?? null,
-  )
-  const [queue, setQueue] = useState<Flashcard[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [reviewed, setReviewed] = useState(0)
-
   const { setStudySessionId } = useAppStore()
 
-  const initialTotalRef = useRef<number>(0)
-  // StrictMode double-mount guard -- without this, two backend sessions are
-  // created on the first mount and the first stays "IN PROGRESS" forever.
-  const didStartRef = useRef(false)
-  // Track the last-known sessionState without triggering the unmount effect
-  // to rerun when it changes.
-  const sessionStateRef = useRef<SessionState>("loading")
+  // Seed state once from the prepared session. React's lazy-init form runs
+  // the factory exactly once; subsequent renders do not re-derive. This is
+  // the critical invariant that replaces the broken mount-side-effect.
+  const [sessionState, setSessionState] = useState<SessionState>(() =>
+    input.initial.kind === "empty" ? "empty" : input.initial.kind,
+  )
+  const [sessionId, setSessionId] = useState<string | null>(() =>
+    input.initial.kind === "empty" ? null : input.initial.session.id,
+  )
+  const [queue, setQueue] = useState<Flashcard[]>(() =>
+    input.initial.kind === "empty" ? [] : input.initial.session.queue,
+  )
+  const [currentIndex, setCurrentIndex] = useState<number>(0)
+  const [reviewed, setReviewed] = useState<number>(() =>
+    input.initial.kind === "empty" ? 0 : input.initial.session.answeredCount,
+  )
+  const [total, setTotal] = useState<number>(() =>
+    input.initial.kind === "empty" ? 0 : input.initial.session.plannedTotal,
+  )
+
+  // Fire the resume-loaded callback exactly once per component instance and
+  // sync the Zustand session id so other UI knows a session is active. The
+  // ref guard makes this StrictMode-safe: the second effect run skips the
+  // callback because the ref has already flipped.
+  const resumeDeliveredRef = useRef(false)
+  const initialRef = useRef(input.initial)
+  const onResumeLoadedRef = useRef(input.onResumeLoaded)
+  onResumeLoadedRef.current = input.onResumeLoaded
   useEffect(() => {
-    sessionStateRef.current = sessionState
-  }, [sessionState])
-  const sessionIdRef = useRef<string | null>(sessionId)
-  useEffect(() => {
-    sessionIdRef.current = sessionId
-  }, [sessionId])
-  // Track progress without retriggering the unmount effect. Used to decide
-  // whether an exit should finalize the session (no progress / all done) or
-  // leave it open so the user can Continue from session history later.
-  const reviewedRef = useRef(0)
-  useEffect(() => {
-    reviewedRef.current = reviewed
-  }, [reviewed])
-  const remainingRef = useRef(0)
-  useEffect(() => {
-    remainingRef.current = Math.max(queue.length - currentIndex, 0)
-  }, [queue.length, currentIndex])
-
-  // A session is "partially answered" when the user has answered at least one
-  // card but still has unanswered cards in the queue. Exiting such a session
-  // should leave it open (ended_at stays null) so Continue appears in history.
-  const hasPartialProgress = () =>
-    reviewedRef.current > 0 && remainingRef.current > 0
-
-  // One-time init (handles both resume and fresh start). The didStartRef guard
-  // keeps us StrictMode-safe; the `cancelled` flag suppresses state writes if
-  // React tears down before the async work settles.
-  useEffect(() => {
-    if (didStartRef.current) return
-    didStartRef.current = true
-    let cancelled = false
-
-    async function init() {
-      try {
-        if (resumeSessionId) {
-          // Resume: clear ended_at on the backend (no-op if already null),
-          // then load prior results + remaining due cards.
-          await reopenSession(resumeSessionId).catch(() => {})
-          const [prevResults, cards] = await Promise.all([
-            fetchSessionTeachbackResults(resumeSessionId),
-            fetchDueCards(documentId || null, collectionId || null, {
-              ...(filters || {}),
-              limit: cardLimit,
-            }),
-          ])
-          if (cancelled) return
-
-          onResumeLoaded?.(prevResults)
-          setReviewed(prevResults.length)
-
-          const answeredCardIds = new Set(
-            prevResults.map((r) => r.flashcard_id),
-          )
-          const remainingCards = cards.filter(
-            (c) => !answeredCardIds.has(c.id),
-          )
-          initialTotalRef.current =
-            prevResults.length + remainingCards.length
-
-          if (remainingCards.length > 0) {
-            setQueue(remainingCards)
-            setSessionState("studying")
-          } else {
-            setSessionState("complete")
-          }
-          return
-        }
-
-        const [sid, cards] = await Promise.all([
-          startSession(documentId ?? null, mode, collectionId ?? null),
-          fetchDueCards(documentId || null, collectionId || null, {
-            ...(filters || {}),
-            limit: cardLimit,
-          }),
-        ])
-        if (cancelled) {
-          void deleteStudySession(sid).catch(() => {})
-          return
-        }
-
-        setSessionId(sid)
-        setStudySessionId(sid)
-        setQueue(cards)
-        initialTotalRef.current = cards.length
-
-        if (cards.length === 0) {
-          // End immediately so no blank IN PROGRESS row lingers in history.
-          void endSession(sid).catch(() => {})
-          setSessionState("empty")
-        } else {
-          setSessionState("studying")
-        }
-      } catch {
-        if (!cancelled) setSessionState("empty")
-      }
+    if (resumeDeliveredRef.current) return
+    resumeDeliveredRef.current = true
+    const snap = initialRef.current
+    if (snap.kind === "empty") return
+    setStudySessionId(snap.session.id)
+    if (snap.session.prevResults.length > 0) {
+      onResumeLoadedRef.current?.(snap.session.prevResults)
     }
-
-    void init()
-    return () => {
-      cancelled = true
-      didStartRef.current = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Unmount safety net: if the component is destroyed mid-session (e.g. user
-  // navigates away), close the session on the backend so it doesn't linger.
-  // Exception: if the user has partial progress (answered some, still has
-  // more), keep the session open so Continue appears in history.
-  useEffect(() => {
-    return () => {
-      const sid = sessionIdRef.current
-      const state = sessionStateRef.current
-      if (sid && state !== "complete" && state !== "empty") {
-        if (reviewedRef.current > 0 && remainingRef.current > 0) return
-        void endSession(sid).catch(() => {})
-      }
-    }
-  }, [])
+  }, [setStudySessionId])
 
   const completeSession = useCallback(async () => {
     if (sessionId) {
@@ -229,57 +110,61 @@ export function useStudySession(
 
   const exit = useCallback(
     async (onExit: () => void) => {
-      if (sessionId && sessionStateRef.current !== "complete") {
-        // Keep partial-progress sessions open so they remain resumable.
-        if (!hasPartialProgress()) {
+      if (sessionId && sessionState !== "complete") {
+        const remaining = Math.max(queue.length - currentIndex, 0)
+        // Only finalise if the queue was exhausted without hitting complete.
+        // reviewed=0 and partial-progress both stay open so a later Start
+        // auto-resumes the same session instead of creating a duplicate.
+        if (reviewed > 0 && remaining === 0) {
           await endSession(sessionId).catch(() => {})
         }
       }
       setStudySessionId(null)
       onExit()
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, setStudySessionId],
+    [
+      sessionId,
+      sessionState,
+      queue.length,
+      currentIndex,
+      reviewed,
+      setStudySessionId,
+    ],
   )
 
-  const beginNew = useCallback(() => {
-    setQueue([])
-    setCurrentIndex(0)
-    setReviewed(0)
-    initialTotalRef.current = 0
-    setSessionId(null)
-    setSessionState("loading")
-    void (async () => {
-      try {
-        const [sid, cards] = await Promise.all([
-          startSession(documentId ?? null, mode, collectionId ?? null),
-          fetchDueCards(documentId || null, collectionId || null, {
-            ...(filters || {}),
-            limit: cardLimit,
-          }),
-        ])
-        setSessionId(sid)
-        setStudySessionId(sid)
-        setQueue(cards)
-        initialTotalRef.current = cards.length
-        if (cards.length === 0) {
-          void endSession(sid).catch(() => {})
-          setSessionState("empty")
-        } else {
-          setSessionState("studying")
-        }
-      } catch {
+  const beginNewInFlightRef = useRef(false)
+  const beginNew = useCallback(async () => {
+    // Begin New -> explicitly asks for a fresh session for the same scope.
+    // We still go through prepareStudySession so that auto-resume and
+    // empty-case handling are identical to the first-start path. The ref
+    // guard drops a double-click before state updates can hide the button.
+    if (beginNewInFlightRef.current) return
+    beginNewInFlightRef.current = true
+    try {
+      setSessionState("loading")
+      const outcome = await prepareStudySession(input.scopeForBeginNew)
+      if (outcome.kind === "empty") {
+        setSessionId(null)
+        setQueue([])
+        setCurrentIndex(0)
+        setReviewed(0)
+        setTotal(0)
+        setStudySessionId(null)
         setSessionState("empty")
+        return
       }
-    })()
-  }, [
-    mode,
-    documentId,
-    collectionId,
-    filters,
-    cardLimit,
-    setStudySessionId,
-  ])
+      const s = outcome.session
+      setSessionId(s.id)
+      setStudySessionId(s.id)
+      setQueue(s.queue)
+      setCurrentIndex(0)
+      setReviewed(s.answeredCount)
+      setTotal(s.plannedTotal)
+      setSessionState(outcome.kind)
+    } finally {
+      beginNewInFlightRef.current = false
+    }
+  }, [input.scopeForBeginNew, setStudySessionId])
 
   return {
     sessionState,
@@ -287,7 +172,7 @@ export function useStudySession(
     queue,
     currentIndex,
     reviewed,
-    total: initialTotalRef.current,
+    total,
     currentCard: queue[currentIndex] ?? null,
     setQueue,
     setCurrentIndex,

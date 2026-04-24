@@ -166,6 +166,10 @@ class StudySessionModel(Base):
     accuracy_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     # flashcard|teachback|socratic|synthesis
     mode: Mapped[str] = mapped_column(String, nullable=False)
+    # Planned flashcard queue captured at session start. Resume uses this to
+    # reconstruct the remaining queue instead of re-querying due cards, which
+    # would otherwise pull in cards that became due after the session began.
+    planned_card_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class ReviewEventModel(Base):

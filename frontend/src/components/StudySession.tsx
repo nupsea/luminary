@@ -24,7 +24,10 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { ClozeCard } from "@/components/ClozeCard"
-import { useStudySession } from "@/hooks/useStudySession"
+import {
+  useStudySession,
+  type UseStudySessionInput,
+} from "@/hooks/useStudySession"
 import {
   type Flashcard,
   type Rating,
@@ -365,21 +368,14 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNex
 // ---------------------------------------------------------------------------
 
 interface StudySessionProps {
-  documentId?: string | null
-  collectionId?: string | null
-  filters?: {
-    tag?: string
-    document_ids?: string[]
-    note_ids?: string[]
-  }
+  initial: UseStudySessionInput["initial"]
+  scopeForBeginNew: UseStudySessionInput["scopeForBeginNew"]
   onExit: () => void
 }
 
+export const FLASHCARD_CARD_LIMIT = 50
 
-
-const FLASHCARD_CARD_LIMIT = 50
-
-export function StudySession({ documentId, collectionId, filters, onExit }: StudySessionProps) {
+export function StudySession({ initial, scopeForBeginNew, onExit }: StudySessionProps) {
   const {
     sessionState,
     sessionId,
@@ -387,19 +383,12 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
     currentIndex,
     reviewed,
     total,
-    setQueue,
     setCurrentIndex,
     setReviewed,
     completeSession,
     exit,
     beginNew,
-  } = useStudySession({
-    mode: "flashcard",
-    documentId,
-    collectionId,
-    filters,
-    cardLimit: FLASHCARD_CARD_LIMIT,
-  })
+  } = useStudySession({ initial, scopeForBeginNew })
 
   const [showAnswer, setShowAnswer] = useState(false)
   const [correct, setCorrect] = useState(0)
@@ -409,7 +398,6 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
   const [sourceContext, setSourceContext] = useState<SourceContext | null>(null)
   const [sourceContextLoading, setSourceContextLoading] = useState(false)
   const dismissedSourceContextIds = useRef(new Set<string>())
-  const requeuedCardIds = useRef(new Set<string>())
 
   async function handleRate(rating: Rating) {
     if (!sessionId || isRating) return
@@ -430,10 +418,9 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
 
       setLastRating(rating)
 
-      if (rating === "again" && !requeuedCardIds.current.has(card.id)) {
-        requeuedCardIds.current.add(card.id)
-        setQueue((prev) => [...prev, card])
-      }
+      // A session answers each planned card exactly once. "again" means FSRS
+      // reschedules the card for a future session -- not that we re-queue it
+      // inline here, which would inflate the session beyond the planned size.
 
       // S155: lazy-fetch source context after "again" or "hard"
       if (rating === "again" || rating === "hard") {
@@ -533,9 +520,8 @@ export function StudySession({ documentId, collectionId, filters, onExit }: Stud
             setShowAnswer(false)
             setNextReviewDate(null)
             setSourceContext(null)
-            requeuedCardIds.current.clear()
             dismissedSourceContextIds.current.clear()
-            beginNew()
+            void beginNew()
           }}
         />
       </div>

@@ -26,13 +26,17 @@ import {
   Loader2,
   Mic,
   MicOff,
+  RotateCw,
   X as XIcon,
   BookOpen,
   MessageSquare,
 } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { useStudySession } from "@/hooks/useStudySession"
+import {
+  useStudySession,
+  type UseStudySessionInput,
+} from "@/hooks/useStudySession"
 import {
   type Flashcard,
   type PendingTeachback,
@@ -595,41 +599,95 @@ function TeachbackResultsPanel({
 
         const isExpanded = expandedId === tb.id
         return (
-          <div
+          <ExpandableResultRow
             key={tb.id}
-            className="rounded-lg border border-border bg-card p-4 cursor-pointer transition-colors hover:bg-accent/30"
-            onClick={() => setExpandedId(isExpanded ? null : tb.id)}
-          >
-            <div className="flex items-center justify-between">
-              <p className="flex-1 text-sm font-medium text-foreground">
-                {result.question || tb.question}
-              </p>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`rounded-full px-3 py-0.5 text-xs font-bold ${scoreBadgeClass(result.score ?? 0)}`}
-                >
-                  {result.score}/100
-                </span>
-                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </div>
-            </div>
-
-            {isExpanded && (
-              <div className="mt-3 border-t border-border pt-3">
-                {result.user_explanation && (
-                  <div className="mb-3">
-                    <p className="text-xs font-medium text-muted-foreground">Your explanation:</p>
-                    <blockquote className="mt-1 border-l-2 border-border pl-3 text-xs text-foreground/80 italic">
-                      {result.user_explanation}
-                    </blockquote>
-                  </div>
-                )}
-                <InlineTeachbackFeedback result={result} />
-              </div>
-            )}
-          </div>
+            result={result}
+            fallbackQuestion={tb.question}
+            isExpanded={isExpanded}
+            onToggle={() => setExpandedId(isExpanded ? null : tb.id)}
+          />
         )
       })}
+    </div>
+  )
+}
+
+function ExpandableResultRow({
+  result,
+  fallbackQuestion,
+  isExpanded,
+  onToggle,
+}: {
+  result: TeachbackResultItem
+  fallbackQuestion: string
+  isExpanded: boolean
+  onToggle: () => void
+}) {
+  const [showAnswer, setShowAnswer] = useState(false)
+  const hasExpected = Boolean(result.expected_answer && result.expected_answer.trim())
+
+  return (
+    <div
+      className="rounded-lg border border-border bg-card p-4 cursor-pointer transition-colors hover:bg-accent/30"
+      onClick={onToggle}
+    >
+      <div className="flex items-center justify-between">
+        <p className="flex-1 text-sm font-medium text-foreground">
+          {result.question || fallbackQuestion}
+        </p>
+        <div className="flex items-center gap-2">
+          <span
+            className={`rounded-full px-3 py-0.5 text-xs font-bold ${scoreBadgeClass(result.score ?? 0)}`}
+          >
+            {result.score}/100
+          </span>
+          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div
+          className="mt-3 border-t border-border pt-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mb-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowAnswer((v) => !v)}
+              className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+              title={showAnswer ? "Show evaluation" : "Show expected answer"}
+            >
+              <RotateCw size={11} />
+              {showAnswer ? "Evaluation" : "Answer"}
+            </button>
+          </div>
+
+          {showAnswer ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                Expected answer
+              </div>
+              <p className="whitespace-pre-wrap text-xs text-foreground">
+                {hasExpected
+                  ? result.expected_answer
+                  : "No reference answer available for this card."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {result.user_explanation && (
+                <div className="mb-3">
+                  <p className="text-xs font-medium text-muted-foreground">Your explanation:</p>
+                  <blockquote className="mt-1 border-l-2 border-border pl-3 text-xs text-foreground/80 italic">
+                    {result.user_explanation}
+                  </blockquote>
+                </div>
+              )}
+              <InlineTeachbackFeedback result={result} />
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -746,28 +804,20 @@ function SessionComplete({
 // ---------------------------------------------------------------------------
 
 interface TeachbackSessionProps {
-  documentId?: string | null
-  collectionId?: string | null
-  filters?: {
-    tag?: string
-    document_ids?: string[]
-    note_ids?: string[]
-  }
+  initial: UseStudySessionInput["initial"]
+  scopeForBeginNew: UseStudySessionInput["scopeForBeginNew"]
   onExit: () => void
-  resumeSessionId?: string | null
   subjectLabel?: string | null
 }
 
 // Teach-back is deliberate and slow; capping the queue keeps sessions focused
 // and prevents a surprise 50-question marathon when many cards are due.
-const TEACHBACK_CARD_LIMIT = 10
+export const TEACHBACK_CARD_LIMIT = 10
 
 export function TeachbackSession({
-  documentId,
-  collectionId,
-  filters,
+  initial,
+  scopeForBeginNew,
   onExit,
-  resumeSessionId,
   subjectLabel,
 }: TeachbackSessionProps) {
   const [pendingTeachbacks, setPendingTeachbacks] = useState<PendingTeachback[]>([])
@@ -785,12 +835,8 @@ export function TeachbackSession({
     exit,
     beginNew,
   } = useStudySession({
-    mode: "teachback",
-    documentId,
-    collectionId,
-    filters,
-    cardLimit: TEACHBACK_CARD_LIMIT,
-    resumeSessionId,
+    initial,
+    scopeForBeginNew,
     onResumeLoaded: (prev) => {
       setPendingTeachbacks(
         prev.map((r) => ({
@@ -896,7 +942,7 @@ export function TeachbackSession({
           onBack={() => void exit(onExit)}
           onStartNext={() => {
             setPendingTeachbacks([])
-            beginNew()
+            void beginNew()
           }}
           pendingTeachbacks={pendingTeachbacks}
         />

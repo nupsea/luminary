@@ -361,3 +361,210 @@ async def test_end_session_404_for_missing_session(test_db):
         resp = await client.post("/study/sessions/nonexistent-id/end")
 
     assert resp.status_code == 404
+
+
+async def test_start_session_persists_planned_card_ids(test_db):
+    """Planned queue is persisted so resume can reconstruct the original set."""
+    _, _factory, _ = test_db
+    ids = [str(uuid.uuid4()) for _ in range(3)]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/study/sessions/start",
+            json={"mode": "teachback", "planned_card_ids": ids},
+        )
+        sid = resp.json()["id"]
+
+        remaining = await client.get(f"/study/sessions/{sid}/remaining-cards")
+
+    assert resp.status_code == 201
+    # No flashcards exist with those IDs, so remaining cards resolves to [].
+    # The endpoint still reports planned_count so the UI can restore the
+    # progress indicator on resume.
+    assert remaining.status_code == 200
+    body = remaining.json()
+    assert body["planned_count"] == 3
+    assert body["answered_count"] == 0
+    assert body["cards"] == []
+
+
+async def test_get_open_session_returns_most_recent_match(test_db):
+    """/sessions/open returns the most recent open session for the scope."""
+    _, _factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post(
+            "/study/sessions/start",
+            json={"mode": "teachback", "document_id": doc_id},
+        )
+        first_id = first.json()["id"]
+
+        # A second, later open session for the same scope.
+        second = await client.post(
+            "/study/sessions/start",
+            json={"mode": "teachback", "document_id": doc_id},
+        )
+        second_id = second.json()["id"]
+
+        resp = await client.get(
+            "/study/sessions/open",
+            params={"mode": "teachback", "document_id": doc_id},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == second_id
+    assert first_id != second_id
+
+
+async def test_get_open_session_404_when_none_open(test_db):
+    """/sessions/open returns 404 when no open session matches."""
+    _, _factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start = await client.post(
+            "/study/sessions/start",
+            json={"mode": "teachback", "document_id": doc_id},
+        )
+        sid = start.json()["id"]
+        await client.post(f"/study/sessions/{sid}/end")
+
+        resp = await client.get(
+            "/study/sessions/open",
+            params={"mode": "teachback", "document_id": doc_id},
+        )
+
+    assert resp.status_code == 404
+
+
+async def test_get_open_session_respects_scope(test_db):
+    """An open session for document A does not match a query for document B."""
+    _, _factory, _ = test_db
+    doc_a = str(uuid.uuid4())
+    doc_b = str(uuid.uuid4())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/study/sessions/start",
+            json={"mode": "teachback", "document_id": doc_a},
+        )
+
+        resp_a = await client.get(
+            "/study/sessions/open",
+            params={"mode": "teachback", "document_id": doc_a},
+        )
+        resp_b = await client.get(
+            "/study/sessions/open",
+            params={"mode": "teachback", "document_id": doc_b},
+        )
+
+    assert resp_a.status_code == 200
+    assert resp_b.status_code == 404
+
+
+async def test_get_open_session_mode_isolation(test_db):
+    """Teach-back open session is not returned when querying flashcard mode."""
+    _, _factory, _ = test_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/study/sessions/start",
+            json={"mode": "teachback"},
+        )
+
+        resp = await client.get(
+            "/study/sessions/open",
+            params={"mode": "flashcard"},
+        )
+
+    assert resp.status_code == 404
+
+
+async def test_session_remaining_cards_deducts_flashcard_reviews(test_db):
+    """Flashcard reviews (ReviewEventModel) deduct from remaining queue."""
+    _, factory, _ = test_db
+    card1 = _make_card()
+    card2 = _make_card()
+
+    async with factory() as session:
+        session.add(card1)
+        session.add(card2)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start = await client.post(
+            "/study/sessions/start",
+            json={
+                "mode": "flashcard",
+                "planned_card_ids": [card1.id, card2.id],
+            },
+        )
+        sid = start.json()["id"]
+
+        # Rate card1 tied to this session.
+        await client.post(
+            f"/flashcards/{card1.id}/review",
+            json={"rating": "good", "session_id": sid},
+        )
+
+        resp = await client.get(f"/study/sessions/{sid}/remaining-cards")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answered_count"] == 1
+    assert body["planned_count"] == 2
+    remaining_ids = [c["id"] for c in body["cards"]]
+    assert card1.id not in remaining_ids
+    assert card2.id in remaining_ids
+
+
+async def test_session_remaining_cards_deducts_teachback_answers(test_db):
+    """After a teach-back evaluation on a planned card, it drops out of remaining."""
+    _, factory, _ = test_db
+    card1 = _make_card()
+    card2 = _make_card()
+
+    async with factory() as session:
+        session.add(card1)
+        session.add(card2)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        start = await client.post(
+            "/study/sessions/start",
+            json={
+                "mode": "teachback",
+                "planned_card_ids": [card1.id, card2.id],
+            },
+        )
+        sid = start.json()["id"]
+
+        # Simulate an already-evaluated teach-back answer on card1 tied to this session.
+        from app.models import TeachbackResultModel
+
+        async with factory() as session:
+            session.add(
+                TeachbackResultModel(
+                    id=str(uuid.uuid4()),
+                    flashcard_id=card1.id,
+                    user_explanation="explained",
+                    score=80,
+                    correct_points=[],
+                    missing_points=[],
+                    misconceptions=[],
+                    status="complete",
+                    session_id=sid,
+                )
+            )
+            await session.commit()
+
+        resp = await client.get(f"/study/sessions/{sid}/remaining-cards")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answered_count"] == 1
+    assert body["planned_count"] == 2
+    remaining_ids = [c["id"] for c in body["cards"]]
+    assert card1.id not in remaining_ids
+    assert card2.id in remaining_ids

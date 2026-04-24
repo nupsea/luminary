@@ -88,6 +88,7 @@ export async function startSession(
   documentId: string | null,
   mode: string = "flashcard",
   collectionId: string | null = null,
+  plannedCardIds: string[] | null = null,
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/study/sessions/start`, {
     method: "POST",
@@ -96,11 +97,44 @@ export async function startSession(
       document_id: documentId,
       collection_id: collectionId,
       mode,
+      planned_card_ids: plannedCardIds,
     }),
   })
   if (!res.ok) throw new Error("Failed to start session")
   const data = (await res.json()) as { id: string }
   return data.id
+}
+
+export interface SessionRemainingState {
+  answered_count: number
+  planned_count: number
+  cards: Flashcard[]
+}
+
+export async function fetchSessionRemainingCards(
+  sessionId: string,
+): Promise<SessionRemainingState> {
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/remaining-cards`,
+  )
+  if (!res.ok) return { answered_count: 0, planned_count: 0, cards: [] }
+  return res.json() as Promise<SessionRemainingState>
+}
+
+/** Most recent open session for this scope, or null if none. */
+export async function fetchOpenSession(params: {
+  mode: string
+  documentId: string | null
+  collectionId: string | null
+}): Promise<{ id: string } | null> {
+  const qs = new URLSearchParams({ mode: params.mode })
+  if (params.documentId) qs.set("document_id", params.documentId)
+  if (params.collectionId) qs.set("collection_id", params.collectionId)
+  const res = await fetch(`${API_BASE}/study/sessions/open?${qs.toString()}`)
+  if (res.status === 404) return null
+  if (!res.ok) return null
+  const data = (await res.json()) as { id: string }
+  return { id: data.id }
 }
 
 export async function fetchDueCards(

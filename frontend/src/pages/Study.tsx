@@ -47,11 +47,23 @@ import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { useAppStore } from "@/store"
-import { StudySession } from "@/components/StudySession"
-import { TeachbackSession } from "@/components/TeachbackSession"
+import {
+  FLASHCARD_CARD_LIMIT,
+  StudySession,
+} from "@/components/StudySession"
+import {
+  TEACHBACK_CARD_LIMIT,
+  TeachbackSession,
+} from "@/components/TeachbackSession"
 import { SessionManager } from "@/components/SessionManager"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
 import { SessionHistory } from "@/components/study/SessionHistory"
+import {
+  type PrepareStudySessionOptions,
+  type PreparedStudySessionOutcome,
+  type StudyMode,
+  prepareStudySession,
+} from "@/lib/studySessionService"
 
 
 // ---------------------------------------------------------------------------
@@ -300,6 +312,21 @@ async function generateFlashcards(req: {
     body: JSON.stringify(req),
   })
   if (!res.ok) throw new GenerateError(res.status, "Failed to generate flashcards")
+  return res.json() as Promise<Flashcard[]>
+}
+
+async function generateTechnicalFlashcards(req: {
+  document_id: string
+  scope: "full" | "section"
+  section_heading: string | null
+  count: number
+}): Promise<Flashcard[]> {
+  const res = await fetch(`${API_BASE}/flashcards/generate-technical`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) throw new GenerateError(res.status, "Failed to generate technical flashcards")
   return res.json() as Promise<Flashcard[]>
 }
 
@@ -1078,6 +1105,11 @@ interface GenerateButtonProps {
   }) => void
   onGenerateFromGraph: (k: number) => void
   onGenerateCloze: (sectionId: string, count: number) => void
+  onGenerateTechnical: (req: {
+    scope: "full" | "section"
+    section_heading: string | null
+    count: number
+  }) => void
   isGenerating: boolean
   isClozeGenerating: boolean
 }
@@ -1089,6 +1121,7 @@ function GenerateButton({
   onGenerate,
   onGenerateFromGraph,
   onGenerateCloze,
+  onGenerateTechnical,
   isGenerating,
   isClozeGenerating,
 }: GenerateButtonProps) {
@@ -1125,7 +1158,9 @@ function GenerateButton({
   }
 
   function handleAdvancedGenerate() {
-    if (mode === "graph" || mode === "technical") {
+    if (mode === "technical") {
+      onGenerateTechnical({ scope, section_heading: sectionHeading, count })
+    } else if (mode === "graph") {
       onGenerateFromGraph(5)
     } else if (mode === "cloze") {
       if (clozeSectionId) {
@@ -1708,6 +1743,15 @@ function FlashcardManager({
     onError: () => toast.error("Failed to generate cards"),
   })
 
+  const generateTechnicalMutation = useMutation({
+    mutationFn: generateTechnicalFlashcards,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      toast.success("Technical cards generated successfully")
+    },
+    onError: () => toast.error("Failed to generate technical cards"),
+  })
+
   return (
     <div className="flex flex-col gap-8">
       {/* Ready to Study Card for this doc */}
@@ -1799,7 +1843,10 @@ function FlashcardManager({
           onGenerate={(req) => generateMutation.mutate({ ...req, document_id: documentId })}
           onGenerateFromGraph={(_k) => {}}
           onGenerateCloze={(_sid, _count) => {}}
-          isGenerating={generateMutation.isPending}
+          onGenerateTechnical={(req) =>
+            generateTechnicalMutation.mutate({ ...req, document_id: documentId })
+          }
+          isGenerating={generateMutation.isPending || generateTechnicalMutation.isPending}
           isClozeGenerating={false}
         />
       </div>
@@ -1867,9 +1914,20 @@ export default function Study() {
     setActiveCollectionId,
   } = useAppStore()
 
-  const [studyMode, setStudyMode] = useState<"flashcard" | "teachback" | null>(null)
-  const [resumeTeachbackId, setResumeTeachbackId] = useState<string | null>(null)
-  const [studyFilters, setStudyFilters] = useState<any>(null)
+  // Study-session lifecycle lives entirely in this one state variable.
+  // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
+  // handleStartTeachback, handleExit). Session creation happens in the
+  // "preparing" phase via prepareStudySession (one user click = one call).
+  type StudyPhase =
+    | { phase: "idle" }
+    | { phase: "preparing"; mode: StudyMode }
+    | {
+        phase: "ready"
+        mode: StudyMode
+        outcome: PreparedStudySessionOutcome
+        scopeForBeginNew: PrepareStudySessionOptions
+      }
+  const [studyPhase, setStudyPhase] = useState<StudyPhase>({ phase: "idle" })
 
   const { data: collections = [], isLoading: loadingCollections } = useQuery({
     queryKey: ["collections-list"],
@@ -1885,15 +1943,55 @@ export default function Study() {
     queryFn: fetchDocList,
   })
 
-  const handleStartFlashcard = (filters?: any) => {
-    setStudyFilters(filters)
-    setStudyMode("flashcard")
+  type StudyFiltersLike = {
+    tag?: string
+    document_ids?: string[]
+    note_ids?: string[]
+  }
+  const startStudy = async (
+    mode: StudyMode,
+    filters: StudyFiltersLike | null,
+    resumeId: string | null,
+  ) => {
+    // Guard: if we are already preparing or in a ready state, ignore the
+    // click. This prevents a double-click (or a re-fired event from a
+    // downstream component) from launching two prepareStudySession calls.
+    if (studyPhase.phase !== "idle") return
+
+    setStudyPhase({ phase: "preparing", mode })
+    const options: PrepareStudySessionOptions = {
+      mode,
+      documentId: activeDocumentId ?? null,
+      collectionId: activeCollectionId ?? null,
+      filters: filters ?? undefined,
+      cardLimit:
+        mode === "teachback" ? TEACHBACK_CARD_LIMIT : FLASHCARD_CARD_LIMIT,
+      resumeSessionId: resumeId,
+    }
+    try {
+      const outcome = await prepareStudySession(options)
+      setStudyPhase({
+        phase: "ready",
+        mode,
+        outcome,
+        scopeForBeginNew: { ...options, resumeSessionId: null },
+      })
+    } catch (err) {
+      console.warn("Failed to prepare study session", err)
+      setStudyPhase({ phase: "idle" })
+      toast.error("Could not start study session. Please try again.")
+    }
   }
 
-  const handleStartTeachback = (filters?: any, resumeId?: string) => {
-    setStudyFilters(filters ?? null)
-    setResumeTeachbackId(resumeId ?? null)
-    setStudyMode("teachback")
+  const handleStartFlashcard = (filters?: StudyFiltersLike) => {
+    void startStudy("flashcard", filters ?? null, null)
+  }
+
+  const handleStartTeachback = (
+    filters?: StudyFiltersLike,
+    resumeId?: string,
+  ) => {
+    void startStudy("teachback", filters ?? null, resumeId ?? null)
   }
 
   // Walk the nested collection tree to find a name by id.
@@ -1919,31 +2017,55 @@ export default function Study() {
     activeCollectionName || activeDocTitle || null
 
   const handleExit = () => {
-    setStudyMode(null)
-    setResumeTeachbackId(null)
-    setStudyFilters(null)
+    setStudyPhase({ phase: "idle" })
   }
 
   // ---- Active session routes ------------------------------------------------
-  if (studyMode === "flashcard") {
+  if (studyPhase.phase === "preparing") {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2
+          size={32}
+          className={
+            studyPhase.mode === "teachback"
+              ? "animate-spin text-violet-500"
+              : "animate-spin text-primary"
+          }
+        />
+      </div>
+    )
+  }
+
+  if (studyPhase.phase === "ready" && studyPhase.mode === "flashcard") {
     return (
       <StudySession
-        documentId={activeDocumentId}
-        collectionId={activeCollectionId}
-        filters={studyFilters}
+        initial={
+          studyPhase.outcome.kind === "empty"
+            ? { kind: "empty" }
+            : {
+                kind: studyPhase.outcome.kind,
+                session: studyPhase.outcome.session,
+              }
+        }
+        scopeForBeginNew={studyPhase.scopeForBeginNew}
         onExit={handleExit}
       />
     )
   }
 
-  if (studyMode === "teachback") {
+  if (studyPhase.phase === "ready" && studyPhase.mode === "teachback") {
     return (
       <TeachbackSession
-        documentId={activeDocumentId}
-        collectionId={activeCollectionId}
-        filters={studyFilters}
+        initial={
+          studyPhase.outcome.kind === "empty"
+            ? { kind: "empty" }
+            : {
+                kind: studyPhase.outcome.kind,
+                session: studyPhase.outcome.session,
+              }
+        }
+        scopeForBeginNew={studyPhase.scopeForBeginNew}
         onExit={handleExit}
-        resumeSessionId={resumeTeachbackId}
         subjectLabel={subjectLabel}
       />
     )

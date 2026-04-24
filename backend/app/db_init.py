@@ -218,6 +218,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE teachback_results ADD COLUMN session_id TEXT",
             # Link study sessions to a collection for enclave-scoped history
             "ALTER TABLE study_sessions ADD COLUMN collection_id TEXT",
+            # Persist the planned queue per session so resume preserves scope
+            "ALTER TABLE study_sessions ADD COLUMN planned_card_ids JSON",
         ]:
             try:
                 await conn.execute(text(ddl))

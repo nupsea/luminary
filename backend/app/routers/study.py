@@ -127,6 +127,7 @@ class StartSessionRequest(BaseModel):
     document_id: str | None = None
     collection_id: str | None = None
     mode: str = "flashcard"
+    planned_card_ids: list[str] | None = None
 
 
 class SessionResponse(BaseModel):
@@ -775,6 +776,39 @@ async def get_gaps(
     return _compute_gaps(weak_cards, chunk_to_section)
 
 
+@router.get("/sessions/open", response_model=SessionResponse)
+async def get_open_session(
+    mode: str,
+    document_id: str | None = None,
+    collection_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> SessionResponse:
+    """Return the most recent still-open session matching this scope.
+
+    Used by the hook to auto-resume an in-progress session instead of creating
+    a duplicate when the user clicks Start. Scope match is exact: a null
+    document_id only matches sessions with null document_id.
+    """
+    stmt = select(StudySessionModel).where(
+        StudySessionModel.ended_at.is_(None),
+        StudySessionModel.mode == mode,
+    )
+    if document_id is not None:
+        stmt = stmt.where(StudySessionModel.document_id == document_id)
+    else:
+        stmt = stmt.where(StudySessionModel.document_id.is_(None))
+    if collection_id is not None:
+        stmt = stmt.where(StudySessionModel.collection_id == collection_id)
+    else:
+        stmt = stmt.where(StudySessionModel.collection_id.is_(None))
+    stmt = stmt.order_by(StudySessionModel.started_at.desc()).limit(1)
+    result = await db.execute(stmt)
+    sess = result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="No open session")
+    return SessionResponse.model_validate(sess)
+
+
 @router.post("/sessions/start", response_model=SessionResponse, status_code=201)
 async def start_session(
     req: StartSessionRequest,
@@ -789,6 +823,7 @@ async def start_session(
         cards_reviewed=0,
         cards_correct=0,
         mode=req.mode,
+        planned_card_ids=req.planned_card_ids or None,
     )
     session.add(sess)
     await session.commit()
@@ -1397,6 +1432,77 @@ async def get_session_cards(
         )
         for event, card in rows
     ]
+
+
+class SessionRemainingResponse(BaseModel):
+    answered_count: int
+    planned_count: int
+    cards: list[FlashcardResponse]
+
+
+@router.get(
+    "/sessions/{session_id}/remaining-cards",
+    response_model=SessionRemainingResponse,
+)
+async def get_session_remaining_cards(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> SessionRemainingResponse:
+    """Return the unanswered flashcards from this session's planned queue.
+
+    Used by resume so the queue reflects what was originally planned, not the
+    set of cards currently due for the scope. Also returns the count of already-
+    answered cards so the hook can restore the progress indicator on resume.
+    """
+    sess_result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = sess_result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    planned_ids: list[str] = list(sess.planned_card_ids or [])
+    if not planned_ids:
+        return SessionRemainingResponse(
+            answered_count=0, planned_count=0, cards=[]
+        )
+
+    # A card is "answered" if it has a teach-back result OR a review event for this session.
+    tb_result = await db.execute(
+        select(TeachbackResultModel.flashcard_id).where(
+            TeachbackResultModel.session_id == session_id
+        )
+    )
+    answered: set[str] = {row[0] for row in tb_result.all()}
+    rev_result = await db.execute(
+        select(ReviewEventModel.flashcard_id).where(
+            ReviewEventModel.session_id == session_id
+        )
+    )
+    answered.update(row[0] for row in rev_result.all())
+
+    # Restrict answered to planned members so the count reflects the planned queue.
+    planned_set = set(planned_ids)
+    answered_in_planned = answered & planned_set
+    remaining_ids = [cid for cid in planned_ids if cid not in answered_in_planned]
+    if not remaining_ids:
+        return SessionRemainingResponse(
+            answered_count=len(answered_in_planned),
+            planned_count=len(planned_ids),
+            cards=[],
+        )
+
+    cards_result = await db.execute(
+        select(FlashcardModel).where(FlashcardModel.id.in_(remaining_ids))
+    )
+    cards_by_id = {c.id: c for c in cards_result.scalars().all()}
+    # Preserve the original planned order.
+    ordered = [_to_response(cards_by_id[cid]) for cid in remaining_ids if cid in cards_by_id]
+    return SessionRemainingResponse(
+        answered_count=len(answered_in_planned),
+        planned_count=len(planned_ids),
+        cards=ordered,
+    )
 
 
 @router.post("/teachback", response_model=TeachbackResponse)
