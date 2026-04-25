@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   AlertCircle,
   BookOpen,
@@ -348,6 +348,49 @@ async function deleteFlashcard(id: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete flashcard")
 }
 
+async function bulkDeleteFlashcards(ids: string[]): Promise<{ deleted: number }> {
+  const res = await fetch(`${API_BASE}/flashcards/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  })
+  if (!res.ok) throw new Error("Failed to delete selected flashcards")
+  return res.json() as Promise<{ deleted: number }>
+}
+
+async function deleteAllFlashcardsForDocument(documentId: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/flashcards/document/${encodeURIComponent(documentId)}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) throw new Error("Failed to delete all flashcards")
+}
+
+async function generateFlashcardsFromGraph(
+  documentId: string,
+  k: number,
+): Promise<Flashcard[]> {
+  const res = await fetch(`${API_BASE}/flashcards/generate-from-graph`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_id: documentId, k }),
+  })
+  if (!res.ok) throw new GenerateError(res.status, "Failed to generate graph flashcards")
+  return res.json() as Promise<Flashcard[]>
+}
+
+async function generateClozeFlashcards(
+  sectionId: string,
+  count: number,
+): Promise<Flashcard[]> {
+  const res = await fetch(
+    `${API_BASE}/flashcards/cloze/${encodeURIComponent(sectionId)}?count=${count}`,
+    { method: "POST" },
+  )
+  if (!res.ok) throw new GenerateError(res.status, "Failed to generate cloze flashcards")
+  return res.json() as Promise<Flashcard[]>
+}
+
 // S153: Bloom's coverage audit API helpers
 async function fetchAudit(documentId: string): Promise<CoverageReport> {
   const res = await fetch(`${API_BASE}/flashcards/audit/${documentId}`)
@@ -405,6 +448,9 @@ interface FlashcardCardProps {
   onDelete: (id: string) => void
   isUpdating: boolean
   isDeleting: boolean
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }
 
 function FlashcardCard({
@@ -413,6 +459,9 @@ function FlashcardCard({
   onDelete,
   isUpdating,
   isDeleting,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: FlashcardCardProps) {
   const [showAnswer, setShowAnswer] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -432,7 +481,20 @@ function FlashcardCard({
   }
 
   return (
-    <Card className="flex flex-col gap-3">
+    <Card
+      className={`flex flex-col gap-3 ${selected ? "ring-2 ring-primary" : ""}`}
+    >
+      {selectionMode && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(card.id)}
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+          />
+          Select for bulk delete
+        </label>
+      )}
       {/* S188: Section heading label */}
       {card.section_heading && !editing && (
         <p className="text-xs text-muted-foreground">{card.section_heading}</p>
@@ -1696,23 +1758,26 @@ function FlashcardManager({
   onStartTeachback: (filters?: any, resumeId?: string) => void;
 }) {
   const [page, setPage] = useState(1)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState<null | "selected" | "all">(null)
   const qc = useQueryClient()
   const { data: docList = [] } = useQuery<DocListItem[]>({
     queryKey: ["study-doc-list"],
     queryFn: fetchDocList,
   })
-  
+
   const { data: stats } = useQuery({
     queryKey: ["study-stats", documentId],
     queryFn: () => fetchStudyStats(documentId),
     enabled: !!documentId,
   })
-  
+
   const { data: searchResult, isLoading: cardsLoading } = useQuery<FlashcardSearchResponse>({
     queryKey: ["flashcards-search", documentId, page],
     queryFn: () => fetchFlashcardSearch({ document_id: documentId, page, page_size: 20 }),
   })
-  
+
   const { data: docData } = useQuery<DocumentSections>({
     queryKey: ["document-sections", documentId],
     queryFn: () => fetchDocumentSections(documentId),
@@ -1723,15 +1788,68 @@ function FlashcardManager({
   const totalCards = searchResult?.total ?? 0
   const totalPages = Math.ceil(totalCards / 20)
 
+  // Reset selection when document changes (avoids deleting wrong doc's cards)
+  useEffect(() => {
+    setSelectedIds(new Set())
+    setSelectionMode(false)
+  }, [documentId])
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllOnPage() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const c of cards) next.add(c.id)
+      return next
+    })
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
   // Mutations for update, delete, generate
   const updateMutation = useMutation({
     mutationFn: (args: { id: string; data: any }) => updateFlashcard(args.id, args.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["flashcards-search"] }),
   })
-  
+
   const deleteMutation = useMutation({
     mutationFn: deleteFlashcard,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["flashcards-search"] }),
+  })
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: bulkDeleteFlashcards,
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
+      clearSelection()
+      setSelectionMode(false)
+      setConfirmBulkDelete(null)
+      toast.success(`Deleted ${res.deleted} flashcard${res.deleted === 1 ? "" : "s"}`)
+    },
+    onError: () => toast.error("Failed to delete selected flashcards"),
+  })
+
+  const deleteAllMutation = useMutation({
+    mutationFn: () => deleteAllFlashcardsForDocument(documentId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
+      clearSelection()
+      setSelectionMode(false)
+      setConfirmBulkDelete(null)
+      toast.success("All flashcards deleted for this document")
+    },
+    onError: () => toast.error("Failed to delete flashcards"),
   })
 
   const generateMutation = useMutation({
@@ -1740,7 +1858,12 @@ function FlashcardManager({
       qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success("Cards generated successfully")
     },
-    onError: () => toast.error("Failed to generate cards"),
+    onError: (err: Error) => {
+      const msg = err instanceof GenerateError && err.status === 503
+        ? "Ollama is unavailable. Start it with: ollama serve"
+        : "Failed to generate cards"
+      toast.error(msg)
+    },
   })
 
   const generateTechnicalMutation = useMutation({
@@ -1749,83 +1872,137 @@ function FlashcardManager({
       qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       toast.success("Technical cards generated successfully")
     },
-    onError: () => toast.error("Failed to generate technical cards"),
+    onError: (err: Error) => {
+      const msg = err instanceof GenerateError && err.status === 503
+        ? "Ollama is unavailable. Start it with: ollama serve"
+        : "Failed to generate technical cards"
+      toast.error(msg)
+    },
   })
+
+  const generateGraphMutation = useMutation({
+    mutationFn: ({ documentId: did, k }: { documentId: string; k: number }) =>
+      generateFlashcardsFromGraph(did, k),
+    onSuccess: (cards) => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      toast.success(
+        cards.length > 0
+          ? `Generated ${cards.length} graph card${cards.length === 1 ? "" : "s"}`
+          : "No graph relationships found for this document",
+      )
+    },
+    onError: (err: Error) => {
+      const msg = err instanceof GenerateError && err.status === 503
+        ? "Ollama is unavailable. Start it with: ollama serve"
+        : "Failed to generate graph flashcards"
+      toast.error(msg)
+    },
+  })
+
+  const generateClozeMutation = useMutation({
+    mutationFn: ({ sectionId, count }: { sectionId: string; count: number }) =>
+      generateClozeFlashcards(sectionId, count),
+    onSuccess: (cards) => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      toast.success(`Generated ${cards.length} cloze card${cards.length === 1 ? "" : "s"}`)
+    },
+    onError: (err: Error) => {
+      const msg = err instanceof GenerateError && err.status === 503
+        ? "Ollama is unavailable. Start it with: ollama serve"
+        : "Failed to generate cloze flashcards"
+      toast.error(msg)
+    },
+  })
+
+  // Hero card subtitle: branch on (due, new, zero, no cards)
+  function heroSubtitle(): string {
+    if (!stats) return ""
+    const due = stats.due_today ?? 0
+    const newCount = stats.new_today ?? 0
+    if (due > 0 && newCount > 0) {
+      return `${due} due for review and ${newCount} new card${newCount === 1 ? "" : "s"} to learn today.`
+    }
+    if (due > 0) {
+      return `You have ${due} flashcard${due === 1 ? "" : "s"} due for review today.`
+    }
+    if (newCount > 0) {
+      return `${newCount} new card${newCount === 1 ? "" : "s"} ready to learn.`
+    }
+    if (totalCards > 0) {
+      return "You're all caught up. Practice early or generate more cards."
+    }
+    return "No flashcards yet. Generate some to begin."
+  }
+
+  const dueOrNew = (stats?.due_today ?? 0) > 0 || (stats?.new_today ?? 0) > 0
+  const showHero = !!stats || totalCards > 0
+  const heroAccent = dueOrNew
+    ? "from-primary/20 to-secondary/10"
+    : totalCards > 0
+      ? "from-emerald-500/15 to-emerald-500/5"
+      : "from-muted to-muted/40"
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Ready to Study Card for this doc */}
-      {stats && (stats.due_today > 0 || stats.new_today > 0) && (
-         <Card className="relative overflow-hidden border-none bg-gradient-to-br from-primary/20 to-secondary/10 p-8 shadow-2xl transition-all hover:scale-[1.01]">
+      {/* Ready to Study hero — always visible when we have stats or cards */}
+      {showHero && (
+         <Card className={`relative overflow-hidden border-none bg-gradient-to-br ${heroAccent} p-8 shadow-2xl transition-all`}>
             <div className="flex flex-col gap-6">
               <div className="flex items-start justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-foreground">Ready to Study</h2>
-                  <p className="text-muted-foreground">You have {stats.due_today} flashcards due for review today.</p>
+                  <h2 className="text-2xl font-bold text-foreground">
+                    {dueOrNew ? "Ready to Study" : totalCards > 0 ? "All Caught Up" : "No Cards Yet"}
+                  </h2>
+                  <p className="text-muted-foreground">{heroSubtitle()}</p>
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/20 text-primary">
                   <Zap size={24} />
                 </div>
               </div>
-              
-              <div className="flex gap-4">
-                <div className="rounded-xl bg-background/50 px-4 py-2 border border-border/50">
-                  <p className="text-xs text-muted-foreground uppercase">New</p>
-                  <p className="text-lg font-bold text-foreground">{stats.new_today}</p>
-                </div>
-                <div className="rounded-xl bg-background/50 px-4 py-2 border border-border/50">
-                  <p className="text-xs text-muted-foreground uppercase">Review</p>
-                  <p className="text-lg font-bold text-foreground">{stats.due_today}</p>
-                </div>
-                <div className="flex-1 rounded-xl bg-background/50 px-4 py-2 border border-border/50">
-                  <div className="flex justify-between mb-1">
-                    <p className="text-xs text-muted-foreground uppercase">Mastery</p>
-                    <p className="text-xs font-bold text-foreground">{stats.mastery_pct}%</p>
-                  </div>
-                  <Progress value={stats.mastery_pct} className="h-1.5" />
-                </div>
-              </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => onStartStudy({ document_id: documentId })}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all hover:bg-blue-700 hover:shadow-xl active:scale-[0.98]"
-                >
-                  <Zap size={18} />
-                  Flashcard Review
-                </button>
-                <button
-                  onClick={() => onStartTeachback({ document_id: documentId })}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 py-4 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition-all hover:bg-violet-700 hover:shadow-xl active:scale-[0.98]"
-                >
-                  <MessageSquare size={18} />
-                  Teach-back Session
-                </button>
-              </div>
+              {stats && (
+                <div className="flex gap-4">
+                  <div className="rounded-xl bg-background/50 px-4 py-2 border border-border/50">
+                    <p className="text-xs text-muted-foreground uppercase">New</p>
+                    <p className="text-lg font-bold text-foreground">{stats.new_today ?? 0}</p>
+                  </div>
+                  <div className="rounded-xl bg-background/50 px-4 py-2 border border-border/50">
+                    <p className="text-xs text-muted-foreground uppercase">Review</p>
+                    <p className="text-lg font-bold text-foreground">{stats.due_today ?? 0}</p>
+                  </div>
+                  <div className="flex-1 rounded-xl bg-background/50 px-4 py-2 border border-border/50">
+                    <div className="flex justify-between mb-1">
+                      <p className="text-xs text-muted-foreground uppercase">Mastery</p>
+                      <p className="text-xs font-bold text-foreground">{stats.mastery_pct ?? 0}%</p>
+                    </div>
+                    <Progress value={stats.mastery_pct ?? 0} className="h-1.5" />
+                  </div>
+                </div>
+              )}
+
+              {totalCards > 0 && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => onStartStudy({ document_id: documentId })}
+                    disabled={!dueOrNew}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all hover:bg-blue-700 hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+                  >
+                    <Zap size={18} />
+                    {dueOrNew ? "Flashcard Review" : "Nothing Due"}
+                  </button>
+                  <button
+                    onClick={() => onStartTeachback({ document_id: documentId })}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 py-4 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition-all hover:bg-violet-700 hover:shadow-xl active:scale-[0.98]"
+                  >
+                    <MessageSquare size={18} />
+                    Teach-back Session
+                  </button>
+                </div>
+              )}
             </div>
             {/* Subtle glow effect */}
             <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-[100px]" />
          </Card>
-      )}
-
-      {/* Always-visible study launch bar */}
-      {!(stats && (stats.due_today > 0 || stats.new_today > 0)) && cards.length > 0 && (
-        <div className="flex gap-3">
-          <button
-            onClick={() => onStartStudy({ document_id: documentId })}
-            className="flex items-center gap-2 rounded-xl border border-blue-600/30 bg-blue-600/10 px-5 py-3 text-sm font-semibold text-blue-600 transition-all hover:bg-blue-600 hover:text-white active:scale-[0.98] dark:text-blue-400 dark:hover:text-white"
-          >
-            <Zap size={16} />
-            Flashcard Review
-          </button>
-          <button
-            onClick={() => onStartTeachback({ document_id: documentId })}
-            className="flex items-center gap-2 rounded-xl border border-violet-600/30 bg-violet-600/10 px-5 py-3 text-sm font-semibold text-violet-600 transition-all hover:bg-violet-600 hover:text-white active:scale-[0.98] dark:text-violet-400 dark:hover:text-white"
-          >
-            <MessageSquare size={16} />
-            Teach-back Session
-          </button>
-        </div>
       )}
 
       <div className="flex flex-wrap items-start justify-between gap-6">
@@ -1836,20 +2013,115 @@ function FlashcardManager({
           <p className="text-sm text-muted-foreground">Managing {totalCards} flashcards for this document</p>
         </div>
 
-        <GenerateButton 
+        <GenerateButton
           documentId={documentId}
           sections={docData?.sections || []}
           cards={cards}
           onGenerate={(req) => generateMutation.mutate({ ...req, document_id: documentId })}
-          onGenerateFromGraph={(_k) => {}}
-          onGenerateCloze={(_sid, _count) => {}}
+          onGenerateFromGraph={(k) => generateGraphMutation.mutate({ documentId, k })}
+          onGenerateCloze={(sectionId, count) =>
+            generateClozeMutation.mutate({ sectionId, count })
+          }
           onGenerateTechnical={(req) =>
             generateTechnicalMutation.mutate({ ...req, document_id: documentId })
           }
-          isGenerating={generateMutation.isPending || generateTechnicalMutation.isPending}
-          isClozeGenerating={false}
+          isGenerating={
+            generateMutation.isPending ||
+            generateTechnicalMutation.isPending ||
+            generateGraphMutation.isPending
+          }
+          isClozeGenerating={generateClozeMutation.isPending}
         />
       </div>
+
+      {/* Bulk selection toolbar */}
+      {totalCards > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/30 px-4 py-2 text-sm">
+          {!selectionMode ? (
+            <button
+              onClick={() => setSelectionMode(true)}
+              className="rounded border border-border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
+            >
+              Select cards
+            </button>
+          ) : (
+            <>
+              <span className="text-xs font-medium text-muted-foreground">
+                {selectedIds.size} selected
+              </span>
+              <button
+                onClick={selectAllOnPage}
+                className="rounded border border-border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
+              >
+                Select all on page
+              </button>
+              <button
+                onClick={clearSelection}
+                className="rounded border border-border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete("selected")}
+                disabled={selectedIds.size === 0 || bulkDeleteMutation.isPending}
+                className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                Delete selected ({selectedIds.size})
+              </button>
+              <button
+                onClick={() => {
+                  setSelectionMode(false)
+                  clearSelection()
+                }}
+                className="ml-auto rounded border border-border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-accent"
+              >
+                Done
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setConfirmBulkDelete("all")}
+            disabled={deleteAllMutation.isPending}
+            className="ml-auto rounded border border-red-300 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+          >
+            Delete all ({totalCards})
+          </button>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation */}
+      {confirmBulkDelete && (
+        <div className="flex items-center gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
+          <AlertCircle size={16} />
+          <span className="flex-1">
+            {confirmBulkDelete === "selected"
+              ? `Permanently delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`
+              : `Permanently delete ALL ${totalCards} flashcards for this document? This cannot be undone.`}
+          </span>
+          <button
+            onClick={() => {
+              if (confirmBulkDelete === "selected") {
+                bulkDeleteMutation.mutate(Array.from(selectedIds))
+              } else {
+                deleteAllMutation.mutate()
+              }
+            }}
+            disabled={bulkDeleteMutation.isPending || deleteAllMutation.isPending}
+            className="flex items-center gap-1 rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {(bulkDeleteMutation.isPending || deleteAllMutation.isPending) && (
+              <Loader2 size={12} className="animate-spin" />
+            )}
+            Confirm delete
+          </button>
+          <button
+            onClick={() => setConfirmBulkDelete(null)}
+            className="rounded border border-red-300 px-3 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 flex flex-col gap-4">
@@ -1858,18 +2130,21 @@ function FlashcardManager({
           ) : cards.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border py-20 bg-card/10">
               <Zap size={32} className="text-muted-foreground opacity-30" />
-              <p className="text-muted-foreground italic">No cards found. Generate some some to get started.</p>
+              <p className="text-muted-foreground italic">No cards found. Generate some to get started.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {cards.map(c => (
-                <FlashcardCard 
-                  key={c.id} 
-                  card={c} 
+                <FlashcardCard
+                  key={c.id}
+                  card={c}
                   onUpdate={(id, data) => updateMutation.mutate({ id, data })}
                   onDelete={(id) => deleteMutation.mutate(id)}
                   isUpdating={updateMutation.isPending}
                   isDeleting={deleteMutation.isPending}
+                  selectionMode={selectionMode}
+                  selected={selectedIds.has(c.id)}
+                  onToggleSelect={toggleSelect}
                 />
               ))}
             </div>
