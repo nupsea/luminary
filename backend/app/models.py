@@ -319,22 +319,35 @@ class ReadingProgressModel(Base):
 
 
 class LearningGoalModel(Base):
-    """A user-defined learning goal with a target date.
+    """S210: typed learning goal (read|recall|write|explore).
 
-    Note: any new delete path in documents.py must also delete these rows
-    (no FK CASCADE in SQLite without pragma enforcement).
+    Replaces the older document-centric goal/FSRS-readiness schema. Sessions in
+    pomodoro_sessions can attribute progress via the nullable goal_id column;
+    SQLite cannot ALTER ADD FK so referential integrity is enforced in the
+    LearningGoalsService (delete_goal NULLs out linked sessions).
     """
 
     __tablename__ = "learning_goals"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
-    # ISO date string: 'YYYY-MM-DD' — stored as TEXT for SQLite portability
-    target_date: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # read|recall|write|explore
+    goal_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # minutes|pages|cards|notes|turns -- nullable for goals with no quantitative target
+    target_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    deck_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # active|paused|completed|archived
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class CodeSnippetModel(Base):

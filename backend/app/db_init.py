@@ -221,6 +221,18 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE study_sessions ADD COLUMN collection_id TEXT",
             # Persist the planned queue per session so resume preserves scope
             "ALTER TABLE study_sessions ADD COLUMN planned_card_ids JSON",
+            # S210: typed learning goals replace the FSRS-readiness goal schema.
+            # Existing databases may already have learning_goals with the old columns
+            # (document_id NOT NULL, target_date). Add the new columns idempotently;
+            # SQLite is permissive about NOT NULL on ALTER ADD when no rows exist.
+            "ALTER TABLE learning_goals ADD COLUMN description TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN goal_type TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN target_value INTEGER",
+            "ALTER TABLE learning_goals ADD COLUMN target_unit TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN deck_id TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN collection_id TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+            "ALTER TABLE learning_goals ADD COLUMN completed_at DATETIME",
         ]:
             try:
                 await conn.execute(text(ddl))
@@ -276,6 +288,20 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS idx_collections_auto_doc_id "
                 "ON collections(auto_document_id)"
+            )
+        )
+
+        # S210: indexes for typed learning goal lookups.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_learning_goals_status "
+                "ON learning_goals(status)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_learning_goals_goal_type "
+                "ON learning_goals(goal_type)"
             )
         )
 
