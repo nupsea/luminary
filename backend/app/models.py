@@ -923,3 +923,33 @@ class FocusSessionModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class PomodoroSessionModel(Base):
+    """S208: a Pomodoro focus interval owned by the global header timer.
+
+    Status state machine: active -> paused -> active -> completed | abandoned.
+    goal_id is a free-form string until S210 adds the learning_goals FK.
+    """
+
+    __tablename__ = "pomodoro_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    focus_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    break_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    # active|paused|completed|abandoned
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    # read|recall|write|explore|none
+    surface: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    deck_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    pause_accumulated_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
+    )

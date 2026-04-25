@@ -39,6 +39,7 @@ from app.routers.images import router as images_router
 from app.routers.mastery import router as mastery_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
+from app.routers.pomodoro import router as pomodoro_router
 from app.routers.qa import router as qa_router
 from app.routers.reading import router as reading_router
 from app.routers.references import router as references_router
@@ -212,6 +213,7 @@ app.include_router(graph_router)
 app.include_router(images_router)
 app.include_router(monitoring_router)
 app.include_router(notes_router)
+app.include_router(pomodoro_router)
 app.include_router(qa_router)
 app.include_router(reading_router)
 app.include_router(references_router)
