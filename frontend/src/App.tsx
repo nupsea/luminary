@@ -17,6 +17,7 @@ import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
+import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
@@ -408,6 +409,10 @@ function AppShell() {
             </button>
           </div>
         )}
+        {/* S209: global focus timer pill -- visible on every tab */}
+        <div className="flex items-center justify-end gap-2 px-4 pt-3">
+          <FocusTimerPill />
+        </div>
         <Routes>
           <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
           <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
