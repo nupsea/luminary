@@ -67,15 +67,23 @@ def _hint_norm_prefix(hint: str) -> str:
     return _norm(hint)[:80]
 
 
-def _search(backend_url: str, question: str, limit: int) -> tuple[list[dict], int]:
+def _search(
+    backend_url: str,
+    question: str,
+    limit: int,
+    document_id: str | None = None,
+) -> tuple[list[dict], int]:
     """Call /search. Returns (all_matches_sorted_by_score_desc, http_status).
 
     On network failure or non-2xx response, returns ([], status_code_or_0).
     """
+    params: dict[str, object] = {"q": question, "limit": limit}
+    if document_id:
+        params["document_id"] = document_id
     try:
         resp = httpx.get(
             f"{backend_url}/search",
-            params={"q": question, "limit": limit},
+            params=params,
             timeout=30.0,
         )
         status = resp.status_code
@@ -114,12 +122,14 @@ def audit_dataset(
         doc_id = manifest.get(source_file)
         hint_norm = _hint_norm_prefix(hint)
 
-        matches, _status = _search(backend_url, question, limit_chunks)
+        # Scope /search to the target document when require_doc_id_match is
+        # set so the audit reflects per-document retrieval quality (S212).
+        # Otherwise call /search globally to surface stale-manifest cases.
+        scoped_doc_id = doc_id if (require_doc_id_match and doc_id) else None
+        matches, _status = _search(
+            backend_url, question, limit_chunks, document_id=scoped_doc_id
+        )
 
-        # Optionally restrict to the dataset's own document. When the manifest
-        # is stale this filter is exactly what makes run_eval go to zero -- so
-        # the default audit *does not* enforce it; it instead reports whether
-        # the chunk that contains the hint belongs to the expected document.
         considered = matches
         if require_doc_id_match and doc_id:
             considered = [m for m in matches if m.get("_doc_id") == doc_id]

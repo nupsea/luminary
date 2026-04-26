@@ -43,14 +43,23 @@ class SearchResponse(BaseModel):
 async def search(
     q: str = Query(..., min_length=1),
     content_types: str = Query(default=""),
+    document_id: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_db),
     retriever: HybridRetriever = Depends(get_retriever),
 ) -> SearchResponse:
-    """Hybrid search across all documents. Returns results grouped by document."""
+    """Hybrid search across all documents. Returns results grouped by document.
+
+    When ``document_id`` is supplied, retrieval is scoped to that single
+    document. Eval pipelines (S212) need this to measure per-document
+    retrieval quality without having the target document drowned out by
+    the rest of the corpus in global ranking.
+    """
     # Resolve document_ids for content_type filter
     document_ids: list[str] | None = None
-    if content_types:
+    if document_id:
+        document_ids = [document_id]
+    elif content_types:
         type_list = [t.strip() for t in content_types.split(",") if t.strip()]
         if type_list:
             result = await session.execute(

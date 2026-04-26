@@ -228,6 +228,13 @@ def search_chunks(backend_url: str, question: str, document_id: str | None) -> l
     intended for UI display -- it is too short for context-hint substring matching.
     """
     params: dict[str, str] = {"q": question}
+    # Scope search to the target document so the eval measures per-document
+    # retrieval quality. Without this, irrelevant corpus documents (DDIA,
+    # AI articles, etc.) drown out literary chunks in the global ranking
+    # and HR@5 collapses to noise. (S212 fix.)
+    if document_id:
+        params["document_id"] = document_id
+        params["limit"] = "20"
     try:
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=30.0)
         resp.raise_for_status()
