@@ -239,6 +239,45 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             except Exception:
                 pass  # column already exists
 
+        # S210-fix: learning_goals.document_id was originally created NOT NULL.
+        # Drop the constraint via table-rebuild (SQLite has no ALTER COLUMN).
+        lg_cols = (await conn.execute(text("PRAGMA table_info(learning_goals)"))).fetchall()
+        lg_doc_col = next((r for r in lg_cols if r[1] == "document_id"), None)
+        if lg_doc_col is not None and lg_doc_col[3] == 1:  # notnull == 1
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS learning_goals_rebuild ("
+                    " id TEXT PRIMARY KEY,"
+                    " title TEXT NOT NULL,"
+                    " description TEXT,"
+                    " goal_type TEXT,"
+                    " target_value INTEGER,"
+                    " target_unit TEXT,"
+                    " document_id TEXT,"
+                    " deck_id TEXT,"
+                    " collection_id TEXT,"
+                    " status TEXT NOT NULL DEFAULT 'active',"
+                    " created_at DATETIME,"
+                    " completed_at DATETIME"
+                    ")"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO learning_goals_rebuild"
+                    " (id, title, description, goal_type, target_value, target_unit,"
+                    "  document_id, deck_id, collection_id, status, created_at, completed_at)"
+                    " SELECT id, title, description, goal_type, target_value, target_unit,"
+                    "  document_id, deck_id, collection_id, status, created_at, completed_at"
+                    " FROM learning_goals"
+                )
+            )
+            await conn.execute(text("DROP TABLE learning_goals"))
+            await conn.execute(
+                text("ALTER TABLE learning_goals_rebuild RENAME TO learning_goals")
+            )
+            logger.info("Migrated learning_goals: dropped NOT NULL on document_id")
+
         # S161: migrate distinct group_name values into collections (idempotent).
         # Uses INSERT OR IGNORE so re-running on an already-migrated DB is safe.
         # The collection id is derived from the group_name to be deterministic across runs.

@@ -13,12 +13,12 @@ clean:
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
-	@(cd backend && uv run uvicorn app.main:app --reload --port 7820) &
+	@(cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run uvicorn app.main:app --reload --port 7820) &
 	@(cd frontend && npm run dev) &
 	@wait
 
 backend:
-	cd backend && uv run uvicorn app.main:app --reload --port 7820
+	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run uvicorn app.main:app --reload --port 7820
 
 frontend:
 	cd frontend && npm run dev

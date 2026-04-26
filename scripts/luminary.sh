@@ -42,6 +42,26 @@ if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Clear stale processes on required ports (graceful restart support)
+# ---------------------------------------------------------------------------
+_free_port() {
+    local port="$1"
+    local pid
+    pid=$(lsof -ti :"$port" 2>/dev/null)
+    if [ -n "$pid" ]; then
+        _info "Port $port in use by PID $pid — stopping it..."
+        kill "$pid" 2>/dev/null || true
+        # Give it a moment to release; force-kill if it lingers
+        sleep 1
+        pid=$(lsof -ti :"$port" 2>/dev/null)
+        [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true
+    fi
+}
+_free_port "$BACKEND_PORT"
+_free_port 5173
+_free_port 5174
+
+# ---------------------------------------------------------------------------
 # Start processes — each piped through awk for prefixed, coloured output
 # ---------------------------------------------------------------------------
 DOCKER_CONTAINER=""
