@@ -14,7 +14,6 @@ import { useEffect, useState } from "react"
 import {
   AlertCircle,
   BookOpen,
-  CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
@@ -24,7 +23,6 @@ import {
   Loader2,
   MessageSquare,
   Pencil,
-
   Plus,
   StickyNote,
   Trash2,
@@ -58,6 +56,7 @@ import {
 import { SessionManager } from "@/components/SessionManager"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
 import { SessionHistory } from "@/components/study/SessionHistory"
+import { GoalsList } from "@/components/goals/GoalsList"
 import {
   type PrepareStudySessionOptions,
   type PreparedStudySessionOutcome,
@@ -134,27 +133,6 @@ interface GapResult {
   weak_card_count: number
   avg_stability: number
   sample_questions: string[]
-}
-
-interface LearningGoal {
-  id: string
-  document_id: string
-  title: string
-  target_date: string
-  created_at: string
-}
-
-interface AtRiskCard {
-  id: string
-  question: string
-  projected_retention_pct: number
-}
-
-interface ReadinessResult {
-  on_track: boolean
-  projected_retention_pct: number
-  at_risk_card_count: number
-  at_risk_cards: AtRiskCard[]
 }
 
 interface StrugglingCard {
@@ -239,39 +217,6 @@ async function fetchGaps(documentId: string): Promise<GapResult[]> {
   const res = await fetch(`${API_BASE}/study/gaps/${documentId}`)
   if (!res.ok) return []
   return res.json() as Promise<GapResult[]>
-}
-
-async function fetchGoals(): Promise<LearningGoal[]> {
-  const res = await fetch(`${API_BASE}/goals`)
-  if (!res.ok) throw new Error("Failed to load goals")
-  return res.json() as Promise<LearningGoal[]>
-}
-
-async function createGoal(body: {
-  document_id: string
-  title: string
-  target_date: string
-}): Promise<LearningGoal> {
-  const res = await fetch(`${API_BASE}/goals`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error("Failed to create goal")
-  return res.json() as Promise<LearningGoal>
-}
-
-async function deleteGoalApi(goalId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(goalId)}`, {
-    method: "DELETE",
-  })
-  if (!res.ok) throw new Error("Failed to delete goal")
-}
-
-async function fetchReadiness(goalId: string): Promise<ReadinessResult> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(goalId)}/readiness`)
-  if (!res.ok) throw new Error("Failed to compute readiness")
-  return res.json() as Promise<ReadinessResult>
 }
 
 async function fetchStrugglingCards(documentId: string): Promise<StrugglingCard[]> {
@@ -1470,247 +1415,11 @@ function StrugglingPanel({ documentId }: StrugglingPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
-// GoalsPanel (exported so Progress tab can render it without Study tab re-implementing)
+// (S211) Old document-centric GoalsPanel removed in favour of typed-goals UI
+// in @/components/goals/GoalsList. Re-export DocListItem for Progress.tsx.
 // ---------------------------------------------------------------------------
 
-export type { LearningGoal, ReadinessResult, AtRiskCard, DocListItem }
-
-function RetentionBadge({ pct }: { pct: number }) {
-  const color =
-    pct >= 80
-      ? "bg-green-100 text-green-800 border-green-200"
-      : pct >= 60
-        ? "bg-yellow-100 text-yellow-800 border-yellow-200"
-        : "bg-red-100 text-red-800 border-red-200"
-  return (
-    <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${color}`}>
-      {pct.toFixed(1)}% projected retention
-    </span>
-  )
-}
-
-interface GoalRowProps {
-  goal: LearningGoal
-  docTitle: string
-  onDelete: (id: string) => void
-  isDeleting: boolean
-}
-
-function GoalRow({ goal, docTitle, onDelete, isDeleting }: GoalRowProps) {
-  const readinessQuery = useQuery<ReadinessResult, Error>({
-    queryKey: ["goal-readiness", goal.id],
-    queryFn: () => fetchReadiness(goal.id),
-    enabled: false,
-  })
-
-  function handleCheckReadiness() {
-    void readinessQuery.refetch()
-  }
-
-  return (
-    <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium text-foreground">{goal.title}</span>
-          <span className="text-xs text-muted-foreground">
-            {docTitle} &middot; by {goal.target_date}
-          </span>
-        </div>
-        <button
-          onClick={() => onDelete(goal.id)}
-          disabled={isDeleting}
-          className="flex-shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-          aria-label="Delete goal"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleCheckReadiness}
-          disabled={readinessQuery.isFetching}
-          className="flex items-center gap-1.5 rounded border border-border px-3 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50"
-        >
-          {readinessQuery.isFetching ? <Loader2 size={12} className="animate-spin" /> : <CalendarDays size={12} />}
-          Check Readiness
-        </button>
-
-        {readinessQuery.isError && (
-          <span className="flex items-center gap-1 text-xs text-red-600">
-            <AlertCircle size={12} />
-            Failed to compute readiness
-          </span>
-        )}
-        {readinessQuery.data && <RetentionBadge pct={readinessQuery.data.projected_retention_pct} />}
-      </div>
-
-      {readinessQuery.data && readinessQuery.data.at_risk_card_count > 0 && (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            {readinessQuery.data.at_risk_card_count} at-risk card{readinessQuery.data.at_risk_card_count !== 1 ? "s" : ""}
-          </span>
-          <ul className="flex flex-col gap-1">
-            {readinessQuery.data.at_risk_cards.slice(0, 5).map((c) => (
-              <li key={c.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="truncate flex-1">{c.question}</span>
-                <span className="flex-shrink-0 text-red-600">{c.projected_retention_pct.toFixed(0)}%</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {readinessQuery.data && readinessQuery.data.at_risk_card_count === 0 && (
-        <p className="text-xs text-green-700">All cards on track for this goal.</p>
-      )}
-    </div>
-  )
-}
-
-export interface GoalsPanelProps {
-  docs: DocListItem[]
-}
-
-export function GoalsPanel({ docs }: GoalsPanelProps) {
-  const qc = useQueryClient()
-  const [title, setTitle] = useState("")
-  const [docId, setDocId] = useState("")
-  const [targetDate, setTargetDate] = useState("")
-  const [formError, setFormError] = useState<string | null>(null)
-
-  const goalsQuery = useQuery<LearningGoal[], Error>({
-    queryKey: ["goals"],
-    queryFn: fetchGoals,
-  })
-
-  const createMutation = useMutation({
-    mutationFn: createGoal,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["goals"] })
-      setTitle("")
-      setDocId("")
-      setTargetDate("")
-      setFormError(null)
-    },
-    onError: () => setFormError("Failed to create goal. Please try again."),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: deleteGoalApi,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["goals"] })
-    },
-    onError: () => toast.error("Failed to delete goal"),
-  })
-
-  function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    setFormError(null)
-    if (!title.trim()) return setFormError("Title is required")
-    if (!docId) return setFormError("Select a document")
-    if (!targetDate) return setFormError("Pick a target date")
-    createMutation.mutate({ document_id: docId, title: title.trim(), target_date: targetDate })
-  }
-
-  const docMap = new Map(docs.map((d) => [d.id, d.title]))
-
-  return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold text-foreground">Learning Goals</h2>
-
-      {/* Creation form */}
-      <form onSubmit={handleCreate} className="flex flex-col gap-3 rounded-md border border-border bg-muted/30 p-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
-          <div className="flex flex-col gap-1 flex-1">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-title">
-              Goal title
-            </label>
-            <input
-              id="goal-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder='e.g. "Master The Time Machine"'
-              className="rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-doc">
-              Document
-            </label>
-            <select
-              id="goal-doc"
-              value={docId}
-              onChange={(e) => setDocId(e.target.value)}
-              className="rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="">Select document</option>
-              {docs.map((d) => (
-                <option key={d.id} value={d.id}>{d.title}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-date">
-              Target date
-            </label>
-            <input
-              id="goal-date"
-              type="date"
-              value={targetDate}
-              onChange={(e) => setTargetDate(e.target.value)}
-              className="rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={createMutation.isPending}
-            className="flex items-center gap-2 rounded bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {createMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Add Goal
-          </button>
-        </div>
-        {formError && (
-          <p className="flex items-center gap-1 text-xs text-red-600">
-            <AlertCircle size={12} />
-            {formError}
-          </p>
-        )}
-      </form>
-
-      {/* Goal list */}
-      {goalsQuery.isLoading ? (
-        <div className="flex flex-col gap-2">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-24 animate-pulse rounded-md bg-muted" />
-          ))}
-        </div>
-      ) : goalsQuery.isError ? (
-        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <AlertCircle size={14} />
-          Failed to load goals. Please try refreshing.
-        </div>
-      ) : goalsQuery.data && goalsQuery.data.length === 0 ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">
-          No goals yet. Add one above.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {goalsQuery.data?.map((goal) => (
-            <GoalRow
-              key={goal.id}
-              goal={goal}
-              docTitle={docMap.get(goal.document_id) ?? goal.document_id}
-              onDelete={(id) => deleteMutation.mutate(id)}
-              isDeleting={deleteMutation.isPending}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
+export type { DocListItem }
 
 // SessionHistoryTab replaced by SessionManager component
 
@@ -2391,8 +2100,11 @@ export default function Study() {
             onStartTeachback={(f) => handleStartTeachback(f)}
           />
         ) : (
-          /* Landing page: session manager + collection grid */
+          /* Landing page: goals + session manager + collection grid */
           <div className="flex flex-col gap-10">
+            {/* (S211) Goals sub-section -- typed learning goals + progress */}
+            <GoalsList />
+
             <SessionManager
               onContinueTeachback={(sessionId, documentId, collectionId) => {
                 if (documentId) setActiveDocument(documentId)

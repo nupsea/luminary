@@ -5,6 +5,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   ChevronDown,
   Pause,
   Play,
@@ -33,6 +34,11 @@ import {
   useFocusStore,
   writeSnapshot,
 } from "@/store/focus"
+import { type Goal, listGoals } from "@/lib/goalsApi"
+import {
+  GOAL_TYPE_LABEL,
+  surfaceMismatchWarning,
+} from "@/components/goals/goalTypeMeta"
 
 const POMODORO_STATS_KEY = ["pomodoro-stats"] as const
 
@@ -91,6 +97,7 @@ export function FocusTimerPill() {
   const setMuted = useFocusStore((s) => s.setMuted)
   const setSurface = useFocusStore((s) => s.setSurface)
   const setError = useFocusStore((s) => s.setError)
+  const setGoalId = useFocusStore((s) => s.setGoalId)
   const hydrate = useFocusStore((s) => s.hydrate)
 
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -104,6 +111,22 @@ export function FocusTimerPill() {
     staleTime: 60_000,
     retry: 1,
   })
+
+  // (S211) active goals for the Attach-to-goal select. Only fetched when the
+  // popover is open to keep idle traffic minimal.
+  const goalsQuery = useQuery<Goal[]>({
+    queryKey: ["goals", "active"],
+    queryFn: () => listGoals("active"),
+    staleTime: 30_000,
+    enabled: popoverOpen,
+  })
+
+  const selectedGoal: Goal | null = (goalsQuery.data ?? []).find(
+    (g) => g.id === goalId,
+  ) ?? null
+  const mismatchWarning = selectedGoal
+    ? surfaceMismatchWarning(selectedGoal.goal_type, surface)
+    : null
 
   // ---------------------------------------------------------------------
   // Mount-time hydration: reconcile localStorage + GET /pomodoro/active.
@@ -197,6 +220,13 @@ export function FocusTimerPill() {
           if (!muted) playChime()
           enterBreak(breakMinutes * 60)
           await qc.invalidateQueries({ queryKey: POMODORO_STATS_KEY })
+          // (S211) refresh goal lists/progress when a session completes so the
+          // open GoalsList and GoalDetailPanel reflect the new state.
+          await qc.invalidateQueries({ queryKey: ["goals"] })
+          if (goalId) {
+            await qc.invalidateQueries({ queryKey: ["goal-progress", goalId] })
+            await qc.invalidateQueries({ queryKey: ["goal-sessions", goalId] })
+          }
         } catch (err) {
           setError(`Could not complete session: ${String(err)}`)
         } finally {
@@ -206,7 +236,7 @@ export function FocusTimerPill() {
     } else if (phase === "break") {
       enterIdle()
     }
-  }, [secondsLeft, phase, sessionId, muted, breakMinutes, qc, enterBreak, enterIdle, setError])
+  }, [secondsLeft, phase, sessionId, muted, breakMinutes, qc, enterBreak, enterIdle, setError, goalId])
 
   // ---------------------------------------------------------------------
   // Action handlers
@@ -478,6 +508,44 @@ export function FocusTimerPill() {
             Surface: <span className="font-mono">{surface}</span>
             {" -- inferred from the active tab."}
           </p>
+
+          {/* (S211) Attach-to-goal select */}
+          <div className="mt-3 flex flex-col gap-1">
+            <label
+              htmlFor="focus-attach-goal"
+              className="text-[10px] uppercase tracking-wide text-muted-foreground"
+            >
+              Attach to goal
+            </label>
+            <select
+              id="focus-attach-goal"
+              value={goalId ?? ""}
+              onChange={(e) => setGoalId(e.target.value || null)}
+              disabled={phase !== "idle" || goalsQuery.isLoading}
+              className="rounded-md border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">No goal</option>
+              {(goalsQuery.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.title} ({GOAL_TYPE_LABEL[g.goal_type]})
+                </option>
+              ))}
+            </select>
+            {goalsQuery.isError && (
+              <span role="alert" className="text-[10px] text-destructive">
+                Could not load goals.
+              </span>
+            )}
+            {mismatchWarning && (
+              <div
+                role="alert"
+                className="mt-1 flex items-start gap-1 rounded-md border border-amber-300/60 bg-amber-50 px-2 py-1 text-[10px] text-amber-800 dark:bg-amber-950/20 dark:text-amber-200"
+              >
+                <AlertTriangle size={10} className="mt-[2px] shrink-0" />
+                <span>{mismatchWarning}</span>
+              </div>
+            )}
+          </div>
 
           {phase === "idle" && (
             <button
