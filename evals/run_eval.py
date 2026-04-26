@@ -139,6 +139,23 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
     return None
 
 
+def is_document_alive(backend_url: str, doc_id: str) -> bool:
+    """Return True iff GET /documents/{doc_id}/status returns 2xx.
+
+    Used to detect a stale manifest entry: when the user has rebuilt the
+    backend database (or deleted documents), the cached doc_id in
+    evals/golden/manifest.json points to a row that no longer exists. If
+    we trust the stale ID, ``search_chunks`` will filter /search results
+    to the dead doc_id and return an empty list -- the exact failure mode
+    that produced HR@5=0.0 across every book dataset (S212 root cause).
+    """
+    try:
+        resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
+        return 200 <= resp.status_code < 300
+    except Exception:
+        return False
+
+
 def lookup_document_by_filename(backend_url: str, source_file: str) -> str | None:
     """Return the document_id for an already-ingested file, or None if not found.
 
@@ -171,8 +188,16 @@ def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]
     matching the source filename stem.  This prevents duplicate documents on
     repeated eval runs when manifest.json was deleted or never written.
     """
-    if source_file in manifest:
-        return manifest[source_file]
+    cached = manifest.get(source_file)
+    if cached and is_document_alive(backend_url, cached):
+        return cached
+    if cached:
+        # Manifest entry is stale (404 on /documents/{id}/status) -- drop it
+        # so we can re-resolve or re-ingest. This single check is the S212
+        # baseline-fix: prior to it, a stale ID caused HR@5=0.0 silently.
+        print(f"  Manifest entry for {source_file} is stale ({cached}); dropping and re-resolving")
+        manifest.pop(source_file, None)
+        save_manifest(manifest)
 
     # Check whether the backend already has this document before re-ingesting
     doc_id = lookup_document_by_filename(backend_url, source_file)
