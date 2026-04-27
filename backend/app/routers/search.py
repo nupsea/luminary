@@ -46,6 +46,7 @@ async def search(
     document_id: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
     hyde: bool = Query(default=False),
+    rerank: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     retriever: HybridRetriever = Depends(get_retriever),
 ) -> SearchResponse:
@@ -59,6 +60,12 @@ async def search(
     When ``hyde`` is true, the retriever calls the local LLM to generate a
     hypothetical answer and uses ``"<q> <answer>"`` for retrieval. Slower
     by one LLM call (~1s) but bridges question/answer phrasing divergence.
+
+    When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
+    cross-encoder and the top-N returned. Adds ~100-300ms per query (CPU)
+    but recovers answer chunks whose vocabulary diverges from the
+    question's surface form -- the remaining S212 failure mode after
+    HyDE. Local-first per I-16. Fails soft on any reranker error.
     """
     # Resolve document_ids for content_type filter
     document_ids: list[str] | None = None
@@ -75,7 +82,9 @@ async def search(
                 return SearchResponse(results=[])
 
     # Hybrid retrieval (vector + BM25)
-    scored_chunks = await retriever.retrieve(q, document_ids=document_ids, k=limit, hyde=hyde)
+    scored_chunks = await retriever.retrieve(
+        q, document_ids=document_ids, k=limit, hyde=hyde, rerank=rerank
+    )
 
     if not scored_chunks:
         return SearchResponse(results=[])

@@ -226,6 +226,7 @@ def search_chunks(
     document_id: str | None,
     *,
     hyde: bool = False,
+    rerank: bool = False,
 ) -> list[str]:
     """Run GET /search and return a list of chunk texts (up to top 5).
 
@@ -236,6 +237,9 @@ def search_chunks(
     When *hyde* is True, asks /search to do HyDE-style query expansion via
     the local LLM. Adds ~1-2s latency per call but bridges question/answer
     phrasing divergence. (S212 iteration 4 fix.)
+
+    When *rerank* is True, asks /search to cross-encoder rerank the top-50
+    RRF candidates. Adds ~100-300ms per call (CPU). (S212 iteration 5.)
     """
     params: dict[str, str] = {"q": question}
     # Scope search to the target document so the eval measures per-document
@@ -247,9 +251,12 @@ def search_chunks(
         params["limit"] = "20"
     if hyde:
         params["hyde"] = "true"
+    if rerank:
+        params["rerank"] = "true"
     try:
-        # HyDE adds an LLM call to /search, so allow more time per request.
-        request_timeout = 60.0 if hyde else 30.0
+        # HyDE adds an LLM call to /search; rerank adds a cross-encoder pass.
+        # Either way allow more time per request than the bare hybrid path.
+        request_timeout = 60.0 if (hyde or rerank) else 30.0
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=request_timeout)
         resp.raise_for_status()
         body = resp.json()
@@ -451,6 +458,16 @@ def main() -> None:
             "LLM call per question (~1-2s, local Ollama)."
         ),
     )
+    parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help=(
+            "Enable cross-encoder reranking of the top-50 RRF candidates "
+            "(local sentence-transformers, ~100-300ms per question). Catches "
+            "answer chunks whose vocabulary diverges from the question's "
+            "surface form. (S212 iteration 5.)"
+        ),
+    )
     args = parser.parse_args()
 
     rows = load_golden(args.dataset)
@@ -474,7 +491,9 @@ def main() -> None:
         doc_id = source_to_doc_id.get(source_file)
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
-        chunks = search_chunks(args.backend_url, question, doc_id, hyde=args.hyde)
+        chunks = search_chunks(
+            args.backend_url, question, doc_id, hyde=args.hyde, rerank=args.rerank
+        )
 
         # For LLM scoring, also call /qa if model is specified
         answer = ""

@@ -2,7 +2,8 @@ import asyncio
 import logging
 import re
 from collections import defaultdict
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from sqlalchemy import text
 
@@ -20,6 +21,18 @@ _DIVERSITY_THRESHOLD = 0.6
 _EXPANSION_TYPES = {"book", "conversation", "notes"}
 # Score multiplier for neighbour chunks added by context expansion.
 _EXPANSION_SCORE_FACTOR = 0.75
+
+# Cross-encoder reranker (S212 iter 5). Direct query/chunk semantic scoring
+# complements RRF: when question phrasing diverges from answer phrasing, a
+# cross-encoder still surfaces chunks that contain the answer fact. Local-first
+# per I-16 -- runs on CPU, ~80MB model, no external service. The model is
+# loaded lazily on first use; failures fail-soft to the original RRF order so
+# a missing model never breaks /search.
+_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# Top-N RRF candidates fed into the reranker. 50 is generous enough for the
+# answer chunk to be reachable when its rank in either vector or BM25 is in
+# the 30s, while keeping cross-encoder latency under ~250ms per query on CPU.
+_RERANK_CANDIDATE_POOL = 50
 
 # HyDE (Hypothetical Document Embeddings) prompt -- generates a brief, plausible
 # answer to the user's question so retrieval can match on the *answer's*
@@ -261,6 +274,91 @@ async def _expand_context(
     return expanded[: k * 2]
 
 
+class _CrossEncoderReranker:
+    """Lazy singleton wrapping the sentence-transformers CrossEncoder.
+
+    Held at module level so the (slow) model load happens once per process.
+    The model file is cached under ``$DATA_DIR/models/ms-marco-minilm`` -- same
+    pattern as the embedder so all ML weights live under one folder.
+    """
+
+    def __init__(self) -> None:
+        self._model: Any = None
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        from sentence_transformers import CrossEncoder  # noqa: PLC0415
+
+        from app.config import get_settings  # noqa: PLC0415
+
+        settings = get_settings()
+        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "ms-marco-minilm"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        self._model = CrossEncoder(_RERANK_MODEL, cache_folder=str(cache_dir), device="cpu")
+        logger.info("Loaded cross-encoder reranker %s", _RERANK_MODEL)
+
+    def score(self, query: str, texts: list[str]) -> list[float]:
+        self._load()
+        if not texts:
+            return []
+        pairs = [(query, t) for t in texts]
+        raw = self._model.predict(pairs, batch_size=32, show_progress_bar=False)
+        return [float(s) for s in raw]
+
+
+_reranker: _CrossEncoderReranker | None = None
+
+
+def _get_reranker() -> _CrossEncoderReranker:
+    global _reranker
+    if _reranker is None:
+        _reranker = _CrossEncoderReranker()
+    return _reranker
+
+
+def _rerank_candidates(
+    query: str,
+    candidates: list[ScoredChunk],
+    k: int,
+) -> list[ScoredChunk]:
+    """Re-score *candidates* with a cross-encoder and return the top *k*.
+
+    The cross-encoder reads each (query, chunk_text) pair jointly, unlike
+    bi-encoder retrieval which embeds them independently. This catches
+    chunks whose vocabulary diverges from the question's surface form but
+    semantically answer it -- the dominant S212 failure mode.
+
+    Fails soft: any model load or inference error logs a warning and falls
+    back to ``candidates[:k]`` so retrieval is never harder than the no-rerank
+    baseline.
+    """
+    if not candidates:
+        return candidates
+    try:
+        scores = _get_reranker().score(query, [c.text for c in candidates])
+    except Exception as exc:
+        logger.warning("rerank failed, falling back to RRF order: %s", exc)
+        return candidates[:k]
+
+    rescored = [
+        ScoredChunk(
+            chunk_id=c.chunk_id,
+            document_id=c.document_id,
+            text=c.text,
+            section_heading=c.section_heading,
+            page=c.page,
+            score=s,
+            source=c.source,
+            chunk_index=c.chunk_index,
+            speaker=c.speaker,
+        )
+        for c, s in zip(candidates, scores, strict=True)
+    ]
+    rescored.sort(key=lambda c: c.score, reverse=True)
+    return rescored[:k]
+
+
 async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
     """Generate a hypothetical answer to *query* and return *query + " " + answer*.
 
@@ -474,6 +572,7 @@ class HybridRetriever:
         k: int,
         *,
         hyde: bool = False,
+        rerank: bool = False,
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
 
@@ -491,6 +590,15 @@ class HybridRetriever:
         (S212): the hypothetical contains likely answer vocabulary that
         the bare question lacks. Falls back to the original query on LLM
         failure so retrieval is never harder than the no-hyde baseline.
+
+        When *rerank* is True, the top-N RRF candidates are re-scored by a
+        cross-encoder and the top-k of that re-ranking is returned. The
+        cross-encoder reads (query, chunk) pairs jointly, so it catches
+        answer chunks whose vocabulary diverges from the question's surface
+        form -- the dominant remaining S212 failure mode. Diversification
+        is skipped when reranking (the cross-encoder already optimises for
+        relevance, and section breadth would dilute the rerank signal).
+        Fails soft: any reranker error returns the RRF order unchanged.
         """
         scoped_single_doc = bool(document_ids) and len(document_ids or []) == 1
         # Widen the candidate pool when scoped to a single document. With a
@@ -498,22 +606,38 @@ class HybridRetriever:
         # a single book of ~500 chunks where the question phrasing diverges
         # from the answer phrasing, the right chunk can sit at rank 25-40
         # in vector or BM25 alone and never reach RRF (S212).
-        candidate_pool = 50 if scoped_single_doc else 20
+        # When rerank=True we always need a wide pool (50) so the cross-encoder
+        # has enough headroom to recover answer chunks at deep ranks.
+        if rerank:
+            candidate_pool = _RERANK_CANDIDATE_POOL
+        elif scoped_single_doc:
+            candidate_pool = 50
+        else:
+            candidate_pool = 20
 
         search_query = await _hyde_expand(query) if hyde else query
 
         with trace_retrieval("hybrid", query=query) as span:
             span.set_attribute("retrieval.hyde", hyde)
+            span.set_attribute("retrieval.rerank", rerank)
             vector_results, keyword_results = await asyncio.gather(
                 asyncio.to_thread(self.vector_search, search_query, document_ids, candidate_pool),
                 self.keyword_search(search_query, document_ids, k=candidate_pool),
             )
+            # When reranking, ask rrf_merge for the full candidate pool so the
+            # cross-encoder can re-score them. Skip diversification regardless
+            # of single-doc scope -- relevance reranking and section breadth
+            # are orthogonal goals; mixing them dilutes the rerank signal.
+            merge_k = candidate_pool if rerank else k
+            diversify = (not rerank) and (not scoped_single_doc)
             results = self.rrf_merge(
                 vector_results,
                 keyword_results,
-                k=k,
-                diversify=not scoped_single_doc,
+                k=merge_k,
+                diversify=diversify,
             )
+            if rerank:
+                results = await asyncio.to_thread(_rerank_candidates, query, results, k)
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:

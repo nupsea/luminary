@@ -205,6 +205,42 @@ def test_search_hyde_default_false():
     assert call_kwargs.get("hyde") is False
 
 
+def test_search_rerank_flag_passes_through_to_retriever():
+    """?rerank=true forwards rerank=True to retriever.retrieve (S212 iter 5)."""
+    chunks = [_make_chunk("c1", "doc-a", 0.9)]
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=chunks)
+    session = _mock_session([[("doc-a", "Paper A", "paper")]])
+
+    app.dependency_overrides[get_db] = _db_override(session)
+    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
+
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test&rerank=true")
+
+    assert resp.status_code == 200
+    call_kwargs = retriever.retrieve.call_args.kwargs
+    assert call_kwargs.get("rerank") is True
+
+
+def test_search_rerank_default_false():
+    """When rerank is not passed, retriever receives rerank=False."""
+    chunks = [_make_chunk("c1", "doc-a", 0.9)]
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=chunks)
+    session = _mock_session([[("doc-a", "Paper A", "paper")]])
+
+    app.dependency_overrides[get_db] = _db_override(session)
+    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
+
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test")
+
+    assert resp.status_code == 200
+    call_kwargs = retriever.retrieve.call_args.kwargs
+    assert call_kwargs.get("rerank") is False
+
+
 def test_search_result_fields():
     """Result items contain all expected fields with correct types."""
     chunks = [_make_chunk("c1", "doc-a", 0.876)]
