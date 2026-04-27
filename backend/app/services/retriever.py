@@ -365,8 +365,17 @@ class HybridRetriever:
         vector_results: list[ScoredChunk],
         keyword_results: list[ScoredChunk],
         k: int = 10,
+        *,
+        diversify: bool = True,
     ) -> list[ScoredChunk]:
-        """Reciprocal Rank Fusion — combine, re-rank, then apply section diversity."""
+        """Reciprocal Rank Fusion — combine, re-rank, then apply section diversity.
+
+        When ``diversify=False``, returns the top-k by RRF score with no
+        section/speaker re-ranking. Use this for focused per-document
+        queries where breadth is undesirable -- diversification trades
+        high-scoring chunks for section variety, which collapses HR@5
+        when the question targets one section (S212 fix).
+        """
         scores: dict[str, float] = {}
         meta: dict[str, ScoredChunk] = {}
         sources: dict[str, set[str]] = {}
@@ -406,6 +415,8 @@ class HybridRetriever:
                 )
             )
 
+        if not diversify:
+            return candidates[:k]
         return _diversify(candidates, k)
 
     async def retrieve(
@@ -414,13 +425,34 @@ class HybridRetriever:
         document_ids: list[str] | None,
         k: int,
     ) -> list[ScoredChunk]:
-        """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion."""
+        """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
+
+        Diversity re-ranking is disabled when the query is scoped to a
+        single document. In that case the user is asking a focused
+        question and wants the highest-scoring chunks, not section
+        breadth -- the diversifier was authored for broad cross-document
+        queries where variety helps. Without this skip, top-scored
+        chunks from one chapter get bumped down by less-relevant chunks
+        from elsewhere in the same book and HR@5 collapses (S212).
+        """
+        scoped_single_doc = bool(document_ids) and len(document_ids or []) == 1
+        # Widen the candidate pool when scoped to a single document. With a
+        # cross-document corpus, 20+20 leaves enough headroom for RRF; with
+        # a single book of ~500 chunks where the question phrasing diverges
+        # from the answer phrasing, the right chunk can sit at rank 25-40
+        # in vector or BM25 alone and never reach RRF (S212).
+        candidate_pool = 50 if scoped_single_doc else 20
         with trace_retrieval("hybrid", query=query) as span:
             vector_results, keyword_results = await asyncio.gather(
-                asyncio.to_thread(self.vector_search, query, document_ids, 20),
-                self.keyword_search(query, document_ids, k=20),
+                asyncio.to_thread(self.vector_search, query, document_ids, candidate_pool),
+                self.keyword_search(query, document_ids, k=candidate_pool),
             )
-            results = self.rrf_merge(vector_results, keyword_results, k=k)
+            results = self.rrf_merge(
+                vector_results,
+                keyword_results,
+                k=k,
+                diversify=not scoped_single_doc,
+            )
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:
