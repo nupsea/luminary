@@ -45,6 +45,7 @@ async def search(
     content_types: str = Query(default=""),
     document_id: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
+    hyde: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     retriever: HybridRetriever = Depends(get_retriever),
 ) -> SearchResponse:
@@ -54,6 +55,10 @@ async def search(
     document. Eval pipelines (S212) need this to measure per-document
     retrieval quality without having the target document drowned out by
     the rest of the corpus in global ranking.
+
+    When ``hyde`` is true, the retriever calls the local LLM to generate a
+    hypothetical answer and uses ``"<q> <answer>"`` for retrieval. Slower
+    by one LLM call (~1s) but bridges question/answer phrasing divergence.
     """
     # Resolve document_ids for content_type filter
     document_ids: list[str] | None = None
@@ -70,7 +75,7 @@ async def search(
                 return SearchResponse(results=[])
 
     # Hybrid retrieval (vector + BM25)
-    scored_chunks = await retriever.retrieve(q, document_ids=document_ids, k=limit)
+    scored_chunks = await retriever.retrieve(q, document_ids=document_ids, k=limit, hyde=hyde)
 
     if not scored_chunks:
         return SearchResponse(results=[])

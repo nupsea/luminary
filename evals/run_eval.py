@@ -220,12 +220,22 @@ def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]
 # ---------------------------------------------------------------------------
 
 
-def search_chunks(backend_url: str, question: str, document_id: str | None) -> list[str]:
+def search_chunks(
+    backend_url: str,
+    question: str,
+    document_id: str | None,
+    *,
+    hyde: bool = False,
+) -> list[str]:
     """Run GET /search and return a list of chunk texts (up to top 5).
 
     Uses the ``text`` field (full chunk text, up to 2000 chars) returned by the
     search API.  The legacy ``text_excerpt`` field is only 200 chars and is
     intended for UI display -- it is too short for context-hint substring matching.
+
+    When *hyde* is True, asks /search to do HyDE-style query expansion via
+    the local LLM. Adds ~1-2s latency per call but bridges question/answer
+    phrasing divergence. (S212 iteration 4 fix.)
     """
     params: dict[str, str] = {"q": question}
     # Scope search to the target document so the eval measures per-document
@@ -235,8 +245,12 @@ def search_chunks(backend_url: str, question: str, document_id: str | None) -> l
     if document_id:
         params["document_id"] = document_id
         params["limit"] = "20"
+    if hyde:
+        params["hyde"] = "true"
     try:
-        resp = httpx.get(f"{backend_url}/search", params=params, timeout=30.0)
+        # HyDE adds an LLM call to /search, so allow more time per request.
+        request_timeout = 60.0 if hyde else 30.0
+        resp = httpx.get(f"{backend_url}/search", params=params, timeout=request_timeout)
         resp.raise_for_status()
         body = resp.json()
 
@@ -428,6 +442,15 @@ def main() -> None:
             "HR@5 >= 0.60, MRR >= 0.45, Faithfulness >= 0.65 (LLM only)"
         ),
     )
+    parser.add_argument(
+        "--hyde",
+        action="store_true",
+        help=(
+            "Enable HyDE-style query expansion via local LLM for retrieval. "
+            "Bridges question/answer phrasing divergence at the cost of one "
+            "LLM call per question (~1-2s, local Ollama)."
+        ),
+    )
     args = parser.parse_args()
 
     rows = load_golden(args.dataset)
@@ -451,7 +474,7 @@ def main() -> None:
         doc_id = source_to_doc_id.get(source_file)
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
-        chunks = search_chunks(args.backend_url, question, doc_id)
+        chunks = search_chunks(args.backend_url, question, doc_id, hyde=args.hyde)
 
         # For LLM scoring, also call /qa if model is specified
         answer = ""

@@ -21,6 +21,29 @@ _EXPANSION_TYPES = {"book", "conversation", "notes"}
 # Score multiplier for neighbour chunks added by context expansion.
 _EXPANSION_SCORE_FACTOR = 0.75
 
+# HyDE (Hypothetical Document Embeddings) prompt -- generates a brief, plausible
+# answer to the user's question so retrieval can match on the *answer's*
+# vocabulary, not the question's. Mitigates question/answer phrasing
+# divergence (S212): e.g. "What was the name of the Eloi girl?" embeds far from
+# the answer chunk "her name was Weena" because the question never mentions
+# Weena. The hypothetical answer bridges that gap. Local Ollama default per I-16.
+#
+# Output is intentionally terse: a verbose hypothetical dilutes the BM25 signal
+# with model-introduced filler vocabulary that does not exist in the source
+# text. We want concrete answer keywords, not natural prose.
+_HYDE_SYSTEM = (
+    "You are a knowledgeable assistant. Given a question, write a brief 1-2 "
+    "sentence factual answer that would plausibly appear in the source text. "
+    "Make a reasonable guess based on common knowledge if uncertain -- do not "
+    "refuse or say 'I don't know'. Output the answer only, no preamble."
+)
+# llama3.2:3b is fast (~1s warm) and produces usable hypotheticals for general
+# questions. For domain-specific questions where the model lacks knowledge, the
+# hypothetical at worst adds neutral noise; the call fails-soft so retrieval
+# is never worse than the no-hyde baseline. Local-first per I-16.
+_HYDE_MODEL = "ollama/llama3.2:3b"
+_HYDE_TIMEOUT_S = 20.0
+
 
 def _round_robin(
     candidates: list[ScoredChunk],
@@ -238,6 +261,31 @@ async def _expand_context(
     return expanded[: k * 2]
 
 
+async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
+    """Generate a hypothetical answer to *query* and return *query + " " + answer*.
+
+    Used to bridge question/answer phrasing divergence in retrieval. Fails
+    soft: any LLM error (Ollama down, timeout, model missing) returns the
+    original query unchanged so the eval can still proceed and the user
+    still gets standard hybrid retrieval.
+    """
+    try:
+        from app.services.llm import get_llm_service  # noqa: PLC0415
+
+        llm = get_llm_service()
+        result = await llm.generate(
+            prompt=f"Question: {query}\n\nAnswer:",
+            system=_HYDE_SYSTEM,
+            model=_HYDE_MODEL,
+            timeout=timeout,
+        )
+        if isinstance(result, str) and result.strip():
+            return f"{query} {result.strip()}"
+    except Exception as exc:
+        logger.warning("hyde_expand failed, falling back to original query: %s", exc)
+    return query
+
+
 class HybridRetriever:
     def vector_search(
         self,
@@ -424,6 +472,8 @@ class HybridRetriever:
         query: str,
         document_ids: list[str] | None,
         k: int,
+        *,
+        hyde: bool = False,
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
 
@@ -434,6 +484,13 @@ class HybridRetriever:
         queries where variety helps. Without this skip, top-scored
         chunks from one chapter get bumped down by less-relevant chunks
         from elsewhere in the same book and HR@5 collapses (S212).
+
+        When *hyde* is True, generates a hypothetical answer via the local
+        LLM and uses ``"<query> <answer>"`` as the search query for both
+        vector and BM25. This bridges question/answer phrasing divergence
+        (S212): the hypothetical contains likely answer vocabulary that
+        the bare question lacks. Falls back to the original query on LLM
+        failure so retrieval is never harder than the no-hyde baseline.
         """
         scoped_single_doc = bool(document_ids) and len(document_ids or []) == 1
         # Widen the candidate pool when scoped to a single document. With a
@@ -442,10 +499,14 @@ class HybridRetriever:
         # from the answer phrasing, the right chunk can sit at rank 25-40
         # in vector or BM25 alone and never reach RRF (S212).
         candidate_pool = 50 if scoped_single_doc else 20
+
+        search_query = await _hyde_expand(query) if hyde else query
+
         with trace_retrieval("hybrid", query=query) as span:
+            span.set_attribute("retrieval.hyde", hyde)
             vector_results, keyword_results = await asyncio.gather(
-                asyncio.to_thread(self.vector_search, query, document_ids, candidate_pool),
-                self.keyword_search(query, document_ids, k=candidate_pool),
+                asyncio.to_thread(self.vector_search, search_query, document_ids, candidate_pool),
+                self.keyword_search(search_query, document_ids, k=candidate_pool),
             )
             results = self.rrf_merge(
                 vector_results,
