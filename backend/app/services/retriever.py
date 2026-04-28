@@ -637,6 +637,13 @@ class HybridRetriever:
                 diversify=diversify,
             )
             if rerank:
+                # Use the original query (not the HyDE-augmented one) for the
+                # cross-encoder. Iteration 6 verified that passing the augmented
+                # query regresses Time Machine HR@5 (0.50 -> 0.43): the LLM
+                # hypothetical introduces vocabulary that does not appear in the
+                # source text, and the cross-encoder rewards chunks containing
+                # that hallucinated vocabulary over the answer chunks. The
+                # original query is the user's authoritative intent. (S212)
                 results = await asyncio.to_thread(_rerank_candidates, query, results, k)
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
