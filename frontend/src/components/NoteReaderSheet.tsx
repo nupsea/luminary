@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, FileText, LayoutGrid, Loader2, Pencil, Tag, Trash2, Wand2 } from "lucide-react"
+import { Check, FileText, LayoutGrid, Loader2, Maximize2, Minimize2, Pencil, Tag, Trash2, Wand2 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
@@ -156,10 +156,60 @@ export function NoteReaderSheet({
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
+  const splitContainerRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const prevNoteId = useRef<string | undefined>(undefined)
   const prevIsNew = useRef<boolean>(false)
   const qc = useQueryClient()
+  // Resizable splitter / fullscreen / scroll sync
+  const [leftPct, setLeftPct] = useState(50)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  // Echo guard: when we set scrollTop programmatically, the receiving pane
+  // fires onScroll. syncingRef holds the source of the in-flight scroll until
+  // the next animation frame so the echo is ignored.
+  const syncingRef = useRef<"write" | "preview" | null>(null)
+
+  function handleSplitterMouseDown(e: React.MouseEvent) {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  useEffect(() => {
+    if (!isDragging) return
+    function onMove(e: MouseEvent) {
+      const el = splitContainerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const pct = ((e.clientX - rect.left) / rect.width) * 100
+      setLeftPct(Math.min(85, Math.max(15, pct)))
+    }
+    function onUp() {
+      setIsDragging(false)
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [isDragging])
+
+  function syncScroll(source: "write" | "preview") {
+    if (syncingRef.current && syncingRef.current !== source) return
+    const src = source === "write" ? textareaRef.current : previewRef.current
+    const dst = source === "write" ? previewRef.current : textareaRef.current
+    if (!src || !dst) return
+    const srcMax = src.scrollHeight - src.clientHeight
+    const dstMax = dst.scrollHeight - dst.clientHeight
+    if (srcMax <= 0 || dstMax <= 0) return
+    syncingRef.current = source
+    dst.scrollTop = (src.scrollTop / srcMax) * dstMax
+    requestAnimationFrame(() => {
+      syncingRef.current = null
+    })
+  }
 
   const adjustHeight = useCallback(() => {
     const ta = textareaRef.current
@@ -264,13 +314,17 @@ export function NoteReaderSheet({
     }
   }
 
-  // Adjust height on content change, and focus on enter edit
+  // Focus textarea on entering edit mode. (Auto-grow disabled; the editor pane
+  // now has a fixed height with its own internal scroll.)
   useEffect(() => {
-    if (mode === "edit") {
-      adjustHeight()
-      if (textareaRef.current) textareaRef.current.focus()
+    if (mode === "edit" && textareaRef.current) {
+      // Clear any leftover inline height set by a previous adjustHeight call.
+      textareaRef.current.style.height = ""
+      textareaRef.current.focus()
     }
-  }, [editContent, mode, adjustHeight])
+  }, [mode])
+  // Silence unused-var lint: adjustHeight retained for future use but no longer wired.
+  void adjustHeight
 
   // Ctrl+S / Cmd+S saves in edit mode
   useEffect(() => {
@@ -383,7 +437,11 @@ export function NoteReaderSheet({
     <Sheet open={note !== null || isNew} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent
         side="right"
-        className="w-[85vw] max-w-5xl sm:max-w-6xl flex flex-col p-0 overflow-hidden"
+        className={
+          isFullscreen
+            ? "w-screen max-w-none sm:max-w-none flex flex-col p-0 overflow-hidden"
+            : "w-[85vw] max-w-5xl sm:max-w-6xl flex flex-col p-0 overflow-hidden"
+        }
       >
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <SheetTitle className="text-xl font-semibold leading-tight pr-8 truncate">
@@ -408,8 +466,8 @@ export function NoteReaderSheet({
           )}
         </SheetHeader>
 
-        <div className="flex-1 overflow-auto">
-          <div className="px-6 py-5 min-h-full flex flex-col">
+        <div className={`flex-1 ${mode === "read" && !isNew ? "overflow-auto" : "flex flex-col overflow-hidden min-h-0"}`}>
+          <div className={`px-6 py-5 ${mode === "read" && !isNew ? "min-h-full flex flex-col" : "flex flex-col flex-1 min-h-0 gap-4"}`}>
             {mode === "read" && !isNew ? (
               <div
                 className="flex-1 cursor-text select-text"
@@ -429,13 +487,17 @@ export function NoteReaderSheet({
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-8 items-start flex-1">
-                <div className="flex flex-col gap-2">
+              <div
+                ref={splitContainerRef}
+                className={`flex items-stretch flex-1 min-h-0 overflow-hidden ${isDragging ? "select-none cursor-col-resize" : ""}`}
+              >
+                <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${leftPct}%` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Editor</span>
                   </div>
                   <textarea
                     ref={textareaRef}
+                    onScroll={() => syncScroll("write")}
                     value={editContent}
                     onPaste={async (e) => {
                       const items = e.clipboardData.items
@@ -480,14 +542,23 @@ export function NoteReaderSheet({
                     }}
                     onChange={(e) => setEditContent(e.target.value)}
                     placeholder="Write your note in Markdown..."
-                    className="w-full resize-none overflow-hidden rounded border-none bg-background py-1 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+                    className="w-full flex-1 resize-none overflow-auto rounded border-none bg-background px-2 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
                   />
                 </div>
-                <div className="flex flex-col gap-2 border-l border-border pl-8 min-h-full">
+                <div
+                  onMouseDown={handleSplitterMouseDown}
+                  className="mx-3 w-1 shrink-0 cursor-col-resize self-stretch rounded bg-border hover:bg-primary/40 transition-colors"
+                  title="Drag to resize"
+                />
+                <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${100 - leftPct}%` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Preview</span>
                   </div>
-                  <div className="prose-sm">
+                  <div
+                    ref={previewRef}
+                    onScroll={() => syncScroll("preview")}
+                    className="prose-sm flex-1 overflow-auto px-2 py-2"
+                  >
                     {editContent.trim() ? (
                       <MarkdownRenderer>{editContent}</MarkdownRenderer>
                     ) : (
@@ -498,7 +569,11 @@ export function NoteReaderSheet({
               </div>
             )}
 
-            <div className="mt-12 pt-8 border-t border-border space-y-6 pb-24">
+            <div className={
+              mode === "read" && !isNew
+                ? "mt-12 pt-8 border-t border-border space-y-6 pb-24"
+                : "shrink-0 pt-4 border-t border-border space-y-4 max-h-[30vh] overflow-y-auto pb-2"
+            }>
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-muted-foreground">
@@ -684,6 +759,14 @@ export function NoteReaderSheet({
         </div>
 
         <div className="shrink-0 border-t border-border bg-background px-6 py-4 flex items-center gap-3">
+          <button
+            onClick={() => setIsFullscreen((v) => !v)}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-accent shadow-sm transition-colors"
+            title={isFullscreen ? "Exit fullscreen" : "Expand to full screen"}
+          >
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {isFullscreen ? "Collapse" : "Expand"}
+          </button>
           {mode === "read" && !isNew ? (
             confirmDelete ? (
               <div className="flex flex-1 items-center justify-end gap-3">

@@ -23,11 +23,21 @@ import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
+export type ImageSize = "small" | "medium" | "large"
+
 interface MarkdownRendererProps {
   children: string
   className?: string
   /** When provided, note link IDs NOT in this set are rendered as broken (muted red). */
   validNoteIds?: Set<string>
+  /** Cap width applied to rendered <img>. Defaults to "medium" so large pasted images don't blow up the page. */
+  imageSize?: ImageSize
+}
+
+const IMAGE_SIZE_CLASS: Record<ImageSize, string> = {
+  small: "prose-img:max-w-[240px] prose-img:max-h-[200px] prose-img:object-contain",
+  medium: "prose-img:max-w-[480px] prose-img:max-h-[360px] prose-img:object-contain",
+  large: "prose-img:max-w-[800px] prose-img:max-h-[600px] prose-img:object-contain",
 }
 
 const NOTE_LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
