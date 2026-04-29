@@ -221,7 +221,8 @@ async def _expand_context(
             surrounding_result = await session.execute(
                 text(
                     "SELECT chunk_index, text FROM chunks "
-                    "WHERE document_id = :doc_id AND chunk_index >= :start_idx AND chunk_index <= :end_idx "
+                    "WHERE document_id = :doc_id "
+                    "AND chunk_index >= :start_idx AND chunk_index <= :end_idx "
                     "ORDER BY chunk_index ASC"
                 ),
                 {"doc_id": chunk.document_id, "start_idx": cidx - window, "end_idx": cidx + window},

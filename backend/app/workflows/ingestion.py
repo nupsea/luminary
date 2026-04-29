@@ -42,6 +42,41 @@ CHUNK_CONFIGS: dict[str, dict[str, int]] = {
     "kindle_clippings": {"chunk_size": 300, "chunk_overlap": 75},
 }
 
+# S224: cap on canonical entities included in a chunk's entity tail.
+# Bounds embedding distortion and BM25 dilution from very entity-dense chunks.
+ENTITY_TAIL_MAX = 12
+
+
+def build_entity_tail(canonical_names: set[str] | list[str] | tuple[str, ...]) -> str:
+    """Build the deterministic entity tail '[Entities: A, B, C]' for a chunk.
+
+    Rules per S224 AC: dedupe (case-insensitive on the canonical key), sort
+    alphabetically (case-insensitive), capitalize each label, cap at
+    ENTITY_TAIL_MAX entries. Returns '' for empty input so callers can store
+    NULL when there are no entities.
+    """
+    if not canonical_names:
+        return ""
+    seen: dict[str, str] = {}
+    for raw in canonical_names:
+        if not isinstance(raw, str):
+            continue
+        name = raw.strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key not in seen:
+            seen[key] = name
+    if not seen:
+        return ""
+    ordered = sorted(seen.values(), key=lambda s: s.casefold())[:ENTITY_TAIL_MAX]
+    capitalized = [
+        " ".join(part[:1].upper() + part[1:] if part else part for part in label.split(" "))
+        for label in ordered
+    ]
+    return f"[Entities: {', '.join(capitalized)}]"
+
+
 STAGE_PROGRESS: dict[str, int] = {
     "parsing": 10,
     "transcribing": 15,
@@ -1116,7 +1151,13 @@ async def embed_node(state: IngestionState) -> IngestionState:
             from app.services.vector_store import get_lancedb_service
 
             content_type = state.get("content_type") or "notes"
-            texts = [c["text"] for c in chunks]
+            # S224: concatenate per-chunk entity tail (if any) into embedding input
+            # so vector search can match canonical entity names that the surface form
+            # may have spelled differently. Display text remains in chunk["text"].
+            texts = [
+                c["text"] + ("\n" + c["entities_text"] if c.get("entities_text") else "")
+                for c in chunks
+            ]
             embedder = get_embedding_service()
 
             # Update stage BEFORE encoding so UI reflects current work immediately
@@ -1175,10 +1216,17 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("keyword_index", state):
         try:
             async with get_session_factory()() as session:
+                # S224: concatenate text || entities_text (when present) so FTS5 BM25
+                # matches canonical entity names even if the surface form differs.
                 await session.execute(
                     text(
                         "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
-                        "SELECT rowid, text, id, document_id FROM chunks "
+                        "SELECT rowid, "
+                        "       text || CASE "
+                        "         WHEN entities_text IS NOT NULL AND entities_text != '' "
+                        "         THEN ' ' || entities_text "
+                        "         ELSE '' END, "
+                        "       id, document_id FROM chunks "
                         "WHERE document_id = :doc_id"
                     ),
                     {"doc_id": doc_id},
@@ -1313,20 +1361,27 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 canonical_entities.append({**ent, "id": canonical_id, "name": canonical})
                 chunk_to_entities.setdefault(ent["chunk_id"], set()).add(canonical)
 
-            # Entity Injection: Append canonical entities to chunk text in memory & DB
+            # S224: Entity injection (option b) -- store canonical entities in a
+            # sibling entities_text column. Display text is preserved; downstream
+            # embed_node and keyword_index_node concatenate entities_text into the
+            # FTS5 indexed text and the embedding input. Idempotent: every reindex
+            # overwrites entities_text rather than appending.
             if chunk_to_entities:
                 from sqlalchemy import update as _update  # noqa: PLC0415
+
                 from app.models import ChunkModel  # noqa: PLC0415
+
                 async with get_session_factory()() as update_session:
                     for chunk in chunks:
                         cid = chunk["id"]
-                        if cid in chunk_to_entities:
-                            ents_str = ", ".join(sorted(chunk_to_entities[cid]))
-                            injection = f"\n[Entities: {ents_str}]"
-                            chunk["text"] += injection
-                            await update_session.execute(
-                                _update(ChunkModel).where(ChunkModel.id == cid).values(text=chunk["text"])
-                            )
+                        canonicals = chunk_to_entities.get(cid)
+                        tail = build_entity_tail(canonicals) if canonicals else ""
+                        chunk["entities_text"] = tail or None
+                        await update_session.execute(
+                            _update(ChunkModel)
+                            .where(ChunkModel.id == cid)
+                            .values(entities_text=tail or None)
+                        )
                     await update_session.commit()
 
             # Upsert entities and add mentions; re-raise on Kuzu failure when

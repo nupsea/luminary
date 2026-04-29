@@ -195,6 +195,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE documents ADD COLUMN publication_year INTEGER",
             # S146: PDF page number per chunk for PDF viewer deep-links
             "ALTER TABLE chunks ADD COLUMN pdf_page_number INTEGER",
+            # S224: canonical entity tail for index-time vocabulary bridging
+            "ALTER TABLE chunks ADD COLUMN entities_text TEXT",
             # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
             # S156: structured rubric JSON for teachback results and feynman sessions

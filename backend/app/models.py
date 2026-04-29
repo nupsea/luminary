@@ -99,6 +99,10 @@ class ChunkModel(Base):
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     code_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # S224: canonical entity tail injected at index time for vocabulary bridging
+    # ("[Entities: A, B, C]"); concatenated into FTS5 text and embedding input,
+    # not into the displayed text.
+    entities_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
