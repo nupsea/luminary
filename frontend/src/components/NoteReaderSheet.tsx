@@ -217,6 +217,13 @@ export function NoteReaderSheet({
     const ta = textareaRef.current
     const dst = previewRef.current
     if (!ta || !dst) return
+
+    // Stick to bottom if cursor is at the end of the document
+    if (ta.selectionStart >= ta.value.length - 1) {
+      dst.scrollTop = dst.scrollHeight
+      return
+    }
+
     const textBeforeCaret = ta.value.substring(0, ta.selectionStart)
     const linesBefore = textBeforeCaret.split("\n").length
     const totalLines = Math.max(1, ta.value.split("\n").length)
@@ -227,6 +234,8 @@ export function NoteReaderSheet({
       dst.scrollTop = pct * dstMax
     }
   }
+
+
 
   const adjustHeight = useCallback(() => {
     const ta = textareaRef.current
@@ -279,7 +288,10 @@ export function NoteReaderSheet({
 
   useEffect(() => {
     if (mode === "edit") {
-      syncCaret()
+      const timer = setTimeout(() => {
+        syncCaret()
+      }, 100)
+      return () => clearTimeout(timer)
     }
   }, [editContent, mode])
 
@@ -612,8 +624,6 @@ export function NoteReaderSheet({
                   <textarea
                     ref={textareaRef}
                     onScroll={() => syncScroll("write")}
-                    onKeyUp={syncCaret}
-                    onClick={syncCaret}
                     value={editContent}
                     onPaste={async (e) => {
                       const items = e.clipboardData.items
