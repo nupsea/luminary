@@ -32,7 +32,7 @@ import httpx
 GOLDEN_DIR = Path(__file__).parent / "golden"
 MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
 SCORES_HISTORY_PATH = Path(__file__).parent / "scores_history.jsonl"
-VALID_DATASETS = ["book", "book_time_machine", "book_alice", "book_odyssey", "paper", "conversation", "notes", "code"]
+VALID_DATASETS = ["book", "book_time_machine", "book_alice", "book_odyssey", "book_frankenstein", "paper", "conversation", "notes", "code"]
 
 # Path to the repo root (two levels up from evals/)
 REPO_ROOT = Path(__file__).parent.parent
@@ -124,8 +124,8 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
             status_resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
             status_resp.raise_for_status()
             stage = status_resp.json().get("stage", "")
-            # entity_extract, summarize, and complete all mean core indexing is DONE
-            if stage in ["complete", "summarize", "entity_extract"]:
+            # section_summarize, summarize, and complete all mean core indexing is DONE
+            if stage in ["complete", "summarize", "section_summarize"]:
                 print(f"  Ingestion finished enough: {source_file} -> {doc_id} (stage={stage})")
                 return doc_id
             if stage == "error":

@@ -1264,7 +1264,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # Sample evenly across the document to get representative entities.
             import asyncio as _asyncio
 
-            NER_CHUNK_LIMIT = 500
+            NER_CHUNK_LIMIT = 5000
             if len(chunks) > NER_CHUNK_LIMIT:
                 step = len(chunks) // NER_CHUNK_LIMIT
                 ner_chunks = chunks[::step][:NER_CHUNK_LIMIT]
@@ -1305,11 +1305,29 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
 
             alias_map: dict[str, list[str]] = {}
             canonical_entities = []
+            chunk_to_entities: dict[str, set[str]] = {}
             for (canonical, etype, original), ent in zip(canonical_triples, entities):
                 canonical_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{canonical}"))
                 if original != canonical:
                     alias_map.setdefault(canonical_id, []).append(original)
                 canonical_entities.append({**ent, "id": canonical_id, "name": canonical})
+                chunk_to_entities.setdefault(ent["chunk_id"], set()).add(canonical)
+
+            # Entity Injection: Append canonical entities to chunk text in memory & DB
+            if chunk_to_entities:
+                from sqlalchemy import update as _update  # noqa: PLC0415
+                from app.models import ChunkModel  # noqa: PLC0415
+                async with get_session_factory()() as update_session:
+                    for chunk in chunks:
+                        cid = chunk["id"]
+                        if cid in chunk_to_entities:
+                            ents_str = ", ".join(sorted(chunk_to_entities[cid]))
+                            injection = f"\n[Entities: {ents_str}]"
+                            chunk["text"] += injection
+                            await update_session.execute(
+                                _update(ChunkModel).where(ChunkModel.id == cid).values(text=chunk["text"])
+                            )
+                    await update_session.commit()
 
             # Upsert entities and add mentions; re-raise on Kuzu failure when
             # entities were successfully extracted (data loss must not be silent).
@@ -1451,8 +1469,8 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 extra={"doc_id": doc_id, "entity_count": entity_count},
             )
 
-        await _update_stage(doc_id, "complete")
-    return {**state, "status": "complete"}
+        await _update_stage(doc_id, "embedding")
+    return {**state, "status": "embedding"}
 
 
 # Strong references to background tasks — prevents GC before they complete.
@@ -1659,7 +1677,8 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
             extra={"doc_id": doc_id},
         )
 
-    return state
+    await _update_stage(doc_id, "complete")
+    return {**state, "status": "complete"}
 
 
 def _route_on_status(next_node: str):
@@ -1688,10 +1707,10 @@ def _build_graph():
     builder.add_conditional_edges("parse", _route_on_status("classify"))
     builder.add_conditional_edges("classify", _route_on_status("transcribe"))
     builder.add_conditional_edges("transcribe", _route_on_status("chunk"))
-    builder.add_conditional_edges("chunk", _route_on_status("embed"))
+    builder.add_conditional_edges("chunk", _route_on_status("entity_extract"))
+    builder.add_edge("entity_extract", "embed")
     builder.add_edge("embed", "keyword_index")
-    builder.add_edge("keyword_index", "entity_extract")
-    builder.add_edge("entity_extract", "section_summarize")
+    builder.add_edge("keyword_index", "section_summarize")
     builder.add_edge("section_summarize", "summarize")
     builder.add_edge("summarize", "enrichment_enqueue")
     builder.add_edge("enrichment_enqueue", END)

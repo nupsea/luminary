@@ -210,68 +210,32 @@ async def _expand_context(
         )
         chunk_index_map: dict[str, int] = {row[0]: row[1] for row in idx_result.fetchall()}
 
-        # Gather all (document_id, target_index) pairs we need to fetch
-        neighbor_queries: list[tuple[str, int, float]] = []
+        # Merge neighbor text directly into the original chunks
         for chunk in chunks:
             if chunk.document_id not in eligible_docs:
                 continue
             cidx = chunk_index_map.get(chunk.chunk_id)
             if cidx is None:
                 continue
-            for delta in range(-window, window + 1):
-                if delta == 0:
-                    continue
-                neighbor_queries.append(
-                    (chunk.document_id, cidx + delta, chunk.score * _EXPANSION_SCORE_FACTOR)
-                )
 
-        # Build result set: start with original chunks
-        result_map: dict[str, ScoredChunk] = {c.chunk_id: c for c in chunks}
-
-        # Fetch neighbors
-        for doc_id, target_idx, neighbor_score in neighbor_queries:
-            nb_result = await session.execute(
+            surrounding_result = await session.execute(
                 text(
-                    "SELECT id, text, speaker, chunk_index FROM chunks "
-                    "WHERE document_id = :doc_id AND chunk_index = :cidx"
+                    "SELECT chunk_index, text FROM chunks "
+                    "WHERE document_id = :doc_id AND chunk_index >= :start_idx AND chunk_index <= :end_idx "
+                    "ORDER BY chunk_index ASC"
                 ),
-                {"doc_id": doc_id, "cidx": target_idx},
+                {"doc_id": chunk.document_id, "start_idx": cidx - window, "end_idx": cidx + window},
             )
-            row = nb_result.fetchone()
-            if row is None:
-                continue
-            nb_id, nb_text, nb_speaker, nb_cidx = row
+            
+            combined_texts = []
+            for row in surrounding_result.fetchall():
+                combined_texts.append(row[1])
+                
+            if combined_texts:
+                chunk.text = "\n\n".join(combined_texts)
 
-            if nb_id in result_map:
-                # Dedup: keep higher score
-                if neighbor_score > result_map[nb_id].score:
-                    result_map[nb_id] = ScoredChunk(
-                        chunk_id=nb_id,
-                        document_id=doc_id,
-                        text=nb_text,
-                        section_heading="",
-                        page=0,
-                        score=neighbor_score,
-                        source="context_expansion",
-                        chunk_index=nb_cidx,
-                        speaker=nb_speaker or None,
-                    )
-            else:
-                result_map[nb_id] = ScoredChunk(
-                    chunk_id=nb_id,
-                    document_id=doc_id,
-                    text=nb_text,
-                    section_heading="",
-                    page=0,
-                    score=neighbor_score,
-                    source="context_expansion",
-                    chunk_index=nb_cidx,
-                    speaker=nb_speaker or None,
-                )
-
-    # Sort by score desc, cap at k * 2
-    expanded = sorted(result_map.values(), key=lambda c: c.score, reverse=True)
-    return expanded[: k * 2]
+    # We return the original chunks (with updated text), capped at k
+    return chunks[:k]
 
 
 class _CrossEncoderReranker:
