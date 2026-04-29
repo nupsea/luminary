@@ -95,6 +95,14 @@ class SuggestedTagsResponse(BaseModel):
     tags: list[str]
 
 
+class NoteTitleSuggestRequest(BaseModel):
+    content: str
+
+
+class NoteTitleSuggestResponse(BaseModel):
+    title: str
+
+
 class NoteSearchItem(BaseModel):
     note_id: str
     content: str
@@ -1383,3 +1391,14 @@ async def suggest_tags(
     tags = [n for t in raw_tags if (n := _norm_tag(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)
+
+
+@router.post("/suggest-title", response_model=NoteTitleSuggestResponse)
+async def suggest_title(
+    req: NoteTitleSuggestRequest,
+) -> NoteTitleSuggestResponse:
+    """Return LLM-suggested title for the provided note content."""
+    from app.services.note_title_generator import get_title_generator  # noqa: PLC0415
+
+    title = await get_title_generator().suggest_title(req.content)
+    return NoteTitleSuggestResponse(title=title)

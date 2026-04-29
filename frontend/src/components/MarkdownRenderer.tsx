@@ -57,7 +57,7 @@ function preprocessLinks(content: string): string {
   return text
 }
 
-export function MarkdownRenderer({ children, className, validNoteIds }: MarkdownRendererProps) {
+export function MarkdownRenderer({ children, className, validNoteIds, imageSize = "medium" }: MarkdownRendererProps) {
   const processed = preprocessLinks(children)
 
   return (
@@ -72,6 +72,28 @@ export function MarkdownRenderer({ children, className, validNoteIds }: Markdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeHighlight, rehypeKatex, rehypeRaw]}
         components={{
+          img: ({ src, alt }) => {
+            let size: ImageSize = imageSize
+            if (alt && alt.includes("|")) {
+              const parts = alt.split("|")
+              const potentialSize = parts[1].trim().toLowerCase()
+              if (["small", "medium", "large"].includes(potentialSize)) {
+                size = potentialSize as ImageSize
+              }
+            }
+            return (
+              <img
+                src={src}
+                alt={alt}
+                className={cn(
+                  "rounded-lg shadow-md mx-auto my-4 block",
+                  size === "small" && "max-w-[240px] max-h-[200px] object-contain",
+                  size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
+                  size === "large" && "max-w-[800px] max-h-[600px] object-contain"
+                )}
+              />
+            )
+          },
           code: ({ children: codeChildren, ...props }) => {
             const text = String(codeChildren)
             const m = text.match(/^\[note:([a-f0-9-]+)\|(.+)\]$/)

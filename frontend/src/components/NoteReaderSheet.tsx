@@ -155,6 +155,8 @@ export function NoteReaderSheet({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
+  const [generatedTitle, setGeneratedTitle] = useState("")
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -211,6 +213,21 @@ export function NoteReaderSheet({
     })
   }
 
+  function syncCaret() {
+    const ta = textareaRef.current
+    const dst = previewRef.current
+    if (!ta || !dst) return
+    const textBeforeCaret = ta.value.substring(0, ta.selectionStart)
+    const linesBefore = textBeforeCaret.split("\n").length
+    const totalLines = Math.max(1, ta.value.split("\n").length)
+    
+    const pct = linesBefore / totalLines
+    const dstMax = dst.scrollHeight - dst.clientHeight
+    if (dstMax > 0) {
+      dst.scrollTop = pct * dstMax
+    }
+  }
+
   const adjustHeight = useCallback(() => {
     const ta = textareaRef.current
     if (!ta) return
@@ -259,6 +276,43 @@ export function NoteReaderSheet({
       prevIsNew.current = isNew
     }
   }, [note?.id, isNew])
+
+  useEffect(() => {
+    if (mode === "edit") {
+      syncCaret()
+    }
+  }, [editContent, mode])
+
+  // Fetch LLM-generated title
+  useEffect(() => {
+    if (isNew) {
+      setGeneratedTitle("New Note")
+    } else if (note && note.content) {
+      if (note.content.trim().length > 20) {
+        setIsGeneratingTitle(true)
+        fetch(`${API_BASE}/notes/suggest-title`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: note.content }),
+        })
+          .then((res) => res.json())
+          .then((data: { title: string }) => {
+            setGeneratedTitle(data.title)
+            setIsGeneratingTitle(false)
+          })
+          .catch(() => {
+            setGeneratedTitle(
+              stripMarkdown(note.content).split("\n").find((l) => l.trim()) ?? "Untitled Note"
+            )
+            setIsGeneratingTitle(false)
+          })
+      } else {
+        setGeneratedTitle(
+          stripMarkdown(note.content).split("\n").find((l) => l.trim()) ?? "Untitled Note"
+        )
+      }
+    }
+  }, [note?.id, note?.content])
 
   // Trigger tag suggestions on mode change or content threshold
   useEffect(() => {
@@ -376,6 +430,23 @@ export function NoteReaderSheet({
       if (!isNew) {
         setMode("read")
       }
+      
+      if (savedNote.content.trim().length > 20) {
+        setIsGeneratingTitle(true)
+        fetch(`${API_BASE}/notes/suggest-title`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: savedNote.content }),
+        })
+          .then((res) => res.json())
+          .then((data: { title: string }) => {
+            setGeneratedTitle(data.title)
+            setIsGeneratingTitle(false)
+          })
+          .catch(() => {
+            setIsGeneratingTitle(false)
+          })
+      }
       // Trigger suggestions fetch for new notes so they are ready when the user clicks 'Edit' 
       if (isNew && savedNote.content.trim().length > 30) {
         void handleFetchSuggestions(false, savedNote)
@@ -445,7 +516,7 @@ export function NoteReaderSheet({
       >
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <SheetTitle className="text-xl font-semibold leading-tight pr-8 truncate">
-            {title}
+            {isGeneratingTitle ? "Generating Title..." : generatedTitle || title}
           </SheetTitle>
           {sourceDoc && (
             <SheetDescription asChild>
@@ -494,10 +565,55 @@ export function NoteReaderSheet({
                 <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${leftPct}%` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Editor</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground">Image spec:</span>
+                      {(["small", "medium", "large"] as const).map((size) => (
+                        <button
+                          key={size}
+                          type="button"
+                          onClick={() => {
+                            const start = textareaRef.current?.selectionStart ?? editContent.length
+                            const end = textareaRef.current?.selectionEnd ?? editContent.length
+                            const selectedText = editContent.substring(start, end)
+                            
+                            // If an existing image markdown is selected, try to inject/replace the size
+                            let newMarkdown = ""
+                            const imgRegex = /!\[([^\]]*?)\]\((.*?)\)/
+                            const match = selectedText.match(imgRegex)
+                            
+                            if (match) {
+                              const altText = match[1]
+                              const url = match[2]
+                              const altClean = altText.split("|")[0].trim() || "Image"
+                              newMarkdown = `![${altClean}|${size}](${url})`
+                            } else {
+                              newMarkdown = `![Image|${size}](url)`
+                            }
+
+                            const newContent =
+                              editContent.substring(0, start) +
+                              newMarkdown +
+                              editContent.substring(end)
+                            setEditContent(newContent)
+                            
+                            setTimeout(() => {
+                              const newPos = start + newMarkdown.length
+                              textareaRef.current?.setSelectionRange(newPos, newPos)
+                              textareaRef.current?.focus()
+                            }, 0)
+                          }}
+                          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <textarea
                     ref={textareaRef}
                     onScroll={() => syncScroll("write")}
+                    onKeyUp={syncCaret}
+                    onClick={syncCaret}
                     value={editContent}
                     onPaste={async (e) => {
                       const items = e.clipboardData.items
@@ -518,7 +634,7 @@ export function NoteReaderSheet({
                             if (!res.ok) throw new Error("Upload failed")
                             const data = (await res.json()) as { path: string }
 
-                            const imgMarkdown = `![Pasted Image](${data.path})`
+                            const imgMarkdown = `![Pasted Image|medium](${data.path})`
                             const start = textareaRef.current?.selectionStart ?? editContent.length
                             const end = textareaRef.current?.selectionEnd ?? editContent.length
                             const newContent =
