@@ -1,3 +1,6 @@
 {
-  "DATA/books/frankenstein.txt": "ac2b1e63-1224-4d3e-8212-903ba77f3386"
+  "DATA/books/frankenstein.txt": "ac2b1e63-1224-4d3e-8212-903ba77f3386",
+  "DATA/books/alice_in_wonderland.txt": "fd13649e-37ef-4994-b438-4c3152e164fd",
+  "DATA/books/time_machine.txt": "40d844f2-dd14-450a-9b1d-06f7992ad5f6",
+  "DATA/books/the_odyssey.txt": "b42ddf64-b039-447e-9d1d-ecc7891ed3e3"
 }
