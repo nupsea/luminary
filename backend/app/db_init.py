@@ -235,6 +235,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE learning_goals ADD COLUMN collection_id TEXT",
             "ALTER TABLE learning_goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
             "ALTER TABLE learning_goals ADD COLUMN completed_at DATETIME",
+            # S213: eval_kind tag + citation_support_rate (S215) on EvalRunModel
+            "ALTER TABLE eval_runs ADD COLUMN eval_kind TEXT",
+            "ALTER TABLE eval_runs ADD COLUMN citation_support_rate REAL",
         ]:
             try:
                 await conn.execute(text(ddl))

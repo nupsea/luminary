@@ -295,6 +295,10 @@ class EvalRunModel(Base):
     context_precision: Mapped[float | None] = mapped_column(Float, nullable=True)
     context_recall: Mapped[float | None] = mapped_column(Float, nullable=True)
     model_used: Mapped[str] = mapped_column(String, nullable=False)
+    # S213: tags the kind of eval -- 'retrieval', 'generation', 'classifier',
+    # 'summary', 'flashcard', 'citation'. Nullable for legacy rows.
+    eval_kind: Mapped[str | None] = mapped_column(String, nullable=True, default="retrieval")
+    citation_support_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class ReadingProgressModel(Base):

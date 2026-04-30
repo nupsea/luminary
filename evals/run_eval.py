@@ -13,30 +13,62 @@ Usage::
 
 Documents are auto-ingested on first run and their IDs cached in
 evals/golden/manifest.json.  Re-runs skip ingestion.
+
+Most of the underlying machinery lives in ``evals.lib`` (S213). This file
+keeps the CLI shape and re-exports the original symbols for backwards
+compatibility with audit_golden.py and existing tests.
 """
 
 import argparse
-import json
-import re
 import sys
-import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from pydantic import BaseModel, ValidationError, field_validator
 
-# ragas and datasets are heavy optional dependencies used only for LLM-based scoring.
-# They are imported lazily inside main() so that this module can be imported by
-# backend unit tests (which run in a venv that does not include ragas/datasets).
+# Make `evals.lib.*` importable when this file is invoked as `python run_eval.py`
+# from inside evals/ (the canonical CLI entry point).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-GOLDEN_DIR = Path(__file__).parent / "golden"
-MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
-SCORES_HISTORY_PATH = Path(__file__).parent / "scores_history.jsonl"
-VALID_DATASETS = ["book", "book_time_machine", "book_alice", "book_odyssey", "book_frankenstein", "paper", "conversation", "notes", "code"]
+from evals.lib.loader import GoldenValidationError  # noqa: E402
+from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
+from evals.lib.manifest import (  # noqa: E402
+    GOLDEN_DIR,
+    MANIFEST_PATH,
+    REPO_ROOT,
+    ensure_ingested,
+    ingest_document,
+    is_document_alive,
+    load_manifest,
+    lookup_document_by_filename,
+    save_manifest,
+)
+from evals.lib.retrieval_metrics import (  # noqa: E402
+    _extract_hint_norms,
+    _norm,
+    compute_hit_rate_5,
+    compute_mrr,
+)
+from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
+from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
+from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
+from evals.lib.store import store_results as _lib_store_results  # noqa: E402
 
-# Path to the repo root (two levels up from evals/)
-REPO_ROOT = Path(__file__).parent.parent
+# Backwards-compat alias: tests and audit_golden.py import GoldenEntry from run_eval.
+GoldenEntry = RetrievalGoldenEntry
+
+VALID_DATASETS = [
+    "book",
+    "book_time_machine",
+    "book_alice",
+    "book_odyssey",
+    "book_frankenstein",
+    "paper",
+    "conversation",
+    "notes",
+    "code",
+]
 
 # Quality gate thresholds
 THRESHOLDS = {
@@ -46,178 +78,34 @@ THRESHOLDS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Manifest helpers (maps source_file -> document_id)
-# ---------------------------------------------------------------------------
+def load_golden(dataset: str) -> list[dict]:
+    """Load and validate a golden JSONL dataset.
 
-
-def load_manifest() -> dict[str, str]:
-    if MANIFEST_PATH.exists():
-        with MANIFEST_PATH.open() as f:
-            return json.load(f)
-    return {}
-
-
-def save_manifest(manifest: dict[str, str]) -> None:
-    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with MANIFEST_PATH.open("w") as f:
-        json.dump(manifest, f, indent=2)
-
-
-# ---------------------------------------------------------------------------
-# Score history helpers
-# ---------------------------------------------------------------------------
+    Wraps evals.lib.loader.load_golden with the legacy CLI behaviour: prints
+    a clear error message and exits 1 on schema-validation failure.
+    """
+    try:
+        return _lib_load_golden(dataset, RetrievalGoldenEntry)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except GoldenValidationError as exc:
+        print(f"ERROR: invalid golden entry in {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def append_history(dataset: str, model: str, metrics: dict, passed: bool) -> None:
-    """Append one eval run to scores_history.jsonl."""
-    entry = {
-        "timestamp": datetime.now(tz=UTC).isoformat(),
-        "dataset": dataset,
-        "model": model,
-        "hr5": metrics.get("hit_rate_5"),
-        "mrr": metrics.get("mrr"),
-        "faithfulness": metrics.get("faithfulness"),
-        "passed": passed,
-    }
-    with SCORES_HISTORY_PATH.open("a") as f:
-        f.write(json.dumps(entry) + "\n")
+    """Backwards-compat wrapper -- always logs eval_kind='retrieval'."""
+    _lib_append_history(dataset, model, metrics, passed, eval_kind="retrieval")
+
+
+def store_results(backend_url: str, dataset: str, model: str, metrics: dict) -> None:
+    """Backwards-compat wrapper -- always sends eval_kind='retrieval'."""
+    _lib_store_results(backend_url, dataset, model, metrics, eval_kind="retrieval")
 
 
 # ---------------------------------------------------------------------------
-# Document ingestion helpers
-# ---------------------------------------------------------------------------
-
-
-def ingest_document(backend_url: str, source_file: str) -> str | None:
-    """Ingest a source file via POST /ingest and wait for completion.
-
-    Returns the document_id on success, None on failure.
-    """
-    file_path = REPO_ROOT / source_file
-    if not file_path.exists():
-        print(f"  ERROR: source file not found: {file_path}", file=sys.stderr)
-        return None
-
-    try:
-        with file_path.open("rb") as fh:
-            resp = httpx.post(
-                f"{backend_url}/documents/ingest",
-                data={"content_type": "book"},
-                files={"file": (file_path.name, fh, "text/plain")},
-                timeout=30.0,
-            )
-        resp.raise_for_status()
-        doc_id = resp.json().get("document_id")
-        if not doc_id:
-            print(f"  ERROR: /ingest returned no document_id for {source_file}", file=sys.stderr)
-            return None
-    except Exception as exc:
-        print(f"  ERROR: /ingest failed for {source_file}: {exc}", file=sys.stderr)
-        return None
-
-    # Poll for completion (up to 10 minutes for large documents with real ML)
-    print(f"  Waiting for ingestion to complete (document_id={doc_id})...")
-    deadline = time.time() + 600
-    while time.time() < deadline:
-        time.sleep(5)
-        try:
-            status_resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
-            status_resp.raise_for_status()
-            stage = status_resp.json().get("stage", "")
-            # section_summarize, summarize, and complete all mean core indexing is DONE
-            if stage in ["complete", "summarize", "section_summarize"]:
-                print(f"  Ingestion finished enough: {source_file} -> {doc_id} (stage={stage})")
-                return doc_id
-            if stage == "error":
-                print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)
-                return None
-            print(f"    stage={stage}...")
-        except Exception as exc:
-            print(f"  WARNING: status check failed: {exc}", file=sys.stderr)
-
-    print(f"  ERROR: ingestion timed out for {source_file}", file=sys.stderr)
-    return None
-
-
-def is_document_alive(backend_url: str, doc_id: str) -> bool:
-    """Return True iff GET /documents/{doc_id}/status returns 2xx.
-
-    Used to detect a stale manifest entry: when the user has rebuilt the
-    backend database (or deleted documents), the cached doc_id in
-    evals/golden/manifest.json points to a row that no longer exists. If
-    we trust the stale ID, ``search_chunks`` will filter /search results
-    to the dead doc_id and return an empty list -- the exact failure mode
-    that produced HR@5=0.0 across every book dataset (S212 root cause).
-    """
-    try:
-        resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
-        return 200 <= resp.status_code < 300
-    except Exception:
-        return False
-
-
-def lookup_document_by_filename(backend_url: str, source_file: str) -> str | None:
-    """Return the document_id for an already-ingested file, or None if not found.
-
-    Calls GET /documents?page_size=100 and matches by the stem of source_file
-    (e.g. "time_machine" for "DATA/books/time_machine.txt").  Only returns a
-    document_id when the document's stage is "complete".
-    """
-    stem = Path(source_file).stem.lower()
-    try:
-        resp = httpx.get(
-            f"{backend_url}/documents",
-            params={"page_size": 100},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        items = resp.json().get("items", [])
-        for doc in items:
-            title = (doc.get("title") or "").lower()
-            if title == stem and doc.get("stage") == "complete":
-                return doc["id"]
-    except Exception as exc:
-        print(f"  WARNING: GET /documents failed: {exc}", file=sys.stderr)
-    return None
-
-
-def ensure_ingested(backend_url: str, source_file: str, manifest: dict[str, str]) -> str | None:
-    """Return the document_id for source_file, ingesting if not yet in manifest.
-
-    Before ingesting, checks GET /documents for an existing completed document
-    matching the source filename stem.  This prevents duplicate documents on
-    repeated eval runs when manifest.json was deleted or never written.
-    """
-    cached = manifest.get(source_file)
-    if cached and is_document_alive(backend_url, cached):
-        return cached
-    if cached:
-        # Manifest entry is stale (404 on /documents/{id}/status) -- drop it
-        # so we can re-resolve or re-ingest. This single check is the S212
-        # baseline-fix: prior to it, a stale ID caused HR@5=0.0 silently.
-        print(f"  Manifest entry for {source_file} is stale ({cached}); dropping and re-resolving")
-        manifest.pop(source_file, None)
-        save_manifest(manifest)
-
-    # Check whether the backend already has this document before re-ingesting
-    doc_id = lookup_document_by_filename(backend_url, source_file)
-    if doc_id:
-        print(f"  Found existing document for {source_file} -> {doc_id} (skipping re-ingest)")
-        manifest[source_file] = doc_id
-        save_manifest(manifest)
-        return doc_id
-
-    print(f"  Ingesting {source_file} (not yet in manifest)...")
-    doc_id = ingest_document(backend_url, source_file)
-    if doc_id:
-        manifest[source_file] = doc_id
-        save_manifest(manifest)
-    return doc_id
-
-
-# ---------------------------------------------------------------------------
-# Search and scoring helpers
+# Search and /qa helpers (CLI-specific; not in lib)
 # ---------------------------------------------------------------------------
 
 
@@ -229,24 +117,8 @@ def search_chunks(
     hyde: bool = False,
     rerank: bool = False,
 ) -> list[str]:
-    """Run GET /search and return a list of chunk texts (up to top 5).
-
-    Uses the ``text`` field (full chunk text, up to 2000 chars) returned by the
-    search API.  The legacy ``text_excerpt`` field is only 200 chars and is
-    intended for UI display -- it is too short for context-hint substring matching.
-
-    When *hyde* is True, asks /search to do HyDE-style query expansion via
-    the local LLM. Adds ~1-2s latency per call but bridges question/answer
-    phrasing divergence. (S212 iteration 4 fix.)
-
-    When *rerank* is True, asks /search to cross-encoder rerank the top-50
-    RRF candidates. Adds ~100-300ms per call (CPU). (S212 iteration 5.)
-    """
+    """Run GET /search and return up to top-5 chunk texts."""
     params: dict[str, str] = {"q": question}
-    # Scope search to the target document so the eval measures per-document
-    # retrieval quality. Without this, irrelevant corpus documents (DDIA,
-    # AI articles, etc.) drown out literary chunks in the global ranking
-    # and HR@5 collapses to noise. (S212 fix.)
     if document_id:
         params["document_id"] = document_id
         params["limit"] = "20"
@@ -255,27 +127,19 @@ def search_chunks(
     if rerank:
         params["rerank"] = "true"
     try:
-        # HyDE adds an LLM call to /search; rerank adds a cross-encoder pass.
-        # Either way allow more time per request than the bare hybrid path.
         request_timeout = 60.0 if (hyde or rerank) else 30.0
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=request_timeout)
         resp.raise_for_status()
         body = resp.json()
 
-        # The backend groups results by document. To get the global top-k,
-        # we must extract all matches, sort them by relevance_score desc,
-        # and then pick the top 5.
         all_matches = []
         for group in body.get("results", []):
-            # If document_id specified, filter to that document only
             if document_id and group.get("document_id") != document_id:
                 continue
             for match in group.get("matches", []):
                 all_matches.append(match)
 
-        # Sort globally by score
         all_matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
-
         return [m.get("text", "") for m in all_matches[:5]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
@@ -283,10 +147,7 @@ def search_chunks(
 
 
 def post_qa(backend_url: str, question: str, model: str, document_id: str | None) -> dict:
-    """POST to /qa and return the response JSON (or empty dict on failure).
-
-    Used for LLM-based RAGAS scoring (faithfulness, answer_relevancy, etc.).
-    """
+    """POST to /qa and return the response JSON (or empty dict on failure)."""
     try:
         payload: dict = {"question": question}
         if document_id:
@@ -305,184 +166,6 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
         return {}
 
 
-def _norm(s: str) -> str:
-    """Collapse whitespace and normalise typographic quotes for robust substring matching.
-
-    Project Gutenberg plain-text files wrap lines at ~70 chars, so a passage
-    that reads "any real body" in the golden hint may appear as "any\nreal body"
-    inside a stored chunk.  Normalising whitespace and Unicode quotation marks
-    (U+2018/2019/201C/201D) to their ASCII equivalents eliminates false misses
-    when hints were authored with straight quotes against a source that uses
-    typographic curly quotes, or vice versa.
-    """
-    # Normalise typographic single/double quotes to ASCII equivalents
-    s = s.replace("\u2018", "'").replace("\u2019", "'")
-    s = s.replace("\u201c", '"').replace("\u201d", '"')
-    return re.sub(r"\s+", " ", s).strip().lower()
-
-
-def _extract_hint_norms(sample: dict) -> list[str]:
-    """Return the list of normalised, length-80 hint prefixes for a sample.
-
-    ``context_hint`` may be a string (legacy) or a list of strings (S226
-    multi-hint). Empty or missing hint falls back to the first 50 chars of
-    ``ground_truths[0]``. Returns [] when no usable hint is found.
-    """
-    raw = sample.get("context_hint", "")
-    if isinstance(raw, list):
-        candidates = [h for h in raw if isinstance(h, str) and h.strip()]
-    else:
-        candidates = [raw] if isinstance(raw, str) and raw.strip() else []
-    if not candidates:
-        gt = sample.get("ground_truths", [""])
-        if gt and isinstance(gt[0], str) and gt[0].strip():
-            candidates = [gt[0][:50]]
-    return [_norm(h)[:80] for h in candidates if h.strip()]
-
-
-def compute_hit_rate_5(samples: list[dict]) -> float:
-    """HR@5: fraction of questions where ANY context_hint substring is in top-5 retrieved chunks.
-
-    When ``context_hint`` is a list, the entry counts as a hit if any of the
-    listed alternates is found as a substring of any top-5 chunk (S226).
-    """
-    if not samples:
-        return 0.0
-    hits = 0
-    for s in samples:
-        hint_norms = _extract_hint_norms(s)
-        if not hint_norms:
-            continue
-        chunks = s.get("contexts", [])[:5]
-        if any(any(h in _norm(ctx) for h in hint_norms) for ctx in chunks):
-            hits += 1
-    return hits / len(samples)
-
-
-def compute_mrr(samples: list[dict]) -> float:
-    """MRR: mean reciprocal rank of first chunk containing ANY context_hint.
-
-    For multi-hint entries (S226), the rank is that of the FIRST top-K chunk
-    whose text contains any of the alternates.
-    """
-    if not samples:
-        return 0.0
-    reciprocal_ranks = []
-    for s in samples:
-        hint_norms = _extract_hint_norms(s)
-        chunks = s.get("contexts", [])
-        rank = None
-        if hint_norms:
-            for i, ctx in enumerate(chunks, start=1):
-                ctx_norm = _norm(ctx)
-                if any(h in ctx_norm for h in hint_norms):
-                    rank = i
-                    break
-        reciprocal_ranks.append(1.0 / rank if rank else 0.0)
-    return sum(reciprocal_ranks) / len(reciprocal_ranks)
-
-
-# ---------------------------------------------------------------------------
-# Golden dataset loading
-# ---------------------------------------------------------------------------
-
-
-class GoldenEntry(BaseModel):
-    """Schema for a single retrieval golden entry.
-
-    ``context_hint`` accepts either a string (legacy) or a list of strings
-    (S226 multi-hint). The validator coerces a bare string into a single-element
-    list so downstream code only needs to handle ``list[str]``.
-    """
-
-    question: str
-    ground_truth_answer: str
-    context_hint: list[str] = []
-    document_id: str | None = None
-    source_file: str | None = None
-
-    model_config = {"extra": "allow"}
-
-    @field_validator("context_hint", mode="before")
-    @classmethod
-    def _coerce_hint(cls, v: object) -> list[str]:
-        if v is None:
-            return []
-        if isinstance(v, str):
-            return [v] if v.strip() else []
-        if isinstance(v, list):
-            if len(v) == 0:
-                raise ValueError("context_hint list must not be empty")
-            for item in v:
-                if not isinstance(item, str):
-                    raise ValueError(
-                        f"context_hint list elements must be str, got {type(item).__name__}"
-                    )
-            return v
-        raise ValueError(f"context_hint must be str or list[str], got {type(v).__name__}")
-
-
-def load_golden(dataset: str) -> list[dict]:
-    """Load and validate a golden JSONL dataset.
-
-    Each line is parsed as JSON and validated through ``GoldenEntry``. The
-    ``context_hint`` field is normalised to ``list[str]`` (a bare string is
-    wrapped into a single-element list). Empty list hints are rejected.
-    Returns a list of dicts (model_dump) so downstream code that already
-    indexes into the loaded rows continues to work unchanged.
-    """
-    path = GOLDEN_DIR / f"{dataset}.jsonl"
-    if not path.exists():
-        print(f"ERROR: golden file not found: {path}", file=sys.stderr)
-        sys.exit(1)
-    rows: list[dict] = []
-    with path.open() as f:
-        for lineno, raw in enumerate(f, start=1):
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                payload = json.loads(raw)
-                entry = GoldenEntry.model_validate(payload)
-            except (json.JSONDecodeError, ValidationError) as exc:
-                print(
-                    f"ERROR: invalid golden entry in {path}:{lineno}: {exc}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            rows.append(entry.model_dump())
-    return rows
-
-
-# ---------------------------------------------------------------------------
-# Results storage
-# ---------------------------------------------------------------------------
-
-
-def store_results(backend_url: str, dataset: str, model: str, metrics: dict) -> None:
-    """POST eval results to backend for storage."""
-    payload = {
-        "dataset_name": dataset,
-        "model_used": model,
-        "hit_rate_5": metrics.get("hit_rate_5"),
-        "mrr": metrics.get("mrr"),
-        "faithfulness": metrics.get("faithfulness"),
-        "answer_relevance": metrics.get("answer_relevance"),
-        "context_precision": metrics.get("context_precision"),
-        "context_recall": metrics.get("context_recall"),
-    }
-    try:
-        resp = httpx.post(
-            f"{backend_url}/monitoring/evals/store",
-            json=payload,
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        print(f"\nResults stored. Run ID: {resp.json().get('id', '?')}")
-    except Exception as exc:
-        print(f"\nWARNING: failed to store results: {exc}", file=sys.stderr)
-
-
 def print_table(dataset: str, model: str, metrics: dict) -> None:
     print(f"\n{'=' * 56}")
     print(f"  RAGAS evaluation -- dataset={dataset}  model={model}")
@@ -495,6 +178,33 @@ def print_table(dataset: str, model: str, metrics: dict) -> None:
     print(f"{'=' * 56}\n")
 
 
+__all__ = [
+    "GOLDEN_DIR",
+    "GoldenEntry",
+    "MANIFEST_PATH",
+    "REPO_ROOT",
+    "SCORES_HISTORY_PATH",
+    "THRESHOLDS",
+    "VALID_DATASETS",
+    "_extract_hint_norms",
+    "_norm",
+    "append_history",
+    "compute_hit_rate_5",
+    "compute_mrr",
+    "ensure_ingested",
+    "ingest_document",
+    "is_document_alive",
+    "load_golden",
+    "load_manifest",
+    "lookup_document_by_filename",
+    "post_qa",
+    "print_table",
+    "save_manifest",
+    "search_chunks",
+    "store_results",
+]
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -502,15 +212,11 @@ def print_table(dataset: str, model: str, metrics: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run RAGAS evaluation against a golden dataset.")
-    parser.add_argument(
-        "--dataset",
-        required=True,
-        help="Golden dataset name",
-    )
+    parser.add_argument("--dataset", required=True, help="Golden dataset name")
     parser.add_argument(
         "--model",
         default="",
-        help="LiteLLM model string for LLM-based RAGAS scoring (optional; default: skip LLM scoring)",
+        help="LiteLLM model string for LLM-based RAGAS scoring (optional)",
     )
     parser.add_argument(
         "--backend-url",
@@ -527,31 +233,15 @@ def main() -> None:
             "HR@5 >= 0.50, MRR >= 0.35, Faithfulness >= 0.65 (LLM only)"
         ),
     )
+    parser.add_argument("--hyde", action="store_true", help="Enable HyDE-style query expansion.")
     parser.add_argument(
-        "--hyde",
-        action="store_true",
-        help=(
-            "Enable HyDE-style query expansion via local LLM for retrieval. "
-            "Bridges question/answer phrasing divergence at the cost of one "
-            "LLM call per question (~1-2s, local Ollama)."
-        ),
-    )
-    parser.add_argument(
-        "--rerank",
-        action="store_true",
-        help=(
-            "Enable cross-encoder reranking of the top-50 RRF candidates "
-            "(local sentence-transformers, ~100-300ms per question). Catches "
-            "answer chunks whose vocabulary diverges from the question's "
-            "surface form. (S212 iteration 5.)"
-        ),
+        "--rerank", action="store_true", help="Enable cross-encoder reranking."
     )
     args = parser.parse_args()
 
     rows = load_golden(args.dataset)
     print(f"Loaded {len(rows)} examples from {args.dataset}.jsonl")
 
-    # Ensure all source files are ingested and resolve document_ids
     manifest = load_manifest()
     source_to_doc_id: dict[str, str | None] = {}
     unique_sources = {row.get("source_file", "") for row in rows if row.get("source_file")}
@@ -559,7 +249,6 @@ def main() -> None:
         doc_id = ensure_ingested(args.backend_url, src, manifest)
         source_to_doc_id[src] = doc_id
 
-    # Collect samples: run /search for retrieval quality assessment
     samples: list[dict] = []
     for i, row in enumerate(rows, start=1):
         question = row["question"]
@@ -573,12 +262,10 @@ def main() -> None:
             args.backend_url, question, doc_id, hyde=args.hyde, rerank=args.rerank
         )
 
-        # For LLM scoring, also call /qa if model is specified
         answer = ""
         if args.model:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
-            # Supplement chunks with citation texts from /qa
             citations = qa_resp.get("citations", [])
             qa_chunks = [c.get("text", "") for c in citations if isinstance(c, dict)]
             seen = set(chunks)
@@ -597,11 +284,9 @@ def main() -> None:
             }
         )
 
-    # Retrieval quality metrics (no LLM required -- uses context_hint)
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
 
-    # RAGAS metrics (require LLM judge -- graceful fallback if unavailable)
     ragas_scores: dict[str, float | None] = {
         "faithfulness": None,
         "answer_relevance": None,
@@ -610,7 +295,7 @@ def main() -> None:
     }
     if args.model:
         try:
-            from datasets import Dataset  # noqa: PLC0415 -- lazy import, see module docstring
+            from datasets import Dataset  # noqa: PLC0415
             from ragas import evaluate  # noqa: PLC0415
             from ragas.metrics import (  # noqa: PLC0415
                 answer_relevancy,
@@ -652,8 +337,6 @@ def main() -> None:
         **ragas_scores,
     }
 
-    # Always evaluate threshold compliance so scores_history.jsonl accurately
-    # reflects quality.  The --assert-thresholds flag only controls exit code.
     threshold_violations: list[str] = []
     if hr5 < THRESHOLDS["hit_rate_5"]:
         threshold_violations.append(f"HR@5 {hr5:.4f} < {THRESHOLDS['hit_rate_5']}")
@@ -666,7 +349,6 @@ def main() -> None:
     passed = len(threshold_violations) == 0
     violations = threshold_violations if args.assert_thresholds else []
 
-    # Persist run to local history file
     append_history(args.dataset, args.model or "no-llm", metrics, passed)
 
     print_table(args.dataset, args.model or "no-llm", metrics)

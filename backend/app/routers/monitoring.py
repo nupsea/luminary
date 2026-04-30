@@ -71,18 +71,21 @@ class MonitoringOverview(BaseModel):
 class EvalRunCreate(BaseModel):
     dataset_name: str
     model_used: str
+    eval_kind: str | None = "retrieval"
     hit_rate_5: float | None = None
     mrr: float | None = None
     faithfulness: float | None = None
     answer_relevance: float | None = None
     context_precision: float | None = None
     context_recall: float | None = None
+    citation_support_rate: float | None = None
 
 
 class EvalRunResponse(BaseModel):
     id: str
     dataset_name: str
     model_used: str
+    eval_kind: str | None
     run_at: datetime
     hit_rate_5: float | None
     mrr: float | None
@@ -90,6 +93,7 @@ class EvalRunResponse(BaseModel):
     answer_relevance: float | None
     context_precision: float | None
     context_recall: float | None
+    citation_support_rate: float | None = None
 
 
 class PhoenixUrlResponse(BaseModel):
@@ -251,6 +255,7 @@ async def store_eval_run(
         id=str(uuid.uuid4()),
         dataset_name=payload.dataset_name,
         model_used=payload.model_used,
+        eval_kind=payload.eval_kind or "retrieval",
         run_at=datetime.now(tz=UTC),
         hit_rate_5=payload.hit_rate_5,
         mrr=payload.mrr,
@@ -258,6 +263,7 @@ async def store_eval_run(
         answer_relevance=payload.answer_relevance,
         context_precision=payload.context_precision,
         context_recall=payload.context_recall,
+        citation_support_rate=payload.citation_support_rate,
     )
     db.add(run)
     await db.commit()
@@ -270,6 +276,7 @@ async def store_eval_run(
         id=run.id,
         dataset_name=run.dataset_name,
         model_used=run.model_used,
+        eval_kind=run.eval_kind,
         run_at=run.run_at,
         hit_rate_5=run.hit_rate_5,
         mrr=run.mrr,
@@ -277,6 +284,7 @@ async def store_eval_run(
         answer_relevance=run.answer_relevance,
         context_precision=run.context_precision,
         context_recall=run.context_recall,
+        citation_support_rate=run.citation_support_rate,
     )
 
 
@@ -306,6 +314,7 @@ async def get_eval_runs(
             id=r.id,
             dataset_name=r.dataset_name,
             model_used=r.model_used,
+            eval_kind=r.eval_kind,
             run_at=r.run_at,
             hit_rate_5=r.hit_rate_5,
             mrr=r.mrr,
@@ -313,6 +322,7 @@ async def get_eval_runs(
             answer_relevance=r.answer_relevance,
             context_precision=r.context_precision,
             context_recall=r.context_recall,
+            citation_support_rate=r.citation_support_rate,
         )
         for r in all_runs
     ]

@@ -40,7 +40,8 @@ def _make_documents_response(doc_id: str, title: str, stage: str = "complete") -
 
 def test_ensure_ingested_skips_reingest_when_document_exists(tmp_path, monkeypatch):
     """ensure_ingested() must not call ingest_document() when the document already exists."""
-    monkeypatch.setattr(run_eval, "MANIFEST_PATH", tmp_path / "manifest.json")
+    import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+    monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     fake_doc_id = "doc-already-exists"
     documents_resp = _make_documents_response(fake_doc_id, "time_machine")
@@ -51,7 +52,7 @@ def test_ensure_ingested_skips_reingest_when_document_exists(tmp_path, monkeypat
         ingest_called.append(source_file)
         return "doc-new-id"
 
-    with patch("run_eval.ingest_document", side_effect=fake_ingest):
+    with patch("evals.lib.manifest.ingest_document", side_effect=fake_ingest):
         with patch("httpx.get", return_value=documents_resp):
             manifest: dict = {}
             result = run_eval.ensure_ingested(
@@ -71,7 +72,8 @@ def test_ensure_ingested_skips_reingest_when_document_exists(tmp_path, monkeypat
 
 def test_ensure_ingested_calls_ingest_when_document_missing(tmp_path, monkeypatch):
     """ensure_ingested() must call ingest_document() when no matching document exists."""
-    monkeypatch.setattr(run_eval, "MANIFEST_PATH", tmp_path / "manifest.json")
+    import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+    monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     # GET /documents returns an empty list
     empty_resp = MagicMock()
@@ -80,7 +82,7 @@ def test_ensure_ingested_calls_ingest_when_document_missing(tmp_path, monkeypatc
 
     new_doc_id = "doc-freshly-ingested"
 
-    with patch("run_eval.ingest_document", return_value=new_doc_id) as mock_ingest:
+    with patch("evals.lib.manifest.ingest_document", return_value=new_doc_id) as mock_ingest:
         with patch("httpx.get", return_value=empty_resp):
             manifest: dict = {}
             result = run_eval.ensure_ingested(
@@ -102,14 +104,15 @@ def test_ensure_ingested_uses_manifest_cache_when_alive(tmp_path, monkeypatch):
     document is still present, the cached value is returned without
     re-ingesting and without calling /documents or /ingest.
     """
-    monkeypatch.setattr(run_eval, "MANIFEST_PATH", tmp_path / "manifest.json")
+    import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+    monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     cached_id = "doc-from-cache"
     manifest = {"DATA/books/time_machine.txt": cached_id}
 
-    with patch("run_eval.is_document_alive", return_value=True) as mock_alive:
-        with patch("run_eval.lookup_document_by_filename") as mock_lookup:
-            with patch("run_eval.ingest_document") as mock_ingest:
+    with patch("evals.lib.manifest.is_document_alive", return_value=True) as mock_alive:
+        with patch("evals.lib.manifest.lookup_document_by_filename") as mock_lookup:
+            with patch("evals.lib.manifest.ingest_document") as mock_ingest:
                 result = run_eval.ensure_ingested(
                     "http://localhost:8000",
                     "DATA/books/time_machine.txt",
@@ -129,15 +132,16 @@ def test_ensure_ingested_drops_stale_cache_and_falls_through(tmp_path, monkeypat
     /documents/{id}/status, drop it from the manifest and fall through
     to lookup/ingest so the next call can resolve a live document.
     """
-    monkeypatch.setattr(run_eval, "MANIFEST_PATH", tmp_path / "manifest.json")
+    import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+    monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     stale_id = "doc-stale"
     fresh_id = "doc-fresh"
     manifest = {"DATA/books/time_machine.txt": stale_id}
 
-    with patch("run_eval.is_document_alive", return_value=False):
-        with patch("run_eval.lookup_document_by_filename", return_value=fresh_id):
-            with patch("run_eval.ingest_document") as mock_ingest:
+    with patch("evals.lib.manifest.is_document_alive", return_value=False):
+        with patch("evals.lib.manifest.lookup_document_by_filename", return_value=fresh_id):
+            with patch("evals.lib.manifest.ingest_document") as mock_ingest:
                 result = run_eval.ensure_ingested(
                     "http://localhost:8000",
                     "DATA/books/time_machine.txt",
@@ -151,14 +155,15 @@ def test_ensure_ingested_drops_stale_cache_and_falls_through(tmp_path, monkeypat
 
 def test_ensure_ingested_skips_incomplete_stage(tmp_path, monkeypatch):
     """ensure_ingested() must not use a document whose stage != 'complete'."""
-    monkeypatch.setattr(run_eval, "MANIFEST_PATH", tmp_path / "manifest.json")
+    import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+    monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     # Document exists but is still processing
     processing_resp = _make_documents_response("doc-processing", "time_machine", stage="embed")
 
     new_doc_id = "doc-new-after-ingest"
 
-    with patch("run_eval.ingest_document", return_value=new_doc_id) as mock_ingest:
+    with patch("evals.lib.manifest.ingest_document", return_value=new_doc_id) as mock_ingest:
         with patch("httpx.get", return_value=processing_resp):
             manifest: dict = {}
             result = run_eval.ensure_ingested(
