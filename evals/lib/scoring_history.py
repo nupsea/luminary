@@ -30,6 +30,9 @@ def append_history(
         "hr5": metrics.get("hit_rate_5"),
         "mrr": metrics.get("mrr"),
         "faithfulness": metrics.get("faithfulness"),
+        "answer_relevance": metrics.get("answer_relevance"),
+        "context_precision": metrics.get("context_precision"),
+        "context_recall": metrics.get("context_recall"),
         "passed": passed,
     }
     with target.open("a") as f:

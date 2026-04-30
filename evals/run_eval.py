@@ -20,6 +20,7 @@ compatibility with audit_golden.py and existing tests.
 """
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
@@ -30,7 +31,11 @@ import httpx
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+_BACKEND_DIR = _REPO_ROOT / "backend"
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.config import get_settings  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
@@ -50,6 +55,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_hit_rate_5,
     compute_mrr,
 )
+from evals.lib.runners import GenerationEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
 from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
@@ -75,6 +81,7 @@ THRESHOLDS = {
     "hit_rate_5": 0.50,
     "mrr": 0.35,
     "faithfulness": 0.65,
+    "answer_relevance": 0.50,
 }
 
 
@@ -230,17 +237,44 @@ def main() -> None:
         dest="assert_thresholds",
         help=(
             "Exit code 1 if any metric is below threshold: "
-            "HR@5 >= 0.50, MRR >= 0.35, Faithfulness >= 0.65 (LLM only)"
+            "HR@5 >= 0.50, MRR >= 0.35, Faithfulness >= 0.65, "
+            "Answer-Relevance >= 0.50"
         ),
     )
     parser.add_argument("--hyde", action="store_true", help="Enable HyDE-style query expansion.")
     parser.add_argument(
         "--rerank", action="store_true", help="Enable cross-encoder reranking."
     )
+    parser.add_argument(
+        "--judge-model",
+        default=get_settings().LITELLM_DEFAULT_MODEL,
+        dest="judge_model",
+        help=(
+            "LiteLLM model string for the RAGAS judge LLM. "
+            "Default: get_settings().LITELLM_DEFAULT_MODEL (Ollama-local per I-16). "
+            "Pass empty string to disable judge scoring entirely."
+        ),
+    )
+    parser.add_argument(
+        "--max-questions",
+        type=int,
+        default=None,
+        dest="max_questions",
+        help=(
+            "Sample N entries deterministically (random.Random(42).sample) "
+            "for fast runs. Default: all entries."
+        ),
+    )
     args = parser.parse_args()
 
     rows = load_golden(args.dataset)
-    print(f"Loaded {len(rows)} examples from {args.dataset}.jsonl")
+    if args.max_questions is not None and args.max_questions < len(rows):
+        rows = random.Random(42).sample(rows, args.max_questions)
+        print(
+            f"Sampled {len(rows)} examples (seed=42) from {args.dataset}.jsonl"
+        )
+    else:
+        print(f"Loaded {len(rows)} examples from {args.dataset}.jsonl")
 
     manifest = load_manifest()
     source_to_doc_id: dict[str, str | None] = {}
@@ -293,43 +327,9 @@ def main() -> None:
         "context_precision": None,
         "context_recall": None,
     }
-    if args.model:
-        try:
-            from datasets import Dataset  # noqa: PLC0415
-            from ragas import evaluate  # noqa: PLC0415
-            from ragas.metrics import (  # noqa: PLC0415
-                answer_relevancy,
-                context_precision,
-                context_recall,
-                faithfulness,
-            )
-
-            dataset_hf = Dataset.from_list(
-                [
-                    {
-                        "question": s["question"],
-                        "answer": s["answer"],
-                        "contexts": s["contexts"],
-                        "ground_truths": s["ground_truths"],
-                    }
-                    for s in samples
-                ]
-            )
-            result = evaluate(
-                dataset=dataset_hf,
-                metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
-            )
-            scores = result.to_pandas()
-            for col in ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]:
-                if col in scores.columns:
-                    val = float(scores[col].mean())
-                    key = "answer_relevance" if col == "answer_relevancy" else col
-                    ragas_scores[key] = val
-        except Exception as exc:
-            print(
-                f"WARNING: RAGAS scoring failed (LLM may be unavailable): {exc}",
-                file=sys.stderr,
-            )
+    if args.judge_model:
+        print(f"Running RAGAS judge with model={args.judge_model}...")
+        ragas_scores = GenerationEval().run(samples, judge_model=args.judge_model)
 
     metrics = {
         "hit_rate_5": hr5,
@@ -343,16 +343,27 @@ def main() -> None:
     if mrr < THRESHOLDS["mrr"]:
         threshold_violations.append(f"MRR {mrr:.4f} < {THRESHOLDS['mrr']}")
     faith = ragas_scores.get("faithfulness")
-    if args.model and faith is not None and faith < THRESHOLDS["faithfulness"]:
+    if faith is not None and faith < THRESHOLDS["faithfulness"]:
         threshold_violations.append(f"Faithfulness {faith:.4f} < {THRESHOLDS['faithfulness']}")
+    answer_rel = ragas_scores.get("answer_relevance")
+    if answer_rel is not None and answer_rel < THRESHOLDS["answer_relevance"]:
+        threshold_violations.append(
+            f"AnswerRelevance {answer_rel:.4f} < {THRESHOLDS['answer_relevance']}"
+        )
 
     passed = len(threshold_violations) == 0
     violations = threshold_violations if args.assert_thresholds else []
 
-    append_history(args.dataset, args.model or "no-llm", metrics, passed)
+    judge_ran = args.judge_model and any(v is not None for v in ragas_scores.values())
+    eval_kind = "generation" if judge_ran else "retrieval"
+    history_model = args.model or args.judge_model or "no-llm"
 
-    print_table(args.dataset, args.model or "no-llm", metrics)
-    store_results(args.backend_url, args.dataset, args.model or "no-llm", metrics)
+    _lib_append_history(args.dataset, history_model, metrics, passed, eval_kind=eval_kind)
+
+    print_table(args.dataset, history_model, metrics)
+    _lib_store_results(
+        args.backend_url, args.dataset, history_model, metrics, eval_kind=eval_kind
+    )
 
     if violations:
         print("\nQUALITY GATE FAILED:", file=sys.stderr)

@@ -6,6 +6,7 @@ GenerationEval added in S214; ClassifierEval added in S218) implement
 quality gates.
 """
 
+import sys
 from abc import ABC, abstractmethod
 
 
@@ -13,7 +14,7 @@ class _BaseEval(ABC):
     eval_kind: str = "base"
 
     @abstractmethod
-    def run(self, samples: list[dict]) -> dict:
+    def run(self, samples: list[dict], **kwargs) -> dict:
         """Compute metrics for the given samples."""
         raise NotImplementedError
 
@@ -35,8 +36,8 @@ class RetrievalEval(_BaseEval):
 
     eval_kind = "retrieval"
 
-    def run(self, samples: list[dict]) -> dict:
-        from evals.lib.retrieval_metrics import compute_hit_rate_5, compute_mrr
+    def run(self, samples: list[dict], **kwargs) -> dict:
+        from evals.lib.retrieval_metrics import compute_hit_rate_5, compute_mrr  # noqa: PLC0415
 
         return {
             "hit_rate_5": compute_hit_rate_5(samples),
@@ -44,16 +45,88 @@ class RetrievalEval(_BaseEval):
         }
 
 
+_EMPTY_GENERATION_METRICS = {
+    "faithfulness": None,
+    "answer_relevance": None,
+    "context_precision": None,
+    "context_recall": None,
+}
+
+
 class GenerationEval(_BaseEval):
     """LLM-judge generation eval (faithfulness, answer relevance).
 
-    Concrete implementation lands in S214 (RAGAS + local Ollama judge).
+    Implemented in S214 (RAGAS + local Ollama judge by default per I-16).
     """
 
     eval_kind = "generation"
 
-    def run(self, samples: list[dict]) -> dict:  # pragma: no cover - implemented in S214
-        raise NotImplementedError("GenerationEval.run is implemented by S214")
+    def run(self, samples: list[dict], **kwargs) -> dict:
+        """Score *samples* with RAGAS using a LiteLLM-style ``judge_model``.
+
+        Returns a dict with keys ``faithfulness``, ``answer_relevance``,
+        ``context_precision``, ``context_recall``. On any failure (Ollama
+        unreachable, ragas import error, malformed result), prints a warning
+        to stderr and returns the same keys with ``None`` values (graceful
+        skip per AC-7).
+        """
+        judge_model: str = kwargs.get("judge_model", "")
+        if not judge_model:
+            print(
+                "WARNING: GenerationEval skipped -- no judge_model provided",
+                file=sys.stderr,
+            )
+            return dict(_EMPTY_GENERATION_METRICS)
+
+        try:
+            from datasets import Dataset  # noqa: PLC0415
+            from langchain_community.chat_models import ChatOllama  # noqa: PLC0415
+            from ragas import evaluate  # noqa: PLC0415
+            from ragas.llms import LangchainLLMWrapper  # noqa: PLC0415
+            from ragas.metrics import (  # noqa: PLC0415
+                answer_relevancy,
+                context_precision,
+                context_recall,
+                faithfulness,
+            )
+
+            ollama_model = (
+                judge_model.split("/", 1)[1]
+                if judge_model.startswith("ollama/")
+                else judge_model
+            )
+            wrapper = LangchainLLMWrapper(ChatOllama(model=ollama_model))
+            metrics_list = [faithfulness, answer_relevancy, context_precision, context_recall]
+            for metric in metrics_list:
+                metric.llm = wrapper
+
+            dataset_hf = Dataset.from_list(
+                [
+                    {
+                        "question": s["question"],
+                        "answer": s["answer"],
+                        "contexts": s["contexts"],
+                        "ground_truths": s["ground_truths"],
+                    }
+                    for s in samples
+                ]
+            )
+            result = evaluate(dataset=dataset_hf, metrics=metrics_list)
+            scores_df = result.to_pandas()
+
+            out = dict(_EMPTY_GENERATION_METRICS)
+            for col in ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]:
+                if col in scores_df.columns:
+                    val = float(scores_df[col].mean())
+                    key = "answer_relevance" if col == "answer_relevancy" else col
+                    out[key] = val
+            return out
+        except Exception as exc:
+            print(
+                f"WARNING: RAGAS scoring failed (judge unreachable?): {exc}",
+                file=sys.stderr,
+            )
+            return dict(_EMPTY_GENERATION_METRICS)
 
 
 class ClassifierEval(_BaseEval):
@@ -64,5 +137,5 @@ class ClassifierEval(_BaseEval):
 
     eval_kind = "classifier"
 
-    def run(self, samples: list[dict]) -> dict:  # pragma: no cover - implemented in S218
+    def run(self, samples: list[dict], **kwargs) -> dict:  # pragma: no cover - implemented in S218
         raise NotImplementedError("ClassifierEval.run is implemented by S218")
