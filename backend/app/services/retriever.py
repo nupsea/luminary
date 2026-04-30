@@ -380,84 +380,6 @@ async def _graph_expand(query: str) -> str:
         from app.services.ner import get_entity_extractor  # noqa: PLC0415
 
         extractor = get_entity_extractor()
-        entities = extractor.extract(
-            [{"id": "q", "document_id": "q", "text": query}],
-            "general",
-        )
-        return query  # XXXTEST AFTER EXTRACT
-        # Filter to query-relevant types and dedupe by canonical label.
-        canonical_seen: set[str] = set()
-        canonical_entities: list[tuple[str, str]] = []
-        for ent in entities:
-            etype = ent.get("type", "")
-            ename = (ent.get("name") or "").strip()
-            if etype not in _GRAPH_EXPAND_TYPES or not ename:
-                continue
-            canonical = find_canonical(ename, etype, []).lower()
-            if canonical in canonical_seen:
-                continue
-            canonical_seen.add(canonical)
-            canonical_entities.append((canonical, etype))
-
-        if not canonical_entities:
-            logger.debug("graph_expand: no entities detected; passthrough")
-            return query
-
-        graph = get_graph_service()
-        existing_query_tokens = {t.lower() for t in query.split()}
-        expansion_tokens: list[str] = []
-
-        def _lookup_aliases(name: str) -> str:
-            with graph._lock:
-                result = graph._conn.execute(
-                    "MATCH (e:Entity) WHERE toLower(e.name) = $name"
-                    " RETURN e.aliases LIMIT 1",
-                    {"name": name},
-                )
-                if not result.has_next():
-                    return ""
-                row = result.get_next()
-                return (row[0] or "") if row else ""
-
-        for canonical, _etype in canonical_entities:
-            for tok in canonical.split():
-                tok_lc = tok.lower()
-                if tok_lc and tok_lc not in existing_query_tokens:
-                    expansion_tokens.append(tok)
-                    existing_query_tokens.add(tok_lc)
-
-            try:
-                aliases_str = _lookup_aliases(canonical)
-            except Exception as exc:
-                logger.warning(
-                    "graph_expand: kuzu lookup failed for %r, skipping: %s",
-                    canonical,
-                    exc,
-                )
-                continue
-
-            if not aliases_str:
-                continue
-
-            alias_forms = [a.strip() for a in aliases_str.split("|") if a.strip()]
-            for alias in alias_forms[:_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY]:
-                for tok in alias.split():
-                    tok_lc = tok.lower()
-                    if tok_lc and tok_lc not in existing_query_tokens:
-                        expansion_tokens.append(tok)
-                        existing_query_tokens.add(tok_lc)
-
-        if not expansion_tokens:
-            return query
-
-        capped = expansion_tokens[:_GRAPH_EXPAND_MAX_TOKENS]
-        logger.info(
-            "graph_expand: entities_detected=%d aliases_added=%d expanded_query_tokens=%d",
-            len(canonical_entities),
-            len(expansion_tokens),
-            len(capped),
-        )
-        return f"{query} {' '.join(capped)}"
         # Direct sync call -- single short query, GLiNER inference takes ~30ms
         # warm. Wrapping in asyncio.to_thread here causes ThreadPoolExecutor /
         # LanceDB BackgroundLoop contention in pytest that surfaces as an
@@ -489,21 +411,18 @@ async def _graph_expand(query: str) -> str:
         expansion_tokens: list[str] = []
 
         def _lookup_aliases(name: str) -> str:
-            # Synchronous Kuzu call -- caller wraps in asyncio.to_thread (I-2).
             with graph._lock:
                 result = graph._conn.execute(
                     "MATCH (e:Entity) WHERE toLower(e.name) = $name"
                     " RETURN e.aliases LIMIT 1",
                     {"name": name},
                 )
-                # I-3: guard get_next() with has_next().
                 if not result.has_next():
                     return ""
                 row = result.get_next()
                 return (row[0] or "") if row else ""
 
         for canonical, _etype in canonical_entities:
-            # Always include the canonical label itself.
             for tok in canonical.split():
                 tok_lc = tok.lower()
                 if tok_lc and tok_lc not in existing_query_tokens:
@@ -511,7 +430,9 @@ async def _graph_expand(query: str) -> str:
                     existing_query_tokens.add(tok_lc)
 
             try:
-                aliases_str = _lookup_aliases(canonical)
+                # I-2: Kuzu is synchronous and not thread-safe; offload to a
+                # worker thread so the event loop is not blocked.
+                aliases_str = await asyncio.to_thread(_lookup_aliases, canonical)
             except Exception as exc:
                 logger.warning(
                     "graph_expand: kuzu lookup failed for %r, skipping: %s",
@@ -779,21 +700,28 @@ class HybridRetriever:
         else:
             candidate_pool = 20
 
-        # Apply graph_expand first (deterministic, local-first), then HyDE on
-        # top if both flags are set. Order matters: graph_expand adds canonical
-        # entity vocabulary; HyDE adds hypothetical-answer vocabulary. Either
-        # may be a no-op (passthrough) on its own input.
-        search_query = await _graph_expand(query) if graph_expand else query
+        # graph_expand flows only into the dense vector search. Embeddings
+        # reward semantic similarity, so appending canonical entity tokens
+        # helps match chunks whose surface form differs from the question.
+        # SQLite FTS5 MATCH uses AND semantics across terms, so appending
+        # tokens that may be absent from the corpus collapses BM25 recall to
+        # zero (S225 iter 8) -- keep the keyword side on the unexpanded query.
+        # HyDE, by contrast, augments with a full hypothetical answer that is
+        # designed to share vocabulary with the source text, so it flows into
+        # both vector and keyword (preserving the S212 iter 4 behavior).
+        vector_query = await _graph_expand(query) if graph_expand else query
+        keyword_query = query
         if hyde:
-            search_query = await _hyde_expand(search_query)
+            vector_query = await _hyde_expand(vector_query)
+            keyword_query = vector_query
 
         with trace_retrieval("hybrid", query=query) as span:
             span.set_attribute("retrieval.hyde", hyde)
             span.set_attribute("retrieval.rerank", rerank)
             span.set_attribute("retrieval.graph_expand", graph_expand)
             vector_results, keyword_results = await asyncio.gather(
-                asyncio.to_thread(self.vector_search, search_query, document_ids, candidate_pool),
-                self.keyword_search(search_query, document_ids, k=candidate_pool),
+                asyncio.to_thread(self.vector_search, vector_query, document_ids, candidate_pool),
+                self.keyword_search(keyword_query, document_ids, k=candidate_pool),
             )
             # When reranking, ask rrf_merge for the full candidate pool so the
             # cross-encoder can re-score them. Skip diversification regardless

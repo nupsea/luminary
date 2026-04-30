@@ -181,7 +181,12 @@ async def test_retrieve_graph_expand_false_bypasses_helper():
 
 @pytest.mark.asyncio
 async def test_retrieve_graph_expand_true_passes_expanded_query():
-    """retrieve(graph_expand=True) feeds the expanded query into both searches."""
+    """retrieve(graph_expand=True) feeds the expanded query to vector search.
+
+    Keyword (FTS5) receives the original query so AND-semantics across appended
+    tokens does not collapse BM25 recall when expansion tokens are absent from
+    the corpus (S225 iter 8).
+    """
     retriever = HybridRetriever()
 
     with (
@@ -202,4 +207,33 @@ async def test_retrieve_graph_expand_true_passes_expanded_query():
         )
 
     assert vec_mock.call_args[0][0] == "What happened? sherlock holmes"
-    assert kw_mock.call_args[0][0] == "What happened? sherlock holmes"
+    assert kw_mock.call_args[0][0] == "What happened?"
+
+
+@pytest.mark.asyncio
+async def test_search_endpoint_graph_expand_param():
+    """/search forwards graph_expand=true|false to retriever.retrieve."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+    from app.services.retriever import HybridRetriever
+
+    fake = HybridRetriever()
+    fake.retrieve = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+    app.dependency_overrides[
+        __import__("app.services.retriever", fromlist=["get_retriever"]).get_retriever
+    ] = lambda: fake
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            resp = await c.get("/search", params={"q": "anything", "graph_expand": "false"})
+        assert resp.status_code == 200
+        assert fake.retrieve.await_args.kwargs["graph_expand"] is False
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            resp = await c.get("/search", params={"q": "anything", "graph_expand": "true"})
+        assert resp.status_code == 200
+        assert fake.retrieve.await_args.kwargs["graph_expand"] is True
+    finally:
+        app.dependency_overrides.clear()
