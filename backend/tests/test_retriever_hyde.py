@@ -80,7 +80,13 @@ async def test_retrieve_with_hyde_passes_augmented_query_to_searches():
         ) as kw_mock,
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve("What happened?", document_ids=["doc-1"], k=5, hyde=True)
+        await retriever.retrieve(
+            "What happened?",
+            document_ids=["doc-1"],
+            k=5,
+            hyde=True,
+            graph_expand=False,
+        )
 
     assert vec_mock.call_count == 1
     assert kw_mock.await_count == 1
@@ -108,7 +114,9 @@ async def test_retrieve_without_hyde_uses_original_query():
         ),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve("What happened?", document_ids=["doc-1"], k=5)
+        await retriever.retrieve(
+            "What happened?", document_ids=["doc-1"], k=5, graph_expand=False
+        )
 
     mock_llm.generate.assert_not_called()
     assert vec_mock.call_args[0][0] == "What happened?"
@@ -133,7 +141,11 @@ async def test_retrieve_with_hyde_falls_back_when_llm_fails():
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
         results = await retriever.retrieve(
-            "What happened?", document_ids=["doc-1"], k=5, hyde=True
+            "What happened?",
+            document_ids=["doc-1"],
+            k=5,
+            hyde=True,
+            graph_expand=False,
         )
 
     assert vec_mock.call_args[0][0] == "What happened?"

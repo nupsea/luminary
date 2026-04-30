@@ -87,7 +87,9 @@ async def test_retrieve_with_rerank_invokes_reranker_and_returns_top_k():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        results = await retriever.retrieve("q", document_ids=["doc-1"], k=5, rerank=True)
+        results = await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, rerank=True, graph_expand=False
+        )
 
     # Reranker should have been called once with the full RRF pool (50 chunks).
     mock_reranker.score.assert_called_once()
@@ -116,7 +118,7 @@ async def test_retrieve_without_rerank_does_not_invoke_reranker():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        await retriever.retrieve("q", document_ids=["doc-1"], k=5)
+        await retriever.retrieve("q", document_ids=["doc-1"], k=5, graph_expand=False)
 
     mock_reranker.score.assert_not_called()
 
@@ -137,7 +139,9 @@ async def test_retrieve_with_rerank_falls_back_when_reranker_fails():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        results = await retriever.retrieve("q", document_ids=["doc-1"], k=5, rerank=True)
+        results = await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, rerank=True, graph_expand=False
+        )
 
     # Fallback to RRF top-5 -- no exception propagated.
     assert len(results) == 5
