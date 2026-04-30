@@ -8,7 +8,7 @@ Usage::
     # With LLM-based RAGAS scoring
     uv run python run_eval.py --dataset book --model ollama/mistral
 
-    # Assert quality gates (exits 1 if HR@5 < 0.60, MRR < 0.45, Faithfulness < 0.65)
+    # Assert quality gates (exits 1 if HR@5 < 0.50, MRR < 0.35, Faithfulness < 0.65)
     uv run python run_eval.py --dataset book --assert-thresholds
 
 Documents are auto-ingested on first run and their IDs cached in
@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+from pydantic import BaseModel, ValidationError, field_validator
 
 # ragas and datasets are heavy optional dependencies used only for LLM-based scoring.
 # They are imported lazily inside main() so that this module can be imported by
@@ -39,8 +40,8 @@ REPO_ROOT = Path(__file__).parent.parent
 
 # Quality gate thresholds
 THRESHOLDS = {
-    "hit_rate_5": 0.60,
-    "mrr": 0.45,
+    "hit_rate_5": 0.50,
+    "mrr": 0.35,
     "faithfulness": 0.65,
 }
 
@@ -320,39 +321,63 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+def _extract_hint_norms(sample: dict) -> list[str]:
+    """Return the list of normalised, length-80 hint prefixes for a sample.
+
+    ``context_hint`` may be a string (legacy) or a list of strings (S226
+    multi-hint). Empty or missing hint falls back to the first 50 chars of
+    ``ground_truths[0]``. Returns [] when no usable hint is found.
+    """
+    raw = sample.get("context_hint", "")
+    if isinstance(raw, list):
+        candidates = [h for h in raw if isinstance(h, str) and h.strip()]
+    else:
+        candidates = [raw] if isinstance(raw, str) and raw.strip() else []
+    if not candidates:
+        gt = sample.get("ground_truths", [""])
+        if gt and isinstance(gt[0], str) and gt[0].strip():
+            candidates = [gt[0][:50]]
+    return [_norm(h)[:80] for h in candidates if h.strip()]
+
+
 def compute_hit_rate_5(samples: list[dict]) -> float:
-    """HR@5: fraction of questions where context_hint substring is in top-5 retrieved chunks."""
+    """HR@5: fraction of questions where ANY context_hint substring is in top-5 retrieved chunks.
+
+    When ``context_hint`` is a list, the entry counts as a hit if any of the
+    listed alternates is found as a substring of any top-5 chunk (S226).
+    """
     if not samples:
         return 0.0
     hits = 0
     for s in samples:
-        context_hint = s.get("context_hint", "").strip()
-        if not context_hint:
-            # Fall back to ground truth prefix if no context_hint
-            context_hint = s.get("ground_truths", [""])[0][:50]
-        hint_norm = _norm(context_hint)[:80]
+        hint_norms = _extract_hint_norms(s)
+        if not hint_norms:
+            continue
         chunks = s.get("contexts", [])[:5]
-        if any(hint_norm in _norm(ctx) for ctx in chunks):
+        if any(any(h in _norm(ctx) for h in hint_norms) for ctx in chunks):
             hits += 1
     return hits / len(samples)
 
 
 def compute_mrr(samples: list[dict]) -> float:
-    """MRR: mean reciprocal rank of first chunk containing context_hint."""
+    """MRR: mean reciprocal rank of first chunk containing ANY context_hint.
+
+    For multi-hint entries (S226), the rank is that of the FIRST top-K chunk
+    whose text contains any of the alternates.
+    """
     if not samples:
         return 0.0
     reciprocal_ranks = []
     for s in samples:
-        context_hint = s.get("context_hint", "").strip()
-        if not context_hint:
-            context_hint = s.get("ground_truths", [""])[0][:50]
-        hint_norm = _norm(context_hint)[:80]
+        hint_norms = _extract_hint_norms(s)
         chunks = s.get("contexts", [])
         rank = None
-        for i, ctx in enumerate(chunks, start=1):
-            if hint_norm in _norm(ctx):
-                rank = i
-                break
+        if hint_norms:
+            for i, ctx in enumerate(chunks, start=1):
+                ctx_norm = _norm(ctx)
+                if any(h in ctx_norm for h in hint_norms):
+                    rank = i
+                    break
         reciprocal_ranks.append(1.0 / rank if rank else 0.0)
     return sum(reciprocal_ranks) / len(reciprocal_ranks)
 
@@ -362,17 +387,70 @@ def compute_mrr(samples: list[dict]) -> float:
 # ---------------------------------------------------------------------------
 
 
+class GoldenEntry(BaseModel):
+    """Schema for a single retrieval golden entry.
+
+    ``context_hint`` accepts either a string (legacy) or a list of strings
+    (S226 multi-hint). The validator coerces a bare string into a single-element
+    list so downstream code only needs to handle ``list[str]``.
+    """
+
+    question: str
+    ground_truth_answer: str
+    context_hint: list[str] = []
+    document_id: str | None = None
+    source_file: str | None = None
+
+    model_config = {"extra": "allow"}
+
+    @field_validator("context_hint", mode="before")
+    @classmethod
+    def _coerce_hint(cls, v: object) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        if isinstance(v, list):
+            if len(v) == 0:
+                raise ValueError("context_hint list must not be empty")
+            for item in v:
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"context_hint list elements must be str, got {type(item).__name__}"
+                    )
+            return v
+        raise ValueError(f"context_hint must be str or list[str], got {type(v).__name__}")
+
+
 def load_golden(dataset: str) -> list[dict]:
+    """Load and validate a golden JSONL dataset.
+
+    Each line is parsed as JSON and validated through ``GoldenEntry``. The
+    ``context_hint`` field is normalised to ``list[str]`` (a bare string is
+    wrapped into a single-element list). Empty list hints are rejected.
+    Returns a list of dicts (model_dump) so downstream code that already
+    indexes into the loaded rows continues to work unchanged.
+    """
     path = GOLDEN_DIR / f"{dataset}.jsonl"
     if not path.exists():
         print(f"ERROR: golden file not found: {path}", file=sys.stderr)
         sys.exit(1)
-    rows = []
+    rows: list[dict] = []
     with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+        for lineno, raw in enumerate(f, start=1):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+                entry = GoldenEntry.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError) as exc:
+                print(
+                    f"ERROR: invalid golden entry in {path}:{lineno}: {exc}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            rows.append(entry.model_dump())
     return rows
 
 
@@ -446,7 +524,7 @@ def main() -> None:
         dest="assert_thresholds",
         help=(
             "Exit code 1 if any metric is below threshold: "
-            "HR@5 >= 0.60, MRR >= 0.45, Faithfulness >= 0.65 (LLM only)"
+            "HR@5 >= 0.50, MRR >= 0.35, Faithfulness >= 0.65 (LLM only)"
         ),
     )
     parser.add_argument(

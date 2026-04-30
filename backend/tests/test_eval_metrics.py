@@ -28,7 +28,13 @@ import pytest
 _EVALS_DIR = Path(__file__).resolve().parent.parent.parent / "evals"
 sys.path.insert(0, str(_EVALS_DIR))
 
-from run_eval import THRESHOLDS, compute_hit_rate_5, compute_mrr  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
+from run_eval import (  # noqa: E402
+    THRESHOLDS,
+    GoldenEntry,
+    compute_hit_rate_5,
+    compute_mrr,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -191,3 +197,154 @@ def test_passed_false_when_mrr_below_threshold():
         violations.append(f"MRR {mrr:.4f} below threshold")
     assert len(violations) == 1
     assert "MRR" in violations[0]
+
+
+# ---------------------------------------------------------------------------
+# S226: multi-hint context_hint schema and metrics
+# ---------------------------------------------------------------------------
+
+
+def test_golden_entry_accepts_string_hint():
+    """Bare string context_hint coerces to single-element list."""
+    entry = GoldenEntry(
+        question="q",
+        ground_truth_answer="a",
+        context_hint="some hint",
+    )
+    assert entry.context_hint == ["some hint"]
+
+
+def test_golden_entry_accepts_list_hint():
+    """List of strings is preserved verbatim."""
+    entry = GoldenEntry(
+        question="q",
+        ground_truth_answer="a",
+        context_hint=["first alt", "second alt", "third alt"],
+    )
+    assert entry.context_hint == ["first alt", "second alt", "third alt"]
+
+
+def test_golden_entry_rejects_empty_list():
+    """Empty list context_hint raises ValidationError with a clear message."""
+    with pytest.raises(ValidationError) as excinfo:
+        GoldenEntry(question="q", ground_truth_answer="a", context_hint=[])
+    assert "must not be empty" in str(excinfo.value)
+
+
+def test_golden_entry_rejects_non_str_list_element():
+    """List with a non-string element raises ValidationError."""
+    with pytest.raises(ValidationError):
+        GoldenEntry(
+            question="q",
+            ground_truth_answer="a",
+            context_hint=["valid", 42],  # type: ignore[list-item]
+        )
+
+
+def test_golden_entry_omitted_hint_defaults_to_empty_list():
+    """Missing context_hint is allowed (defaults to []); falls back to ground_truth in metrics."""
+    entry = GoldenEntry(question="q", ground_truth_answer="a")
+    assert entry.context_hint == []
+
+
+def test_hit_rate_list_hint_any_match():
+    """Multi-hint entry: HR@5=1 when ANY alternate is present in any top-5 chunk."""
+    samples = [
+        {
+            "question": "q1",
+            "context_hint": ["needle one absent", "needle two present"],
+            "contexts": ["chunk with needle two present text"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_hit_rate_5(samples) == pytest.approx(1.0)
+
+
+def test_hit_rate_list_hint_all_miss():
+    """Multi-hint entry: HR@5=0 when no alternate matches any top-5 chunk."""
+    samples = [
+        {
+            "question": "q1",
+            "context_hint": ["alpha", "beta", "gamma"],
+            "contexts": ["delta epsilon", "zeta eta"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_hit_rate_5(samples) == pytest.approx(0.0)
+
+
+def test_hit_rate_list_hint_three_alternates_one_match():
+    """Three alternates, only the third matches -> still a hit."""
+    samples = [
+        {
+            "question": "q1",
+            "context_hint": ["first miss", "second miss", "third matches here"],
+            "contexts": ["irrelevant 1", "the third matches here in chunk 2", "irrelevant 3"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_hit_rate_5(samples) == pytest.approx(1.0)
+
+
+def test_mrr_list_hint_first_matching_chunk_wins():
+    """MRR for multi-hint: rank of FIRST top-K chunk that matches ANY alternate.
+
+    Even if a later chunk matches a different alternate at higher 'priority',
+    the rank of the earliest matching chunk is what counts.
+    """
+    samples = [
+        {
+            "question": "q1",
+            "context_hint": ["only-in-three", "first-match"],
+            "contexts": [
+                "chunk one",
+                "chunk two with first-match here",  # rank 2 matches alt[1]
+                "chunk three with only-in-three here",  # rank 3 matches alt[0]
+            ],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_mrr(samples) == pytest.approx(0.5)
+
+
+def test_mrr_list_hint_no_match():
+    """No alternate matches -> MRR = 0."""
+    samples = [
+        {
+            "question": "q1",
+            "context_hint": ["alpha", "beta"],
+            "contexts": ["nothing here", "or here"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_mrr(samples) == pytest.approx(0.0)
+
+
+def test_existing_string_hints_remain_compatible_after_load():
+    """Backwards-compat: a sample with bare-string context_hint still scores correctly.
+
+    This emulates what compute_hit_rate_5 sees when an old golden file is
+    loaded: rows pass through GoldenEntry which coerces str -> [str], so the
+    sample dict carries list-form. But the metric must also handle a raw
+    string in case a caller bypasses load_golden.
+    """
+    samples_str = [
+        {
+            "question": "q1",
+            "context_hint": "raw string hint",
+            "contexts": ["chunk with raw string hint embedded"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    samples_list = [
+        {
+            "question": "q1",
+            "context_hint": ["raw string hint"],
+            "contexts": ["chunk with raw string hint embedded"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_hit_rate_5(samples_str) == pytest.approx(1.0)
+    assert compute_hit_rate_5(samples_list) == pytest.approx(1.0)
+    assert compute_mrr(samples_str) == pytest.approx(1.0)
+    assert compute_mrr(samples_list) == pytest.approx(1.0)

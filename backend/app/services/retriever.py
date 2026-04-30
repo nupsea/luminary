@@ -191,6 +191,8 @@ async def _expand_context(
     if not chunks:
         return chunks
 
+    expanded_by_id: dict[str, ScoredChunk] = {chunk.chunk_id: chunk for chunk in chunks}
+
     # Collect all document_ids to fetch content_types in a single query.
     doc_ids = list({c.document_id for c in chunks})
 
@@ -210,44 +212,47 @@ async def _expand_context(
         if not eligible_docs:
             return chunks
 
-        # Fetch chunk_index for all input chunks
-        chunk_ids = [c.chunk_id for c in chunks]
-        idx_result = await session.execute(
-            text(
-                "SELECT id, chunk_index FROM chunks WHERE id IN ("
-                + ", ".join(f"'{cid}'" for cid in chunk_ids)
-                + ")"
-            )
-        )
-        chunk_index_map: dict[str, int] = {row[0]: row[1] for row in idx_result.fetchall()}
-
-        # Merge neighbor text directly into the original chunks
         for chunk in chunks:
             if chunk.document_id not in eligible_docs:
-                continue
-            cidx = chunk_index_map.get(chunk.chunk_id)
-            if cidx is None:
                 continue
 
             surrounding_result = await session.execute(
                 text(
-                    "SELECT chunk_index, text FROM chunks "
+                    "SELECT id, chunk_index, text, page_number, speaker FROM chunks "
                     "WHERE document_id = :doc_id "
                     "AND chunk_index >= :start_idx AND chunk_index <= :end_idx "
                     "ORDER BY chunk_index ASC"
                 ),
-                {"doc_id": chunk.document_id, "start_idx": cidx - window, "end_idx": cidx + window},
+                {
+                    "doc_id": chunk.document_id,
+                    "start_idx": chunk.chunk_index - window,
+                    "end_idx": chunk.chunk_index + window,
+                },
             )
-            
-            combined_texts = []
-            for row in surrounding_result.fetchall():
-                combined_texts.append(row[1])
-                
-            if combined_texts:
-                chunk.text = "\n\n".join(combined_texts)
 
-    # We return the original chunks (with updated text), capped at k
-    return chunks[:k]
+            for row in surrounding_result.fetchall():
+                neighbor_id = row[0]
+                if neighbor_id == chunk.chunk_id:
+                    continue
+
+                neighbor_score = chunk.score * _EXPANSION_SCORE_FACTOR
+                existing = expanded_by_id.get(neighbor_id)
+                if existing is not None and existing.score >= neighbor_score:
+                    continue
+
+                expanded_by_id[neighbor_id] = ScoredChunk(
+                    chunk_id=neighbor_id,
+                    document_id=chunk.document_id,
+                    text=row[2],
+                    section_heading=chunk.section_heading,
+                    page=row[3] or 0,
+                    score=neighbor_score,
+                    source="context_expansion",
+                    chunk_index=row[1],
+                    speaker=row[4],
+                )
+
+    return sorted(expanded_by_id.values(), key=lambda c: c.score, reverse=True)[: k * 2]
 
 
 class _CrossEncoderReranker:

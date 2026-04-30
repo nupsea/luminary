@@ -34,7 +34,6 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 import httpx
 
@@ -56,15 +55,27 @@ class AuditRow:
     question: str
     source_file: str
     doc_id: str | None
-    context_hint: str
+    context_hint: list[str]
     status: str  # "pass" | "miss" | "empty"
     returned_chunks: int
-    rank: int | None  # 1-based rank of first hit, None if miss/empty
+    rank: int | None  # 1-based rank of first chunk matching ANY hint alternate
+    hint_status: list[str]  # one of "pass" | "miss" per alternate, parallel to context_hint
 
 
 def _hint_norm_prefix(hint: str) -> str:
     """First 80 normalised chars of hint -- mirrors run_eval.compute_hit_rate_5."""
     return _norm(hint)[:80]
+
+
+def _coerce_hints(raw: object) -> list[str]:
+    """Coerce a context_hint payload (str | list[str] | None) into a list of strings."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [h for h in raw if isinstance(h, str) and h.strip()]
+    if isinstance(raw, str):
+        return [raw] if raw.strip() else []
+    return []
 
 
 def _search(
@@ -117,10 +128,14 @@ def audit_dataset(
     results: list[AuditRow] = []
     for i, row in enumerate(rows, start=1):
         question = row["question"]
-        hint = row.get("context_hint", "") or row.get("ground_truth_answer", "")
+        hints = _coerce_hints(row.get("context_hint"))
+        if not hints:
+            gt = row.get("ground_truth_answer", "")
+            if gt:
+                hints = [gt[:50]]
+        hint_norms = [_hint_norm_prefix(h) for h in hints]
         source_file = row.get("source_file", "")
         doc_id = manifest.get(source_file)
-        hint_norm = _hint_norm_prefix(hint)
 
         # Scope /search to the target document when require_doc_id_match is
         # set so the audit reflects per-document retrieval quality (S212).
@@ -134,11 +149,18 @@ def audit_dataset(
         if require_doc_id_match and doc_id:
             considered = [m for m in matches if m.get("_doc_id") == doc_id]
 
+        # Per-alternate hit detection. An alternate "passes" if it appears in
+        # any considered chunk; the entry "passes" if any alternate passes.
+        hint_status = ["miss"] * len(hint_norms)
         rank: int | None = None
         for j, m in enumerate(considered, start=1):
-            text = m.get("text", "")
-            if hint_norm and hint_norm in _norm(text):
-                rank = j
+            text_norm = _norm(m.get("text", ""))
+            for k, hn in enumerate(hint_norms):
+                if hn and hn in text_norm:
+                    hint_status[k] = "pass"
+                    if rank is None:
+                        rank = j
+            if rank is not None and all(s == "pass" for s in hint_status):
                 break
 
         if not considered:
@@ -154,19 +176,23 @@ def audit_dataset(
                 question=question,
                 source_file=source_file,
                 doc_id=doc_id,
-                context_hint=hint,
+                context_hint=hints,
                 status=status,
                 returned_chunks=len(considered),
                 rank=rank,
+                hint_status=hint_status,
             )
         )
 
         if verbose and status != "pass":
+            alt_summary = ", ".join(
+                f"{k}:{s}" for k, s in enumerate(hint_status)
+            ) if len(hint_norms) > 1 else ""
             print(
                 f"  [{i:3d}] {status.upper():5s}  "
                 f"chunks={len(considered):3d}  "
                 f"q={question[:60]!r}  "
-                f"hint_prefix={hint_norm[:60]!r}"
+                f"hints={len(hint_norms)} {alt_summary}"
             )
 
     return results

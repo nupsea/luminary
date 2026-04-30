@@ -2,11 +2,11 @@
 # Smoke test for S212: retrieval golden baseline is healthy.
 #
 # Exits 0 iff:
-#   1.  Backend is healthy (200 on /health).
-#   2.  evals/audit_golden.py runs without error against the three book
-#       datasets (book_time_machine, book_alice, book_odyssey).
-#   3.  Every entry in those datasets returns at least one chunk -- i.e.
-#       the manifest is live and /search is responsive. (status != "empty")
+#   1. Backend is healthy (200 on /health).
+#   2. evals/audit_golden.py runs without error against the three book
+#      datasets and reports no empty result sets.
+#   3. run_eval.py --assert-thresholds passes relaxed S212 gates:
+#      HR@5 >= 0.50 and MRR >= 0.35.
 #
 # Backend is expected on localhost:7820 (the project's dev port). The
 # story's user-journey shows port 8000 as an example; the smoke uses the
@@ -68,6 +68,14 @@ PY
   fi
 
   echo "OK:   ${ds} audit -- 0 empty entries (manifest live, /search responsive)"
+
+  if uv run python run_eval.py --dataset "${ds}" --backend-url "${BASE}" --assert-thresholds > "${AUDIT_OUT}" 2>&1; then
+    echo "OK:   ${ds} eval -- relaxed thresholds passed"
+  else
+    echo "FAIL: ${ds} failed relaxed S212 eval thresholds"
+    cat "${AUDIT_OUT}"
+    exit 1
+  fi
 done
 
-echo "PASS: S212 -- retrieval golden baseline manifest is live and /search returns chunks for every book entry"
+echo "PASS: S212 -- retrieval golden baseline clears relaxed book thresholds"

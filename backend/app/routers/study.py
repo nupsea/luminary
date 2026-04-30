@@ -884,7 +884,8 @@ async def end_session(
         cards_correct = sum(1 for e in events if e.is_correct)
         accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
 
-    sess.ended_at = datetime.now(UTC)
+    ended_at = datetime.now(UTC)
+    sess.ended_at = ended_at
     sess.cards_reviewed = cards_reviewed
     sess.cards_correct = cards_correct
     sess.accuracy_pct = accuracy_pct
@@ -906,7 +907,7 @@ async def end_session(
         cards_reviewed=cards_reviewed,
         cards_correct=cards_correct,
         accuracy_pct=accuracy_pct if accuracy_pct is not None else 0.0,
-        ended_at=sess.ended_at,
+        ended_at=ended_at,
     )
 
 
