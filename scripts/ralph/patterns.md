@@ -12,6 +12,7 @@ Patterns discovered through completed stories. Read before implementing new feat
 - **Single-active-resource invariant**: enforce in service via a query filter (e.g., `_get_active_or_paused()`) + a typed exception (e.g., `ActiveSessionExists(existing_id)`); map the exception to HTTP 409 in the router with `existing_id` in the detail payload.
 - **Service-level ON DELETE SET NULL**: SQLite cannot ALTER ADD FK, so implement cascade-delete logic in the service. Before deleting a parent row whose ID is referenced by a nullable column in a child table, run `UPDATE child_table SET fk_col=NULL WHERE fk_col=:parent_id`; the FK column remains a plain nullable index. This pattern applies to any ownership relationship where foreign keys cannot be declared.
 - **Type-dispatched compute methods**: keep the dispatcher trivial -- a series of `if self.type == 'A': return await self._compute_A()` branches ending with `raise InvalidType`. Each branch is independently testable and logic stays out of the dispatcher.
+- **Subprocess backend URL constant**: When launching subprocesses from within a backend service (e.g., eval runner), they need to reach the backend API. Store the URL as a module-level constant (`_BACKEND_URL = "http://localhost:7820"`) and pass it as `--backend-url` to all subprocess invocations. Avoids hard-coded ports scattered across code.
 
 ## Database Migrations and Schema Evolution
 
@@ -26,6 +27,7 @@ Patterns discovered through completed stories. Read before implementing new feat
 
 - **Literal vs. parametric endpoint ordering**: register literal-segment endpoints (e.g., `/resource/active`, `/resource/stats`) BEFORE `/resource/{id}/...` so the router does not match the literal segment as a path parameter.
 - **HTTP 204 responses**: use `Response(status_code=204)` directly; FastAPI cannot serialize a `None` body via `response_model=` decorator.
+- **Polymorphic JSONL field normalization at API boundary**: Golden JSONL files may have `context_hint` as string or list of strings. Normalize at the API response builder, not in consumers: `def _str_hint(raw: object) -> str | None: return None if raw is None else (" ".join(str(s) for s in raw) if isinstance(raw, list) else str(raw))`. This pattern applies to any JSONL ingestion where fields have variable types.
 
 ## Testing
 
@@ -35,6 +37,7 @@ Patterns discovered through completed stories. Read before implementing new feat
 
 ## Frontend
 
+- **Button-based tab nav with hash persistence**: @radix-ui/react-tabs may not be installed; use state-driven buttons + `window.location.hash` for URL persistence. Initialize tab from hash: `const [activeTab, setActiveTab] = useState(() => { const hash = window.location.hash.replace('#', '') as TabId; return TABS.some(t => t.id === hash) ? hash : 'default' })`. On change: `setActiveTab(tab); window.location.hash = tab`. Style with `border-b-2 border-primary` for active, `border-transparent` for inactive.
 - **localStorage snapshot for persistent UI state**: module-level `readSnapshot()`, `writeSnapshot()`, `clearSnapshot()` triplet in Zustand modules; read snapshot at module load to seed initial state; call `writeSnapshot()` in a `useEffect` on every state change. On component mount, reconcile with server (e.g., `GET /resource/active`); if server has no record, `clearSnapshot()` and reset to idle; otherwise hydrate from server response. Critical: module-level read happens once per page load, so every state mutation must call `writeSnapshot()` to persist across refresh.
 - **Vitest for pure logic only**: vitest config uses "node" environment (not jsdom). Convention: extract pure functions into helpers (lib/ or store/) and unit-test those; do NOT mount React components in vitest tests. See ClozeCard.test.ts and focusUtils.test.ts as canonical patterns.
 - **409 conflict-with-id discriminated union**: when an endpoint returns 409 with a conflicting resource ID, type the response as `Resource | { status: 409; existing_id_field: string }`. Fetch wrapper returns the right branch based on `res.status` -- callers stay type-safe without try/catch.

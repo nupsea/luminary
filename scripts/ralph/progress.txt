@@ -838,3 +838,67 @@ Started: Sat Apr 25 16:55:35 AEST 2026
   - UI Stabilisation: API contract changes must be reflected in frontend types immediately to avoid blank screens.
 ---
 
+## 2026-05-01 - S227
+- What was implemented:
+  - Renamed nav tab "Evals" -> "Quality"; /evals route redirects to /quality.
+  - frontend/src/pages/Quality.tsx: five-tab hub (Datasets, Runs, Routing,
+    Ablations, Regressions) with hash-based tab persistence via
+    window.location.hash (no Radix Tabs dependency -- @radix-ui/react-tabs
+    was not installed).
+  - File-backed golden dataset cards now clickable (DatasetCard canOpen=true);
+    clicking opens DatasetDetail with question preview from
+    GET /evals/golden/{name}, past-runs table from
+    GET /evals/runs?dataset_name={name}, and Run Eval button.
+  - DatasetDetail.tsx branched on source=file vs db: FileQuestionList uses
+    stripMarkdown (I-12), Delete button hidden for file-backed, Run Eval
+    enabled unconditionally for file-backed.
+  - RunEvalDialog.tsx: warning block when judgeModel === "" (faithfulness n/a).
+  - Four new sub-tab components: RunsTab (filter controls + table),
+    RoutingTab (confusion matrix from per_route JSON),
+    AblationsTab (recharts grouped bar chart by strategy),
+    RegressionsTab (table from GET /monitoring/evals/regressions).
+  - All sub-tabs have loading/error/empty states per I-10.
+  - Backend: GET /evals/runs (paginated, filtered);
+    GET /evals/golden/{name} (allowlist + ^[a-zA-Z0-9_-]+$ regex guard,
+    handles list-valued context_hint by joining with space);
+    POST /evals/run extended with judge_model/check_citations/max_questions.
+  - Fixed _run_eval_subprocess to pass --backend-url http://localhost:7820
+    (was defaulting to port 8000, causing store results 404 errors).
+    Also fixed _run_generated_eval_subprocess with the same constant.
+  - 14 new backend tests (test_evals_s227.py).
+- Files changed:
+  - backend/app/routers/evals.py (3 new endpoints + _BACKEND_URL fix)
+  - backend/tests/test_evals_s227.py (new, 14 tests)
+  - frontend/src/App.tsx (lazy import, nav label/path, /evals redirect)
+  - frontend/src/pages/Quality.tsx (new)
+  - frontend/src/components/evals/types.ts (EvalRunFull, FileQuestion, etc.)
+  - frontend/src/components/evals/DatasetCard.tsx (canOpen=true)
+  - frontend/src/components/evals/DatasetDetail.tsx (file-backed branching)
+  - frontend/src/components/evals/RunEvalDialog.tsx (disabled warning)
+  - frontend/src/components/evals/ScoresTable.tsx (wider input type)
+  - frontend/src/components/evals/RunsTab.tsx (new)
+  - frontend/src/components/evals/RoutingTab.tsx (new)
+  - frontend/src/components/evals/AblationsTab.tsx (new)
+  - frontend/src/components/evals/RegressionsTab.tsx (new)
+  - docs/ralph-run-flow.md (Phase 8 story status table added)
+  - scripts/smoke/S227.sh (new)
+- Quality gates: ruff clean; pytest 14 new + full suite passing; tsc clean.
+- Smoke: PASS (GET /evals/runs, GET /evals/golden/{name}, path-traversal
+  rejection, POST /evals/run with extended body, poll verified row in
+  eval_runs after 202 trigger -- 3s on pre-indexed document).
+- passes=true.
+- **Learnings for future iterations:**
+  - eval subprocess defaults to localhost:8000; Luminary runs on 7820.
+    Always pass --backend-url to run_eval.py from within the backend.
+    Added _BACKEND_URL constant in evals.py to avoid repeating the port.
+  - @radix-ui/react-tabs is NOT installed. Use button-based tab nav with
+    state + window.location.hash for hash persistence. This pattern is
+    reusable for any future tabbed page (added to patterns.md).
+  - context_hint in golden JSONL can be a list (multi-sentence hints).
+    Always normalize at the API boundary: join list items with space.
+  - Smoke test for async background tasks (eval subprocess) needs a long
+    timeout on first run (~10min) due to full-book ingestion. Second+ runs
+    are fast (~3s) because the document is already indexed.
+    Use judge_model="" to skip RAGAS LLM calls for faster smoke tests.
+---
+
