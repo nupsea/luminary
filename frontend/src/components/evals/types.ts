@@ -54,3 +54,35 @@ export interface DocumentOption {
   content_type: string
   stage: string
 }
+
+export interface EvalRunFull {
+  id: string
+  dataset_name: string
+  run_at: string
+  hit_rate_5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  answer_relevance: number | null
+  routing_accuracy: number | null
+  per_route: Record<string, unknown> | null
+  ablation_metrics: Record<string, unknown> | null
+  eval_kind: string | null
+  model_used: string
+  citation_support_rate: number | null
+}
+
+export interface FileQuestion {
+  q: string
+  a: string
+  context_hint: string | null
+  source_file: string | null
+}
+
+export interface EvalRegressionItem {
+  dataset: string
+  metric: string
+  current_value: number
+  baseline_value: number
+  drop_pct: number
+  eval_kind: string | null
+}

@@ -6,14 +6,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { EvalRunSummary } from "./types"
+import type { EvalRunFull, EvalRunSummary } from "./types"
 
 function fmt(value: number | null | undefined): string {
   if (value == null) return "n/a"
   return value.toFixed(3)
 }
 
-export function ScoresTable({ runs }: { runs: EvalRunSummary[] }) {
+export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull> }) {
   if (runs.length === 0) {
     return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No runs yet.</div>
   }

@@ -8,6 +8,7 @@ Routes:
 import asyncio
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,9 @@ _EVALS_DIR = REPO_ROOT / "evals"
 # Strong references to background tasks — prevents GC before they complete.
 _background_tasks: set[asyncio.Task] = set()
 
+# Luminary backend always runs on port 7820; eval subprocess needs this to call /search etc.
+_BACKEND_URL = "http://localhost:7820"
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
@@ -58,6 +62,40 @@ class EvalResultItem(BaseModel):
 class EvalRunRequest(BaseModel):
     dataset: str
     assert_thresholds: bool = False
+    judge_model: str | None = None
+    check_citations: bool = False
+    max_questions: int | None = None
+
+
+class EvalRunListItem(BaseModel):
+    id: str
+    dataset_name: str
+    run_at: str
+    hit_rate_5: float | None
+    mrr: float | None
+    faithfulness: float | None
+    answer_relevance: float | None
+    routing_accuracy: float | None
+    per_route: dict | None
+    ablation_metrics: dict | None
+    eval_kind: str | None
+    model_used: str
+    citation_support_rate: float | None
+
+
+class GoldenFileQuestion(BaseModel):
+    q: str
+    a: str
+    context_hint: str | None = None
+    source_file: str | None = None
+
+
+class GoldenFileResponse(BaseModel):
+    name: str
+    total: int
+    questions: list[GoldenFileQuestion]
+    offset: int
+    limit: int
 
 
 class GoldenDatasetCreateRequest(BaseModel):
@@ -135,10 +173,26 @@ def _fire_and_forget(coro) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
-async def _run_eval_subprocess(dataset: str, assert_thresholds: bool) -> None:
-    cmd = ["uv", "run", "python", "run_eval.py", "--dataset", dataset]
+async def _run_eval_subprocess(
+    dataset: str,
+    assert_thresholds: bool,
+    judge_model: str | None = None,
+    check_citations: bool = False,
+    max_questions: int | None = None,
+) -> None:
+    cmd = [
+        "uv", "run", "python", "run_eval.py",
+        "--dataset", dataset,
+        "--backend-url", _BACKEND_URL,
+    ]
     if assert_thresholds:
         cmd.append("--assert-thresholds")
+    if judge_model is not None:
+        cmd.extend(["--judge-model", judge_model])
+    if check_citations:
+        cmd.append("--check-citations")
+    if max_questions is not None:
+        cmd.extend(["--max-questions", str(max_questions)])
     logger.debug("starting eval subprocess: %s cwd=%s", cmd, _EVALS_DIR)
     result = await asyncio.to_thread(
         subprocess.run,
@@ -163,7 +217,11 @@ async def _run_generated_eval_subprocess(
     check_citations: bool,
     max_questions: int | None,
 ) -> None:
-    cmd = ["uv", "run", "python", "run_eval.py", "--dataset-id", dataset_id]
+    cmd = [
+        "uv", "run", "python", "run_eval.py",
+        "--dataset-id", dataset_id,
+        "--backend-url", _BACKEND_URL,
+    ]
     if model:
         cmd.extend(["--model", model])
     if judge_model is not None:
@@ -215,6 +273,99 @@ def _dataset_to_item(
 # ---------------------------------------------------------------------------
 
 
+_GOLDEN_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+@router.get("/runs", response_model=list[EvalRunListItem])
+async def get_eval_runs(
+    dataset_name: str | None = Query(default=None),
+    eval_kind: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[EvalRunListItem]:
+    """Return paginated eval_runs ordered by run_at DESC with optional filters."""
+    query = select(EvalRunModel).order_by(EvalRunModel.run_at.desc())
+    if dataset_name is not None:
+        query = query.where(EvalRunModel.dataset_name == dataset_name)
+    if eval_kind is not None:
+        query = query.where(EvalRunModel.eval_kind == eval_kind)
+    if model is not None:
+        query = query.where(EvalRunModel.model_used == model)
+    query = query.offset(offset).limit(limit)
+    result = await db.execute(query)
+    runs = result.scalars().all()
+    return [
+        EvalRunListItem(
+            id=r.id,
+            dataset_name=r.dataset_name,
+            run_at=r.run_at.isoformat(),
+            hit_rate_5=r.hit_rate_5,
+            mrr=r.mrr,
+            faithfulness=r.faithfulness,
+            answer_relevance=r.answer_relevance,
+            routing_accuracy=r.routing_accuracy,
+            per_route=r.per_route,
+            ablation_metrics=r.ablation_metrics,
+            eval_kind=r.eval_kind,
+            model_used=r.model_used,
+            citation_support_rate=r.citation_support_rate,
+        )
+        for r in runs
+    ]
+
+
+@router.get("/golden/{name}", response_model=GoldenFileResponse)
+async def get_golden_file(
+    name: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> GoldenFileResponse:
+    """Return paginated questions from a file-backed JSONL golden dataset."""
+    if not _GOLDEN_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid dataset name")
+    golden_dir = _EVALS_DIR / "golden"
+    allowed = {f.stem for f in golden_dir.glob("*.jsonl")} if golden_dir.exists() else set()
+    if name not in allowed:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    golden_file = golden_dir / f"{name}.jsonl"
+    rows: list[dict] = []
+    try:
+        with golden_file.open() as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Could not read golden file") from exc
+    total = len(rows)
+    page = rows[offset : offset + limit]
+    def _str_hint(raw: object) -> str | None:
+        if raw is None:
+            return None
+        if isinstance(raw, list):
+            return " ".join(str(s) for s in raw)
+        return str(raw)
+
+    questions = [
+        GoldenFileQuestion(
+            q=row.get("q", row.get("question", "")),
+            a=row.get("a", row.get("ground_truth_answer", "")),
+            context_hint=_str_hint(row.get("context_hint") or row.get("hint")),
+            source_file=row.get("source_file"),
+        )
+        for row in page
+    ]
+    return GoldenFileResponse(
+        name=name, total=total, questions=questions, offset=offset, limit=limit
+    )
+
+
 @router.get("/datasets")
 async def get_datasets(
     status: str | None = Query(default=None),
@@ -239,6 +390,17 @@ async def get_datasets(
     files = list(golden_dir.glob("*.jsonl"))
     if status is None:
         for f in sorted(files):
+            last_run = await latest_run_for_dataset(db, f.stem)
+            last_run_payload = None
+            if last_run is not None:
+                last_run_payload = {
+                    "run_at": last_run.run_at.isoformat(),
+                    "model_used": last_run.model_used,
+                    "hit_rate_5": last_run.hit_rate_5,
+                    "mrr": last_run.mrr,
+                    "faithfulness": last_run.faithfulness,
+                    "eval_kind": last_run.eval_kind,
+                }
             items.append(
                 GoldenDatasetListItem(
                     name=f.stem,
@@ -246,6 +408,7 @@ async def get_datasets(
                     generated_count=0,
                     target_count=0,
                     source="file",
+                    last_run=last_run_payload,
                 ).model_dump()
             )
     return items
@@ -488,7 +651,15 @@ async def run_eval(req: EvalRunRequest) -> dict:
             detail=f"Dataset '{req.dataset}' not found (missing {golden_file.name})",
         )
 
-    _fire_and_forget(_run_eval_subprocess(req.dataset, req.assert_thresholds))
+    _fire_and_forget(
+        _run_eval_subprocess(
+            req.dataset,
+            req.assert_thresholds,
+            req.judge_model,
+            req.check_citations,
+            req.max_questions,
+        )
+    )
     logger.info(
         "eval run started: dataset=%s assert_thresholds=%s", req.dataset, req.assert_thresholds
     )

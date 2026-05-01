@@ -55,6 +55,13 @@ export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunE
             </div>
           )}
 
+          {judgeModel === "" && (
+            <div className="flex items-center gap-2 rounded-md border border-muted bg-muted/40 p-2 text-xs text-muted-foreground">
+              <AlertTriangle className="h-4 w-4" />
+              Faithfulness, answer-relevance, and citation grounding will be n/a without a judge model.
+            </div>
+          )}
+
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

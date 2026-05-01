@@ -9,7 +9,7 @@ import {
 import type { QueryKey } from "@tanstack/react-query"
 import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
 import { useAppStore } from "./store"
@@ -28,7 +28,7 @@ const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
 const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
-const Evals = lazy(() => import("./pages/Evals"))
+const Quality = lazy(() => import("./pages/Quality"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
 
@@ -119,7 +119,7 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchFn: prefetchDueCards,
   },
   { to: "/notes", icon: StickyNote, label: "Notes" },
-  { to: "/evals", icon: ClipboardCheck, label: "Evals" },
+  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
   {
     to: "/progress",
     icon: TrendingUp,
@@ -421,7 +421,8 @@ function AppShell() {
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
-          <Route path="/evals" element={<Suspense fallback={<PageSkeleton />}><Evals /></Suspense>} />
+          <Route path="/quality" element={<Suspense fallback={<PageSkeleton />}><Quality /></Suspense>} />
+          <Route path="/evals" element={<Navigate to="/quality" replace />} />
           <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
           <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
           <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />

@@ -169,3 +169,24 @@ Each story SXXX produces or modifies these artifacts:
 | S209 | Global focus timer pill in app header | pass |
 | S210 | Learning goals backend: typed goals, progress aggregation, session linking | pass |
 | S211 | Learning goals UI on Study tab and Attach-to-goal in timer popover | pass |
+
+## V3 Phase 8 Story Status
+
+| Story | Title | Status |
+|---|---|---|
+| S212 | Retrieval golden baseline -- book HR@5 | pass |
+| S213 | Unified eval harness + Pydantic golden schema | pass |
+| S214 | Faithfulness + answer-relevance (Ollama judge) | pass |
+| S215 | Citation grounding | pass |
+| S216 | Summarization correctness | pass |
+| S217 | Flashcard correctness | pass |
+| S218 | Chat-graph routing accuracy | pass |
+| S219 | Dataset gen backend | pass |
+| S220 | Evals tab UI | pass |
+| S221 | Regression detection | pass |
+| S222 | Retrieval-strategy ablation | pass |
+| S223 | Cross-domain datasets | pass |
+| S224 | Entity injection at index time | pass |
+| S225 | Graph-augmented deterministic query expansion | pass |
+| S226 | Multi-hint golden schema | pass |
+| S227 | Rename Evals to Quality + tabbed hub | pass |

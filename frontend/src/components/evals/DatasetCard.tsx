@@ -26,7 +26,7 @@ interface DatasetCardProps {
 export function DatasetCard({ dataset, selected, onSelect }: DatasetCardProps) {
   const progress =
     dataset.target_count > 0 ? (dataset.generated_count / dataset.target_count) * 100 : 100
-  const canOpen = dataset.source === "db"
+  const canOpen = true
 
   return (
     <Card
