@@ -30,10 +30,13 @@ sys.path.insert(0, str(_EVALS_DIR))
 
 from pydantic import ValidationError  # noqa: E402
 from run_eval import (  # noqa: E402
+    DATASET_THRESHOLDS,
     THRESHOLDS,
+    VALID_DATASETS,
     GoldenEntry,
     compute_hit_rate_5,
     compute_mrr,
+    thresholds_for_dataset,
 )
 
 # ---------------------------------------------------------------------------
@@ -48,6 +51,14 @@ def _sample(question: str, hint: str, chunks: list[str], ground_truth: str = "GT
         "contexts": chunks,
         "ground_truths": [ground_truth],
     }
+
+
+def test_cross_domain_datasets_and_thresholds_are_configured():
+    assert {"paper", "conversation", "notes", "code"} <= set(VALID_DATASETS)
+    assert DATASET_THRESHOLDS["paper"]["hit_rate_5"] == pytest.approx(0.45)
+    assert DATASET_THRESHOLDS["conversation"]["mrr"] == pytest.approx(0.40)
+    assert thresholds_for_dataset("notes")["hit_rate_5"] == pytest.approx(0.60)
+    assert thresholds_for_dataset("book_alice")["hit_rate_5"] == THRESHOLDS["hit_rate_5"]
 
 
 # ---------------------------------------------------------------------------

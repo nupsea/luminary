@@ -66,6 +66,7 @@ export function MarkdownRenderer({ children, className, validNoteIds, imageSize 
       "prose-headings:font-sans prose-headings:font-bold prose-headings:tracking-tight",
       "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
       "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+      IMAGE_SIZE_CLASS[imageSize],
       className
     )}>
       <ReactMarkdown

@@ -10,9 +10,21 @@ import json
 import logging
 import subprocess
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models import EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services.dataset_generator_service import (
+    count_questions,
+    create_dataset,
+    delete_dataset,
+    latest_run_for_dataset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +60,70 @@ class EvalRunRequest(BaseModel):
     assert_thresholds: bool = False
 
 
+class GoldenDatasetCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    document_ids: list[str] = Field(min_length=1)
+    size: str = "small"
+    generator_model: str | None = None
+    description: str | None = None
+
+
+class GoldenDatasetListItem(BaseModel):
+    id: str | None = None
+    name: str
+    description: str | None = None
+    size: str | None = None
+    generator_model: str | None = None
+    source_document_ids: list[str] = []
+    status: str
+    generated_count: int
+    target_count: int
+    created_at: str | None = None
+    completed_at: str | None = None
+    error_message: str | None = None
+    last_run: dict[str, Any] | None = None
+    source: str = "db"
+
+
+class GoldenDatasetStatusResponse(BaseModel):
+    id: str
+    status: str
+    generated_count: int
+    target_count: int
+    error_message: str | None = None
+
+
+class GoldenQuestionResponse(BaseModel):
+    id: str
+    question: str
+    ground_truth_answer: str
+    context_hint: str
+    source_chunk_id: str
+    source_document_id: str
+    quality_score: float
+    included: bool
+
+
+class GoldenDatasetDetailResponse(GoldenDatasetListItem):
+    questions: list[GoldenQuestionResponse]
+    offset: int
+    limit: int
+
+
+class GeneratedRunRequest(BaseModel):
+    model: str | None = None
+    judge_model: str | None = None
+    assert_thresholds: bool = False
+    check_citations: bool = False
+    max_questions: int | None = None
+
+
+class GeneratedRunResponse(BaseModel):
+    status: str
+    run_id: str
+    dataset_id: str
+
+
 # ---------------------------------------------------------------------------
 # Background task helper
 # ---------------------------------------------------------------------------
@@ -78,19 +154,273 @@ async def _run_eval_subprocess(dataset: str, assert_thresholds: bool) -> None:
     )
 
 
+async def _run_generated_eval_subprocess(
+    dataset_id: str,
+    run_id: str,
+    model: str | None,
+    judge_model: str | None,
+    assert_thresholds: bool,
+    check_citations: bool,
+    max_questions: int | None,
+) -> None:
+    cmd = ["uv", "run", "python", "run_eval.py", "--dataset-id", dataset_id]
+    if model:
+        cmd.extend(["--model", model])
+    if judge_model is not None:
+        cmd.extend(["--judge-model", judge_model])
+    if assert_thresholds:
+        cmd.append("--assert-thresholds")
+    if check_citations:
+        cmd.append("--check-citations")
+    if max_questions is not None:
+        cmd.extend(["--max-questions", str(max_questions)])
+    logger.debug("starting generated eval subprocess: run_id=%s cmd=%s", run_id, cmd)
+    await asyncio.to_thread(subprocess.run, cmd, cwd=str(_EVALS_DIR), capture_output=True)
+
+
+def _dataset_to_item(
+    dataset: GoldenDatasetModel,
+    question_count: int,
+    last_run: EvalRunModel | None,
+) -> GoldenDatasetListItem:
+    last_run_payload = None
+    if last_run is not None:
+        last_run_payload = {
+            "run_at": last_run.run_at.isoformat(),
+            "model_used": last_run.model_used,
+            "hit_rate_5": last_run.hit_rate_5,
+            "mrr": last_run.mrr,
+            "faithfulness": last_run.faithfulness,
+            "eval_kind": last_run.eval_kind,
+        }
+    return GoldenDatasetListItem(
+        id=dataset.id,
+        name=dataset.name,
+        description=dataset.description,
+        size=dataset.size,
+        generator_model=dataset.generator_model,
+        source_document_ids=list(dataset.source_document_ids or []),
+        status=dataset.status,
+        generated_count=question_count,
+        target_count=dataset.target_count,
+        created_at=dataset.created_at.isoformat() if dataset.created_at else None,
+        completed_at=dataset.completed_at.isoformat() if dataset.completed_at else None,
+        error_message=dataset.error_message,
+        last_run=last_run_payload,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
-@router.get("/datasets", response_model=list[str])
-async def get_datasets() -> list[str]:
-    """Return a list of available evaluation datasets (golden JSONL files)."""
+@router.get("/datasets")
+async def get_datasets(
+    status: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Return generated datasets plus legacy JSONL golden datasets."""
+    query = select(GoldenDatasetModel).order_by(GoldenDatasetModel.created_at.desc())
+    if status:
+        query = query.where(GoldenDatasetModel.status == status)
+    result = await db.execute(query)
+    datasets = list(result.scalars().all())
+
+    items: list[dict[str, Any]] = []
+    for dataset in datasets:
+        question_count = await count_questions(db, dataset.id)
+        last_run = await latest_run_for_dataset(db, dataset.id)
+        items.append(_dataset_to_item(dataset, question_count, last_run).model_dump())
+
     golden_dir = _EVALS_DIR / "golden"
     if not golden_dir.exists():
-        return []
+        return items
     files = list(golden_dir.glob("*.jsonl"))
-    return sorted([f.stem for f in files])
+    if status is None:
+        for f in sorted(files):
+            items.append(
+                GoldenDatasetListItem(
+                    name=f.stem,
+                    status="complete",
+                    generated_count=0,
+                    target_count=0,
+                    source="file",
+                ).model_dump()
+            )
+    return items
+
+
+@router.post("/datasets", status_code=202)
+async def create_golden_dataset(
+    req: GoldenDatasetCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Create a generated golden dataset and start the background generation task."""
+    if req.size not in {"small", "medium", "large"}:
+        raise HTTPException(status_code=422, detail="size must be small, medium, or large")
+    dataset = await create_dataset(
+        db,
+        name=req.name,
+        description=req.description,
+        document_ids=req.document_ids,
+        size=req.size,
+        generator_model=req.generator_model,
+    )
+    return {"id": dataset.id, "status": dataset.status}
+
+
+@router.get("/datasets/{dataset_id}/status", response_model=GoldenDatasetStatusResponse)
+async def get_golden_dataset_status(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> GoldenDatasetStatusResponse:
+    dataset = await db.get(GoldenDatasetModel, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return GoldenDatasetStatusResponse(
+        id=dataset.id,
+        status=dataset.status,
+        generated_count=dataset.generated_count,
+        target_count=dataset.target_count,
+        error_message=dataset.error_message,
+    )
+
+
+@router.get("/datasets/{dataset_id}", response_model=GoldenDatasetDetailResponse)
+async def get_golden_dataset(
+    dataset_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> GoldenDatasetDetailResponse:
+    dataset = await db.get(GoldenDatasetModel, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    result = await db.execute(
+        select(GoldenQuestionModel)
+        .where(GoldenQuestionModel.dataset_id == dataset_id)
+        .order_by(GoldenQuestionModel.created_at)
+        .offset(offset)
+        .limit(limit)
+    )
+    questions = [
+        GoldenQuestionResponse(
+            id=q.id,
+            question=q.question,
+            ground_truth_answer=q.ground_truth_answer,
+            context_hint=q.context_hint,
+            source_chunk_id=q.source_chunk_id,
+            source_document_id=q.source_document_id,
+            quality_score=q.quality_score,
+            included=q.included,
+        )
+        for q in result.scalars().all()
+    ]
+    question_count = await count_questions(db, dataset_id)
+    last_run = await latest_run_for_dataset(db, dataset_id)
+    item = _dataset_to_item(dataset, question_count, last_run)
+    return GoldenDatasetDetailResponse(
+        **item.model_dump(),
+        questions=questions,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.delete("/datasets/{dataset_id}", status_code=204)
+async def remove_golden_dataset(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    deleted = await delete_dataset(db, dataset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+
+@router.get("/datasets/{dataset_id}/golden")
+async def get_golden_dataset_rows(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, str]]:
+    dataset = await db.get(GoldenDatasetModel, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    result = await db.execute(
+        select(GoldenQuestionModel)
+        .where(
+            GoldenQuestionModel.dataset_id == dataset_id,
+            GoldenQuestionModel.included.is_(True),
+        )
+        .order_by(GoldenQuestionModel.created_at)
+    )
+    return [
+        {
+            "question": q.question,
+            "ground_truth_answer": q.ground_truth_answer,
+            "context_hint": q.context_hint,
+            "source_file": "",
+            "source_document_id": q.source_document_id,
+            "source_chunk_id": q.source_chunk_id,
+        }
+        for q in result.scalars().all()
+    ]
+
+
+@router.post("/datasets/{dataset_id}/run", status_code=202, response_model=GeneratedRunResponse)
+async def run_generated_dataset_eval(
+    dataset_id: str,
+    req: GeneratedRunRequest,
+    db: AsyncSession = Depends(get_db),
+) -> GeneratedRunResponse:
+    dataset = await db.get(GoldenDatasetModel, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if dataset.status != "complete":
+        raise HTTPException(status_code=409, detail="Dataset is not complete")
+    run_id = f"generated-{dataset_id}-{len(_background_tasks) + 1}"
+    _fire_and_forget(
+        _run_generated_eval_subprocess(
+            dataset_id,
+            run_id,
+            req.model,
+            req.judge_model,
+            req.assert_thresholds,
+            req.check_citations,
+            req.max_questions,
+        )
+    )
+    return GeneratedRunResponse(status="started", run_id=run_id, dataset_id=dataset_id)
+
+
+@router.get("/datasets/{dataset_id}/runs")
+async def get_generated_dataset_runs(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    dataset = await db.get(GoldenDatasetModel, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    result = await db.execute(
+        select(EvalRunModel)
+        .where(EvalRunModel.dataset_name == dataset_id)
+        .order_by(EvalRunModel.run_at.desc())
+    )
+    return [
+        {
+            "id": run.id,
+            "run_at": run.run_at.isoformat(),
+            "hit_rate_5": run.hit_rate_5,
+            "mrr": run.mrr,
+            "faithfulness": run.faithfulness,
+            "answer_relevance": run.answer_relevance,
+            "context_precision": run.context_precision,
+            "context_recall": run.context_recall,
+            "model_used": run.model_used,
+            "eval_kind": run.eval_kind,
+        }
+        for run in result.scalars().all()
+    ]
 
 
 @router.get("/results", response_model=list[EvalResultItem])

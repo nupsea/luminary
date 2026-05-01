@@ -48,6 +48,7 @@ async def search(
     hyde: bool = Query(default=False),
     rerank: bool = Query(default=False),
     graph_expand: bool = Query(default=True),
+    strategy: str = Query(default="rrf", pattern="^(rrf|vector|fts|graph)$"),
     session: AsyncSession = Depends(get_db),
     retriever: HybridRetriever = Depends(get_retriever),
 ) -> SearchResponse:
@@ -95,6 +96,7 @@ async def search(
         hyde=hyde,
         rerank=rerank,
         graph_expand=graph_expand,
+        strategy=strategy,  # type: ignore[arg-type]
     )
 
     if not scored_chunks:

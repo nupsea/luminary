@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon } from "lucide-react"
+import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -28,6 +28,7 @@ const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
 const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
+const Evals = lazy(() => import("./pages/Evals"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
 
@@ -102,14 +103,6 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchKey: ["documents", undefined, null, "newest", 1, 20],
     prefetchFn: prefetchDocuments,
   },
-  { to: "/notes", icon: StickyNote, label: "Notes" },
-  {
-    to: "/study",
-    icon: BarChart2,
-    label: "Study",
-    prefetchKey: ["study-due"],
-    prefetchFn: prefetchDueCards,
-  },
   {
     to: "/chat",
     icon: MessageSquare,
@@ -118,6 +111,15 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchFn: prefetchLLMSettings,
   },
   { to: "/viz", icon: Network, label: "Viz" },
+  {
+    to: "/study",
+    icon: BarChart2,
+    label: "Study",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchDueCards,
+  },
+  { to: "/notes", icon: StickyNote, label: "Notes" },
+  { to: "/evals", icon: ClipboardCheck, label: "Evals" },
   {
     to: "/progress",
     icon: TrendingUp,
@@ -419,6 +421,7 @@ function AppShell() {
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
+          <Route path="/evals" element={<Suspense fallback={<PageSkeleton />}><Evals /></Suspense>} />
           <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
           <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
           <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />

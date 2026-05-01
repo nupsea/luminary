@@ -63,8 +63,8 @@ smoke:
 
 eval:
 	@echo "Running retrieval quality evals (backend must be running on :7820)..."
-	cd evals && uv run python run_eval.py --dataset book --assert-thresholds
-	cd evals && uv run python run_eval.py --dataset paper --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --assert-thresholds
 
 luminary:
 	bash scripts/luminary.sh

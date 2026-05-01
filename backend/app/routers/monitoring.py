@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models import ChunkModel, DocumentModel, EvalRunModel, QAHistoryModel
+from app.services.eval_regression_service import detect_regressions
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,15 @@ class EvalRunCreate(BaseModel):
     context_precision: float | None = None
     context_recall: float | None = None
     citation_support_rate: float | None = None
+    theme_coverage: float | None = None
+    no_hallucination: float | None = None
+    conciseness_pct: float | None = None
+    factuality: float | None = None
+    atomicity: float | None = None
+    clarity_avg: float | None = None
+    routing_accuracy: float | None = None
+    per_route: dict | None = None
+    ablation_metrics: dict | None = None
 
 
 class EvalRunResponse(BaseModel):
@@ -94,6 +104,24 @@ class EvalRunResponse(BaseModel):
     context_precision: float | None
     context_recall: float | None
     citation_support_rate: float | None = None
+    theme_coverage: float | None = None
+    no_hallucination: float | None = None
+    conciseness_pct: float | None = None
+    factuality: float | None = None
+    atomicity: float | None = None
+    clarity_avg: float | None = None
+    routing_accuracy: float | None = None
+    per_route: dict | None = None
+    ablation_metrics: dict | None = None
+
+
+class EvalRegressionResponse(BaseModel):
+    dataset: str
+    metric: str
+    current_value: float
+    baseline_value: float
+    drop_pct: float
+    eval_kind: str | None = None
 
 
 class PhoenixUrlResponse(BaseModel):
@@ -264,6 +292,15 @@ async def store_eval_run(
         context_precision=payload.context_precision,
         context_recall=payload.context_recall,
         citation_support_rate=payload.citation_support_rate,
+        theme_coverage=payload.theme_coverage,
+        no_hallucination=payload.no_hallucination,
+        conciseness_pct=payload.conciseness_pct,
+        factuality=payload.factuality,
+        atomicity=payload.atomicity,
+        clarity_avg=payload.clarity_avg,
+        routing_accuracy=payload.routing_accuracy,
+        per_route=payload.per_route,
+        ablation_metrics=payload.ablation_metrics,
     )
     db.add(run)
     await db.commit()
@@ -285,6 +322,15 @@ async def store_eval_run(
         context_precision=run.context_precision,
         context_recall=run.context_recall,
         citation_support_rate=run.citation_support_rate,
+        theme_coverage=run.theme_coverage,
+        no_hallucination=run.no_hallucination,
+        conciseness_pct=run.conciseness_pct,
+        factuality=run.factuality,
+        atomicity=run.atomicity,
+        clarity_avg=run.clarity_avg,
+        routing_accuracy=run.routing_accuracy,
+        per_route=run.per_route,
+        ablation_metrics=run.ablation_metrics,
     )
 
 
@@ -323,9 +369,29 @@ async def get_eval_runs(
             context_precision=r.context_precision,
             context_recall=r.context_recall,
             citation_support_rate=r.citation_support_rate,
+            theme_coverage=r.theme_coverage,
+            no_hallucination=r.no_hallucination,
+            conciseness_pct=r.conciseness_pct,
+            factuality=r.factuality,
+            atomicity=r.atomicity,
+            clarity_avg=r.clarity_avg,
+            routing_accuracy=r.routing_accuracy,
+            per_route=r.per_route,
+            ablation_metrics=r.ablation_metrics,
         )
         for r in all_runs
     ]
+
+
+@router.get("/evals/regressions", response_model=list[EvalRegressionResponse])
+async def get_eval_regressions(
+    window: int = 5,
+    threshold_pct: float = 0.05,
+    db: AsyncSession = Depends(get_db),
+) -> list[EvalRegressionResponse]:
+    """Return eval metrics whose latest value dropped versus a moving baseline."""
+    regressions = await detect_regressions(db, window=window, threshold_pct=threshold_pct)
+    return [EvalRegressionResponse(**regression.__dict__) for regression in regressions]
 
 
 class ModelUsageItem(BaseModel):

@@ -176,6 +176,21 @@ def test_append_history_with_summary_eval_kind(tmp_path):
     assert rows[0]["eval_kind"] == "summary"
 
 
+def test_append_history_persists_citation_support_rate(tmp_path):
+    target = tmp_path / "scores.jsonl"
+    append_history(
+        "ds",
+        "judge",
+        {"citation_support_rate": 0.875},
+        True,
+        eval_kind="citation",
+        path=target,
+    )
+    rows = [json.loads(line) for line in target.read_text().splitlines() if line]
+    assert rows[0]["eval_kind"] == "citation"
+    assert rows[0]["citation_support_rate"] == 0.875
+
+
 # ---------------------------------------------------------------------------
 # Metric re-exports
 # ---------------------------------------------------------------------------

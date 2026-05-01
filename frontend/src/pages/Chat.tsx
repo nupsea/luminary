@@ -552,7 +552,7 @@ export default function Chat() {
       // Collect last 6 completed messages (3 exchanges) as conversation history.
       // Excludes the current streaming placeholder and not_found messages.
       const historySlice = messages
-        .filter((m) => !m.isStreaming && !m.not_found && m.text)
+        .filter((m) => !m.isStreaming && !m.not_found && m.text && m.type !== "divider")
         .slice(-6)
         .map((m) => ({ role: m.role, content: m.text }))
 

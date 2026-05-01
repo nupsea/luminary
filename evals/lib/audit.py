@@ -6,7 +6,6 @@ Usage::
 """
 
 import sys
-from pathlib import Path
 
 from evals.lib.loader import GOLDEN_DIR, GoldenValidationError, load_golden
 from evals.lib.schemas import RetrievalGoldenEntry

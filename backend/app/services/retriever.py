@@ -13,6 +13,8 @@ from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
 
+RetrievalStrategy = Literal["rrf", "vector", "fts", "graph"]
+
 RRF_K = 60
 # Fraction of top-k chunks from one section that triggers diversity re-ranking.
 _DIVERSITY_THRESHOLD = 0.6
@@ -663,6 +665,7 @@ class HybridRetriever:
         hyde: bool = False,
         rerank: bool = False,
         graph_expand: bool = True,
+        strategy: RetrievalStrategy = "rrf",
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
 
@@ -714,7 +717,7 @@ class HybridRetriever:
         # HyDE, by contrast, augments with a full hypothetical answer that is
         # designed to share vocabulary with the source text, so it flows into
         # both vector and keyword (preserving the S212 iter 4 behavior).
-        vector_query = await _graph_expand(query) if graph_expand else query
+        vector_query = await _graph_expand(query) if graph_expand and strategy == "rrf" else query
         keyword_query = query
         if hyde:
             vector_query = await _hyde_expand(vector_query)
@@ -724,6 +727,28 @@ class HybridRetriever:
             span.set_attribute("retrieval.hyde", hyde)
             span.set_attribute("retrieval.rerank", rerank)
             span.set_attribute("retrieval.graph_expand", graph_expand)
+            span.set_attribute("retrieval.strategy", strategy)
+            if strategy == "vector":
+                results = await asyncio.to_thread(
+                    self.vector_search, query, document_ids, candidate_pool
+                )
+                results = results[:k]
+                span.set_attribute("retrieval.chunk_count", len(results))
+                return results
+            if strategy == "fts":
+                results = await self.keyword_search(query, document_ids, k=candidate_pool)
+                results = results[:k]
+                span.set_attribute("retrieval.chunk_count", len(results))
+                return results
+            if strategy == "graph":
+                expanded_query = await _graph_expand(query)
+                results = await asyncio.to_thread(
+                    self.vector_search, expanded_query, document_ids, candidate_pool
+                )
+                results = results[:k]
+                span.set_attribute("retrieval.chunk_count", len(results))
+                return results
+
             vector_results, keyword_results = await asyncio.gather(
                 asyncio.to_thread(self.vector_search, vector_query, document_ids, candidate_pool),
                 self.keyword_search(keyword_query, document_ids, k=candidate_pool),

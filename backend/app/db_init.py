@@ -20,6 +20,8 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     FeynmanTurnModel,
     FlashcardModel,
     GlossaryTermModel,
+    GoldenDatasetModel,
+    GoldenQuestionModel,
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
@@ -238,6 +240,15 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S213: eval_kind tag + citation_support_rate (S215) on EvalRunModel
             "ALTER TABLE eval_runs ADD COLUMN eval_kind TEXT",
             "ALTER TABLE eval_runs ADD COLUMN citation_support_rate REAL",
+            "ALTER TABLE eval_runs ADD COLUMN theme_coverage REAL",
+            "ALTER TABLE eval_runs ADD COLUMN no_hallucination REAL",
+            "ALTER TABLE eval_runs ADD COLUMN conciseness_pct REAL",
+            "ALTER TABLE eval_runs ADD COLUMN factuality REAL",
+            "ALTER TABLE eval_runs ADD COLUMN atomicity REAL",
+            "ALTER TABLE eval_runs ADD COLUMN clarity_avg REAL",
+            "ALTER TABLE eval_runs ADD COLUMN routing_accuracy REAL",
+            "ALTER TABLE eval_runs ADD COLUMN per_route JSON",
+            "ALTER TABLE eval_runs ADD COLUMN ablation_metrics JSON",
         ]:
             try:
                 await conn.execute(text(ddl))

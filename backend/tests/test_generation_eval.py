@@ -7,8 +7,9 @@ are imported lazily inside the method body, patch the source module
 """
 
 import sys
+import types
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -37,7 +38,50 @@ class _FakeResult:
         return self._df
 
 
-def test_generation_eval_metrics_flow_from_ragas_to_dict():
+def _install_fake_generation_modules(monkeypatch, evaluate_func) -> None:
+    """Install minimal fake RAGAS/langchain/datasets modules for isolated unit tests."""
+    ragas_mod = types.ModuleType("ragas")
+    ragas_mod.evaluate = evaluate_func
+
+    ragas_llms_mod = types.ModuleType("ragas.llms")
+
+    class _FakeWrapper:
+        def __init__(self, llm) -> None:
+            self.llm = llm
+
+    ragas_llms_mod.LangchainLLMWrapper = _FakeWrapper
+
+    ragas_metrics_mod = types.ModuleType("ragas.metrics")
+    for name in ("answer_relevancy", "context_precision", "context_recall", "faithfulness"):
+        setattr(ragas_metrics_mod, name, types.SimpleNamespace(llm=None))
+
+    datasets_mod = types.ModuleType("datasets")
+
+    class _FakeDataset:
+        @classmethod
+        def from_list(cls, rows):
+            return rows
+
+    datasets_mod.Dataset = _FakeDataset
+
+    langchain_mod = types.ModuleType("langchain_community")
+    chat_models_mod = types.ModuleType("langchain_community.chat_models")
+
+    class _FakeChatOllama:
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+    chat_models_mod.ChatOllama = _FakeChatOllama
+
+    monkeypatch.setitem(sys.modules, "ragas", ragas_mod)
+    monkeypatch.setitem(sys.modules, "ragas.llms", ragas_llms_mod)
+    monkeypatch.setitem(sys.modules, "ragas.metrics", ragas_metrics_mod)
+    monkeypatch.setitem(sys.modules, "datasets", datasets_mod)
+    monkeypatch.setitem(sys.modules, "langchain_community", langchain_mod)
+    monkeypatch.setitem(sys.modules, "langchain_community.chat_models", chat_models_mod)
+
+
+def test_generation_eval_metrics_flow_from_ragas_to_dict(monkeypatch):
     """faithfulness + answer_relevancy from RAGAS land in the result dict."""
     fake_df = pd.DataFrame(
         [
@@ -49,12 +93,13 @@ def test_generation_eval_metrics_flow_from_ragas_to_dict():
             }
         ]
     )
-    with (
-        patch("ragas.evaluate", return_value=_FakeResult(fake_df)) as mock_eval,
-        patch("langchain_community.chat_models.ChatOllama") as mock_chat,
-    ):
-        mock_chat.return_value = object()  # opaque; LangchainLLMWrapper just stores it
-        out = GenerationEval().run(_SAMPLES, judge_model="ollama/test-model")
+    mock_eval = Mock(return_value=_FakeResult(fake_df))
+
+    def _fake_evaluate(**kwargs):
+        return mock_eval(**kwargs)
+
+    _install_fake_generation_modules(monkeypatch, _fake_evaluate)
+    out = GenerationEval().run(_SAMPLES, judge_model="ollama/test-model")
 
     assert mock_eval.called
     assert out["faithfulness"] == pytest.approx(0.80)
@@ -63,10 +108,13 @@ def test_generation_eval_metrics_flow_from_ragas_to_dict():
     assert out["context_recall"] == pytest.approx(0.60)
 
 
-def test_generation_eval_graceful_skip_on_judge_unreachable():
+def test_generation_eval_graceful_skip_on_judge_unreachable(monkeypatch):
     """When the judge raises (e.g. Ollama down), all metrics are None."""
-    with patch("ragas.evaluate", side_effect=ConnectionRefusedError("ollama down")):
-        out = GenerationEval().run(_SAMPLES, judge_model="ollama/test-model")
+    def _raise_connection_error(**kwargs):
+        raise ConnectionRefusedError("ollama down")
+
+    _install_fake_generation_modules(monkeypatch, _raise_connection_error)
+    out = GenerationEval().run(_SAMPLES, judge_model="ollama/test-model")
 
     assert out == {
         "faithfulness": None,

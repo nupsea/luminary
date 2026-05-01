@@ -42,6 +42,7 @@ logs/
 
 # uv
 uv.lock
+.uv-cache/
 
 # Internal harness, agents, and project metadata (not for public repo)
 # These directories remain on disk for local development and the Ralph harness.

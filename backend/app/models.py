@@ -299,6 +299,53 @@ class EvalRunModel(Base):
     # 'summary', 'flashcard', 'citation'. Nullable for legacy rows.
     eval_kind: Mapped[str | None] = mapped_column(String, nullable=True, default="retrieval")
     citation_support_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    theme_coverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    no_hallucination: Mapped[float | None] = mapped_column(Float, nullable=True)
+    conciseness_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    factuality: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atomicity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    clarity_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    routing_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    per_route: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ablation_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class GoldenDatasetModel(Base):
+    __tablename__ = "golden_datasets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # small|medium|large
+    size: Mapped[str] = mapped_column(String(16), nullable=False)
+    generator_model: Mapped[str] = mapped_column(String, nullable=False)
+    source_document_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # pending|generating|complete|failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    generated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    target_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class GoldenQuestionModel(Base):
+    __tablename__ = "golden_questions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    dataset_id: Mapped[str] = mapped_column(
+        String, ForeignKey("golden_datasets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    ground_truth_answer: Mapped[str] = mapped_column(Text, nullable=False)
+    context_hint: Mapped[str] = mapped_column(Text, nullable=False)
+    source_chunk_id: Mapped[str] = mapped_column(String, nullable=False)
+    source_document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    included: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class ReadingProgressModel(Base):

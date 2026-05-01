@@ -126,6 +126,13 @@ interface Document {
   content_type: string
 }
 
+interface GoldenDataset {
+  id: string | null
+  name: string
+  status: string
+  source: "db" | "file"
+}
+
 // ---------------------------------------------------------------------------
 // Per-section state
 // ---------------------------------------------------------------------------
@@ -201,10 +208,10 @@ async function fetchEvalResults(): Promise<EvalResultItem[]> {
   return res.json() as Promise<EvalResultItem[]>
 }
 
-async function fetchEvalDatasets(): Promise<string[]> {
+async function fetchEvalDatasets(): Promise<GoldenDataset[]> {
   const res = await fetch(`${API_BASE}/evals/datasets`)
   if (!res.ok) throw new Error("evals/datasets failed")
-  return res.json() as Promise<string[]>
+  return res.json() as Promise<GoldenDataset[]>
 }
 
 async function triggerEvalRun(dataset: string): Promise<void> {
@@ -595,7 +602,7 @@ function scoreColor(value: number | null, metricKey: string): string {
 
 function EvalPanel() {
   const [state, setState] = useState<SectionState<EvalResultItem[]>>(initSection([]))
-  const [datasetsState, setDatasetsState] = useState<SectionState<string[]>>(initSection([]))
+  const [datasetsState, setDatasetsState] = useState<SectionState<GoldenDataset[]>>(initSection([]))
   const [runningDatasets, setRunningDatasets] = useState<Set<string>>(new Set())
   const [selectedDataset, setSelectedDataset] = useState<string>("")
 
@@ -614,7 +621,7 @@ function EvalPanel() {
       .then((d) => {
         if (!cancelled) {
            setDatasetsState({ loading: false, data: d, error: false })
-           if (d.length > 0) setSelectedDataset(d[0])
+           if (d.length > 0) setSelectedDataset(d[0].name)
         }
       })
       .catch((e: unknown) => {
@@ -662,7 +669,7 @@ function EvalPanel() {
           onChange={(e) => setSelectedDataset(e.target.value)}
           className="rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {datasetsState.data.map(d => <option key={d} value={d}>{d}</option>)}
+          {datasetsState.data.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
           {datasetsState.data.length === 0 && <option value="" disabled>No datasets found</option>}
         </select>
         <button

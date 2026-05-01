@@ -330,6 +330,10 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNex
           <span className="text-3xl font-bold text-foreground">{reviewed}</span>
           <span className="text-sm text-muted-foreground">Cards reviewed</span>
         </div>
+        <div className="flex flex-col items-center">
+          <span className="text-3xl font-bold text-foreground">{pct}%</span>
+          <span className="text-sm text-muted-foreground">Accuracy</span>
+        </div>
       </div>
 
       {nextReviewDate && (
