@@ -1,0 +1,36 @@
+{
+  "_note": "Archived stories S208-S211 from prd-v3.json. All passes:true as of 2026-04-26. Phase 7 (Focused Learning) complete. Kept for reference only.",
+  "archivedAt": "2026-04-26",
+  "phase": "V3 Phase 7 - Focused Learning",
+  "lastPassingStory": "S211",
+  "stories": [
+    {
+      "id": "S208",
+      "title": "Pomodoro session backend: model, service, and API",
+      "phase": "V3 Phase 7 - Focused Learning",
+      "passes": true,
+      "summary": "PomodoroSessionModel + pomodoro_service (start/pause/resume/complete/abandon), POST /pomodoro/* endpoints, GET /pomodoro/stats with today_count + streak_days + total_completed, single active-or-paused invariant, nullable goal_id reserved for S210."
+    },
+    {
+      "id": "S209",
+      "title": "Global focus timer pill in app header",
+      "phase": "V3 Phase 7 - Focused Learning",
+      "passes": true,
+      "summary": "FocusTimerPill in app header, Zustand focus store, surface auto-detected from active tab, localStorage persistence with /pomodoro/active rehydrate, chime on focus complete, stats popover with Today/Streak/Total."
+    },
+    {
+      "id": "S210",
+      "title": "Learning goals backend: typed goals, progress aggregation, session linking",
+      "phase": "V3 Phase 7 - Focused Learning",
+      "passes": true,
+      "summary": "LearningGoalModel + learning_goals_service with type-dispatched compute_progress (read/recall/write/explore), CRUD + link/unlink session endpoints, FK from pomodoro_sessions.goal_id ON DELETE SET NULL, goalless sessions still count toward stats."
+    },
+    {
+      "id": "S211",
+      "title": "Learning goals UI on Study tab and Attach-to-goal in timer popover",
+      "phase": "V3 Phase 7 - Focused Learning",
+      "passes": true,
+      "summary": "GoalsList sub-section on Study tab, GoalCreateDialog, GoalDetailPanel with progress bar + linked sessions, FocusTimerPill 'Attach to goal' selector, surface mismatch warning, stripMarkdown previews per I-12."
+    }
+  ]
+}

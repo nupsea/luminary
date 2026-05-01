@@ -14,6 +14,7 @@ build/
 
 # Node / frontend
 node_modules/
+scripts/ralph/flowchart/node_modules/
 dist/
 .parcel-cache/
 
@@ -44,10 +45,6 @@ logs/
 uv.lock
 .uv-cache/
 
-# Internal harness, agents, and project metadata (not for public repo)
-# These directories remain on disk for local development and the Ralph harness.
-.claude/
-scripts/ralph/
-docs/
+# Internal project metadata (project root only)
 prd.json
 evals/scores_history.jsonl

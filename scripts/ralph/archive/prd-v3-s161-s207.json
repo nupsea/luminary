@@ -1,0 +1,195 @@
+{
+  "_note": "Archived stories S161-S207 from prd-v3.json. All passes:true as of 2026-04-26. Kept for reference only. Active stories start at S208 in prd-v3.json.",
+  "archivedAt": "2026-04-26",
+  "lastPassingStory": "S207",
+  "stories": [
+    {
+      "id": "S161", "title": "Note collections: schema, API, and group_name migration", "phase": "V3 Phase 1", "passes": true,
+      "summary": "NoteCollectionModel + NoteCollectionMemberModel, GET/POST/DELETE /collections, 2-level nesting, group_name migration, GET /notes?collection_id filter."
+    },
+    {
+      "id": "S162", "title": "Hierarchical tags: shadow index table, canonical tag registry, prefix-search API", "phase": "V3 Phase 1", "passes": true,
+      "summary": "NoteTagIndexModel, CanonicalTagModel, TagAliasModel, _sync_tag_index, GET /tags/autocomplete prefix search, hierarchical GET /notes?tag= filter."
+    },
+    {
+      "id": "S163", "title": "Notes as Kuzu graph nodes: NOTE type, WRITTEN_ABOUT entity edges, TAG_IS_CONCEPT bridge", "phase": "V3 Phase 1", "passes": true,
+      "summary": "Kuzu Note node, WRITTEN_ABOUT/TAG_IS_CONCEPT/DERIVED_FROM edges, NoteGraphService (upsert/delete/get), GET /notes/{id}/entities, chat_graph enrichment."
+    },
+    {
+      "id": "S164", "title": "Collections UI: sidebar tree, CRUD dialog, multi-collection assignment", "phase": "V3 Phase 1", "passes": true,
+      "summary": "CollectionTree component, CreateCollectionDialog, NoteEditorDialog multi-collection checkboxes, drag-and-drop assignment, collection_ids in note response."
+    },
+    {
+      "id": "S165", "title": "Hierarchical tag browser UI: tree sidebar, tag management panel, TagAutocomplete", "phase": "V3 Phase 1", "passes": true,
+      "summary": "TagTree component, TagManagementPanel (rename/re-parent/merge), TagAutocomplete with hierarchy-aware dropdown, POST /tags/merge atomic endpoint."
+    },
+    {
+      "id": "S166", "title": "Semantic note clustering via HDBSCAN: auto-suggest collections", "phase": "V3 Phase 1", "passes": true,
+      "summary": "ClusteringService with sklearn HDBSCAN, ClusterSuggestionModel, POST /notes/cluster, GET /notes/cluster/suggestions, accept/reject endpoints, 'Auto-organize' sidebar button."
+    },
+    {
+      "id": "S167", "title": "Tag co-occurrence graph in Viz tab: Sigma.js tag network mode", "phase": "V3 Phase 1", "passes": true,
+      "summary": "TagGraphService (build_tag_graph with co-occurrence SQL), GET /tags/graph, TagGraph Sigma.js component in Viz tab, luminary:navigate on node click."
+    },
+    {
+      "id": "S168", "title": "Smart tag normalization: embedding similarity scan, merge suggestions drawer", "phase": "V3 Phase 1", "passes": true,
+      "summary": "TagMergeSuggestionModel, SmartTagNormalizerService (bge-m3 cosine similarity >0.85), POST /tags/normalization/scan, NormalizationDrawer accept/reject UI."
+    },
+    {
+      "id": "S169", "title": "Collection-based flashcard generation: deck naming, incremental generation", "phase": "V3 Phase 1", "passes": true,
+      "summary": "FlashcardModel.source_content_hash, FlashcardService.generate_from_collection (skips hash-matched notes), GET /flashcards/decks with source_type, 'By Collection' tab in GenerateFlashcardsDialog."
+    },
+    {
+      "id": "S170", "title": "Notes performance refactor: fix vector dimension mismatch (384->1024)", "phase": "V3 Phase 1", "passes": true,
+      "summary": "NOTE_VECTOR_DIM=1024 in vector_store.py, auto-drop-and-recreate on dim mismatch, ReindexService, POST /admin/notes/reindex, @pytest.mark.slow tag-query performance test."
+    },
+    {
+      "id": "S171", "title": "Note-to-note bidirectional links: Zettelkasten-style connections", "phase": "V3 Phase 2", "passes": true,
+      "summary": "NoteLinkModel, Kuzu LINKS_TO edge, POST/DELETE/GET /notes/{id}/links, [[ autocomplete trigger in NoteEditorDialog, backlinks section, [[id|text]] chip rendering."
+    },
+    {
+      "id": "S172", "title": "Note nodes in Viz Knowledge and Learning Path graph modes", "phase": "V3 Phase 2", "passes": true,
+      "summary": "GET /graph?include_notes=true returns Note nodes + WRITTEN_ABOUT/LINKS_TO edges, Viz 'Notes' layer toggle, square indigo Note nodes, NotePreviewPanel on click."
+    },
+    {
+      "id": "S173", "title": "Collection health report: cohesion score, orphaned notes, coverage gaps, stale notes", "phase": "V3 Phase 2", "passes": true,
+      "summary": "CollectionHealthService (cohesion score, orphaned/uncovered/stale notes), NoteModel.archived column, GET /collections/{id}/health, POST .../archive-stale, CollectionHealthPanel."
+    },
+    {
+      "id": "S174", "title": "Export: collections as Obsidian Markdown vault and as Anki deck", "phase": "V3 Phase 2", "passes": true,
+      "summary": "ExportService (export_collection_markdown->zip, export_collection_anki->.apkg via genanki), GET /collections/{id}/export?format=, browser download from CollectionTree actions menu."
+    },
+    {
+      "id": "S175", "title": "Multi-document notes: cross-book annotations with dual entity edge support", "phase": "V3 Phase 2", "passes": true,
+      "summary": "NoteSourceModel pivot (note_id+document_id), GET /notes?document_id= uses both model FK and pivot, DERIVED_FROM edges for each NoteSourceModel row, multi-select document picker in NoteEditorDialog."
+    },
+    {
+      "id": "S176", "title": "Notes reader-first layout: widen content area, strategic actions, clickable tag navigation", "phase": "V3 Phase 3", "passes": true,
+      "summary": "Full-width note reader panel/Sheet, floating action bar, clickable tag chips dispatch luminary:navigate, in-place edit mode, source doc subtitle link."
+    },
+    {
+      "id": "S177", "title": "Progress tab: replace Monitoring with learner-centric view, move dev metrics to /admin", "phase": "V3 Phase 3", "passes": true,
+      "summary": "Monitoring.tsx -> Progress.tsx, GoalsPanel moved from Study to Progress, RAG/Phoenix/Langfuse panels moved to /admin route, hidden 'Dev Tools' footer link."
+    },
+    {
+      "id": "S178", "title": "Study tab consolidation: merge health panels, Smart Generate button, fix default deck label", "phase": "V3 Phase 3", "passes": true,
+      "summary": "Single 'Smart Generate' button (mastery-adaptive mode), DeckHealthPanel+HealthReportPanel merged into 'Deck Status' accordion, 'default' deck label aliased to document title."
+    },
+    {
+      "id": "S179", "title": "Context-aware flashcard generation: best-practices for non-fiction and technical books", "phase": "V3 Phase 3", "passes": true,
+      "summary": "Pre-generation chunk classifier (concept/definition/example/analogy/narrative/transition), genre-aware prompt, FlashcardModel.chunk_classification, embedding-based dedup (>=0.85 cosine)."
+    },
+    {
+      "id": "S180", "title": "Chat interface simplification: settings drawer, collapsible transparency panel", "phase": "V3 Phase 3", "passes": true,
+      "summary": "ChatSettingsDrawer (gear icon) for model/web toggle, 'How I answered' collapsed to 'i' icon by default, low-confidence shown as compact inline badge not full-width banner."
+    },
+    {
+      "id": "S181", "title": "Viz tab overhaul: collapsible View Options panel, select-all entity types, hide Call Graph", "phase": "V3 Phase 3", "passes": true,
+      "summary": "Call Graph hidden unless code document selected, layer toggles in collapsible View Options panel, Select All/Deselect All entity type controls, cluster view when >200 nodes."
+    },
+    {
+      "id": "S182", "title": "YouTube transcript viewer: full feature parity with text documents in Read section", "phase": "V3 Phase 3", "passes": true,
+      "summary": "Transcript displayed as chunked paragraphs with timestamps, video metadata header, DocumentModel.youtube_url/channel_name fields, fallback 'processing' state with 10s polling."
+    },
+    {
+      "id": "S183", "title": "Learning tab: slim LibraryOverview into sidebar widget, document list as primary focus", "phase": "V3 Phase 3", "passes": true,
+      "summary": "LibraryOverview as single-row stats bar (4-5 clickable pills), document list as primary content, 'Continue reading' highlighted top row, empty library CTA."
+    },
+    {
+      "id": "S184", "title": "Flashcard search and unified browse replaces deck-first navigation", "phase": "V3 Phase 4", "passes": true,
+      "summary": "GET /flashcards/search with FTS5 virtual table, filter chips (document/collection/tag/bloom/fsrs_state/type), paginated card grid replaces deck list."
+    },
+    {
+      "id": "S185", "title": "Simplified Study tab: single generate button with adaptive defaults", "phase": "V3 Phase 4", "passes": true,
+      "summary": "Single 'Generate Cards' button (SmartGenerate logic), disclosure chevron for power-user options, DeckHealthPanel+HealthReportPanel+StrugglingPanel merged into 'Insights' accordion."
+    },
+    {
+      "id": "S186", "title": "Chat: inline document scope selector replaces settings drawer scope", "phase": "V3 Phase 4", "passes": true,
+      "summary": "Combobox in Chat header for document scope, scope removed from ChatSettingsDrawer, document change inserts scope-change divider (no conversation clear), chatPreload preserved."
+    },
+    {
+      "id": "S187", "title": "Chat: document-aware contextual recommendations", "phase": "V3 Phase 4", "passes": true,
+      "summary": "GET /chat/suggestions?document_id= returns 4 doc-type-specific suggestions using Kuzu entities/sections (no LLM), ConfusionSignals removed, SuggestionPills replaces all old components."
+    },
+    {
+      "id": "S188", "title": "Flashcard generation: context-rich questions with source grounding", "phase": "V3 Phase 4", "passes": true,
+      "summary": "Section heading + chapter context injected into prompt, Kuzu entity names for books, code blocks for technical docs, Bloom L3+ targeting >=50%, FlashcardResponse.section_heading field."
+    },
+    {
+      "id": "S189", "title": "Auto-organize: guided plan with confirmation workflow", "phase": "V3 Phase 4", "passes": true,
+      "summary": "OrganizationPlanDialog shows all clusters at once with editable names, drag notes between groups, POST /notes/cluster/suggestions/batch-accept (single transaction), Dismiss rejects all."
+    },
+    {
+      "id": "S190", "title": "Tag search: type-ahead search in Notes sidebar", "phase": "V3 Phase 4", "passes": true,
+      "summary": "Search input at top of TagTree, client-side filter with parent chain context, matching substring highlighted, Enter applies tag filter, clear restores full tree. Frontend-only."
+    },
+    {
+      "id": "S191", "title": "Library document action menu: quick navigation to document-scoped tabs", "phase": "V3 Phase 5", "passes": true,
+      "summary": "Three-dot DropdownMenu on DocumentCard: Read/Chat about this/Study flashcards/View notes/View in graph. Each dispatches luminary:navigate with tab + document scope. No new endpoints."
+    },
+    {
+      "id": "S192", "title": "DocumentReader notes panel: collection-scoped active reading sidebar", "phase": "V3 Phase 5", "passes": true,
+      "summary": "NoteCollectionModel.auto_document_id column, GET /collections/by-document/{id}, POST /collections/auto/{id} (idempotent), Notes tab replaces One-liner in DocumentReader right panel, NotesReaderPanel component."
+    },
+    {
+      "id": "S193", "title": "Glossary: persistent storage, categorization, and regeneration", "phase": "V3 Phase 5", "passes": true,
+      "summary": "GlossaryTermModel (id/document_id/term/definition/first_mention_section_id/category), GET /explain/glossary/{id}/cached, upsert on regenerate, DELETE /explain/glossary/{id}/terms/{term_id}, searchable table with category badges."
+    },
+    {
+      "id": "S194", "title": "References: URL validation and pruning of dead links", "phase": "V3 Phase 5", "passes": true,
+      "summary": "WebReferenceModel.is_valid + last_checked_at, ReferenceValidatorService (httpx HEAD, Semaphore(5), max 20), POST /references/documents/{id}/validate, GET /references excludes invalid by default, 3-tier UI (verified/unchecked/unavailable)."
+    },
+    {
+      "id": "S195", "title": "Chat: Bloom-progressive recommendations with dedup and summary grounding", "phase": "V3 Phase 5", "passes": true,
+      "summary": "ChatSuggestionHistoryModel, LLM-powered GET /chat/suggestions using executive summary + entities, Bloom level decays from 5 to 2 over 4 asked questions, Jaccard dedup, POST /chat/suggestions/{id}/asked."
+    },
+    {
+      "id": "S196", "title": "Chat: non-destructive scope clear preserves conversation context", "phase": "V3 Phase 5", "passes": true,
+      "summary": "X button on scope selector inserts scope-change divider instead of clearing conversation. Trash icon remains the only explicit clear. Frontend-only change to Chat.tsx."
+    },
+    {
+      "id": "S197", "title": "Compare notes with book: auto-collection gap analysis", "phase": "V3 Phase 5", "passes": true,
+      "summary": "notes_gap_node auto-fetches from document auto-collection when no explicit note_ids, 'Compare my notes' button in DocumentReader toolbar, GapDetectDialog Quick-compare mode, 'Take a note on this' per gap result."
+    },
+    {
+      "id": "S198", "title": "Highlight reliability: text viewer, PDF edge cases, large selection menu", "phase": "V3 Phase 5", "passes": true,
+      "summary": "SelectionActionBar viewport clamping, ReadView data-section-id DOM walk fix, PDF fallback section matching for page_start=0, 10000-char selection limit disables highlight swatches."
+    },
+    {
+      "id": "S199", "title": "Naming conventions: UPPER-CASE collections and lower-case tags with dash separators", "phase": "V3 Phase 5", "passes": true,
+      "summary": "normalize_collection_name and normalize_tag_slug in naming.py, applied at POST /collections + POST /tags + _sync_tag_index, POST /tags/migrate-naming + POST /collections/migrate-naming, tagUtils.ts equivalents, frontend preview in TagAutocomplete + CreateCollectionDialog."
+    },
+    {
+      "id": "S200", "title": "PDF Viewer: working internal links, external links, and rendering fidelity", "phase": "V3 Phase 6", "passes": true,
+      "summary": "GoTo action dict support in linkService.navigateTo, external links as anchors with target=_blank, --scale-factor sync with canvas re-render, highlight marks don't block link clicks."
+    },
+    {
+      "id": "S201", "title": "Fix tag auto-save on note creation and eliminate duplicate notes", "phase": "V3 Phase 6", "passes": true,
+      "summary": "Accepted auto-tags persisted via PUT /notes/{id}, suggest-tags returns normalized slugs, backend dedup (same doc/section/hash within 5s), save button debounce guard, batch_accept_suggestions applies normalize_collection_name."
+    },
+    {
+      "id": "S202", "title": "Fix CI gate errors and browser console errors", "phase": "V3 Phase 6", "passes": true,
+      "summary": "CI sweep: ruff check + pytest + tsc --noEmit all exit 0. Browser console check across all 6 tabs. Suspense fallbacks verified on lazy pages. No new 'any' type assertions."
+    },
+    {
+      "id": "S203", "title": "PDF Viewer: in-page and cross-page text search", "phase": "V3 Phase 6", "passes": true,
+      "summary": "PdfSearchBar overlay (Ctrl+F), in-page match highlights + prev/next, cross-page match index via getTextContent(), lazy page extraction, cached page text Map, Escape to close."
+    },
+    {
+      "id": "S204", "title": "Notes created from highlighted text sync state across all surfaces", "phase": "V3 Phase 6", "passes": true,
+      "summary": "POST /notes response includes full NoteModel. After highlight-based note creation: invalidate ['notes'], ['notes', documentId], ['document-notes', documentId], ['collections'] TanStack Query keys."
+    },
+    {
+      "id": "S205", "title": "PDF text layer and search highlight rendering: fix font overlap and visual artifacts", "phase": "V3 Phase 6", "passes": true,
+      "summary": "Highlights rendered as absolutely-positioned overlay divs between canvas and text layer (no <mark> injection into spans). applyPdfHighlights + applySearchHighlights refactored. Text selection and AnnotationPopover preserved."
+    },
+    {
+      "id": "S206", "title": "Fix flashcard search: FTS5 query returns no results for keyword searches", "phase": "V3 Phase 6", "passes": true,
+      "summary": "flashcards_fts populated on create/generate, backfill on startup (INSERT OR IGNORE), UPDATE/DELETE triggers, query sanitized/quoted, LIKE fallback on 0 results, 'No flashcards found' empty state."
+    },
+    {
+      "id": "S207", "title": "Auto-organize: retroactive naming normalization and actionable suggestions", "phase": "V3 Phase 6", "passes": true,
+      "summary": "ClusteringService.detect_naming_violations(), POST /notes/cluster/normalize-check, POST /notes/cluster/normalize-apply (transactional), startup migration normalizes existing tags+collections, OrganizationPlanDialog shows 'Naming Fixes' section even when no cluster suggestions."
+    }
+  ]
+}
