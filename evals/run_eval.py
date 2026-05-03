@@ -22,6 +22,7 @@ compatibility with audit_golden.py and existing tests.
 import argparse
 import random
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpx
@@ -428,8 +429,12 @@ def main() -> None:
         )
         return
 
-    samples: list[dict] = []
-    for i, row in enumerate(rows, start=1):
+    # Parallel /search (+ optional /qa) per row. Backend FastAPI handlers are
+    # async-safe; cap concurrency so we don't overwhelm a local Ollama judge.
+    needs_qa = bool(args.model or args.check_citations)
+
+    def _process_row(idx_row: tuple[int, dict]) -> dict:
+        i, row = idx_row
         question = row["question"]
         ground_truth = row["ground_truth_answer"]
         context_hint = row.get("context_hint", "")
@@ -443,7 +448,7 @@ def main() -> None:
 
         answer = ""
         qa_resp: dict = {}
-        if args.model or args.check_citations:
+        if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
             citations = qa_resp.get("citations", [])
@@ -453,17 +458,19 @@ def main() -> None:
                 if c not in seen:
                     chunks.append(c)
                     seen.add(c)
+        return {
+            "question": question,
+            "answer": answer or ground_truth,
+            "contexts": chunks or [""],
+            "ground_truths": [ground_truth],
+            "context_hint": context_hint,
+            "qa_response": qa_resp,
+        }
 
-        samples.append(
-            {
-                "question": question,
-                "answer": answer or ground_truth,
-                "contexts": chunks or [""],
-                "ground_truths": [ground_truth],
-                "context_hint": context_hint,
-                "qa_response": qa_resp,
-            }
-        )
+    # /search alone: keep concurrency higher; /qa adds LLM load: cap at 2.
+    max_workers = 2 if needs_qa else 6
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        samples = list(pool.map(_process_row, enumerate(rows, start=1)))
 
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
@@ -539,9 +546,10 @@ def main() -> None:
     print_table(dataset_label, history_model, metrics)
 
     n_questions = len(samples)
+    # context_precision / context_recall are intentionally skipped now (they
+    # duplicate HR@5/MRR signal). Don't surface a warning for them.
     null_metrics = [
-        k for k in ("faithfulness", "answer_relevance", "context_precision",
-                    "context_recall") if metrics.get(k) is None
+        k for k in ("faithfulness", "answer_relevance") if metrics.get(k) is None
     ]
     if args.judge_model and null_metrics:
         print(
