@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-const JUDGE_MODELS = ["ollama/gemma4", "ollama/mistral", "openai/gpt-4o-mini", ""]
+const JUDGE_MODELS = ["ollama/llama3.2:3b", "ollama/mistral", "ollama/gemma4", "openai/gpt-4o-mini", ""]
 
 interface RunEvalDialogProps {
   open: boolean
@@ -19,7 +19,7 @@ interface RunEvalDialogProps {
 }
 
 export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunEvalDialogProps) {
-  const [judgeModel, setJudgeModel] = useState("ollama/gemma4")
+  const [judgeModel, setJudgeModel] = useState("ollama/llama3.2:3b")
   const [checkCitations, setCheckCitations] = useState(false)
   const [maxQuestions, setMaxQuestions] = useState(20)
   const external = /^(openai|anthropic|gemini)\//.test(judgeModel)

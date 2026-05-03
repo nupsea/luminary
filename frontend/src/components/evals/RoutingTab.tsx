@@ -55,11 +55,9 @@ export function RoutingTab() {
 
   // Use most recent run with per_route data
   const latest = withPerRoute[0]
-  const perRoute = latest.per_route as Record<string, Record<string, number>>
-  const intents = Object.keys(perRoute)
-  const allPredicted = Array.from(
-    new Set(intents.flatMap((intent) => Object.keys(perRoute[intent] ?? {})))
-  )
+  // per_route is {route: {precision: number, recall: number}} from compute_per_route_precision_recall
+  const perRoute = latest.per_route as Record<string, { precision?: number; recall?: number }>
+  const routes = Object.keys(perRoute)
 
   return (
     <div className="grid gap-6">
@@ -70,39 +68,27 @@ export function RoutingTab() {
       </div>
 
       <section className="grid gap-2">
-        <h2 className="text-sm font-semibold">Confusion Matrix</h2>
+        <h2 className="text-sm font-semibold">Per-Route Precision / Recall</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
-                <th className="py-1.5 pr-3 font-medium">Actual \ Predicted</th>
-                {allPredicted.map((p) => (
-                  <th key={p} className="py-1.5 pr-3 font-medium">
-                    {p}
-                  </th>
-                ))}
+                <th className="py-1.5 pr-3 font-medium">Route</th>
+                <th className="py-1.5 pr-3 font-medium">Precision</th>
+                <th className="py-1.5 pr-3 font-medium">Recall</th>
+                <th className="py-1.5 pr-3 font-medium">F1</th>
               </tr>
             </thead>
             <tbody>
-              {intents.map((intent) => {
-                const row = perRoute[intent] ?? {}
-                const total = Object.values(row).reduce((a, b) => a + b, 0)
+              {routes.map((route) => {
+                const { precision = 0, recall = 0 } = perRoute[route] ?? {}
+                const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0
                 return (
-                  <tr key={intent} className="border-b last:border-0">
-                    <td className="py-1.5 pr-3 font-medium">{intent}</td>
-                    {allPredicted.map((p) => {
-                      const val = row[p] ?? 0
-                      const isCorrect = p === intent
-                      return (
-                        <td
-                          key={p}
-                          className={`py-1.5 pr-3 ${isCorrect ? "font-semibold text-green-700" : "text-muted-foreground"}`}
-                        >
-                          {val}
-                          {total > 0 && ` (${Math.round((val / total) * 100)}%)`}
-                        </td>
-                      )
-                    })}
+                  <tr key={route} className="border-b last:border-0">
+                    <td className="py-1.5 pr-3 font-medium">{route}</td>
+                    <td className="py-1.5 pr-3">{pct(precision)}</td>
+                    <td className="py-1.5 pr-3">{pct(recall)}</td>
+                    <td className="py-1.5 pr-3">{pct(f1)}</td>
                   </tr>
                 )
               })}

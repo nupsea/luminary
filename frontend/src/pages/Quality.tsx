@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BarChart3, Plus, RefreshCw } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { AblationsTab } from "@/components/evals/AblationsTab"
-import { DatasetCard } from "@/components/evals/DatasetCard"
+import { ResultsTab } from "@/components/evals/ResultsTab"
 import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
 import { RegressionsTab } from "@/components/evals/RegressionsTab"
@@ -67,26 +67,40 @@ async function fetchFileRuns(name: string): Promise<EvalRunFull[]> {
   return res.json() as Promise<EvalRunFull[]>
 }
 
+const USABLE_STAGES = new Set(["embedding", "entity_extract", "indexing", "complete"])
+
 async function fetchDocuments(): Promise<DocumentOption[]> {
   const params = new URLSearchParams({ sort: "newest", page: "1", page_size: "100" })
   const res = await fetch(`${API_BASE}/documents?${params.toString()}`)
   if (!res.ok) throw new Error("Failed to fetch documents")
   const data = (await res.json()) as { items: DocumentOption[] }
-  return data.items.filter((doc) => doc.stage === "complete")
+  return data.items.filter((doc) => USABLE_STAGES.has(doc.stage))
 }
 
 // ---------------------------------------------------------------------------
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "runs" | "routing" | "ablations" | "regressions"
+type TabId = "datasets" | "results" | "runs" | "routing" | "ablations" | "regressions"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
+  { id: "results", label: "Results" },
   { id: "runs", label: "Runs" },
   { id: "routing", label: "Routing" },
   { id: "ablations", label: "Ablations" },
   { id: "regressions", label: "Regressions" },
 ]
+
+function pct(v: number): string {
+  return `${Math.round(v * 100)}%`
+}
+
+function metricColor(v: number | null | undefined, threshold: number): string {
+  if (v == null) return ""
+  if (v >= threshold) return "font-semibold text-green-700 dark:text-green-400"
+  if (v >= threshold * 0.75) return "font-semibold text-amber-600 dark:text-amber-400"
+  return "text-muted-foreground"
+}
 
 function getInitialTab(): TabId {
   const hash = window.location.hash.replace("#", "") as TabId
@@ -106,6 +120,60 @@ export default function Quality() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // file-backed selection
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
+  // eval in-flight tracking
+  const [evalRunning, setEvalRunning] = useState(false)
+  const evalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function markEvalRunning() {
+    setEvalRunning(true)
+    if (evalTimerRef.current) clearTimeout(evalTimerRef.current)
+    // auto-clear after 15 minutes in case the run silently fails
+    evalTimerRef.current = setTimeout(() => setEvalRunning(false), 15 * 60 * 1000)
+  }
+
+  // Re-attach to in-flight runs on page mount (survives browser refresh) and
+  // surface failures the user would otherwise never see.
+  const seenFailuresRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    async function poll() {
+      try {
+        const res = await fetch(`${API_BASE}/evals/in-flight`)
+        if (!res.ok) return
+        const rows = (await res.json()) as Array<{
+          key: string
+          run_id: string
+          status: "running" | "failed" | "done"
+          error: string | null
+          finished_at: number | null
+        }>
+        if (cancelled) return
+        const anyRunning = rows.some((r) => r.status === "running")
+        if (anyRunning) markEvalRunning()
+        else if (!evalRunning) setEvalRunning(false)
+        for (const row of rows) {
+          if (row.status === "failed" && !seenFailuresRef.current.has(row.run_id)) {
+            seenFailuresRef.current.add(row.run_id)
+            toast.error(`Eval failed for ${row.key}: ${row.error ?? "unknown error"}`)
+          }
+          if (row.status === "done" && row.finished_at) {
+            // refresh the runs queries when something just completed
+            void qc.invalidateQueries({ queryKey: ["eval-dataset-runs", row.key] })
+            void qc.invalidateQueries({ queryKey: ["eval-file-runs", row.key] })
+          }
+        }
+      } catch {
+        // ignore — polling is best-effort
+      }
+    }
+    void poll()
+    const id = setInterval(poll, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function handleTabChange(tab: TabId) {
     setActiveTab(tab)
@@ -166,6 +234,7 @@ export default function Quality() {
       size: DatasetSize
       document_ids: string[]
       generator_model?: string
+      question_count?: number
     }) => {
       const res = await fetch(`${API_BASE}/evals/datasets`, {
         method: "POST",
@@ -216,10 +285,12 @@ export default function Quality() {
     },
     onSuccess: () => {
       setRunOpen(false)
+      markEvalRunning()
+      if (activeTab !== "runs") setActiveTab("runs")
       if (selectedId) void qc.invalidateQueries({ queryKey: ["eval-dataset-runs", selectedId] })
       if (selectedFileName)
         void qc.invalidateQueries({ queryKey: ["eval-file-runs", selectedFileName] })
-      toast.success("Eval run started")
+      toast.success("Eval started — switching to Runs tab")
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Run failed"),
   })
@@ -237,15 +308,15 @@ export default function Quality() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Delete failed"),
   })
 
-  // Derived
-  const dbDatasets = useMemo(
-    () => (datasetsQuery.data || []).filter((d) => d.source === "db"),
-    [datasetsQuery.data],
-  )
-  const fileDatasets = useMemo(
-    () => (datasetsQuery.data || []).filter((d) => d.source === "file"),
-    [datasetsQuery.data],
-  )
+  // All datasets merged and sorted: most recent activity first
+  const allDatasets = useMemo(() => {
+    const all = datasetsQuery.data ?? []
+    return [...all].sort((a, b) => {
+      const aKey = a.last_run?.run_at ?? a.completed_at ?? a.created_at ?? ""
+      const bKey = b.last_run?.run_at ?? b.completed_at ?? b.created_at ?? ""
+      return bKey.localeCompare(aKey)
+    })
+  }, [datasetsQuery.data])
 
   const isDetailOpen = Boolean(selectedId) || Boolean(selectedFileName)
   const detailSource = selectedFileName ? "file" : "db"
@@ -275,6 +346,21 @@ export default function Quality() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
+      {evalRunning && (
+        <div className="flex shrink-0 items-center justify-between border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+            Eval running in background — results will appear in the Runs tab when complete
+          </div>
+          <button
+            type="button"
+            className="text-amber-600 underline hover:text-amber-800"
+            onClick={() => setEvalRunning(false)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <header className="flex shrink-0 items-center justify-between border-b px-6 py-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Quality</h1>
@@ -324,16 +410,16 @@ export default function Quality() {
         {activeTab === "datasets" && (
           <>
             {datasetsQuery.isLoading ? (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {[0, 1, 2].map((item) => (
-                  <Skeleton key={item} className="h-44 w-full" />
+              <div className="grid gap-2">
+                {[0, 1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-11 w-full" />
                 ))}
               </div>
             ) : datasetsQuery.isError ? (
               <div className="rounded-md border border-destructive/30 p-4 text-sm text-destructive">
                 Datasets unavailable.
               </div>
-            ) : dbDatasets.length === 0 && fileDatasets.length === 0 ? (
+            ) : allDatasets.length === 0 ? (
               <div className="flex min-h-96 flex-col items-center justify-center gap-3 rounded-md border border-dashed text-center">
                 <BarChart3 className="h-8 w-8 text-muted-foreground" />
                 <div className="text-sm font-medium">No evaluation datasets yet</div>
@@ -347,50 +433,91 @@ export default function Quality() {
                 </button>
               </div>
             ) : (
-              <div className="grid gap-6">
-                {dbDatasets.length > 0 && (
-                  <section className="grid gap-3">
-                    <h2 className="text-sm font-semibold">Generated Datasets</h2>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {dbDatasets.map((dataset) => (
-                        <DatasetCard
-                          key={dataset.id || dataset.name}
-                          dataset={dataset}
-                          selected={dataset.id === selectedId}
-                          onSelect={() => {
-                            setSelectedFileName(null)
-                            setSelectedId(dataset.id)
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                      <th className="py-2 pl-3 pr-3 font-medium">Name</th>
+                      <th className="py-2 pr-3 font-medium">Source</th>
+                      <th className="py-2 pr-3 font-medium">Questions</th>
+                      <th className="py-2 pr-3 font-medium">Generated</th>
+                      <th className="py-2 pr-3 font-medium">Last Run</th>
+                      <th className="py-2 pr-3 text-right font-medium">HR@5</th>
+                      <th className="py-2 pr-3 text-right font-medium">MRR</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Requires judge model">Faith</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allDatasets.map((dataset) => {
+                      const isSelected =
+                        dataset.source === "db"
+                          ? dataset.id === selectedId
+                          : dataset.name === selectedFileName
+                      const lr = dataset.last_run
+                      return (
+                        <tr
+                          key={dataset.id ?? dataset.name}
+                          onClick={() => {
+                            if (dataset.source === "db") {
+                              setSelectedFileName(null)
+                              setSelectedId(dataset.id)
+                            } else {
+                              setSelectedId(null)
+                              setSelectedFileName(dataset.name)
+                            }
                           }}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {fileDatasets.length > 0 && (
-                  <section className="grid gap-3">
-                    <h2 className="text-sm font-semibold">File Goldens</h2>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {fileDatasets.map((dataset) => (
-                        <DatasetCard
-                          key={dataset.name}
-                          dataset={dataset}
-                          selected={dataset.name === selectedFileName}
-                          onSelect={() => {
-                            setSelectedId(null)
-                            setSelectedFileName(dataset.name)
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                )}
+                          className={cn(
+                            "cursor-pointer border-b last:border-0 hover:bg-accent/50",
+                            isSelected && "bg-primary/5",
+                          )}
+                        >
+                          <td className="py-2.5 pl-3 pr-3">
+                            <span className="font-medium text-foreground">{dataset.name}</span>
+                            {dataset.status === "generating" || dataset.status === "pending" ? (
+                              <span className="ml-2 text-muted-foreground">
+                                {dataset.generated_count}/{dataset.target_count}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="py-2.5 pr-3 text-muted-foreground">
+                            {dataset.source === "file" ? "file" : "generated"}
+                          </td>
+                          <td className="py-2.5 pr-3 text-muted-foreground">
+                            {dataset.source === "file" ? "—" : dataset.generated_count}
+                          </td>
+                          <td className="py-2.5 pr-3 text-muted-foreground">
+                            {dataset.created_at
+                              ? new Date(dataset.created_at).toLocaleDateString()
+                              : "—"}
+                          </td>
+                          <td className="py-2.5 pr-3 text-muted-foreground">
+                            {lr?.run_at ? new Date(lr.run_at).toLocaleString() : "never"}
+                          </td>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.hit_rate_5, 0.6))}>
+                            {lr?.hit_rate_5 != null ? pct(lr.hit_rate_5) : "—"}
+                          </td>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.mrr, 0.45))}>
+                            {lr?.mrr != null ? pct(lr.mrr) : "—"}
+                          </td>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.faithfulness, 0.65))}>
+                            {lr?.faithfulness != null ? pct(lr.faithfulness) : (
+                              <span className="text-muted-foreground/50" title="Run with a judge model to compute faithfulness">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
         )}
 
-        {activeTab === "runs" && <RunsTab />}
+        {activeTab === "results" && (
+          <ResultsTab onRunStarted={markEvalRunning} />
+        )}
+        {activeTab === "runs" && <RunsTab polling={evalRunning} />}
         {activeTab === "routing" && <RoutingTab />}
         {activeTab === "ablations" && <AblationsTab />}
         {activeTab === "regressions" && <RegressionsTab />}

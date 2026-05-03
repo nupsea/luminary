@@ -39,6 +39,54 @@ _EVALS_DIR = REPO_ROOT / "evals"
 # Strong references to background tasks — prevents GC before they complete.
 _background_tasks: set[asyncio.Task] = set()
 
+# In-flight + recently-completed eval run tracker.
+# Key: dataset key (file-backed -> dataset name, db-backed -> dataset id).
+# Survives across browser refreshes (process-local but persistent within
+# backend lifetime). Failed/completed entries linger so the UI can surface
+# their final status on the first page load after they finish.
+import time as _time  # noqa: E402
+
+_in_flight_runs: dict[str, dict[str, Any]] = {}
+_RUN_RETENTION_SECONDS = 30 * 60  # keep terminal entries 30 min for UI pickup
+
+
+def _record_run_start(
+    key: str,
+    *,
+    run_id: str,
+    judge_model: str | None,
+    is_generated: bool,
+) -> None:
+    _in_flight_runs[key] = {
+        "key": key,
+        "run_id": run_id,
+        "judge_model": judge_model,
+        "is_generated": is_generated,
+        "status": "running",
+        "started_at": _time.time(),
+        "finished_at": None,
+        "error": None,
+    }
+
+
+def _record_run_finish(key: str, *, error: str | None) -> None:
+    entry = _in_flight_runs.get(key)
+    if entry is None:
+        return
+    entry["status"] = "failed" if error else "done"
+    entry["finished_at"] = _time.time()
+    entry["error"] = error
+
+
+def _prune_in_flight() -> None:
+    cutoff = _time.time() - _RUN_RETENTION_SECONDS
+    stale = [
+        k for k, v in _in_flight_runs.items()
+        if v["status"] != "running" and (v.get("finished_at") or 0) < cutoff
+    ]
+    for k in stale:
+        _in_flight_runs.pop(k, None)
+
 # Luminary backend always runs on port 7820; eval subprocess needs this to call /search etc.
 _BACKEND_URL = "http://localhost:7820"
 
@@ -104,6 +152,7 @@ class GoldenDatasetCreateRequest(BaseModel):
     size: str = "small"
     generator_model: str | None = None
     description: str | None = None
+    question_count: int | None = Field(default=None, ge=1, le=500)
 
 
 class GoldenDatasetListItem(BaseModel):
@@ -170,7 +219,16 @@ class GeneratedRunResponse(BaseModel):
 def _fire_and_forget(coro) -> None:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+
+    def _on_done(t: asyncio.Task) -> None:
+        _background_tasks.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.exception("background eval task crashed", exc_info=exc)
+
+    task.add_done_callback(_on_done)
 
 
 async def _run_eval_subprocess(
@@ -193,19 +251,37 @@ async def _run_eval_subprocess(
         cmd.append("--check-citations")
     if max_questions is not None:
         cmd.extend(["--max-questions", str(max_questions)])
-    logger.debug("starting eval subprocess: %s cwd=%s", cmd, _EVALS_DIR)
-    result = await asyncio.to_thread(
-        subprocess.run,
-        cmd,
-        cwd=str(_EVALS_DIR),
-        capture_output=True,
-    )
-    logger.debug(
-        "eval subprocess finished: returncode=%d stdout=%r stderr=%r",
-        result.returncode,
-        result.stdout[-500:] if result.stdout else b"",
-        result.stderr[-500:] if result.stderr else b"",
-    )
+    logger.info("eval subprocess starting: dataset=%s cmd=%s", dataset, cmd)
+    error: str | None = None
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            cwd=str(_EVALS_DIR),
+            capture_output=True,
+        )
+        stdout_tail = (result.stdout or b"")[-1000:].decode(errors="replace")
+        stderr_tail = (result.stderr or b"")[-1000:].decode(errors="replace")
+        if result.returncode != 0:
+            logger.warning(
+                "eval subprocess FAILED: dataset=%s returncode=%d\nSTDOUT:\n%s\nSTDERR:\n%s",
+                dataset, result.returncode, stdout_tail, stderr_tail,
+            )
+            error = (stderr_tail.strip().splitlines() or ["eval subprocess failed"])[-1][:500]
+        else:
+            logger.info(
+                "eval subprocess finished OK: dataset=%s\n%s", dataset, stdout_tail
+            )
+            if stderr_tail.strip():
+                logger.warning(
+                    "eval subprocess (rc=0) STDERR for dataset=%s:\n%s",
+                    dataset, stderr_tail,
+                )
+    except Exception as exc:
+        logger.exception("eval subprocess raised: dataset=%s", dataset)
+        error = f"{type(exc).__name__}: {exc}"[:500]
+    finally:
+        _record_run_finish(dataset, error=error)
 
 
 async def _run_generated_eval_subprocess(
@@ -232,8 +308,34 @@ async def _run_generated_eval_subprocess(
         cmd.append("--check-citations")
     if max_questions is not None:
         cmd.extend(["--max-questions", str(max_questions)])
-    logger.debug("starting generated eval subprocess: run_id=%s cmd=%s", run_id, cmd)
-    await asyncio.to_thread(subprocess.run, cmd, cwd=str(_EVALS_DIR), capture_output=True)
+    logger.info("eval subprocess starting: dataset_id=%s cmd=%s", dataset_id, cmd)
+    error: str | None = None
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, cwd=str(_EVALS_DIR), capture_output=True
+        )
+        stdout_tail = (result.stdout or b"")[-1000:].decode(errors="replace")
+        stderr_tail = (result.stderr or b"")[-1000:].decode(errors="replace")
+        if result.returncode != 0:
+            logger.warning(
+                "eval subprocess FAILED: dataset_id=%s returncode=%d\nSTDOUT:\n%s\nSTDERR:\n%s",
+                dataset_id, result.returncode, stdout_tail, stderr_tail,
+            )
+            error = (stderr_tail.strip().splitlines() or ["eval subprocess failed"])[-1][:500]
+        else:
+            logger.info(
+                "eval subprocess finished OK: dataset_id=%s\n%s", dataset_id, stdout_tail
+            )
+    except Exception as exc:
+        logger.exception("eval subprocess raised: dataset_id=%s", dataset_id)
+        error = f"{type(exc).__name__}: {exc}"[:500]
+    finally:
+        _record_run_finish(dataset_id, error=error)
+        if stderr_tail.strip():
+            logger.warning(
+                "eval subprocess (rc=0) STDERR for dataset_id=%s:\n%s",
+                dataset_id, stderr_tail,
+            )
 
 
 def _dataset_to_item(
@@ -429,6 +531,7 @@ async def create_golden_dataset(
         document_ids=req.document_ids,
         size=req.size,
         generator_model=req.generator_model,
+        question_count=req.question_count,
     )
     return {"id": dataset.id, "status": dataset.status}
 
@@ -542,6 +645,12 @@ async def run_generated_dataset_eval(
     if dataset.status != "complete":
         raise HTTPException(status_code=409, detail="Dataset is not complete")
     run_id = f"generated-{dataset_id}-{len(_background_tasks) + 1}"
+    _record_run_start(
+        dataset_id,
+        run_id=run_id,
+        judge_model=req.judge_model,
+        is_generated=True,
+    )
     _fire_and_forget(
         _run_generated_eval_subprocess(
             dataset_id,
@@ -651,6 +760,12 @@ async def run_eval(req: EvalRunRequest) -> dict:
             detail=f"Dataset '{req.dataset}' not found (missing {golden_file.name})",
         )
 
+    _record_run_start(
+        req.dataset,
+        run_id=f"file-{req.dataset}-{len(_background_tasks) + 1}",
+        judge_model=req.judge_model,
+        is_generated=False,
+    )
     _fire_and_forget(
         _run_eval_subprocess(
             req.dataset,
@@ -664,3 +779,15 @@ async def run_eval(req: EvalRunRequest) -> dict:
         "eval run started: dataset=%s assert_thresholds=%s", req.dataset, req.assert_thresholds
     )
     return {"status": "started", "dataset": req.dataset}
+
+
+@router.get("/in-flight")
+async def list_in_flight_runs() -> list[dict[str, Any]]:
+    """Return currently-running and recently-finished eval runs.
+
+    The frontend polls this on Quality-page mount so a browser refresh
+    can re-attach to in-progress runs and surface failure toasts that
+    were missed while the page was unmounted.
+    """
+    _prune_in_flight()
+    return list(_in_flight_runs.values())

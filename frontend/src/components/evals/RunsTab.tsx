@@ -33,7 +33,7 @@ function fmtDate(iso: string): string {
   }
 }
 
-export function RunsTab() {
+export function RunsTab({ polling = false }: { polling?: boolean }) {
   const [datasetFilter, setDatasetFilter] = useState("")
   const [kindFilter, setKindFilter] = useState("")
   const [modelFilter, setModelFilter] = useState("")
@@ -48,11 +48,18 @@ export function RunsTab() {
         model: modelFilter || undefined,
         limit,
       }),
-    staleTime: 30_000,
+    staleTime: polling ? 0 : 30_000,
+    refetchInterval: polling ? 6_000 : false,
   })
 
   return (
     <div className="grid gap-4">
+      {polling && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+          Eval running in background — polling for results every 6s
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         <input
           type="text"
@@ -113,7 +120,7 @@ export function RunsTab() {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">Dataset</th>
                 <th className="py-2 pr-3 font-medium">Kind</th>
-                <th className="py-2 pr-3 font-medium">Model</th>
+                <th className="py-2 pr-3 font-medium">Judge Model</th>
                 <th className="py-2 pr-3 font-medium">Run At</th>
                 <th className="py-2 pr-3 font-medium">HR@5</th>
                 <th className="py-2 pr-3 font-medium">MRR</th>

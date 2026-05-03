@@ -26,6 +26,7 @@ SIZE_CONFIG: dict[str, tuple[int, int]] = {
     "large": (20, 10),
 }
 MAX_QUESTIONS_PER_DATASET = 1000
+DEFAULT_GENERATOR_MODEL = "openai/gpt-4.1"
 
 _background_tasks: set[asyncio.Task] = set()
 
@@ -59,33 +60,48 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return json.loads(stripped[start : end + 1])
 
 
-def _fallback_questions(chunk_text: str, count: int) -> list[dict[str, str]]:
-    sentences = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", chunk_text)
-        if len(s.strip().split()) >= 5
-    ]
-    if not sentences:
-        hint = chunk_text[:240].strip()
-        return [
-            {
-                "question": "What is the main point of this source passage?",
-                "answer": hint or "The passage contains the answer.",
-                "context_hint": hint,
-            }
-        ][:count]
+_FRONT_BACK_MATTER = frozenset(
+    "foreword preface acknowledgments acknowledgement dedication copyright isbn"
+    " publisher colophon bibliography index glossary".split()
+)
 
-    questions: list[dict[str, str]] = []
-    for idx, sentence in enumerate(sentences[:count], start=1):
-        hint = sentence[:240].strip()
-        questions.append(
-            {
-                "question": f"What does the source explain in point {idx}?",
-                "answer": hint,
-                "context_hint": hint,
-            }
-        )
-    return questions
+
+def _is_structural_chunk(text: str) -> bool:
+    """Return True for chunks unlikely to yield good content-focused eval questions.
+
+    Skips page headers, TOC entries, front/back matter, and chunks with low
+    alphabetic density (tables, code listings, figure captions).
+    """
+    stripped = text.strip()
+    if len(stripped) < 200:
+        return True
+    words = stripped.split()
+    if len(words) < 40:
+        return True
+    alpha_ratio = sum(1 for c in stripped if c.isalpha()) / len(stripped)
+    if alpha_ratio < 0.55:
+        return True
+    # Skip front/back matter sections (foreword, preface, acknowledgments, etc.)
+    lower_words = set(w.strip(".,;:\"'").lower() for w in words[:30])
+    if lower_words & _FRONT_BACK_MATTER:
+        return True
+    # Section-header prefix scan: chunks are emitted as
+    # "[doc_title > Section Name — subsection] body...". Reject if the section
+    # path itself names front-matter (Part III. Apache Iceberg in Practice
+    # preface, "Praise for...", endorsements, etc.).
+    header_match = re.match(r"\s*\[([^\]]+)\]", stripped)
+    if header_match:
+        header = header_match.group(1).lower()
+        if any(
+            tag in header
+            for tag in (
+                "foreword", "preface", "acknowledgment", "acknowledgement",
+                "dedication", "praise for", "about the author", "introduction",
+                "part i.", "part ii.", "part iii.", "part iv.",
+            )
+        ):
+            return True
+    return False
 
 
 def _dedupe_by_embedding(candidates: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -121,19 +137,80 @@ def _dedupe_by_embedding(candidates: list[dict[str, str]]) -> list[dict[str, str
         return unique
 
 
+_STOPWORDS = frozenset(
+    "a an the is are was were be been being have has had do does did will would could should "
+    "may might shall can of in on at to for with by from as into through during about above "
+    "between but and or nor not if then that this these those it its we our they their i my "
+    "what which who when where how".split()
+)
+
+
+def _hint_grounded(hint_norm: str, source_norm: str) -> bool:
+    """True when ≥75% of the non-stopword words in the hint appear in the source."""
+    hint_words = [w for w in hint_norm.split() if w not in _STOPWORDS and len(w) > 2]
+    if not hint_words:
+        return False
+    source_words = set(source_norm.split())
+    overlap = sum(1 for w in hint_words if w in source_words)
+    return overlap / len(hint_words) >= 0.75
+
+
 def _quality_filter(
     questions: list[dict[str, Any]],
     source_chunk: ChunkModel,
 ) -> list[dict[str, str]]:
-    source_text_norm = _normalize_text(source_chunk.text)
+    source_norm = _normalize_text(source_chunk.text)
     filtered: list[dict[str, str]] = []
     for raw in questions:
         question = str(raw.get("question", "")).strip()
         answer = str(raw.get("answer") or raw.get("ground_truth_answer") or "").strip()
         context_hint = str(raw.get("context_hint", "")).strip()
-        if not question or len(answer) < 5 or not context_hint:
+        if not question or len(answer) < 10 or not context_hint:
             continue
-        if _normalize_text(context_hint) not in source_text_norm:
+        # Reject questions that reference the document instead of the subject matter.
+        # Good: "What does Apache Iceberg use to track file-level statistics?"
+        # Bad:  "According to the text, what does Iceberg use...?"
+        q_lower = question.lower()
+        if any(
+            phrase in q_lower
+            for phrase in (
+                # explicit document references
+                "according to the text", "according to the guide",
+                "according to the source", "according to the passage",
+                "according to the author", "according to the document",
+                "the text states", "the text says", "the text describes",
+                "the text explains", "the text mentions", "the text notes",
+                "the text suggests", "the guide states", "the guide describes",
+                "the guide mentions", "the source states", "the passage states",
+                "the author states", "the author describes", "the author explains",
+                "the author mentions", "the author suggests",
+                "as stated in", "as described in", "as mentioned in",
+                "as noted in", "as explained in",
+                # implicit document references
+                "according to this", "this text", "this guide", "this source",
+                "this passage", "this document", "this section", "this chapter",
+                "the text", "the guide", "the source", "the passage",
+                "the document", "the section", "the chapter", "the excerpt",
+                # passive "is mentioned / listed / highlighted / described"
+                "is mentioned", "is listed", "is highlighted", "is described",
+                "is stated", "is noted", "is referenced", "is discussed",
+                "are mentioned", "are listed", "are highlighted", "are described",
+                "are stated", "are noted",
+                # generic templates from fallback / bad LLM output
+                "what does the source", "what is the main point", "in point ",
+                # book metadata / authorship / publication
+                "who wrote", "who is the author", "who authored", "who edited",
+                "foreword", "preface", "acknowledgment", "dedication",
+                "who dedicated", "copyright", "isbn", "publisher", "published by",
+                "edition of", "this book", "the book",
+                # document structure references
+                "page number", "chapter number", "section number",
+                "table of contents", "appendix",
+            )
+        ):
+            continue
+        # Require the hint to be grounded in the source chunk
+        if not _hint_grounded(_normalize_text(context_hint), source_norm):
             continue
         filtered.append(
             {
@@ -148,18 +225,34 @@ def _quality_filter(
 async def _generate_questions_for_chunk(
     chunk_text: str, count: int, model: str
 ) -> list[dict[str, str]]:
-    prompt = (
-        "Generate grounded golden evaluation questions from the source text. "
-        "Return strict JSON only: {\"questions\":[{\"question\":\"...\","
-        "\"answer\":\"...\",\"context_hint\":\"exact substring from source\"}]}. "
-        "Every answer must be supported by the source. Every context_hint must be an exact "
-        f"substring of the source. Generate {count} questions.\n\nSOURCE:\n{chunk_text[:6000]}"
+    rules = (
+        f"Generate {count} self-contained knowledge questions from the source text below.\n\n"
+        "CRITICAL RULE: Write questions as if testing whether someone has learned this"
+        " subject — NOT as reading comprehension about a document.\n\n"
+        "GOOD example: 'What file format does Apache Iceberg use to store table metadata?'\n"
+        "BAD examples (never do these):\n"
+        "  - 'According to the text, what does Iceberg use...?'\n"
+        "  - 'What does the guide say about...?'\n"
+        "  - 'What is mentioned in this passage about...?'\n"
+        "  - 'What is highlighted/listed/described in the source?'\n\n"
+        "Rules:\n"
+        "- The question must make complete sense to someone who has never seen this"
+        " document. No references to 'the text', 'the guide', 'the source',"
+        " 'this section', 'the passage', 'the author', or any document.\n"
+        "- Ask about concrete facts, definitions, mechanisms, trade-offs, or examples.\n"
+        "- The answer must be specific and complete — not 'see the text'.\n"
+        "- context_hint must be a verbatim phrase (5-20 words) from the source text.\n"
+        "- Do NOT ask about authorship, foreword, preface, dedication, copyright,"
+        " ISBN, publisher, or any publication metadata.\n\n"
+        "Return ONLY valid JSON:\n"
+        '{"questions":[{"question":"...","answer":"...","context_hint":"verbatim"}]}\n\n'
+        f"SOURCE:\n{chunk_text[:6000]}"
     )
     settings = get_settings()
     kwargs: dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "timeout": 90,
+        "messages": [{"role": "user", "content": rules}],
+        "timeout": 120,
     }
     if model.startswith("ollama/"):
         kwargs["api_base"] = settings.OLLAMA_URL
@@ -180,9 +273,13 @@ async def create_dataset(
     size: str,
     generator_model: str | None,
     description: str | None = None,
+    question_count: int | None = None,
     schedule: bool = True,
 ) -> GoldenDatasetModel:
-    model = generator_model or get_settings().LITELLM_DEFAULT_MODEL
+    model = generator_model or DEFAULT_GENERATOR_MODEL
+    target = (
+        question_count if question_count is not None else target_count_for(size, len(document_ids))
+    )
     dataset = GoldenDatasetModel(
         id=str(uuid.uuid4()),
         name=name,
@@ -192,7 +289,7 @@ async def create_dataset(
         source_document_ids=document_ids,
         status="pending",
         generated_count=0,
-        target_count=target_count_for(size, len(document_ids)),
+        target_count=target,
     )
     session.add(dataset)
     await session.commit()
@@ -222,30 +319,44 @@ async def _generate_dataset(dataset_id: str) -> None:
             if dataset is None:
                 return
             questions_per_chunk, chunks_per_doc = SIZE_CONFIG[dataset.size]
+
+            # When target_count exceeds the SIZE_CONFIG ceiling, lift the chunk
+            # limit so we sample as many chunks as needed to hit the target.
+            size_ceiling = questions_per_chunk * chunks_per_doc * len(dataset.source_document_ids)
+            custom_count = dataset.target_count > size_ceiling
+
             for document_id in dataset.source_document_ids:
                 if dataset.generated_count >= dataset.target_count:
                     break
-                result = await session.execute(
+                # Randomize chunk order so we sample across the whole document
+                # (front-matter has heavy bias toward generic "what is X about" Qs).
+                # Oversample 4x so structural-chunk skips don't starve the run.
+                chunk_query = (
                     select(ChunkModel)
                     .where(ChunkModel.document_id == document_id)
-                    .order_by(ChunkModel.chunk_index)
-                    .limit(chunks_per_doc)
+                    .order_by(func.random())
                 )
+                if not custom_count:
+                    chunk_query = chunk_query.limit(chunks_per_doc * 4)
+                result = await session.execute(chunk_query)
                 chunks = list(result.scalars().all())
                 for chunk in chunks:
                     if dataset.generated_count >= dataset.target_count:
                         break
+                    if _is_structural_chunk(chunk.text):
+                        logger.debug("skipping structural chunk %s", chunk.id)
+                        continue
                     remaining = dataset.target_count - dataset.generated_count
+                    # Ask for 2× headroom so the quality filter has candidates to work with.
+                    ask = min(questions_per_chunk * 2, remaining * 2, 20)
                     count = min(questions_per_chunk, remaining)
                     try:
                         raw_questions = await _generate_questions_for_chunk(
-                            chunk.text, count, dataset.generator_model
+                            chunk.text, ask, dataset.generator_model
                         )
                     except Exception as exc:
-                        logger.warning(
-                            "golden question LLM generation failed; using fallback: %s", exc
-                        )
-                        raw_questions = _fallback_questions(chunk.text, count)
+                        logger.warning("skipping chunk %s — LLM error: %s", chunk.id, exc)
+                        continue
                     accepted = _quality_filter(raw_questions, chunk)[:count]
                     for item in accepted:
                         session.add(
