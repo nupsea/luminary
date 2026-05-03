@@ -68,10 +68,54 @@ def _install_fake_generation_modules(monkeypatch, evaluate_func) -> None:
     chat_models_mod = types.ModuleType("langchain_community.chat_models")
 
     class _FakeChatOllama:
-        def __init__(self, model: str) -> None:
+        def __init__(self, model: str, **kwargs) -> None:
             self.model = model
+            self.kwargs = kwargs
 
     chat_models_mod.ChatOllama = _FakeChatOllama
+
+    # Mirror the install path used by langchain_ollama (preferred) and skip
+    # the prewarm side-effect to keep the unit test hermetic.
+    langchain_ollama_mod = types.ModuleType("langchain_ollama")
+    langchain_ollama_mod.ChatOllama = _FakeChatOllama
+    monkeypatch.setitem(sys.modules, "langchain_ollama", langchain_ollama_mod)
+
+    # Embeddings stubs -- langchain_huggingface / ragas.embeddings aren't
+    # installed in backend's venv (they live in evals/), so mock them.
+    langchain_hf_mod = types.ModuleType("langchain_huggingface")
+
+    class _FakeHFEmbeddings:
+        def __init__(self, *_, **__) -> None:
+            pass
+
+    langchain_hf_mod.HuggingFaceEmbeddings = _FakeHFEmbeddings
+    monkeypatch.setitem(sys.modules, "langchain_huggingface", langchain_hf_mod)
+
+    ragas_embeddings_mod = types.ModuleType("ragas.embeddings")
+
+    class _FakeEmbedWrapper:
+        def __init__(self, embeddings) -> None:
+            self.embeddings = embeddings
+
+    ragas_embeddings_mod.LangchainEmbeddingsWrapper = _FakeEmbedWrapper
+    monkeypatch.setitem(sys.modules, "ragas.embeddings", ragas_embeddings_mod)
+
+    ragas_run_config_mod = types.ModuleType("ragas.run_config")
+
+    class _FakeRunConfig:
+        def __init__(self, **kwargs) -> None:
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    ragas_run_config_mod.RunConfig = _FakeRunConfig
+    monkeypatch.setitem(sys.modules, "ragas.run_config", ragas_run_config_mod)
+
+    import evals.lib.runners as _runners_mod  # noqa: PLC0415
+    # Reset the embeddings cache so this test gets fresh fakes (some other
+    # test may have populated it with real instances).
+    monkeypatch.setattr(_runners_mod, "_CACHED_EMBEDDINGS", None)
+    monkeypatch.setattr(_runners_mod, "_CACHED_HF_MODEL", None)
+    monkeypatch.setattr(_runners_mod, "_prewarm_ollama", lambda _model: None)
 
     monkeypatch.setitem(sys.modules, "ragas", ragas_mod)
     monkeypatch.setitem(sys.modules, "ragas.llms", ragas_llms_mod)
@@ -99,7 +143,11 @@ def test_generation_eval_metrics_flow_from_ragas_to_dict(monkeypatch):
         return mock_eval(**kwargs)
 
     _install_fake_generation_modules(monkeypatch, _fake_evaluate)
-    out = GenerationEval().run(_SAMPLES, judge_model="ollama/test-model")
+    # full_metrics=True opts back into context_precision/context_recall, which
+    # are skipped in the default fast/reliable path.
+    out = GenerationEval().run(
+        _SAMPLES, judge_model="ollama/test-model", full_metrics=True
+    )
 
     assert mock_eval.called
     assert out["faithfulness"] == pytest.approx(0.80)
