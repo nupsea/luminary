@@ -65,8 +65,8 @@ def main() -> None:
         "per_route": compute_per_route_precision_recall(samples),
     }
     passed = metrics["routing_accuracy"] >= THRESHOLDS["routing_accuracy"]
-    append_history(args.dataset, "classifier", metrics, passed, eval_kind="intent")
-    store_results(args.backend_url, args.dataset, "classifier", metrics, eval_kind="intent")
+    append_history(args.dataset, "classifier", metrics, passed, eval_kind="routing")
+    store_results(args.backend_url, args.dataset, "classifier", metrics, eval_kind="routing")
     print_table(metrics)
     if args.assert_thresholds and not passed:
         print(

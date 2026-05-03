@@ -80,8 +80,13 @@ class GenerationEval(_BaseEval):
 
         try:
             from datasets import Dataset  # noqa: PLC0415
-            from langchain_community.chat_models import ChatOllama  # noqa: PLC0415
+            try:
+                from langchain_ollama import ChatOllama  # noqa: PLC0415
+            except ImportError:
+                from langchain_community.chat_models import ChatOllama  # noqa: PLC0415
+            from langchain_huggingface import HuggingFaceEmbeddings  # noqa: PLC0415
             from ragas import evaluate  # noqa: PLC0415
+            from ragas.embeddings import LangchainEmbeddingsWrapper  # noqa: PLC0415
             from ragas.llms import LangchainLLMWrapper  # noqa: PLC0415
             from ragas.metrics import (  # noqa: PLC0415
                 answer_relevancy,
@@ -95,10 +100,15 @@ class GenerationEval(_BaseEval):
                 if judge_model.startswith("ollama/")
                 else judge_model
             )
-            wrapper = LangchainLLMWrapper(ChatOllama(model=ollama_model))
+            llm_wrapper = LangchainLLMWrapper(ChatOllama(model=ollama_model))
+            embed_wrapper = LangchainEmbeddingsWrapper(
+                HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+            )
             metrics_list = [faithfulness, answer_relevancy, context_precision, context_recall]
             for metric in metrics_list:
-                metric.llm = wrapper
+                metric.llm = llm_wrapper
+                if hasattr(metric, "embeddings"):
+                    metric.embeddings = embed_wrapper
 
             dataset_hf = Dataset.from_list(
                 [
@@ -107,23 +117,43 @@ class GenerationEval(_BaseEval):
                         "answer": s["answer"],
                         "contexts": s["contexts"],
                         "ground_truths": s["ground_truths"],
+                        "reference": s["ground_truths"][0] if s["ground_truths"] else "",
                     }
                     for s in samples
                 ]
             )
-            result = evaluate(dataset=dataset_hf, metrics=metrics_list)
+            import math  # noqa: PLC0415
+
+            from ragas.run_config import RunConfig  # noqa: PLC0415
+
+            run_config = RunConfig(timeout=600, max_retries=2, max_workers=2)
+            result = evaluate(
+                dataset=dataset_hf, metrics=metrics_list, run_config=run_config
+            )
             scores_df = result.to_pandas()
 
             out = dict(_EMPTY_GENERATION_METRICS)
+            total = len(scores_df)
             for col in ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]:
                 if col in scores_df.columns:
-                    val = float(scores_df[col].mean())
+                    series = scores_df[col]
+                    nan_count = int(series.isna().sum())
+                    if total > 0 and nan_count > 0:
+                        pct = nan_count / total
+                        marker = "WARNING" if pct >= 0.5 else "NOTE"
+                        print(
+                            f"{marker}: {col} -- {nan_count}/{total} judge "
+                            f"calls failed ({pct:.0%}). Score is mean of "
+                            f"successful rows only.",
+                            file=sys.stderr,
+                        )
+                    val = float(series.mean())
                     key = "answer_relevance" if col == "answer_relevancy" else col
-                    out[key] = val
+                    out[key] = None if math.isnan(val) else val
             return out
         except Exception as exc:
             print(
-                f"WARNING: RAGAS scoring failed (judge unreachable?): {exc}",
+                f"WARNING: RAGAS scoring failed: {type(exc).__name__}: {exc}",
                 file=sys.stderr,
             )
             return dict(_EMPTY_GENERATION_METRICS)

@@ -7,6 +7,14 @@ from pathlib import Path
 
 import httpx
 
+# Stages that mean the document is indexed and searchable for eval purposes.
+# "complete" is the fully-done state; "embedding" is the terminal state for
+# most documents that skip the optional entity-extraction / graph steps.
+_USABLE_STAGES = frozenset(
+    ["embedding", "entity_extract", "indexing", "complete",
+     "summarize", "section_summarize"]
+)
+
 GOLDEN_DIR = Path(__file__).resolve().parent.parent / "golden"
 MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -47,7 +55,7 @@ def lookup_document_by_filename(backend_url: str, source_file: str) -> str | Non
         items = resp.json().get("items", [])
         for doc in items:
             title = (doc.get("title") or "").lower()
-            if title == stem and doc.get("stage") == "complete":
+            if title == stem and doc.get("stage") in _USABLE_STAGES:
                 return doc["id"]
     except Exception as exc:
         print(f"  WARNING: GET /documents failed: {exc}", file=sys.stderr)
@@ -86,7 +94,7 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
             status_resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
             status_resp.raise_for_status()
             stage = status_resp.json().get("stage", "")
-            if stage in ["complete", "summarize", "section_summarize"]:
+            if stage in _USABLE_STAGES:
                 print(f"  Ingestion finished enough: {source_file} -> {doc_id} (stage={stage})")
                 return doc_id
             if stage == "error":

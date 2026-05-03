@@ -537,6 +537,28 @@ def main() -> None:
     _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind=eval_kind)
 
     print_table(dataset_label, history_model, metrics)
+
+    n_questions = len(samples)
+    null_metrics = [
+        k for k in ("faithfulness", "answer_relevance", "context_precision",
+                    "context_recall") if metrics.get(k) is None
+    ]
+    if args.judge_model and null_metrics:
+        print(
+            "\nWARNING: judge_model was set but the following metrics are "
+            f"null: {', '.join(null_metrics)}. Scroll up for per-metric "
+            "WARNING/NOTE lines explaining why.",
+            file=sys.stderr,
+        )
+    if args.check_citations and metrics.get("citation_support_rate") is None:
+        print(
+            "WARNING: --check-citations was set but citation_support_rate is "
+            "null. Most common cause: the QA endpoint did not emit [N]-style "
+            "citation markers in answers.",
+            file=sys.stderr,
+        )
+    print(f"\nEvaluated {n_questions} questions.", file=sys.stderr)
+
     _lib_store_results(
         args.backend_url, dataset_label, history_model, metrics, eval_kind=eval_kind
     )

@@ -77,14 +77,54 @@ def compute_citation_support_rate(
     *,
     judge: Callable[[str, str], Verdict],
 ) -> float | None:
-    """Return ``(yes + 0.5 * partial) / total`` for claim/chunk pairs."""
+    """Return ``(yes + 0.5 * partial) / total`` for claim/chunk pairs.
+
+    Resilient to per-pair judge failures: each judge call is wrapped, errors
+    are counted and logged, and the rate is computed over successful judgements
+    only. Returns None if zero pairs were judged successfully.
+    """
+    import sys  # noqa: PLC0415
+
     if not pairs:
+        print(
+            "WARNING: citation_support_rate skipped -- no [N]-style citation "
+            "markers found in any answer. Check that the QA endpoint emits "
+            "bracketed citations.",
+            file=sys.stderr,
+        )
         return None
     score = 0.0
+    judged = 0
+    failures = 0
     for claim, chunk in pairs:
-        verdict = judge(claim, chunk)
+        try:
+            verdict = judge(claim, chunk)
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(
+                f"WARNING: citation judge call failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        judged += 1
         if verdict == "yes":
             score += 1.0
         elif verdict == "partial":
             score += 0.5
-    return score / len(pairs)
+    total = len(pairs)
+    if failures:
+        pct = failures / total
+        print(
+            f"WARNING: {failures}/{total} citation judge calls failed "
+            f"({pct:.0%}).",
+            file=sys.stderr,
+        )
+        if pct >= 0.5:
+            print(
+                "WARNING: citation_support_rate is unreliable -- majority of "
+                "judge calls failed. Check the judge model availability.",
+                file=sys.stderr,
+            )
+    if judged == 0:
+        return None
+    return score / judged
