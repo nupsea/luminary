@@ -661,6 +661,7 @@ class FeynmanService:
                 "status": s.status,
                 "gap_count": gap_counts.get(s.id, 0),
                 "created_at": s.created_at,
+                "section_id": s.section_id,
             }
             for s in sessions
         ]
