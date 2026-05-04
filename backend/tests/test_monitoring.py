@@ -13,6 +13,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, EvalRunModel, QAHistoryModel
+from app.services.eval_regression_service import detect_regressions
 
 # ---------------------------------------------------------------------------
 # Test DB fixture
@@ -322,6 +323,15 @@ async def test_store_eval_run_creates_row(test_db):
         "answer_relevance": 0.9,
         "context_precision": 0.8,
         "context_recall": 0.75,
+        "theme_coverage": 0.88,
+        "no_hallucination": 0.95,
+        "conciseness_pct": 1.1,
+        "factuality": 0.92,
+        "atomicity": 0.84,
+        "clarity_avg": 4.1,
+        "routing_accuracy": 0.93,
+        "per_route": {"search": {"precision": 1.0, "recall": 0.9}},
+        "ablation_metrics": {"vector": {"hit_rate_5": 0.5, "mrr": 0.4}},
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -333,6 +343,15 @@ async def test_store_eval_run_creates_row(test_db):
     assert data["model_used"] == "ollama/mistral"
     assert data["hit_rate_5"] == pytest.approx(0.7)
     assert data["mrr"] == pytest.approx(0.6)
+    assert data["theme_coverage"] == pytest.approx(0.88)
+    assert data["no_hallucination"] == pytest.approx(0.95)
+    assert data["conciseness_pct"] == pytest.approx(1.1)
+    assert data["factuality"] == pytest.approx(0.92)
+    assert data["atomicity"] == pytest.approx(0.84)
+    assert data["clarity_avg"] == pytest.approx(4.1)
+    assert data["routing_accuracy"] == pytest.approx(0.93)
+    assert data["per_route"]["search"]["recall"] == pytest.approx(0.9)
+    assert data["ablation_metrics"]["vector"]["mrr"] == pytest.approx(0.4)
     assert "id" in data
     assert "run_at" in data
 
@@ -439,6 +458,80 @@ async def test_get_evals_caps_at_10_per_dataset(test_db):
     assert resp.status_code == 200
     code_runs = [r for r in resp.json() if r["dataset_name"] == "code"]
     assert len(code_runs) <= 10
+
+
+async def test_detect_regressions_with_synthetic_history(test_db):
+    """Latest run dropping >= 5% vs prior-window mean is reported."""
+    _, factory, _ = test_db
+    async with factory() as session:
+        for i, score in enumerate([0.82, 0.8, 0.81, 0.79, 0.8], start=1):
+            session.add(
+                EvalRunModel(
+                    id=f"baseline-{i}",
+                    dataset_name="book",
+                    model_used="ollama/mistral",
+                    eval_kind="retrieval",
+                    run_at=datetime(2026, 1, i, tzinfo=UTC),
+                    hit_rate_5=score,
+                    mrr=0.5,
+                    faithfulness=0.7,
+                )
+            )
+        session.add(
+            EvalRunModel(
+                id="current",
+                dataset_name="book",
+                model_used="ollama/mistral",
+                eval_kind="retrieval",
+                run_at=datetime(2026, 1, 10, tzinfo=UTC),
+                hit_rate_5=0.7,
+                mrr=0.5,
+                faithfulness=0.7,
+            )
+        )
+        await session.commit()
+
+        regressions = await detect_regressions(session, window=5, threshold_pct=0.05)
+
+    assert len(regressions) == 1
+    assert regressions[0].dataset == "book"
+    assert regressions[0].metric == "hit_rate_5"
+    assert regressions[0].drop_pct >= 0.05
+
+
+async def test_get_eval_regressions_endpoint(test_db):
+    """GET /monitoring/evals/regressions returns detected regression rows."""
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add_all(
+            [
+                EvalRunModel(
+                    id="old-a",
+                    dataset_name="notes",
+                    model_used="no-llm",
+                    eval_kind="retrieval",
+                    run_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    mrr=0.6,
+                ),
+                EvalRunModel(
+                    id="new-a",
+                    dataset_name="notes",
+                    model_used="no-llm",
+                    eval_kind="retrieval",
+                    run_at=datetime(2026, 1, 2, tzinfo=UTC),
+                    mrr=0.5,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/evals/regressions")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["dataset"] == "notes"
+    assert data[0]["metric"] == "mrr"
 
 
 # ---------------------------------------------------------------------------

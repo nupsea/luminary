@@ -18,6 +18,7 @@ import app.routers.evals as evals_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
+from app.models import EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
 
 # ---------------------------------------------------------------------------
 # Shared fixture — in-memory SQLite DB
@@ -176,3 +177,128 @@ async def test_post_run_per_book_dataset(test_db, monkeypatch, dataset):
     body = resp.json()
     assert body["status"] == "started"
     assert body["dataset"] == dataset
+
+
+@pytest.mark.asyncio
+async def test_create_generated_dataset_returns_status(test_db, monkeypatch):
+    """POST /evals/datasets creates a DB-backed generated dataset and returns 202."""
+    import app.services.dataset_generator_service as generator_module
+
+    monkeypatch.setattr(generator_module, "_fire_and_forget", lambda coro: coro.close())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/evals/datasets",
+            json={"name": "Chapter eval", "document_ids": ["doc-1"], "size": "small"},
+        )
+
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["id"]
+
+    async with db_module.get_session_factory()() as session:
+        dataset = await session.get(GoldenDatasetModel, body["id"])
+        assert dataset is not None
+        assert dataset.target_count == 10
+
+
+@pytest.mark.asyncio
+async def test_generated_dataset_detail_golden_and_runs(test_db, monkeypatch):
+    """Generated dataset endpoints expose status, questions, JSONL-shaped rows, and runs."""
+    async with db_module.get_session_factory()() as session:
+        dataset = GoldenDatasetModel(
+            id="ds-1",
+            name="Generated",
+            size="small",
+            generator_model="ollama/gemma4",
+            source_document_ids=["doc-1"],
+            status="complete",
+            generated_count=1,
+            target_count=10,
+        )
+        session.add(dataset)
+        session.add(
+            GoldenQuestionModel(
+                id="q-1",
+                dataset_id="ds-1",
+                question="What is tested?",
+                ground_truth_answer="The generated dataset API.",
+                context_hint="generated dataset API",
+                source_chunk_id="chunk-1",
+                source_document_id="doc-1",
+                quality_score=1.0,
+                included=True,
+            )
+        )
+        session.add(
+            EvalRunModel(
+                id="run-1",
+                dataset_name="ds-1",
+                hit_rate_5=0.8,
+                mrr=0.7,
+                model_used="no-llm",
+                eval_kind="retrieval",
+            )
+        )
+        await session.commit()
+
+    monkeypatch.setattr(evals_module, "_fire_and_forget", lambda coro: coro.close())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        status = await client.get("/evals/datasets/ds-1/status")
+        detail = await client.get("/evals/datasets/ds-1")
+        golden = await client.get("/evals/datasets/ds-1/golden")
+        runs = await client.get("/evals/datasets/ds-1/runs")
+        run_resp = await client.post("/evals/datasets/ds-1/run", json={})
+
+    assert status.status_code == 200
+    assert status.json()["status"] == "complete"
+    assert detail.status_code == 200
+    assert detail.json()["questions"][0]["question"] == "What is tested?"
+    assert detail.json()["last_run"]["hit_rate_5"] == pytest.approx(0.8)
+    assert golden.status_code == 200
+    assert golden.json()[0]["source_document_id"] == "doc-1"
+    assert runs.status_code == 200
+    assert runs.json()[0]["mrr"] == pytest.approx(0.7)
+    assert run_resp.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_delete_generated_dataset_cascades_questions(test_db):
+    """DELETE /evals/datasets/{id} removes the generated questions first."""
+    async with db_module.get_session_factory()() as session:
+        session.add(
+            GoldenDatasetModel(
+                id="ds-delete",
+                name="Generated",
+                size="small",
+                generator_model="ollama/gemma4",
+                source_document_ids=["doc-1"],
+                status="complete",
+                generated_count=1,
+                target_count=10,
+            )
+        )
+        session.add(
+            GoldenQuestionModel(
+                id="q-delete",
+                dataset_id="ds-delete",
+                question="What is removed?",
+                ground_truth_answer="The question row.",
+                context_hint="question row",
+                source_chunk_id="chunk-1",
+                source_document_id="doc-1",
+                quality_score=1.0,
+                included=True,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.delete("/evals/datasets/ds-delete")
+
+    assert resp.status_code == 204
+    async with db_module.get_session_factory()() as session:
+        assert await session.get(GoldenDatasetModel, "ds-delete") is None
+        assert await session.get(GoldenQuestionModel, "q-delete") is None

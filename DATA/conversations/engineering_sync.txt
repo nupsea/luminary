@@ -1,0 +1,97 @@
+Transcript: Weekly Engineering Sync — Backend Architecture Review
+Date: 2026-01-15
+Participants: Alice (Engineering Lead), Bob (Senior Backend Engineer), Carol (DevOps Engineer), David (Junior Engineer)
+
+---
+
+Alice: Alright, let's get started. We've got a lot to cover today. The main agenda is reviewing our current API gateway setup, discussing the database migration plan, and then Carol's going to walk us through the new deployment pipeline. Bob, can you kick us off with the API gateway status?
+
+Bob: Sure. So we've been running Kong as our API gateway for about eight months now. Overall it's been solid, but we're hitting some limitations with the rate limiting plugin. The current setup uses a fixed window algorithm, which means we get edge cases at window boundaries where a burst of requests can exceed the intended limit.
+
+Alice: Right, I've seen that in the metrics. What's the alternative you're proposing?
+
+Bob: I'd recommend switching to a sliding window or token bucket algorithm. Kong supports a Redis-backed sliding window, but it adds a dependency on Redis for every request path. The token bucket approach is more elegant—it refills tokens at a fixed rate and requests consume tokens, so bursts are allowed up to the bucket capacity but sustained throughput is bounded.
+
+Carol: From a DevOps perspective, I'd flag that adding Redis to the critical path increases operational complexity. If Redis goes down, does that take down rate limiting, or do we fail open?
+
+Bob: Good point. In Kong's implementation you can configure a fallback behavior. We'd configure fail-open with a warning log, meaning if Redis is unavailable, rate limiting is skipped and we alert on it. That's safer than taking down the whole API over a Redis hiccup.
+
+David: What's the difference in latency between the fixed window and the sliding window approaches?
+
+Bob: The sliding window needs to query Redis for a sorted set operation—about two to three milliseconds of added latency per request in our setup. For most endpoints that's acceptable, but for our search endpoint which already has some tail latency issues, we'd want to cache the token bucket state locally with periodic sync to Redis.
+
+Alice: Okay, let's table the Redis decision for now and move on. Bob, what about the database migration? We've been on Postgres 14 and there was a proposal to upgrade.
+
+Bob: Yes. Postgres 15 brings a significant performance improvement to the MERGE statement, which we use heavily in our upsert paths. Also, row-level security enhancements would let us simplify some of our tenant isolation logic. The migration path is straightforward—a logical replication slot from 14 to 15, promote the replica, update connection strings.
+
+Carol: I've done this before at my previous company. The tricky part is the cutover window. We need the application to be able to handle connections to both 14 and 15 simultaneously for a brief period. Are there any schema differences we need to worry about?
+
+Bob: One thing—the behavior of jsonb subscripting changed slightly in 15. We have a few places in our analytics queries that use jsonb subscript notation. I've tested them and they're compatible, but we should run the full query regression suite against a Postgres 15 staging instance before we commit to the migration.
+
+David: How long would that regression suite take to run?
+
+Bob: About forty minutes. We can parallelize it across eight workers and bring it down to about seven minutes. Carol, can we get a Postgres 15 instance spun up in staging this week?
+
+Carol: Yeah, I can have it ready by tomorrow. I'll use Terraform to provision it—same spec as production, 16 vCPUs, 64 GB RAM. I'll also set up pgBouncer in front of it since we're moving to connection pooling as part of this upgrade.
+
+Alice: Why are we moving to pgBouncer now? Is that required for the upgrade?
+
+Carol: Not strictly required, but it makes sense to do it together. Right now we're using persistent connections from each application pod, and we have about 400 pods in peak traffic, each with a pool of up to 10 connections. That's potentially four thousand connections to Postgres, which causes memory pressure. pgBouncer will multiplex those down to a few hundred server-side connections.
+
+Bob: We tried an internal pooler in the application layer before, but pgBouncer in transaction mode is more efficient because it releases the server connection as soon as the transaction commits, rather than holding it for the lifetime of the connection. The tradeoff is that prepared statements don't work in transaction mode, so we'll need to switch any prepared statement usage to parameterized queries.
+
+David: I know we use prepared statements in the authentication service. Is that a big refactor?
+
+Bob: I checked—it's about twelve call sites. Mostly in the session lookup path. I'd estimate half a day of work to convert them. The queries are simple enough that there's no performance difference between prepared and parameterized in our case.
+
+Alice: Okay. Carol, let's move on to the deployment pipeline. This has been a pain point for a while.
+
+Carol: Absolutely. Our current setup is a Jenkins pipeline that was built three years ago and has accumulated a lot of technical debt. It takes about twenty-two minutes from merge to production, which is too slow. The new pipeline uses GitHub Actions for CI and ArgoCD for GitOps-based deployment to Kubernetes.
+
+The main changes: first, we're splitting the build and test stages to run in parallel where possible. Unit tests and integration tests currently run sequentially—by splitting them into separate jobs and running in parallel, we save about eight minutes. Second, we're using layer caching for Docker builds. Our base image changes rarely, but we rebuild it from scratch on every commit. With layer caching, only changed layers rebuild.
+
+David: How much time does the Docker build currently take?
+
+Carol: About six minutes for a full build. With layer caching, it should drop to under a minute for most commits. Third, we're replacing the blue-green deployment with a canary deployment. Instead of switching all traffic instantly, we route five percent to the new version, monitor error rates and latency for five minutes, then either roll out fully or roll back automatically.
+
+Alice: That sounds much better for catching regressions early. What does the rollback trigger look like?
+
+Carol: We're using Prometheus metrics. If error rate on the canary exceeds one percent—our current p99 is about 0.1 percent—or if p99 latency exceeds 500 milliseconds for more than two minutes, ArgoCD triggers an automatic rollback to the previous image tag. The whole rollback process takes about ninety seconds.
+
+Bob: What about database migrations during canary deployments? If we're running two versions simultaneously, we can't do breaking schema changes.
+
+Carol: That's a constraint we need to enforce as a process. The rule will be: any migration that alters or drops an existing column requires a three-phase approach—add the new column and write to both, migrate data, then remove the old column in a separate deploy after the canary is fully promoted. We'll document this as a migration contract in the engineering handbook.
+
+Alice: Good. Let's add that to the runbook. David, you've been quiet—any questions on the deployment pipeline?
+
+David: I was just thinking about secrets management. If we're moving to GitHub Actions, how do we handle the secrets that are currently injected by Jenkins?
+
+Carol: We're using HashiCorp Vault with the Vault Agent Injector in Kubernetes. GitHub Actions authenticates to Vault using OIDC tokens—no long-lived credentials stored in GitHub. The Vault Agent injects secrets as environment variables into the pod at startup, and they're never written to disk.
+
+Alice: Perfect. Okay, last topic: the search latency issue Bob mentioned earlier. Our p99 for the search endpoint is currently around 800 milliseconds. The target is 300 milliseconds. Bob, what's your diagnosis?
+
+Bob: I profiled it last week. The bottleneck is not in the application code—it's the vector similarity search. We're using pgvector with an HNSW index, but the index parameters were never tuned. The default ef_search of 40 is too high for our use case. Dropping it to 16 reduces recall slightly but cuts query time by about sixty percent.
+
+David: Does dropping ef_search affect result quality noticeably?
+
+Bob: I ran an offline evaluation on our golden queries. At ef_search=40, recall@10 is 94 percent. At ef_search=16, it's 89 percent. For our use case—document search where approximate results are acceptable—that tradeoff is worthwhile given the latency improvement.
+
+Alice: That seems like a reasonable tradeoff. Let's also look at whether we can pre-warm the index cache. I noticed our first query after a pod restart is often two seconds—the index needs to be loaded into memory from disk.
+
+Carol: I can add a pod startup probe that runs a synthetic search query before the pod is marked ready. That way Kubernetes doesn't send real traffic until the index is warm.
+
+Bob: Good idea. We should also look at whether we can use shared memory between pods—but that's a larger architectural change for later.
+
+Alice: Agreed. Let's not over-engineer this. Tune ef_search, add the warmup probe, and re-measure. If we're still above 300 milliseconds we dig deeper. Anything else before we wrap up?
+
+Bob: One thing—I wanted to flag that our API versioning is getting messy. We have /v1, /v2, and three endpoints that bypass versioning entirely. I'd like to propose an RFC for a consistent versioning strategy before we add more endpoints.
+
+Alice: Good idea. Can you draft that RFC this week and post it to the engineering channel? I want everyone to review it before our next sync.
+
+Bob: Will do.
+
+Alice: Great. Thanks everyone. Summary: Carol provisions Postgres 15 in staging by tomorrow, Bob tests the query regression suite, Carol starts the new deployment pipeline build, and Bob drafts the API versioning RFC. See you all next week.
+
+---
+
+End of transcript.

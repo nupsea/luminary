@@ -32,10 +32,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 import app.services.embedder as embedder_module
+import app.services.enrichment_worker as enrichment_worker_module
 import app.services.graph as graph_module
 import app.services.ner as ner_module
 import app.services.retriever as retriever_module
+import app.services.section_summarizer as section_summarizer_module
+import app.services.summarizer as summarizer_module
 import app.services.vector_store as vs_module
+import app.workflows.ingestion as ingestion_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
@@ -113,6 +117,20 @@ async def integration_db(tmp_path, monkeypatch):
     graph_module._graph_service = None
     retriever_module._retriever = None
 
+    # Reset singletons that hold references to closed engines/event loops from prior tests.
+    # Without these, stale enrichment_worker / summarizer references can keep
+    # _update_stage("complete") from running and leave doc.stage at "indexing".
+    orig_section_summarizer = section_summarizer_module._service
+    orig_summarizer = summarizer_module._summarization_service
+    orig_enrichment_worker = enrichment_worker_module._worker
+    section_summarizer_module._service = None
+    summarizer_module._summarization_service = None
+    enrichment_worker_module._worker = None
+
+    # Drain stale background tasks (e.g., _run_pregenerate from prior tests) whose
+    # event loops have since been closed by pytest-asyncio.
+    ingestion_module._background_tasks.clear()
+
     # Inject fast mock services (no model downloads)
     embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
     ner_module._extractor = _MockEntityExtractor()  # type: ignore[assignment]
@@ -130,6 +148,10 @@ async def integration_db(tmp_path, monkeypatch):
     embedder_module._embedding_service = orig_embedder  # type: ignore[assignment]
     ner_module._extractor = orig_extractor
     retriever_module._retriever = orig_retriever
+    section_summarizer_module._service = orig_section_summarizer
+    summarizer_module._summarization_service = orig_summarizer
+    enrichment_worker_module._worker = orig_enrichment_worker
+    ingestion_module._background_tasks.clear()
     get_settings.cache_clear()
     await engine.dispose()
 
@@ -206,7 +228,10 @@ async def test_ingest_fiction(integration_db, monkeypatch):
     async with factory() as session:
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None, "DocumentModel should exist"
-    assert doc.stage == "complete", f"Expected stage='complete', got '{doc.stage}'"
+    assert doc.stage == "complete", (
+        f"Expected stage='complete', got '{doc.stage}' "
+        f"(error_message={doc.error_message!r})"
+    )
 
     # 2. At least 5 chunks should be in the database
     async with factory() as session:
@@ -234,7 +259,10 @@ async def test_ingest_technical(integration_db, monkeypatch):
     async with factory() as session:
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None, "DocumentModel should exist"
-    assert doc.stage == "complete", f"Expected stage='complete', got '{doc.stage}'"
+    assert doc.stage == "complete", (
+        f"Expected stage='complete', got '{doc.stage}' "
+        f"(error_message={doc.error_message!r})"
+    )
 
     # 2. At least 5 chunks should be in the database
     async with factory() as session:

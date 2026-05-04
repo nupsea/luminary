@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.services.intent import classify_intent_heuristic
 from app.services.qa import get_qa_service
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,22 @@ class QARequest(BaseModel):
     web_enabled: bool = False  # optional web augmentation (S142)
 
 
+class ClassifyOnlyResponse(BaseModel):
+    chosen_route: Literal["summary", "graph", "comparative", "search"]
+    intent: str
+    confidence: float
+
+
+def _normalize_classify_route(intent: str) -> Literal["summary", "graph", "comparative", "search"]:
+    if intent == "summary":
+        return "summary"
+    if intent == "relational":
+        return "graph"
+    if intent == "comparative":
+        return "comparative"
+    return "search"
+
+
 @router.post("")
 async def ask_question(req: QARequest) -> StreamingResponse:
     svc = get_qa_service()
@@ -42,4 +59,15 @@ async def ask_question(req: QARequest) -> StreamingResponse:
             web_enabled=req.web_enabled,
         ),
         media_type="text/event-stream",
+    )
+
+
+@router.post("/classify-only", response_model=ClassifyOnlyResponse)
+async def classify_only(req: QARequest) -> ClassifyOnlyResponse:
+    """Classify the chat route without executing retrieval/LLM graph nodes."""
+    intent, confidence = classify_intent_heuristic(req.question)
+    return ClassifyOnlyResponse(
+        chosen_route=_normalize_classify_route(intent),
+        intent=intent,
+        confidence=confidence,
     )

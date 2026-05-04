@@ -23,9 +23,10 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StudyHabitsSection } from "@/components/StudyHabitsSection"
 import { logger } from "@/lib/logger"
 import { API_BASE } from "@/lib/config"
-import { GoalsPanel } from "./Study"
+import { GoalsList } from "@/components/goals/GoalsList"
 import type { DocListItem } from "./Study"
 
 // ---------------------------------------------------------------------------
@@ -590,6 +591,9 @@ export default function Progress() {
         )}
       </section>
 
+      {/* Study Habits: streaks, XP, achievements (Phase 7) */}
+      <StudyHabitsSection />
+
       {/* Notes over time chart */}
       {notes.length > 0 && (
         <section className="flex flex-col gap-3">
@@ -615,15 +619,8 @@ export default function Progress() {
          <KnowledgeGapScanner docs={docList} />
       )}
 
-      {/* Learning Goals (moved from Study tab in S177) */}
-      {docsLoading ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold text-foreground">Learning Goals</h2>
-          <SectionSkeleton rows={2} />
-        </section>
-      ) : (
-        <GoalsPanel docs={docList} />
-      )}
+      {/* Learning Goals -- now shared with Study tab; replaced legacy GoalsPanel in S211 */}
+      <GoalsList />
     </div>
   )
 }

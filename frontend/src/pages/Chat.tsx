@@ -1,7 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, Send, Settings, Trash2, X } from "lucide-react"
+import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { toast } from "sonner"
+import { ChatSessionList } from "@/components/chat/ChatSessionList"
+import {
+  appendChatMessage,
+  createChatSession,
+  deleteChatSession,
+  getChatSession,
+  renameChatSession,
+  type PersistedMessage,
+} from "@/lib/chatSessionsApi"
 import { Badge } from "@/components/ui/badge"
 import { SourceCitationChips } from "@/components/SourceCitationChips"
 import type { SourceCitation } from "@/components/SourceCitationChips"
@@ -210,6 +220,22 @@ async function fetchLLMSettings(): Promise<LLMSettings> {
   return res.json() as Promise<LLMSettings>
 }
 
+function persistedToChatMessage(p: PersistedMessage): ChatMessage {
+  const extra = (p.extra ?? {}) as Record<string, unknown>
+  return {
+    id: p.id,
+    role: p.role,
+    text: p.content,
+    citations: (extra["citations"] as Citation[] | undefined) ?? undefined,
+    confidence: (extra["confidence"] as Confidence | undefined) ?? undefined,
+    not_found: (extra["not_found"] as boolean | undefined) ?? undefined,
+    image_ids: (extra["image_ids"] as string[] | undefined) ?? undefined,
+    web_sources: (extra["web_sources"] as WebSource[] | undefined) ?? undefined,
+    source_citations: (extra["source_citations"] as SourceCitation[] | undefined) ?? undefined,
+    transparency: (extra["transparency"] as TransparencyInfo | undefined) ?? undefined,
+  }
+}
+
 const CONFIDENCE_BADGE: Record<Confidence, "green" | "blue" | "gray"> = {
   high: "green",
   medium: "blue",
@@ -402,6 +428,11 @@ export default function Chat() {
   const [isStreaming, setIsStreaming] = useState(false)
   const qaError = useAppStore((s) => s.chatQaError)
   const setQaError = useAppStore((s) => s.setChatQaError)
+  const activeSessionId = useAppStore((s) => s.activeChatSessionId)
+  const setActiveSessionId = useAppStore((s) => s.setActiveChatSessionId)
+  const sidebarOpen = useAppStore((s) => s.chatSidebarOpen)
+  const setSidebarOpen = useAppStore((s) => s.setChatSidebarOpen)
+  const [hydratingSession, setHydratingSession] = useState(false)
   const [webEnabled, setWebEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
@@ -417,10 +448,14 @@ export default function Chat() {
     staleTime: 30_000,
   })
 
-  // Pre-populate from global store when user arrives from Learning tab
+  // Pre-populate from global store when user arrives from Learning tab.
+  // Use a ref to avoid re-populating after the user explicitly clears
+  // the document selection (clicking the X button).
+  const docSelectorTouched = useRef(false)
   useEffect(() => {
-    if (activeDocumentId && !selectedDocId) {
+    if (activeDocumentId && !selectedDocId && !docSelectorTouched.current) {
       setSelectedDocId(activeDocumentId)
+      setScope("single")
     }
   }, [activeDocumentId, selectedDocId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -503,6 +538,48 @@ export default function Chat() {
     logger.info("[Chat] mounted")
   }, [])
 
+  // Hydrate from server explicitly. Used on initial mount for a persisted
+  // session id and whenever the user clicks an entry in the sidebar.
+  // We deliberately do NOT auto-hydrate on every activeSessionId change, because
+  // sendMessage and switchContextWithUndo also flip activeSessionId, and a
+  // hydration race during streaming would clobber the in-flight assistant turn.
+  async function hydrateSession(id: string) {
+    setHydratingSession(true)
+    try {
+      const sess = await getChatSession(id)
+      const hydrated: ChatMessage[] = sess.messages.map(persistedToChatMessage)
+      setMessagesRaw(hydrated)
+      setScope(sess.scope)
+      setSelectedDocId(sess.document_ids[0] ?? null)
+      setQaError(null)
+    } catch {
+      // Session disappeared (deleted in another tab) -- start fresh.
+      setActiveSessionId(null)
+      setMessagesRaw([])
+    } finally {
+      setHydratingSession(false)
+    }
+  }
+
+  // One-shot hydration for the persisted active session at mount time.
+  const didInitialHydrate = useRef(false)
+  useEffect(() => {
+    if (didInitialHydrate.current) return
+    didInitialHydrate.current = true
+    const persistedId = useAppStore.getState().activeChatSessionId
+    if (persistedId) {
+      void hydrateSession(persistedId)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startNewChat() {
+    setActiveSessionId(null)
+    setMessagesRaw([])
+    setQaError(null)
+    setWebCallsUsed(0)
+    docSelectorTouched.current = false
+  }
+
   useEffect(() => {
     if (llmSettings && !model) {
       const elapsed = Date.now() - mountTime.current
@@ -516,9 +593,65 @@ export default function Chat() {
   }, [messages])
 
   function clearConversation() {
-    setMessages([])
-    setQaError(null)
-    setWebCallsUsed(0)
+    // With persistence, Clear means "start a new chat" -- the prior thread is preserved
+    // in the sidebar.
+    startNewChat()
+  }
+
+  async function switchContextWithUndo(
+    nextScope: "single" | "all",
+    nextDocId: string | null,
+  ) {
+    // Snapshot for undo
+    const prevSessionId = useAppStore.getState().activeChatSessionId
+    const prevMessages = useAppStore.getState().chatMessages as ChatMessage[]
+    const prevScope = scope
+    const prevDocId = selectedDocId
+    const labelDoc =
+      nextScope === "single" && nextDocId
+        ? (docList?.find((d) => d.id === nextDocId)?.title ?? "this document")
+        : "All documents"
+
+    // Empty conversation -> just update context, no session split needed.
+    if (prevMessages.length === 0 || !prevSessionId) {
+      setScope(nextScope)
+      setSelectedDocId(nextDocId)
+      return
+    }
+
+    try {
+      const created = await createChatSession({
+        scope: nextScope,
+        document_ids: nextScope === "single" && nextDocId ? [nextDocId] : [],
+        model: model || null,
+      })
+      setActiveSessionId(created.id)
+      setMessagesRaw([])
+      setScope(nextScope)
+      setSelectedDocId(nextDocId)
+      void qc.invalidateQueries({ queryKey: ["chat-sessions"] })
+
+      toast(`New chat for ${labelDoc}`, {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            // Discard the empty session and restore the prior conversation.
+            void deleteChatSession(created.id).catch(() => {})
+            setActiveSessionId(prevSessionId)
+            setMessagesRaw(prevMessages)
+            setScope(prevScope)
+            setSelectedDocId(prevDocId)
+            void qc.invalidateQueries({ queryKey: ["chat-sessions"] })
+          },
+        },
+        duration: 6000,
+      })
+    } catch (err) {
+      logger.warn("[Chat] switchContextWithUndo failed", { err: String(err) })
+      // Fall back to in-place context switch if session creation breaks.
+      setScope(nextScope)
+      setSelectedDocId(nextDocId)
+    }
   }
 
   function autoResize() {
@@ -533,11 +666,40 @@ export default function Chat() {
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
 
+    // Resolve / create the persisted session before we start streaming, so we have
+    // a stable id to attach both the user turn and the assistant turn to.
+    const effectiveDocIdAtSend = selectedDocId ?? activeDocumentId
+    const sessionDocIds =
+      scope === "single" && effectiveDocIdAtSend ? [effectiveDocIdAtSend] : []
+    let sessionId = useAppStore.getState().activeChatSessionId
+    const isFirstTurn =
+      !sessionId ||
+      (useAppStore.getState().chatMessages as ChatMessage[]).length === 0
+    if (!sessionId) {
+      try {
+        const created = await createChatSession({
+          scope,
+          document_ids: sessionDocIds,
+          model: model || null,
+        })
+        sessionId = created.id
+        setActiveSessionId(created.id)
+        void qc.invalidateQueries({ queryKey: ["chat-sessions"] })
+      } catch (err) {
+        logger.warn("[Chat] session create failed; falling back to ephemeral", { err: String(err) })
+        sessionId = null
+      }
+    }
+
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text: question }
     const assistantId = crypto.randomUUID()
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", text: "", isStreaming: true }
     setMessages((m) => [...m, userMsg, assistantMsg])
     setIsStreaming(true)
+
+    if (sessionId) {
+      void appendChatMessage(sessionId, { role: "user", content: question }).catch(() => {})
+    }
 
     try {
       const effectiveDocId = selectedDocId ?? activeDocumentId
@@ -546,7 +708,7 @@ export default function Chat() {
       // Collect last 6 completed messages (3 exchanges) as conversation history.
       // Excludes the current streaming placeholder and not_found messages.
       const historySlice = messages
-        .filter((m) => !m.isStreaming && !m.not_found && m.text)
+        .filter((m) => !m.isStreaming && !m.not_found && m.text && m.type !== "divider")
         .slice(-6)
         .map((m) => ({ role: m.role, content: m.text }))
 
@@ -672,6 +834,40 @@ export default function Chat() {
               // S195: refresh suggestion pills after each answered question
               const suggestDocId = scope === "single" ? (selectedDocId ?? activeDocumentId) : null
               void qc.invalidateQueries({ queryKey: ["chat-suggestions", suggestDocId] })
+
+              // Persist the assistant turn + refresh sidebar list. For brand-new
+              // sessions also fire an LLM auto-title in the background.
+              if (sessionId) {
+                const finalText =
+                  finalAnswer !== undefined
+                    ? finalAnswer
+                    : (useAppStore.getState().chatMessages as ChatMessage[]).find(
+                      (mm) => mm.id === assistantId,
+                    )?.text ?? ""
+                const transparencyAtDone = (useAppStore.getState().chatMessages as ChatMessage[]).find(
+                  (mm) => mm.id === assistantId,
+                )?.transparency
+                void appendChatMessage(sessionId, {
+                  role: "assistant",
+                  content: finalText,
+                  extra: {
+                    citations,
+                    confidence,
+                    image_ids,
+                    web_sources,
+                    source_citations,
+                    not_found,
+                    transparency: transparencyAtDone,
+                  },
+                })
+                  .then(() => qc.invalidateQueries({ queryKey: ["chat-sessions"] }))
+                  .catch(() => {})
+                if (isFirstTurn) {
+                  void renameChatSession(sessionId, { auto_from_message: question })
+                    .then(() => qc.invalidateQueries({ queryKey: ["chat-sessions"] }))
+                    .catch(() => {})
+                }
+              }
             }
           } catch {
             // skip malformed SSE event
@@ -715,62 +911,52 @@ export default function Chat() {
   const noDocumentSelected = scope === "single" && !effectiveDocId
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full">
+      {sidebarOpen && (
+        <aside className="w-72 shrink-0 hidden md:flex md:flex-col">
+          <ChatSessionList
+            activeSessionId={activeSessionId}
+            onSelect={(id) => {
+              if (isStreaming) return
+              setActiveSessionId(id)
+              void hydrateSession(id)
+            }}
+            onNewChat={() => {
+              if (isStreaming) return
+              startNewChat()
+            }}
+          />
+        </aside>
+      )}
+      <div className="flex h-full flex-col flex-1 min-w-0">
       {/* Header controls */}
-      <div className="flex items-center gap-4 border-b border-border px-6 py-3">
+      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          title={sidebarOpen ? "Hide chat list" : "Show chat list"}
+          aria-label={sidebarOpen ? "Hide chat list" : "Show chat list"}
+        >
+          {sidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+        </button>
+        {hydratingSession && (
+          <span className="text-xs text-muted-foreground">Loading chat...</span>
+        )}
         {/* S186: Inline document scope combobox */}
         <DocumentScopeCombobox
           docList={docList}
           selectedDocId={selectedDocId}
           onSelect={(docId) => {
+            docSelectorTouched.current = true
+            // Whenever the context (scope or selected book) changes mid-conversation,
+            // we start a new persisted chat. The user can undo from the toast.
             if (docId === null) {
-              // S196: Clear -> revert to "All documents" -- preserve conversation
-              if (scope === "single") {
-                setScope("all")
-                setSelectedDocId(null)
-                if (messages.length > 0) {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `divider-${Date.now()}`,
-                      role: "assistant" as const,
-                      text: "Switched to All documents",
-                      type: "divider" as const,
-                    },
-                  ])
-                }
+              if (scope !== "all" || selectedDocId !== null) {
+                void switchContextWithUndo("all", null)
               }
-            } else if (selectedDocId === null || scope === "all") {
-              // S196: Transition: all -> single -- insert divider, preserve conversation
-              const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
-              setScope("single")
-              setSelectedDocId(docId)
-              if (messages.length > 0) {
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: `divider-${Date.now()}`,
-                    role: "assistant" as const,
-                    text: `Scope changed to ${docTitle}`,
-                    type: "divider" as const,
-                  },
-                ])
-              }
-            } else if (docId !== selectedDocId) {
-              // Transition: single -> single (different doc) -- insert divider, do NOT clear
-              const docTitle = docList?.find((d) => d.id === docId)?.title ?? "Unknown"
-              setSelectedDocId(docId)
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: `divider-${Date.now()}`,
-                  role: "assistant",
-                  text: `Scope changed to ${docTitle}`,
-                  type: "divider" as const,
-                },
-              ])
+            } else if (docId !== selectedDocId || scope === "all") {
+              void switchContextWithUndo("single", docId)
             }
-            // docId === selectedDocId -> no-op
           }}
         />
 
@@ -1108,6 +1294,7 @@ export default function Chat() {
           </button>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">Enter to send · Shift+Enter for newline</p>
+      </div>
       </div>
     </div>
   )

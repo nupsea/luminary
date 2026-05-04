@@ -95,6 +95,14 @@ class SuggestedTagsResponse(BaseModel):
     tags: list[str]
 
 
+class NoteTitleSuggestRequest(BaseModel):
+    content: str
+
+
+class NoteTitleSuggestResponse(BaseModel):
+    title: str
+
+
 class NoteSearchItem(BaseModel):
     note_id: str
     content: str
@@ -418,6 +426,24 @@ async def create_note(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
+
+    # Fire-and-forget XP award for note creation.
+    async def _award_note_xp() -> None:
+        try:
+            from app.database import get_session_factory  # noqa: PLC0415
+            from app.services.engagement_service import EngagementService  # noqa: PLC0415
+
+            async with get_session_factory()() as xp_session:
+                svc = EngagementService(xp_session)
+                await svc.award_note_xp(note.id, len(tags))
+                await xp_session.commit()
+        except Exception:
+            logger.warning("Failed to award XP for note creation", exc_info=True)
+
+    _xp_task = asyncio.create_task(_award_note_xp())
+    _background_tasks.add(_xp_task)
+    _xp_task.add_done_callback(_background_tasks.discard)
+
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note, source_document_ids=req.source_document_ids)
 
@@ -1365,3 +1391,14 @@ async def suggest_tags(
     tags = [n for t in raw_tags if (n := _norm_tag(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)
+
+
+@router.post("/suggest-title", response_model=NoteTitleSuggestResponse)
+async def suggest_title(
+    req: NoteTitleSuggestRequest,
+) -> NoteTitleSuggestResponse:
+    """Return LLM-suggested title for the provided note content."""
+    from app.services.note_title_generator import get_title_generator  # noqa: PLC0415
+
+    title = await get_title_generator().suggest_title(req.content)
+    return NoteTitleSuggestResponse(title=title)

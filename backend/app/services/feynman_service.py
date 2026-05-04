@@ -251,6 +251,8 @@ class FeynmanService:
 
         opening_prompt = _FEYNMAN_OPENING_TMPL.format(concept=concept)
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         try:
             raw = await llm.generate(
                 prompt=opening_prompt,
@@ -366,7 +368,7 @@ class FeynmanService:
             created_at=datetime.now(UTC),
         )
         db_session.add(learner_turn)
-        await db_session.flush()
+        await db_session.commit()  # Commit learner turn to release write locks during LLM stream
 
         # Stream LLM response
         from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
@@ -560,6 +562,8 @@ class FeynmanService:
             section_context=section_context,
         )
 
+        await db_session.commit()  # Release read locks to prevent WAL deadlocks during LLM stream
+
         from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
         accumulated = ""
@@ -657,6 +661,7 @@ class FeynmanService:
                 "status": s.status,
                 "gap_count": gap_counts.get(s.id, 0),
                 "created_at": s.created_at,
+                "section_id": s.section_id,
             }
             for s in sessions
         ]

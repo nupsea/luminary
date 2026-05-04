@@ -23,11 +23,21 @@ import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
+export type ImageSize = "small" | "medium" | "large"
+
 interface MarkdownRendererProps {
   children: string
   className?: string
   /** When provided, note link IDs NOT in this set are rendered as broken (muted red). */
   validNoteIds?: Set<string>
+  /** Cap width applied to rendered <img>. Defaults to "medium" so large pasted images don't blow up the page. */
+  imageSize?: ImageSize
+}
+
+const IMAGE_SIZE_CLASS: Record<ImageSize, string> = {
+  small: "prose-img:max-w-[240px] prose-img:max-h-[200px] prose-img:object-contain",
+  medium: "prose-img:max-w-[480px] prose-img:max-h-[360px] prose-img:object-contain",
+  large: "prose-img:max-w-[800px] prose-img:max-h-[600px] prose-img:object-contain",
 }
 
 const NOTE_LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
@@ -47,7 +57,7 @@ function preprocessLinks(content: string): string {
   return text
 }
 
-export function MarkdownRenderer({ children, className, validNoteIds }: MarkdownRendererProps) {
+export function MarkdownRenderer({ children, className, validNoteIds, imageSize = "medium" }: MarkdownRendererProps) {
   const processed = preprocessLinks(children)
 
   return (
@@ -56,12 +66,35 @@ export function MarkdownRenderer({ children, className, validNoteIds }: Markdown
       "prose-headings:font-sans prose-headings:font-bold prose-headings:tracking-tight",
       "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
       "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+      IMAGE_SIZE_CLASS[imageSize],
       className
     )}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeHighlight, rehypeKatex, rehypeRaw]}
         components={{
+          img: ({ src, alt }) => {
+            let size: ImageSize = imageSize
+            if (alt && alt.includes("|")) {
+              const parts = alt.split("|")
+              const potentialSize = parts[1].trim().toLowerCase()
+              if (["small", "medium", "large"].includes(potentialSize)) {
+                size = potentialSize as ImageSize
+              }
+            }
+            return (
+              <img
+                src={src}
+                alt={alt}
+                className={cn(
+                  "rounded-lg shadow-md mx-auto my-4 block",
+                  size === "small" && "max-w-[240px] max-h-[200px] object-contain",
+                  size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
+                  size === "large" && "max-w-[800px] max-h-[600px] object-contain"
+                )}
+              />
+            )
+          },
           code: ({ children: codeChildren, ...props }) => {
             const text = String(codeChildren)
             const m = text.match(/^\[note:([a-f0-9-]+)\|(.+)\]$/)

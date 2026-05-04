@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, Highlighter, ChevronRight, GitCompareArrows } from "lucide-react"
+import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, ChevronLeft, Highlighter, ChevronRight, GitCompareArrows } from "lucide-react"
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { toast } from "sonner"
@@ -18,6 +18,7 @@ import { NoteCreationDialog } from "./NoteCreationDialog"
 import { NoteEditorDialog, type Note } from "@/components/NoteEditorDialog"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { FeynmanDialog } from "./FeynmanDialog"
+import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { EPUBViewer } from "./EPUBViewer"
 import { ReadView } from "./ReadView"
@@ -92,6 +93,48 @@ function fragilityBorderClass(score: number | null): string {
   if (score <= 0.3) return "border-l-4 border-l-green-500"
   if (score <= 0.6) return "border-l-4 border-l-yellow-500"
   return "border-l-4 border-l-red-500"
+}
+
+// Render an FSRS retention chip (compact pill) showing % retained, color-coded.
+// Replaces the heavy fragility border as the primary signal in the dashboard view.
+function RetentionChip({ heatmap }: { heatmap: SectionHeatmapItem | null }) {
+  if (!heatmap || heatmap.fragility_score === null) return null
+  const retentionPct = heatmap.avg_retention_pct ?? Math.round((1 - heatmap.fragility_score) * 100)
+  const tone =
+    heatmap.fragility_score <= 0.3
+      ? "bg-green-500/15 text-green-700 dark:text-green-400"
+      : heatmap.fragility_score <= 0.6
+        ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
+        : "bg-red-500/15 text-red-700 dark:text-red-400"
+  const label = `Retention ${Math.round(retentionPct)}%`
+  return (
+    <span
+      title={`${label}${heatmap.due_card_count > 0 ? ` | ${heatmap.due_card_count} due` : ""}`}
+      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${tone}`}
+    >
+      {Math.round(retentionPct)}%
+      {heatmap.due_card_count > 0 && (
+        <span className="ml-1 opacity-70">·{heatmap.due_card_count}</span>
+      )}
+    </span>
+  )
+}
+
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ""
+  const diffMs = Date.now() - then
+  const min = Math.round(diffMs / 60_000)
+  if (min < 1) return "just now"
+  if (min < 60) return `${min}m ago`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const d = Math.round(hr / 24)
+  if (d < 30) return `${d}d ago`
+  const mo = Math.round(d / 30)
+  if (mo < 12) return `${mo}mo ago`
+  const y = Math.round(mo / 12)
+  return `${y}y ago`
 }
 
 const ADMONITION_STYLES: Record<string, string> = {
@@ -1659,6 +1702,11 @@ const SectionListItem = memo(({
   progressPct,
   annotations,
   feynmanEnabled,
+  isActive,
+  lastPracticedAt,
+  childCount,
+  isCollapsed,
+  onToggleCollapsed,
   onRead,
   onPdfJump,
   onMediaJump,
@@ -1666,6 +1714,7 @@ const SectionListItem = memo(({
   onSaved,
   onCancel,
   onFeynman,
+  onPrefetchFeynman,
   onShowGoals
 }: {
   section: SectionItem;
@@ -1681,6 +1730,11 @@ const SectionListItem = memo(({
   progressPct?: number;
   annotations: AnnotationItem[];
   feynmanEnabled: boolean;
+  isActive: boolean;
+  lastPracticedAt?: string;
+  childCount: number;
+  isCollapsed: boolean;
+  onToggleCollapsed: (id: string) => void;
   onRead: (id: string) => void;
   onPdfJump: (p: number) => void;
   onMediaJump: (t: number) => void;
@@ -1688,6 +1742,7 @@ const SectionListItem = memo(({
   onSaved: () => void;
   onCancel: () => void;
   onFeynman: (id: string) => void;
+  onPrefetchFeynman: (id: string) => void;
   onShowGoals: (id: string) => void;
 }) => {
   const fragilityClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
@@ -1701,99 +1756,171 @@ const SectionListItem = memo(({
 
   const mediaStartTime = (isAudio || isVideo || isYouTube) ? parseAudioStartTime(section.heading) : null
 
+  const headingNode = (
+    <span className="min-w-0 flex-1 truncate">
+      {section.admonition_type && (
+        <span
+          className="mr-1 rounded px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+          style={{ color: ADMONITION_LABEL_COLORS[section.admonition_type] ?? "inherit" }}
+        >
+          {section.admonition_type}
+        </span>
+      )}
+      {section.heading || "(Untitled section)"}
+    </span>
+  )
+
+  const lastPracticedLabel = lastPracticedAt ? formatRelativeTime(lastPracticedAt) : null
+
   return (
     <li
       data-section-id={section.id}
       title={tooltipText}
       className={cn(
-        "rounded-md border border-border p-3 min-h-[50px]",
-        sectionBorderClass,
+        "group rounded-md border p-3 min-h-[50px] transition-colors",
+        // Active row: stronger border + tinted background; ambient otherwise.
+        isActive
+          ? "border-primary/50 bg-primary/5"
+          : "border-border hover:border-border/80 hover:bg-muted/40",
+        // Keep admonition tone when present, otherwise drop the heavy fragility
+        // border in favor of the retention chip.
+        section.admonition_type && sectionBorderClass,
         searchHit && "ring-2 ring-primary",
       )}
     >
-      <div className="flex items-start gap-1">
-        <p
-          className="flex-1 text-sm font-semibold text-foreground"
-          style={{ paddingLeft: `${(section.level - 1) * 12}px` }}
-        >
-          {section.admonition_type && (
-            <span
-              className="mr-1 rounded px-1 py-0.5 text-xs font-bold uppercase tracking-wide"
-              style={{ color: ADMONITION_LABEL_COLORS[section.admonition_type] ?? "inherit" }}
-            >
-              {section.admonition_type}
-            </span>
-          )}
-          {section.heading || "(Untitled section)"}
-        </p>
-        <button
-          onClick={() => onRead(section.id)}
-          title="Read from this section"
-          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-        >
-          <BookOpen size={12} />
-        </button>
-        {doc.format === "pdf" && section.page_start > 0 && (
+      {/* Row 1: heading + retention chip + (optional) media timestamp */}
+      <div
+        className="flex items-center gap-2 text-sm font-semibold text-foreground"
+        style={{ paddingLeft: `${Math.max(0, section.level - 1) * 12}px` }}
+      >
+        {childCount > 0 ? (
           <button
-            onClick={() => onPdfJump(section.page_start)}
-            title={`Open PDF at page ${section.page_start}`}
-            className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleCollapsed(section.id)
+            }}
+            title={isCollapsed ? `Expand ${childCount} subsections` : "Collapse subsections"}
+            className="-ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            p.{section.page_start}
+            {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
           </button>
+        ) : (
+          <span className="-ml-1 inline-block w-[18px] shrink-0" aria-hidden />
         )}
-        {mediaStartTime !== null && (
-          isYouTube && doc?.source_url ? (
-            <a
-              href={buildYouTubeTimestampUrl(doc.source_url, mediaStartTime)}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`Open YouTube at ${formatMmSs(mediaStartTime)}`}
-              className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              {formatMmSs(mediaStartTime)}
-            </a>
-          ) : (
-            <button
-              onClick={() => onMediaJump(mediaStartTime)}
-              title={`Play from ${formatMmSs(mediaStartTime)}`}
-              className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              {formatMmSs(mediaStartTime)}
-            </button>
-          )
+        <button
+          type="button"
+          onClick={() => onRead(section.id)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-primary"
+          title="Read this section"
+        >
+          {headingNode}
+        </button>
+        {isCollapsed && childCount > 0 && (
+          <span
+            className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+            title={`${childCount} hidden subsections`}
+          >
+            +{childCount}
+          </span>
         )}
+        <RetentionChip heatmap={heatmapItem} />
         {progressPct !== undefined && (
           <button
             onClick={() => onShowGoals(section.id)}
             title={`${Math.round(progressPct)}% objectives covered`}
-            className="mt-0.5 shrink-0"
+            className="shrink-0"
           >
             <ChapterProgressRing pct={progressPct} size={12} />
           </button>
         )}
         {hasNote && (
-          <span title="Has note" className="mt-0.5 shrink-0 text-primary">
+          <span title="Has note" className="shrink-0 text-primary">
             <StickyNote size={12} />
           </span>
         )}
-        <button
-          onClick={() => onToggleNote(section.id)}
-          title="Add note"
-          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+      </div>
+
+      {/* Row 2: meta line — last-practiced + media timestamp + page anchor */}
+      {(lastPracticedLabel || mediaStartTime !== null || (doc.format === "pdf" && section.page_start > 0)) && (
+        <div
+          className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+          style={{ paddingLeft: `${Math.max(0, section.level - 1) * 12}px` }}
         >
-          <StickyNote size={12} />
+          {lastPracticedLabel && (
+            <span className="inline-flex items-center gap-1">
+              <Brain size={10} />
+              <span>Practiced {lastPracticedLabel}</span>
+            </span>
+          )}
+          {doc.format === "pdf" && section.page_start > 0 && (
+            <button
+              onClick={() => onPdfJump(section.page_start)}
+              title={`Open PDF at page ${section.page_start}`}
+              className="tabular-nums hover:text-foreground"
+            >
+              p.{section.page_start}
+            </button>
+          )}
+          {mediaStartTime !== null && (
+            isYouTube && doc?.source_url ? (
+              <a
+                href={buildYouTubeTimestampUrl(doc.source_url, mediaStartTime)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open YouTube at ${formatMmSs(mediaStartTime)}`}
+                className="tabular-nums hover:text-foreground"
+              >
+                {formatMmSs(mediaStartTime)}
+              </a>
+            ) : (
+              <button
+                onClick={() => onMediaJump(mediaStartTime)}
+                title={`Play from ${formatMmSs(mediaStartTime)}`}
+                className="tabular-nums hover:text-foreground"
+              >
+                {formatMmSs(mediaStartTime)}
+              </button>
+            )
+          )}
+        </div>
+      )}
+
+      {/* Row 3: action chips — primary actions always visible, no hover gating */}
+      <div
+        className="mt-2 flex flex-wrap items-center gap-1.5"
+        style={{ paddingLeft: `${Math.max(0, section.level - 1) * 12}px` }}
+      >
+        <button
+          onClick={() => onRead(section.id)}
+          title="Read from this section"
+          className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground"
+        >
+          <BookOpen size={11} />
+          <span>Read</span>
         </button>
         {feynmanEnabled && (
           <button
             onClick={() => onFeynman(section.id)}
-            title="Practice Feynman technique for this section"
-            className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+            onMouseEnter={() => onPrefetchFeynman(section.id)}
+            onFocus={() => onPrefetchFeynman(section.id)}
+            title="Explain this section in your own words (Feynman technique)"
+            className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
           >
-            <Brain size={12} />
+            <Brain size={11} />
+            <span>Practice</span>
           </button>
         )}
+        <button
+          onClick={() => onToggleNote(section.id)}
+          title={hasNote ? "Edit note" : "Add note"}
+          className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground"
+        >
+          <StickyNote size={11} />
+          <span>{hasNote ? "Note" : "Note"}</span>
+        </button>
       </div>
+
       {section.preview && (
         <SectionPreviewWithHighlights
           preview={section.preview}
@@ -1877,6 +2004,22 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
+  // Unified "section the user is currently focused on" — set by every section
+  // action (Read, Practice, Note, PDF jump, Goals, citation deep-link). Drives
+  // the sticky banner in the sections tab and the active-row visual treatment.
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
+
+  // In-document navigation stack: every user-initiated navigation (tab change,
+  // Read click, PDF jump, citation deep-link) pushes the current place. The
+  // Back button (and Cmd/Ctrl+[) pops it.
+  type ReaderPlace = {
+    tab: "sections" | "pdfview" | "bookview" | "read"
+    sectionId: string | null
+    pdfPage: number | null
+  }
+  const historyRef = useRef<ReaderPlace[]>([])
+  const currentPlaceRef = useRef<ReaderPlace>({ tab: "sections", sectionId: null, pdfPage: null })
+  const [historyDepth, setHistoryDepth] = useState(0)
   // S197: noteCount for "Compare my notes" button visibility
   const [noteCount, setNoteCount] = useState(0)
   // S151: in-document Cmd+F search state
@@ -1927,6 +2070,73 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
     return m
   }, [doc?.sections])
+
+  // Parent -> direct children (ids), and total-descendant count per parent.
+  // Used by the collapsible hierarchy in the sections list.
+  const sectionTree = useMemo(() => {
+    const childrenOf = new Map<string, string[]>()
+    const descendantCount = new Map<string, number>()
+    const sections = doc?.sections ?? []
+    for (const s of sections) {
+      if (!s.parent_section_id) continue
+      const arr = childrenOf.get(s.parent_section_id) ?? []
+      arr.push(s.id)
+      childrenOf.set(s.parent_section_id, arr)
+    }
+    // Walk parent chain to accumulate descendant counts.
+    for (const s of sections) {
+      let pid = s.parent_section_id
+      while (pid) {
+        descendantCount.set(pid, (descendantCount.get(pid) ?? 0) + 1)
+        pid = sectionMap.get(pid)?.parent_section_id ?? null
+      }
+    }
+    return { childrenOf, descendantCount }
+  }, [doc?.sections, sectionMap])
+
+  // Sections collapsed by default: any level<=2 parent that owns level>=3
+  // descendants in a long doc. Keeps the dashboard scannable for tech books
+  // without hiding structure for short articles.
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set())
+  const initialCollapsedKey = doc?.id
+  const initialCollapsedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!doc?.sections || initialCollapsedRef.current === initialCollapsedKey) return
+    initialCollapsedRef.current = initialCollapsedKey ?? null
+    if (doc.sections.length <= 30) {
+      setCollapsedParents(new Set())
+      return
+    }
+    const next = new Set<string>()
+    for (const s of doc.sections) {
+      if (s.level > 2) continue
+      const kids = sectionTree.childrenOf.get(s.id) ?? []
+      const hasDeep = kids.some((cid) => (sectionMap.get(cid)?.level ?? 0) >= 3)
+      if (hasDeep) next.add(s.id)
+    }
+    setCollapsedParents(next)
+  }, [doc?.sections, initialCollapsedKey, sectionTree, sectionMap])
+
+  const toggleCollapsed = useCallback((sid: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev)
+      if (next.has(sid)) next.delete(sid)
+      else next.add(sid)
+      return next
+    })
+  }, [])
+
+  const isSectionHidden = useCallback(
+    (sec: SectionItem): boolean => {
+      let pid = sec.parent_section_id
+      while (pid) {
+        if (collapsedParents.has(pid)) return true
+        pid = sectionMap.get(pid)?.parent_section_id ?? null
+      }
+      return false
+    },
+    [collapsedParents, sectionMap],
+  )
 
   const audioUrl = (isAudio && !isYouTube) ? `${API_BASE}/documents/${documentId}/audio` : null
   const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
@@ -1990,6 +2200,137 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       return () => clearTimeout(timer)
     }
   }, [leftTab, readSectionId])
+
+  // Keep activeSectionId in sync with whichever per-action state was most
+  // recently touched. Priority: Feynman > Read > Goals > Note editor.
+  useEffect(() => {
+    const next = feynmanSection ?? readSectionId ?? activeSectionGoals ?? openNoteEditor
+    if (next) setActiveSectionId(next)
+  }, [feynmanSection, readSectionId, activeSectionGoals, openNoteEditor])
+
+  // Mirror the current place into a ref so navigation handlers can read it
+  // synchronously when pushing onto the history stack.
+  useEffect(() => {
+    currentPlaceRef.current = {
+      tab: leftTab,
+      sectionId: activeSectionId,
+      pdfPage: leftTab === "pdfview" ? pdfCurrentPage : null,
+    }
+  }, [leftTab, activeSectionId, pdfCurrentPage])
+
+  // Push the current place onto the history stack. Pass an override when the
+  // caller knows the "place to return to" better than current state — e.g. a
+  // Read button click should return to the clicked section, not to whatever
+  // activeSectionId happened to be when the click fired.
+  const pushHistory = useCallback((override?: Partial<ReaderPlace>) => {
+    const base = { ...currentPlaceRef.current }
+    historyRef.current.push({ ...base, ...override })
+    setHistoryDepth(historyRef.current.length)
+  }, [])
+
+  // Scroll the active section card into view inside the sections list.
+  // If any ancestor is collapsed, expand the chain first so the target row
+  // actually exists in the DOM before we try to scroll to it. The retry loop
+  // handles the case where the sections tab was just mounted and the row
+  // hasn't appeared in the DOM yet.
+  const scrollActiveSectionIntoView = useCallback((sid: string) => {
+    const sec = sectionMap.get(sid)
+    if (sec) {
+      const ancestors: string[] = []
+      let pid = sec.parent_section_id
+      while (pid) {
+        ancestors.push(pid)
+        pid = sectionMap.get(pid)?.parent_section_id ?? null
+      }
+      const collapsedAncestors = ancestors.filter((a) => collapsedParents.has(a))
+      if (collapsedAncestors.length > 0) {
+        setCollapsedParents((prev) => {
+          const next = new Set(prev)
+          for (const a of collapsedAncestors) next.delete(a)
+          return next
+        })
+      }
+    }
+
+    function attempt(tries: number) {
+      const container = sectionListRef.current
+      const el = container?.querySelector<HTMLElement>(
+        `[data-section-id="${CSS.escape(sid)}"]`,
+      )
+      if (!container || !el) {
+        if (tries < 20) requestAnimationFrame(() => attempt(tries + 1))
+        return
+      }
+      // Center the row within the section list container directly instead of
+      // relying on Element.scrollIntoView (which can choose the wrong scroll
+      // ancestor, especially when a sticky banner sits at the top).
+      const containerRect = container.getBoundingClientRect()
+      const elRect = el.getBoundingClientRect()
+      const target =
+        container.scrollTop +
+        (elRect.top - containerRect.top) -
+        containerRect.height / 2 +
+        elRect.height / 2
+      container.scrollTo({ top: Math.max(0, target), behavior: "smooth" })
+      el.classList.add("ring-2", "ring-primary", "transition-shadow")
+      window.setTimeout(() => {
+        el.classList.remove("ring-2", "ring-primary", "transition-shadow")
+      }, 1500)
+    }
+    attempt(0)
+  }, [sectionMap, collapsedParents])
+
+  // When goBack switches tabs, the target tab's DOM is not yet mounted, so
+  // scrolling has to wait until React commits the new tab. We park the
+  // intended scroll target in a ref and let an effect fire it after render.
+  const pendingScrollRef = useRef<string | null>(null)
+
+  const goBack = useCallback(() => {
+    const prev = historyRef.current.pop()
+    setHistoryDepth(historyRef.current.length)
+    if (!prev) return
+    if (prev.sectionId) {
+      setActiveSectionId(prev.sectionId)
+      setReadSectionId(prev.sectionId)
+      if (prev.tab === "sections") {
+        pendingScrollRef.current = prev.sectionId
+      }
+    }
+    if (prev.tab === "pdfview") {
+      setPdfViewVisited(true)
+      if (prev.pdfPage) {
+        // Defer until the PDF view has had a chance to mount on tab switch.
+        window.setTimeout(() => pdfViewerRef.current?.goToPage(prev.pdfPage as number), 50)
+      }
+    }
+    if (prev.tab === "bookview") {
+      setBookViewVisited(true)
+    }
+    setLeftTab(prev.tab)
+  }, [])
+
+  // Fire the pending scroll once the Sections tab has actually rendered.
+  // scrollActiveSectionIntoView itself retries with RAF until the row exists
+  // in the DOM, so no setTimeout is required here.
+  useEffect(() => {
+    if (leftTab !== "sections" || !pendingScrollRef.current) return
+    const sid = pendingScrollRef.current
+    pendingScrollRef.current = null
+    scrollActiveSectionIntoView(sid)
+  }, [leftTab, scrollActiveSectionIntoView])
+
+  // Cmd/Ctrl+[ — Back. Cmd/Ctrl+] — Forward (not supported yet, no-op).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (e.key === "[") {
+        e.preventDefault()
+        goBack()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [goBack])
 
   // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
   useEffect(() => {
@@ -2138,6 +2479,27 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       return data.heatmap
     },
     staleTime: 60_000,
+  })
+
+  // Map of section_id -> ISO timestamp of most recent Feynman session.
+  // Powers the "last practiced" badge in the section list.
+  const { data: lastPracticedBySection } = useQuery<Map<string, string>>({
+    queryKey: ["feynman-sessions-by-section", documentId],
+    queryFn: async () => {
+      const res = await fetch(
+        `${API_BASE}/feynman/sessions?document_id=${encodeURIComponent(documentId)}`
+      )
+      if (!res.ok) return new Map()
+      const sessions = (await res.json()) as Array<{ section_id: string | null; created_at: string }>
+      const byId = new Map<string, string>()
+      // Sessions are returned in created_at desc; first hit per section wins.
+      for (const s of sessions) {
+        if (!s.section_id) continue
+        if (!byId.has(s.section_id)) byId.set(s.section_id, s.created_at)
+      }
+      return byId
+    },
+    staleTime: 30_000,
   })
 
   // Derive the set of section IDs that have at least one note
@@ -2326,6 +2688,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [documentId, qc])
 
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
+    pushHistory()
     if (doc?.format === "pdf" && ann.page_number) {
       setLeftTab("pdfview")
       setPdfViewVisited(true)
@@ -2335,7 +2698,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       setReadSectionId(ann.section_id)
     }
     setHighlightsPanelOpen(false)
-  }, [doc])
+  }, [doc, pushHistory])
 
   const handleDeleteHighlight = useCallback(async (id: string) => {
     if (!confirm("Remove this highlight?")) return
@@ -2382,9 +2745,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // S131: Use virtualization for the section list if it's very large.
   const renderedSectionItems = useMemo(() => {
     if (!doc?.sections) return null
-    // Virtualization: only render up to the current limit to avoid Hook-count crashes (S131)
-    const sectionsToRender = doc.sections.slice(0, listLimit)
-    
+    // Filter out sections whose ancestor is collapsed *before* slicing, so
+    // virtualization counts visible rows (not raw section count).
+    const visible = doc.sections.filter((s) => !isSectionHidden(s))
+    const sectionsToRender = visible.slice(0, listLimit)
+
     return sectionsToRender.map((section) => {
       const hasNote = notedSections.has(section.id)
       const editorOpen = openNoteEditor === section.id
@@ -2406,11 +2771,30 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           progressPct={progressBySectionId.get(section.id)}
           annotations={annotationsBySection.get(section.id) ?? []}
           feynmanEnabled={doc.content_type === "tech_book" || doc.content_type === "tech_article"}
+          isActive={activeSectionId === section.id}
+          lastPracticedAt={lastPracticedBySection?.get(section.id)}
+          childCount={sectionTree.descendantCount.get(section.id) ?? 0}
+          isCollapsed={collapsedParents.has(section.id)}
+          onToggleCollapsed={toggleCollapsed}
           onRead={(sid) => {
+            // Push "Sections tab focused on the clicked section" as the
+            // place-to-return-to, so Back scrolls back to that exact row.
+            const sec = sectionMap.get(sid)
+            if (doc.format === "pdf" && sec && sec.page_start > 0) {
+              pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
+              setReadSectionId(sid)
+              setPdfViewVisited(true)
+              setLeftTab("pdfview")
+              pdfViewerRef.current?.goToPage(sec.page_start)
+              return
+            }
+            pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
             setReadSectionId(sid)
             setLeftTab("read")
           }}
           onPdfJump={(p) => {
+            // The page anchor lives on a specific section — return to it.
+            pushHistory({ tab: "sections", sectionId: section.id, pdfPage: null })
             setPdfViewVisited(true)
             setLeftTab("pdfview")
             pdfViewerRef.current?.goToPage(p)
@@ -2420,6 +2804,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           onSaved={handleNoteSaved}
           onCancel={() => setOpenNoteEditor(null)}
           onFeynman={setFeynmanSection}
+          onPrefetchFeynman={(sid) => prefetchFeynmanSummary(doc.id, sid)}
           onShowGoals={(sid) => setActiveSectionGoals(activeSectionGoals === sid ? null : sid)}
         />
       )
@@ -2437,6 +2822,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     progressBySectionId,
     annotationsBySection,
     activeSectionGoals,
+    activeSectionId,
+    lastPracticedBySection,
+    sectionMap,
+    sectionTree,
+    collapsedParents,
+    toggleCollapsed,
+    isSectionHidden,
     handleNoteSaved,
     listLimit,
   ])
@@ -2501,13 +2893,30 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     <div className="flex h-full flex-col overflow-hidden">
       {/* Back button + Compare my notes (S197) */}
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft size={14} />
-          Back to library
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft size={14} />
+            Back to library
+          </button>
+          <span className="text-muted-foreground/40">·</span>
+          <button
+            onClick={goBack}
+            disabled={historyDepth === 0}
+            title={historyDepth === 0 ? "No previous view" : "Back to previous view (Cmd/Ctrl+[)"}
+            className={cn(
+              "flex items-center gap-1.5 text-sm transition-colors",
+              historyDepth === 0
+                ? "cursor-not-allowed text-muted-foreground/40"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ChevronLeft size={14} />
+            Back
+          </button>
+        </div>
         {noteCount >= 3 && (
           <button
             onClick={() => {
@@ -2567,7 +2976,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             ).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setLeftTab(tab)}
+                onClick={() => {
+                  if (leftTab !== tab) {
+                    pushHistory()
+                    setLeftTab(tab)
+                  }
+                }}
                 className={cn(
                   "flex-1 py-2 text-xs font-medium transition-colors",
                   leftTab === tab
@@ -2687,6 +3101,34 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           >
             {leftTab === "sections" && (
               <>
+                {/* Sticky "current section" banner — only shown when the user
+                    has engaged with a section via any action. Lets them jump
+                    back after the section list scrolls away from focus. */}
+                {activeSectionId && sectionMap.has(activeSectionId) && (
+                  <div className="sticky top-0 z-10 -mb-px border-b border-border bg-background/95 px-6 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Current
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => scrollActiveSectionIntoView(activeSectionId)}
+                        className="flex-1 truncate text-left text-sm font-medium text-foreground hover:text-primary"
+                        title="Jump to this section in the list"
+                      >
+                        {sectionMap.get(activeSectionId)?.heading || "(Untitled section)"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSectionId(null)}
+                        className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                        title="Clear current section"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {notesError && (
                   <p className="mb-2 px-6 pt-3 text-xs text-muted-foreground">
                     Note indicators unavailable — could not load notes.
@@ -2721,9 +3163,36 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   {doc.sections.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No sections detected.</p>
                   ) : (
-                    <ul className="space-y-3">
-                      {renderedSectionItems}
-                    </ul>
+                    <>
+                      {sectionTree.childrenOf.size > 0 && (
+                        <div className="mb-2 flex items-center justify-end gap-3 text-[11px] text-muted-foreground">
+                          <button
+                            type="button"
+                            onClick={() => setCollapsedParents(new Set())}
+                            className="hover:text-foreground"
+                          >
+                            Expand all
+                          </button>
+                          <span>·</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = new Set<string>()
+                              for (const s of doc.sections) {
+                                if ((sectionTree.childrenOf.get(s.id)?.length ?? 0) > 0) next.add(s.id)
+                              }
+                              setCollapsedParents(next)
+                            }}
+                            className="hover:text-foreground"
+                          >
+                            Collapse all
+                          </button>
+                        </div>
+                      )}
+                      <ul className="space-y-3">
+                        {renderedSectionItems}
+                      </ul>
+                    </>
                   )}
                   {doc.sections.length > listLimit && (
                     <div className="mt-6 flex justify-center pb-10">
@@ -2761,6 +3230,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             onNoteCountKnown={setNoteCount}
             onScrollToSection={(sectionId) => {
               if (leftTab !== "read") {
+                pushHistory()
                 setReadSectionId(sectionId)
                 setLeftTab("read")
               } else {
@@ -2798,7 +3268,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           documentId={documentId}
           sectionId={feynmanSection}
           concept={doc.sections.find((s) => s.id === feynmanSection)?.heading ?? ""}
-          onClose={() => setFeynmanSection(null)}
+          onClose={() => {
+            const sid = feynmanSection
+            setFeynmanSection(null)
+            if (sid) {
+              // Push so Back returns to whatever tab the dialog was opened from.
+              if (leftTab !== "sections") pushHistory()
+              setLeftTab("sections")
+              scrollActiveSectionIntoView(sid)
+            }
+          }}
         />
       )}
 

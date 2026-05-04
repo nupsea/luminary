@@ -1,0 +1,91 @@
+Machine Learning Fundamentals — Study Notes
+
+## 1. What is Machine Learning?
+
+Machine learning is a subfield of artificial intelligence concerned with building systems that learn from data. Rather than explicitly programming rules, a machine learning model identifies patterns in training data and uses those patterns to make predictions or decisions on new, unseen data.
+
+There are three primary learning paradigms: supervised learning, unsupervised learning, and reinforcement learning. In supervised learning, the model is trained on labeled examples—input-output pairs—and learns to map inputs to correct outputs. In unsupervised learning, the model finds structure in unlabeled data, such as clustering similar examples together. In reinforcement learning, an agent learns by interacting with an environment and receiving reward signals for desirable actions.
+
+## 2. Supervised Learning
+
+Supervised learning is the most commonly used paradigm. The goal is to learn a function f such that f(x) ≈ y for input x and label y. The model is trained by minimizing a loss function that measures the discrepancy between predictions and true labels.
+
+Two main categories exist: classification (predicting a discrete label) and regression (predicting a continuous value). Logistic regression, decision trees, support vector machines, and neural networks are all examples of supervised learning algorithms.
+
+The training process involves forward pass (computing predictions), loss computation, and backward pass (computing gradients via backpropagation). The optimizer—such as stochastic gradient descent (SGD) or Adam—updates model parameters to reduce loss.
+
+## 3. Neural Networks and Deep Learning
+
+A neural network is a computational model loosely inspired by the brain's structure. It consists of layers of artificial neurons (nodes). Each neuron computes a weighted sum of its inputs and applies a nonlinear activation function such as ReLU, sigmoid, or tanh.
+
+Deep learning refers to neural networks with many layers (hence "deep"). Deep networks can learn hierarchical representations: early layers learn simple features (edges, textures), while deeper layers combine them into complex concepts (faces, objects).
+
+The backpropagation algorithm enables efficient gradient computation through the chain rule of calculus. Given a loss L, we compute ∂L/∂w for each weight w in the network, then update w ← w - η · ∂L/∂w, where η is the learning rate.
+
+## 4. Overfitting and Generalization
+
+A critical challenge in machine learning is generalization: performing well on unseen data, not just training data. When a model learns the training data too precisely—memorizing noise instead of underlying patterns—it overfits.
+
+Indicators of overfitting: high training accuracy, much lower validation accuracy. The gap between training and validation performance is called the generalization gap.
+
+Regularization techniques combat overfitting:
+- L1 regularization adds a penalty proportional to the absolute value of weights, encouraging sparsity.
+- L2 regularization (weight decay) adds a penalty proportional to squared weight magnitudes, discouraging large weights.
+- Dropout randomly sets a fraction of neurons to zero during training, forcing the network to learn redundant representations.
+- Data augmentation artificially increases training set size by applying transformations (rotation, flipping, cropping) to existing examples.
+
+Early stopping monitors validation loss during training and halts when it stops improving, preventing overfitting on training data.
+
+## 5. Bias-Variance Tradeoff
+
+Model error decomposes into bias, variance, and irreducible noise. Bias is the error from overly simplistic assumptions—a high-bias model underfits, failing to capture data patterns. Variance is sensitivity to fluctuations in training data—a high-variance model overfits.
+
+Simple models (linear regression, shallow trees) have high bias and low variance. Complex models (deep networks, high-degree polynomials) have low bias but high variance. The goal is to find the sweet spot that minimizes total error on unseen data.
+
+Cross-validation is a standard technique for estimating model generalization. In k-fold cross-validation, the dataset is split into k equal subsets; the model trains on k-1 folds and validates on the remaining fold, cycling through all folds. The average validation score estimates true generalization performance.
+
+## 6. Feature Engineering and Representation
+
+Raw data is often unsuitable for direct use in learning algorithms. Feature engineering transforms raw data into informative representations. Good features capture the signal while discarding irrelevant noise.
+
+Normalization (scaling features to zero mean and unit variance) is important for many algorithms because gradient-based optimization and distance metrics are sensitive to feature scale. Standardization computes z = (x - μ) / σ. Min-max normalization scales to [0, 1]: x' = (x - min) / (max - min).
+
+Principal Component Analysis (PCA) is a dimensionality reduction technique that projects data onto the directions of maximum variance (principal components). It reduces noise and redundancy while retaining the most informative structure.
+
+Embeddings map discrete entities (words, users, items) into dense low-dimensional vectors. Word embeddings like Word2Vec and GloVe capture semantic relationships: similar words have similar vectors. The famous analogy "king - man + woman ≈ queen" illustrates the geometric structure of embedding spaces.
+
+## 7. Evaluation Metrics
+
+Choosing the right evaluation metric depends on the task and the cost of different errors.
+
+For binary classification: accuracy (fraction correct), precision (true positives / predicted positives), recall (true positives / actual positives), and F1 score (harmonic mean of precision and recall). The area under the ROC curve (AUC-ROC) measures discrimination across all thresholds.
+
+For regression: mean squared error (MSE), mean absolute error (MAE), and R-squared (coefficient of determination, measuring proportion of variance explained).
+
+In information retrieval: precision@k, recall@k, mean reciprocal rank (MRR), and normalized discounted cumulative gain (nDCG) account for the ranked nature of results.
+
+When classes are imbalanced, accuracy can be misleading. A model predicting the majority class always achieves high accuracy while being useless. F1, AUC-ROC, and balanced accuracy are more appropriate for imbalanced settings.
+
+## 8. Transformers and Attention
+
+The Transformer architecture, introduced in "Attention Is All You Need" (Vaswani et al., 2017), revolutionized natural language processing. It relies on the self-attention mechanism: each token attends to all other tokens in the sequence, computing a weighted sum based on similarity (dot product of query and key vectors, scaled and softmaxed).
+
+Multi-head attention applies multiple attention heads in parallel, allowing the model to attend to different aspects of the input simultaneously. The results are concatenated and projected.
+
+Large language models (LLMs) such as GPT and BERT are trained on massive text corpora using self-supervised objectives: predicting the next token (GPT) or masked tokens (BERT). Fine-tuning adapts pre-trained LLMs to specific tasks with relatively small labeled datasets. Retrieval-augmented generation (RAG) combines LLMs with retrieval systems to ground responses in specific document sets.
+
+## 9. Optimization Algorithms
+
+Stochastic gradient descent (SGD) updates parameters using gradients computed on a single example or mini-batch, making it computationally feasible for large datasets. The learning rate η controls step size; too large causes divergence, too small causes slow convergence.
+
+Momentum adds a velocity term that accumulates gradients over time, accelerating convergence through consistent gradient directions. The Adam optimizer combines momentum with adaptive per-parameter learning rates, making it robust to hyperparameter choices and widely used in practice.
+
+Learning rate schedules reduce η during training: step decay (multiply by factor every N epochs), cosine annealing (smooth reduction following a cosine curve), and warmup (start with small η and increase before decaying) are common strategies.
+
+## 10. Practical Machine Learning Workflow
+
+A typical ML project follows: problem definition → data collection → exploratory data analysis → preprocessing → model selection → training and evaluation → hyperparameter tuning → deployment → monitoring.
+
+Hyperparameter tuning searches for the best configuration: grid search exhaustively tries all combinations, random search samples configurations randomly (often more efficient), and Bayesian optimization builds a surrogate model of performance to direct the search.
+
+Model deployment involves packaging the model, building an inference API, and monitoring production performance. Distribution shift—where production data differs from training data—degrades model performance over time and requires retraining or adaptation.

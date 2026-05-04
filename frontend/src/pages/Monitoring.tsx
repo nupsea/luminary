@@ -33,6 +33,7 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EvalTrendsPanel } from "@/components/EvalTrendsPanel"
 import { logger } from "@/lib/logger"
 
 import { API_BASE } from "@/lib/config"
@@ -1181,6 +1182,16 @@ export default function Monitoring() {
           <SectionErrorCard name="Retrieval Quality Over Time" />
         ) : (
           <EvalHistorySparkline history={evalHistState.data} />
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        {evalHistState.loading ? (
+          <SectionSkeleton rows={3} />
+        ) : evalHistState.error ? (
+          <SectionErrorCard name="Eval Trends" />
+        ) : (
+          <EvalTrendsPanel history={evalHistState.data} />
         )}
       </section>
 

@@ -89,7 +89,7 @@ async def test_generate_from_gaps_creates_flashcards():
 
     call_idx = 0
 
-    async def _mock_generate(prompt, system=None, stream=False):
+    async def _mock_generate(prompt, system=None, stream=False, **kwargs):
         nonlocal call_idx
         resp = llm_responses[call_idx % len(llm_responses)]
         call_idx += 1
@@ -139,7 +139,7 @@ async def test_generate_from_gaps_skips_malformed_llm():
     ]
     call_idx = 0
 
-    async def _mock_generate(prompt, system=None, stream=False):
+    async def _mock_generate(prompt, system=None, stream=False, **kwargs):
         nonlocal call_idx
         resp = responses[call_idx % len(responses)]
         call_idx += 1
@@ -188,7 +188,7 @@ async def test_gap_card_to_flashcards():
     ]
     call_idx = 0
 
-    async def _mock_generate(prompt, system=None, stream=False):
+    async def _mock_generate(prompt, system=None, stream=False, **kwargs):
         nonlocal call_idx
         resp = responses[call_idx % len(responses)]
         call_idx += 1

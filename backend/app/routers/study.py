@@ -5,12 +5,15 @@ Routes:
   POST /study/sessions/start         — create a new study session
   POST /study/sessions/{id}/end      — close a session and return summary
   GET  /study/gaps/{document_id}     — weak flashcard areas grouped by section
-  POST /study/teachback              — LLM evaluation of user's teach-back explanation
+  POST /study/teachback              — LLM evaluation of user's teach-back explanation (sync)
+  POST /study/teachback/async        — submit teach-back for background evaluation
+  GET  /study/teachback/results      — batch-poll teach-back results by IDs
   GET  /study/stats/{document_id}    — progress stats: mastery, retention, streak
   GET  /study/history                — daily study activity for the last N days
   GET  /study/struggling             — cards with >= N 'again' ratings in last M days
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -20,10 +23,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -53,6 +57,20 @@ router = APIRouter(prefix="/study", tags=["study"])
 
 _GAP_STABILITY_THRESHOLD = 2.0
 _GAP_MIN_REPS = 1
+
+# Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+# Serialize background teachback evaluations to avoid SQLite "database is locked"
+# when multiple concurrent tasks try to write (invariant I-1).
+_teachback_eval_sem = asyncio.Semaphore(1)
+
+
+def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
+    """Schedule coroutine as fire-and-forget background task with strong ref."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 _TEACHBACK_SYSTEM = (
     "You are a Socratic tutor evaluating a student's explanation. "
@@ -107,12 +125,15 @@ _RUBRIC_USER_TMPL = (
 
 class StartSessionRequest(BaseModel):
     document_id: str | None = None
+    collection_id: str | None = None
     mode: str = "flashcard"
+    planned_card_ids: list[str] | None = None
 
 
 class SessionResponse(BaseModel):
     id: str
     document_id: str | None
+    collection_id: str | None = None
     started_at: datetime
     ended_at: datetime | None
     cards_reviewed: int
@@ -140,7 +161,10 @@ class SessionListItem(BaseModel):
     accuracy_pct: float | None
     document_id: str | None
     document_title: str | None
+    collection_id: str | None = None
+    collection_name: str | None = None
     mode: str
+    has_pending_evaluations: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -200,6 +224,7 @@ def _compute_gaps(
 class TeachbackRequest(BaseModel):
     flashcard_id: str
     user_explanation: str
+    session_id: str | None = None
 
 
 class RubricDimensionResponse(BaseModel):
@@ -225,6 +250,33 @@ class TeachbackResponse(BaseModel):
     misconceptions: list[str]
     correction_flashcard_id: str | None = None
     rubric: TeachbackRubricResponse | None = None  # S156: null when rubric LLM call fails
+
+
+class TeachbackSubmitResponse(BaseModel):
+    """Returned by POST /study/teachback/async -- evaluation runs in background."""
+
+    id: str
+
+
+class TeachbackResultItem(BaseModel):
+    """Single item in batch-poll response."""
+
+    id: str
+    status: str  # "pending" | "complete" | "error"
+    flashcard_id: str
+    question: str = ""
+    expected_answer: str = ""
+    score: int | None = None
+    correct_points: list[str] = []
+    missing_points: list[str] = []
+    misconceptions: list[str] = []
+    correction_flashcard_id: str | None = None
+    rubric: TeachbackRubricResponse | None = None
+    user_explanation: str | None = None
+
+
+class TeachbackResultsBatchResponse(BaseModel):
+    results: list[TeachbackResultItem]
 
 
 class SectionStabilityItem(BaseModel):
@@ -724,6 +776,39 @@ async def get_gaps(
     return _compute_gaps(weak_cards, chunk_to_section)
 
 
+@router.get("/sessions/open", response_model=SessionResponse)
+async def get_open_session(
+    mode: str,
+    document_id: str | None = None,
+    collection_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> SessionResponse:
+    """Return the most recent still-open session matching this scope.
+
+    Used by the hook to auto-resume an in-progress session instead of creating
+    a duplicate when the user clicks Start. Scope match is exact: a null
+    document_id only matches sessions with null document_id.
+    """
+    stmt = select(StudySessionModel).where(
+        StudySessionModel.ended_at.is_(None),
+        StudySessionModel.mode == mode,
+    )
+    if document_id is not None:
+        stmt = stmt.where(StudySessionModel.document_id == document_id)
+    else:
+        stmt = stmt.where(StudySessionModel.document_id.is_(None))
+    if collection_id is not None:
+        stmt = stmt.where(StudySessionModel.collection_id == collection_id)
+    else:
+        stmt = stmt.where(StudySessionModel.collection_id.is_(None))
+    stmt = stmt.order_by(StudySessionModel.started_at.desc()).limit(1)
+    result = await db.execute(stmt)
+    sess = result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="No open session")
+    return SessionResponse.model_validate(sess)
+
+
 @router.post("/sessions/start", response_model=SessionResponse, status_code=201)
 async def start_session(
     req: StartSessionRequest,
@@ -733,17 +818,24 @@ async def start_session(
     sess = StudySessionModel(
         id=str(uuid.uuid4()),
         document_id=req.document_id,
+        collection_id=req.collection_id,
         started_at=datetime.now(UTC),
         cards_reviewed=0,
         cards_correct=0,
         mode=req.mode,
+        planned_card_ids=req.planned_card_ids or None,
     )
     session.add(sess)
     await session.commit()
     await session.refresh(sess)
     logger.info(
         "Study session started",
-        extra={"session_id": sess.id, "document_id": req.document_id},
+        extra={
+            "session_id": sess.id,
+            "document_id": req.document_id,
+            "collection_id": req.collection_id,
+            "mode": req.mode,
+        },
     )
     return SessionResponse.model_validate(sess)
 
@@ -764,11 +856,36 @@ async def end_session(
     )
     events = events_result.scalars().all()
 
-    cards_reviewed = len(events)
-    cards_correct = sum(1 for e in events if e.is_correct)
-    accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
+    # Pull all teach-back rows (pending + complete). Pending rows mean the
+    # background evaluator has not yet scored the answer -- we still count them
+    # toward cards_reviewed (the user did answer) but leave accuracy provisional
+    # until the last evaluation lands. _evaluate_teachback_bg finalizes the
+    # tally when the last pending row flips to "complete".
+    tb_all_result = await db.execute(
+        select(TeachbackResultModel).where(
+            TeachbackResultModel.session_id == session_id,
+        )
+    )
+    tb_rows = tb_all_result.scalars().all()
+    tb_complete = [tb for tb in tb_rows if tb.status == "complete"]
+    tb_pending_count = sum(1 for tb in tb_rows if tb.status == "pending")
 
-    sess.ended_at = datetime.now(UTC)
+    if tb_rows:
+        scores = [tb.score for tb in tb_complete if tb.score is not None]
+        cards_reviewed = len(tb_rows)
+        cards_correct = sum(1 for s in scores if s >= 60)
+        if tb_pending_count > 0:
+            # Provisional: accuracy is unknown until evaluations finish.
+            accuracy_pct: float | None = None
+        else:
+            accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+    else:
+        cards_reviewed = len(events)
+        cards_correct = sum(1 for e in events if e.is_correct)
+        accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
+
+    ended_at = datetime.now(UTC)
+    sess.ended_at = ended_at
     sess.cards_reviewed = cards_reviewed
     sess.cards_correct = cards_correct
     sess.accuracy_pct = accuracy_pct
@@ -782,15 +899,65 @@ async def end_session(
             "cards_reviewed": cards_reviewed,
             "cards_correct": cards_correct,
             "accuracy_pct": accuracy_pct,
+            "pending_evaluations": tb_pending_count,
         },
     )
     return SessionSummary(
         session_id=sess.id,
         cards_reviewed=cards_reviewed,
         cards_correct=cards_correct,
-        accuracy_pct=accuracy_pct,
-        ended_at=sess.ended_at,
+        accuracy_pct=accuracy_pct if accuracy_pct is not None else 0.0,
+        ended_at=ended_at,
     )
+
+
+@router.post("/sessions/{session_id}/reopen", status_code=204)
+async def reopen_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Clear ended_at on a session so the user can Continue adding answers.
+
+    Tallies are reset; _finalize_session_tally_if_ready recomputes them the
+    next time the session is ended and all evaluations are complete.
+    """
+    result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    sess.ended_at = None
+    sess.cards_correct = 0
+    sess.accuracy_pct = None
+    await db.commit()
+    logger.info("Study session reopened", extra={"session_id": session_id})
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a study session and all associated review events and teachback results."""
+    result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    await db.execute(
+        sa_delete(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
+    )
+    await db.execute(
+        sa_delete(TeachbackResultModel).where(
+            TeachbackResultModel.session_id == session_id
+        )
+    )
+    await db.delete(sess)
+    await db.commit()
+    logger.info("Study session deleted", extra={"session_id": session_id})
 
 
 async def _resolve_collection_members(
@@ -830,7 +997,16 @@ async def get_collection_study_dashboard(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> StudyCollectionDashboardResponse:
-    """Return a summary of study status for all material in a collection (S192)."""
+    """Return a summary of study status for all material in a collection (S192).
+
+    Rewritten to use SQL aggregates and a small fixed number of queries regardless
+    of tag count, sub-enclave count, or tree depth. Previously this endpoint could
+    issue 20+ sequential queries per click.
+    """
+    from collections import defaultdict
+
+    from app.routers.documents import _safe_tags
+
     # 1. Fetch collection name
     coll_result = await session.execute(
         select(CollectionModel.name).where(CollectionModel.id == collection_id)
@@ -839,120 +1015,280 @@ async def get_collection_study_dashboard(
     if not coll_name:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # 2. Resolve all documents and notes in this hierarchy
-    doc_ids, note_ids = await _resolve_collection_members(collection_id, session)
+    # 2. Load the collection tree once and build parent->children adjacency in Python.
+    # Collections are small (typically < 200 rows) so this beats recursive CTEs for
+    # clarity and keeps query count flat regardless of tree depth.
+    all_colls_rows = (
+        await session.execute(
+            select(CollectionModel.id, CollectionModel.parent_collection_id)
+        )
+    ).all()
+    children_of: dict[str | None, list[str]] = defaultdict(list)
+    for cid, pid in all_colls_rows:
+        children_of[pid].append(cid)
 
-    # 3. Aggregate flashcard stats across all documents (and any note-sourced cards)
+    def _descendants(root: str) -> set[str]:
+        out = {root}
+        stack = [root]
+        while stack:
+            cur = stack.pop()
+            for child in children_of.get(cur, ()):
+                if child not in out:
+                    out.add(child)
+                    stack.append(child)
+        return out
+
+    hierarchy_ids = _descendants(collection_id)
+    direct_children = children_of.get(collection_id, [])
+
+    # For sub-enclave counts: compute each direct child's full descendant set and
+    # track which descendants roll up to which sub-enclave root.
+    descendants_by_child: dict[str, set[str]] = {
+        child_id: _descendants(child_id) for child_id in direct_children
+    }
+
+    # 3. Fetch all members (docs + notes) of every collection in the hierarchy,
+    # plus every direct-child subtree. One query.
+    all_relevant_coll_ids = set(hierarchy_ids)
+    for desc in descendants_by_child.values():
+        all_relevant_coll_ids.update(desc)
+
+    members_rows = (
+        await session.execute(
+            select(
+                CollectionMemberModel.collection_id,
+                CollectionMemberModel.member_id,
+                CollectionMemberModel.member_type,
+            ).where(CollectionMemberModel.collection_id.in_(list(all_relevant_coll_ids)))
+        )
+    ).all()
+
+    # Bucket by hierarchy membership.
+    doc_ids: set[str] = set()
+    note_ids: set[str] = set()
+    for coll_id, member_id, member_type in members_rows:
+        if coll_id in hierarchy_ids:
+            if member_type == "document":
+                doc_ids.add(member_id)
+            elif member_type == "note":
+                note_ids.add(member_id)
+
+    # 4. Flashcard aggregate stats -- one query, no rows pulled into memory.
     now = datetime.now(UTC)
-    cards_stmt = select(FlashcardModel).where(
-        or_(
-            FlashcardModel.document_id.in_(doc_ids) if doc_ids else False,
-            FlashcardModel.note_id.in_(note_ids) if note_ids else False,
-        )
-    )
-    cards_result = await session.execute(cards_stmt)
-    all_cards = list(cards_result.scalars().all())
-
-    due_today = sum(1 for c in all_cards if c.due_date and c.due_date.replace(tzinfo=UTC) <= now)
-    new_today = sum(1 for c in all_cards if c.fsrs_state == "new")
-
-    # Mastery % = cards with stability > 30 days
-    mastered = sum(1 for c in all_cards if c.fsrs_stability > 30.0)
-    mastery_pct = round(mastered / len(all_cards) * 100, 1) if all_cards else 0.0
-
-    # 4. Topics (tags) aggregation
-    # We want tags that are present in either documents or notes of this collection.
-    # For each tag, we want:
-    # - card_count: flashcards linked to docs with this tag OR notes with this tag
-    #   (within the collection)
-    # - note_count: notes in the collection with this tag
-
-    tag_to_docs: dict[str, set[str]] = {}
-    tag_to_notes: dict[str, set[str]] = {}
-
-    # (a) Process documents in collection
+    where_clauses = []
     if doc_ids:
-        docs_stmt = select(DocumentModel.id, DocumentModel.tags).where(
-            DocumentModel.id.in_(doc_ids)
-        )
-        docs_rows = (await session.execute(docs_stmt)).all()
-        for did, dtags in docs_rows:
-            from app.routers.documents import _safe_tags
-
-            dtags_list = _safe_tags(dtags)
-            for t in dtags_list:
-                tag_to_docs.setdefault(t, set()).add(did)
-
-    # (b) Process notes in collection
+        where_clauses.append(FlashcardModel.document_id.in_(list(doc_ids)))
     if note_ids:
-        note_tag_stmt = select(NoteTagIndexModel.tag_full, NoteTagIndexModel.note_id).where(
-            NoteTagIndexModel.note_id.in_(note_ids)
-        )
-        note_tag_rows = (await session.execute(note_tag_stmt)).all()
-        for t, nid in note_tag_rows:
-            tag_to_notes.setdefault(t, set()).add(nid)
+        where_clauses.append(FlashcardModel.note_id.in_(list(note_ids)))
 
-    # (c) Build topics list
+    if where_clauses:
+        stats_row = (
+            await session.execute(
+                select(
+                    func.count(FlashcardModel.id).label("total"),
+                    func.sum(
+                        case(
+                            (
+                                (FlashcardModel.due_date.is_not(None))
+                                & (FlashcardModel.due_date <= now),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ).label("due_today"),
+                    func.sum(
+                        case((FlashcardModel.fsrs_state == "new", 1), else_=0)
+                    ).label("new_today"),
+                    func.sum(
+                        case((FlashcardModel.fsrs_stability > 30.0, 1), else_=0)
+                    ).label("mastered"),
+                ).where(or_(*where_clauses))
+            )
+        ).one()
+        total = int(stats_row.total or 0)
+        due_today = int(stats_row.due_today or 0)
+        new_today = int(stats_row.new_today or 0)
+        mastered = int(stats_row.mastered or 0)
+    else:
+        total = due_today = new_today = mastered = 0
+
+    mastery_pct = round(mastered / total * 100, 1) if total else 0.0
+
+    # 5. Topics: build tag->docs/notes maps, then a single aggregate query for card
+    # counts per doc and per note. Replaces the old N+1 count loop.
+    tag_to_docs: dict[str, set[str]] = defaultdict(set)
+    tag_to_notes: dict[str, set[str]] = defaultdict(set)
+
+    if doc_ids:
+        docs_tag_rows = (
+            await session.execute(
+                select(DocumentModel.id, DocumentModel.tags).where(
+                    DocumentModel.id.in_(list(doc_ids))
+                )
+            )
+        ).all()
+        for did, dtags in docs_tag_rows:
+            for t in _safe_tags(dtags):
+                tag_to_docs[t].add(did)
+
+    if note_ids:
+        note_tag_rows = (
+            await session.execute(
+                select(NoteTagIndexModel.tag_full, NoteTagIndexModel.note_id).where(
+                    NoteTagIndexModel.note_id.in_(list(note_ids))
+                )
+            )
+        ).all()
+        for t, nid in note_tag_rows:
+            tag_to_notes[t].add(nid)
+
+    # Count cards per document and per note in ONE query each (two queries total).
+    cards_per_doc: dict[str, int] = {}
+    if doc_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.document_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.document_id.in_(list(doc_ids)))
+                .group_by(FlashcardModel.document_id)
+            )
+        ).all()
+        cards_per_doc = {did: int(cnt) for did, cnt in rows}
+
+    cards_per_note: dict[str, int] = {}
+    if note_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.note_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.note_id.in_(list(note_ids)))
+                .group_by(FlashcardModel.note_id)
+            )
+        ).all()
+        cards_per_note = {nid: int(cnt) for nid, cnt in rows}
+
     all_tags = set(tag_to_docs.keys()) | set(tag_to_notes.keys())
     topics: list[CollectionTopic] = []
-
     for t in all_tags:
-        t_doc_ids = list(tag_to_docs.get(t, set()))
-        t_note_ids = list(tag_to_notes.get(t, set()))
-
-        # Count flashcards for this tag in this collection
-        # Card belongs if: (doc in t_doc_ids) OR (note in t_note_ids)
-        card_count_stmt = select(func.count(FlashcardModel.id)).where(
-            or_(
-                FlashcardModel.document_id.in_(t_doc_ids) if t_doc_ids else False,
-                FlashcardModel.note_id.in_(t_note_ids) if t_note_ids else False,
-            )
+        card_count = sum(cards_per_doc.get(d, 0) for d in tag_to_docs.get(t, ())) + sum(
+            cards_per_note.get(n, 0) for n in tag_to_notes.get(t, ())
         )
-        card_count = (await session.execute(card_count_stmt)).scalar() or 0
-
-        note_count = len(t_note_ids)
+        note_count = len(tag_to_notes.get(t, ()))
         if card_count > 0 or note_count > 0:
-            topics.append(CollectionTopic(tag=t, card_count=card_count, note_count=note_count))
-
-    # Sort by card_count desc, then note_count desc
+            topics.append(
+                CollectionTopic(tag=t, card_count=card_count, note_count=note_count)
+            )
     topics.sort(key=lambda x: (x.card_count, x.note_count), reverse=True)
     topics = topics[:10]
 
-    # 5. Sources list
+    # 6. Sources list. SUBSTR on note.content avoids streaming large note bodies
+    # over the wire only to slice the first line.
     sources: list[CollectionSource] = []
     if doc_ids:
-        docs_result = await session.execute(
-            select(DocumentModel.id, DocumentModel.title).where(DocumentModel.id.in_(doc_ids))
-        )
-        for did, dtitle in docs_result:
+        doc_title_rows = (
+            await session.execute(
+                select(DocumentModel.id, DocumentModel.title).where(
+                    DocumentModel.id.in_(list(doc_ids))
+                )
+            )
+        ).all()
+        for did, dtitle in doc_title_rows:
             sources.append(CollectionSource(id=did, title=dtitle, type="document"))
     if note_ids:
-        notes_result = await session.execute(
-            select(NoteModel.id, NoteModel.content).where(NoteModel.id.in_(note_ids))
-        )
-        for nid, ncontent in notes_result:
-            ntitle = ncontent.split("\n")[0][:60] or "Untitled Note"
+        note_snippet_rows = (
+            await session.execute(
+                select(
+                    NoteModel.id,
+                    func.substr(NoteModel.content, 1, 120).label("snippet"),
+                ).where(NoteModel.id.in_(list(note_ids)))
+            )
+        ).all()
+        for nid, snippet in note_snippet_rows:
+            ntitle = (snippet or "").split("\n")[0][:60] or "Untitled Note"
             sources.append(CollectionSource(id=nid, title=ntitle, type="note"))
 
-    # 6. Sub-collections
-    child_stmt = select(CollectionModel.id, CollectionModel.name).where(
-        CollectionModel.parent_collection_id == collection_id
-    )
-    children = (await session.execute(child_stmt)).all()
-    sub_collections: list[CollectionSubEnclave] = []
+    # 7. Sub-enclaves: for each direct child we already know its full descendant set.
+    # Map descendant collection ID -> sub-enclave root, then bucket the members rows
+    # we already fetched. One pass, zero extra queries.
+    desc_to_root: dict[str, str] = {}
+    for child_id, desc_set in descendants_by_child.items():
+        for d in desc_set:
+            desc_to_root.setdefault(d, child_id)
 
-    for cid, cname in children:
-        # Get total card count for this sub-enclave
-        c_doc_ids, c_note_ids = await _resolve_collection_members(cid, session)
-        count_stmt = select(func.count(FlashcardModel.id)).where(
-            or_(
-                FlashcardModel.document_id.in_(c_doc_ids) if c_doc_ids else False,
-                FlashcardModel.note_id.in_(c_note_ids) if c_note_ids else False,
+    sub_doc_ids: dict[str, set[str]] = defaultdict(set)
+    sub_note_ids: dict[str, set[str]] = defaultdict(set)
+    for coll_id, member_id, member_type in members_rows:
+        root = desc_to_root.get(coll_id)
+        if root is None:
+            continue
+        if member_type == "document":
+            sub_doc_ids[root].add(member_id)
+        elif member_type == "note":
+            sub_note_ids[root].add(member_id)
+
+    # Child card counts reuse cards_per_doc / cards_per_note -- but those only cover
+    # hierarchy_ids members. Sub-enclave members can include docs/notes outside the
+    # parent hierarchy (when a child enclave directly holds an item the parent does
+    # not). Top up with one extra pair of queries for any missing IDs.
+    missing_doc_ids = (
+        set().union(*sub_doc_ids.values()) if sub_doc_ids else set()
+    ) - doc_ids
+    missing_note_ids = (
+        set().union(*sub_note_ids.values()) if sub_note_ids else set()
+    ) - note_ids
+    if missing_doc_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.document_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.document_id.in_(list(missing_doc_ids)))
+                .group_by(FlashcardModel.document_id)
             )
+        ).all()
+        for did, cnt in rows:
+            cards_per_doc[did] = int(cnt)
+    if missing_note_ids:
+        rows = (
+            await session.execute(
+                select(
+                    FlashcardModel.note_id,
+                    func.count(FlashcardModel.id),
+                )
+                .where(FlashcardModel.note_id.in_(list(missing_note_ids)))
+                .group_by(FlashcardModel.note_id)
+            )
+        ).all()
+        for nid, cnt in rows:
+            cards_per_note[nid] = int(cnt)
+
+    child_name_map: dict[str, str] = {}
+    if direct_children:
+        name_rows = (
+            await session.execute(
+                select(CollectionModel.id, CollectionModel.name).where(
+                    CollectionModel.id.in_(direct_children)
+                )
+            )
+        ).all()
+        child_name_map = {cid: name for cid, name in name_rows}
+
+    sub_collections: list[CollectionSubEnclave] = []
+    for child_id in direct_children:
+        count = sum(cards_per_doc.get(d, 0) for d in sub_doc_ids.get(child_id, ())) + sum(
+            cards_per_note.get(n, 0) for n in sub_note_ids.get(child_id, ())
         )
-        total_cards_count = (await session.execute(count_stmt)).scalar() or 0
         sub_collections.append(
-            CollectionSubEnclave(id=cid, name=cname, card_count=total_cards_count)
+            CollectionSubEnclave(
+                id=child_id,
+                name=child_name_map.get(child_id, ""),
+                card_count=count,
+            )
         )
 
     return StudyCollectionDashboardResponse(
@@ -970,6 +1306,13 @@ async def get_collection_study_dashboard(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     document_id: str | None = None,
+    collection_id: str | None = Query(
+        default=None, description="Filter sessions to a specific collection/enclave"
+    ),
+    mode: str | None = Query(default=None, description="Filter by mode: flashcard, teachback"),
+    status: str | None = Query(
+        default=None, description="Filter by status: incomplete (no ended_at), complete"
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -978,6 +1321,14 @@ async def list_sessions(
     base_stmt = select(StudySessionModel)
     if document_id:
         base_stmt = base_stmt.where(StudySessionModel.document_id == document_id)
+    if collection_id:
+        base_stmt = base_stmt.where(StudySessionModel.collection_id == collection_id)
+    if mode:
+        base_stmt = base_stmt.where(StudySessionModel.mode == mode)
+    if status == "incomplete":
+        base_stmt = base_stmt.where(StudySessionModel.ended_at.is_(None))
+    elif status == "complete":
+        base_stmt = base_stmt.where(StudySessionModel.ended_at.is_not(None))
 
     count_result = await db.execute(select(func.count()).select_from(base_stmt.subquery()))
     total = count_result.scalar_one()
@@ -996,6 +1347,35 @@ async def list_sessions(
         for doc in docs_result.scalars().all():
             doc_titles[doc.id] = doc.title
 
+    coll_ids = {s.collection_id for s in sessions if s.collection_id}
+    coll_names: dict[str, str] = {}
+    if coll_ids:
+        colls_result = await db.execute(
+            select(CollectionModel).where(CollectionModel.id.in_(coll_ids))
+        )
+        for coll in colls_result.scalars().all():
+            coll_names[coll.id] = coll.name
+
+    # Map session_id -> pending teach-back count so the UI knows which rows
+    # still need polling. Single grouped query beats N+1.
+    session_ids = [s.id for s in sessions]
+    pending_by_session: dict[str, int] = {}
+    if session_ids:
+        pending_result = await db.execute(
+            select(
+                TeachbackResultModel.session_id,
+                func.count().label("n"),
+            )
+            .where(
+                TeachbackResultModel.session_id.in_(session_ids),
+                TeachbackResultModel.status == "pending",
+            )
+            .group_by(TeachbackResultModel.session_id)
+        )
+        pending_by_session = {
+            sid: n for sid, n in pending_result.all() if sid is not None
+        }
+
     items: list[SessionListItem] = []
     for sess in sessions:
         duration: float | None = None
@@ -1012,7 +1392,10 @@ async def list_sessions(
                 accuracy_pct=sess.accuracy_pct,
                 document_id=sess.document_id,
                 document_title=doc_titles.get(sess.document_id) if sess.document_id else None,
+                collection_id=sess.collection_id,
+                collection_name=coll_names.get(sess.collection_id) if sess.collection_id else None,
                 mode=sess.mode,
+                has_pending_evaluations=pending_by_session.get(sess.id, 0) > 0,
             )
         )
 
@@ -1050,6 +1433,77 @@ async def get_session_cards(
         )
         for event, card in rows
     ]
+
+
+class SessionRemainingResponse(BaseModel):
+    answered_count: int
+    planned_count: int
+    cards: list[FlashcardResponse]
+
+
+@router.get(
+    "/sessions/{session_id}/remaining-cards",
+    response_model=SessionRemainingResponse,
+)
+async def get_session_remaining_cards(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> SessionRemainingResponse:
+    """Return the unanswered flashcards from this session's planned queue.
+
+    Used by resume so the queue reflects what was originally planned, not the
+    set of cards currently due for the scope. Also returns the count of already-
+    answered cards so the hook can restore the progress indicator on resume.
+    """
+    sess_result = await db.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = sess_result.scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    planned_ids: list[str] = list(sess.planned_card_ids or [])
+    if not planned_ids:
+        return SessionRemainingResponse(
+            answered_count=0, planned_count=0, cards=[]
+        )
+
+    # A card is "answered" if it has a teach-back result OR a review event for this session.
+    tb_result = await db.execute(
+        select(TeachbackResultModel.flashcard_id).where(
+            TeachbackResultModel.session_id == session_id
+        )
+    )
+    answered: set[str] = {row[0] for row in tb_result.all()}
+    rev_result = await db.execute(
+        select(ReviewEventModel.flashcard_id).where(
+            ReviewEventModel.session_id == session_id
+        )
+    )
+    answered.update(row[0] for row in rev_result.all())
+
+    # Restrict answered to planned members so the count reflects the planned queue.
+    planned_set = set(planned_ids)
+    answered_in_planned = answered & planned_set
+    remaining_ids = [cid for cid in planned_ids if cid not in answered_in_planned]
+    if not remaining_ids:
+        return SessionRemainingResponse(
+            answered_count=len(answered_in_planned),
+            planned_count=len(planned_ids),
+            cards=[],
+        )
+
+    cards_result = await db.execute(
+        select(FlashcardModel).where(FlashcardModel.id.in_(remaining_ids))
+    )
+    cards_by_id = {c.id: c for c in cards_result.scalars().all()}
+    # Preserve the original planned order.
+    ordered = [_to_response(cards_by_id[cid]) for cid in remaining_ids if cid in cards_by_id]
+    return SessionRemainingResponse(
+        answered_count=len(answered_in_planned),
+        planned_count=len(planned_ids),
+        cards=ordered,
+    )
 
 
 @router.post("/teachback", response_model=TeachbackResponse)
@@ -1112,16 +1566,19 @@ async def teachback(
     # If score < 60 and there are misconceptions, create MisconceptionModel rows
     # and a correction flashcard
     if score < 60 and misconceptions:
-        for m_text in misconceptions:
-            misconception = MisconceptionModel(
-                id=str(uuid.uuid4()),
-                document_id=card.document_id,
-                flashcard_id=card.id,
-                user_answer=req.user_explanation,
-                error_type="misconception",
-                correction_note=m_text,
-            )
-            session.add(misconception)
+        # Only persist misconceptions when document_id is set;
+        # note-sourced flashcards have document_id=None.
+        if card.document_id:
+            for m_text in misconceptions:
+                misconception = MisconceptionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=card.document_id,
+                    flashcard_id=card.id,
+                    user_answer=req.user_explanation,
+                    error_type="misconception",
+                    correction_note=m_text,
+                )
+                session.add(misconception)
 
         # Generate a correction flashcard targeting the first misconception
         correction_card_id = await _generate_correction_flashcard(
@@ -1156,6 +1613,396 @@ async def teachback(
         correction_flashcard_id=correction_card_id,
         rubric=rubric_response,
     )
+
+
+# ---------------------------------------------------------------------------
+# Async teach-back: submit + background evaluate + batch poll
+# ---------------------------------------------------------------------------
+
+
+def _score_to_rating(score: int) -> str:
+    """Map teach-back score (0-100) to FSRS rating for spaced repetition."""
+    if score >= 80:
+        return "good"
+    if score >= 60:
+        return "hard"
+    return "again"
+
+
+async def _finalize_session_tally_if_ready(
+    session: AsyncSession,
+    session_id: str,
+) -> None:
+    """Recompute session tally once the last pending teach-back completes.
+
+    Called from the background evaluator after writing a teach-back result.
+    No-op if the session hasn't been ended yet, or if there are still pending
+    evaluations (they will trigger the final update themselves).
+    """
+    sess_result = await session.execute(
+        select(StudySessionModel).where(StudySessionModel.id == session_id)
+    )
+    sess = sess_result.scalar_one_or_none()
+    if sess is None or sess.ended_at is None:
+        return
+
+    tb_result = await session.execute(
+        select(TeachbackResultModel).where(
+            TeachbackResultModel.session_id == session_id,
+        )
+    )
+    tb_rows = tb_result.scalars().all()
+    if not tb_rows:
+        return
+    if any(tb.status == "pending" for tb in tb_rows):
+        return
+
+    complete = [tb for tb in tb_rows if tb.status == "complete"]
+    scores = [tb.score for tb in complete if tb.score is not None]
+    sess.cards_reviewed = len(tb_rows)
+    sess.cards_correct = sum(1 for s in scores if s >= 60)
+    sess.accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+    logger.info(
+        "Study session tally finalized",
+        extra={
+            "session_id": session_id,
+            "cards_reviewed": sess.cards_reviewed,
+            "cards_correct": sess.cards_correct,
+            "accuracy_pct": sess.accuracy_pct,
+        },
+    )
+
+
+async def _evaluate_teachback_bg(
+    tb_id: str,
+    card_id: str,
+    card_answer: str,
+    card_document_id: str,
+    card_question: str,
+    user_explanation: str,
+    session_id: str | None = None,
+) -> None:
+    """Background coroutine: evaluate teach-back and update the row.
+
+    Uses its own DB session (invariant I-1: no shared AsyncSession across tasks).
+    After scoring, creates an FSRS review + ReviewEventModel so teach-back
+    results feed into spaced repetition and session progress stats.
+    """
+    logger.info("Teachback bg task started for %s", tb_id)
+
+    # LLM calls happen outside the semaphore so they don't block other evals.
+    llm = get_llm_service()
+
+    # LLM call 1: evaluation
+    prompt = _TEACHBACK_USER_TMPL.format(
+        answer=card_answer,
+        explanation=user_explanation,
+    )
+    raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
+    parsed = _parse_teachback_response(raw)
+    score = parsed.get("score", 0)
+    correct_points: list[str] = parsed.get("correct_points", [])
+    missing_points: list[str] = parsed.get("missing_points", [])
+    misconceptions: list[str] = parsed.get("misconceptions", [])
+
+    # LLM call 2: rubric (graceful fallback)
+    rubric_dict: dict | None = None
+    try:
+        rubric_prompt = _RUBRIC_USER_TMPL.format(
+            source_context=card_answer,
+            explanation=user_explanation,
+        )
+        raw_rubric = await llm.generate(
+            prompt=rubric_prompt, system=_RUBRIC_SYSTEM,
+        )
+        rubric_dict = _parse_rubric(raw_rubric)
+    except Exception:  # noqa: BLE001
+        logger.warning("Rubric LLM call failed for teachback=%s", tb_id)
+
+    rating = _score_to_rating(score)
+
+    # LLM call 3: correction flashcard (if any) -- generated BEFORE the write
+    # transaction. Holding the SQLite write lock while an LLM call is in flight
+    # starves concurrent HTTP inserts past busy_timeout.
+    correction_payload: dict | None = None
+    correction_card: FlashcardModel | None = None
+    if score < 60 and misconceptions:
+        session_factory = get_session_factory()
+        async with session_factory() as read_session:
+            card_result = await read_session.execute(
+                select(FlashcardModel).where(FlashcardModel.id == card_id)
+            )
+            correction_card = card_result.scalar_one_or_none()
+        if correction_card:
+            correction_payload = await _llm_correction_card_payload(
+                card=correction_card,
+                misconception=misconceptions[0],
+            )
+
+    # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
+    async with _teachback_eval_sem:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            try:
+                # Update the pending row
+                result = await session.execute(
+                    select(TeachbackResultModel).where(
+                        TeachbackResultModel.id == tb_id
+                    )
+                )
+                tb_row = result.scalar_one_or_none()
+                if tb_row is None:
+                    logger.error("Teachback row %s disappeared", tb_id)
+                    return
+
+                tb_row.score = score
+                tb_row.correct_points = correct_points
+                tb_row.missing_points = missing_points
+                tb_row.misconceptions = misconceptions
+                tb_row.rubric_json = rubric_dict
+                tb_row.status = "complete"
+
+                # FSRS review: schedule the card
+                fsrs = get_fsrs_service()
+                await fsrs.schedule(card_id, rating, session)
+
+                # Create ReviewEventModel so end_session tallies include this card
+                if session_id:
+                    event = ReviewEventModel(
+                        id=str(uuid.uuid4()),
+                        session_id=session_id,
+                        flashcard_id=card_id,
+                        rating=rating,
+                        is_correct=rating != "again",
+                    )
+                    session.add(event)
+
+                # Misconceptions + correction flashcard (LLM already resolved above)
+                if score < 60 and misconceptions and correction_card:
+                    if card_document_id:
+                        for m_text in misconceptions:
+                            misconception = MisconceptionModel(
+                                id=str(uuid.uuid4()),
+                                document_id=card_document_id,
+                                flashcard_id=card_id,
+                                user_answer=user_explanation,
+                                error_type="misconception",
+                                correction_note=m_text,
+                            )
+                            session.add(misconception)
+                    if correction_payload is not None:
+                        _insert_correction_flashcard(
+                            card=correction_card,
+                            payload=correction_payload,
+                            session=session,
+                        )
+
+                # Self-heal session tally: if the parent session has already
+                # been ended by the user (e.g. they navigated away mid-eval)
+                # and this was the last pending evaluation, recompute
+                # cards_correct / accuracy_pct on the session row so session
+                # history reflects the final scores.
+                if session_id:
+                    await _finalize_session_tally_if_ready(session, session_id)
+
+                await session.commit()
+                logger.info(
+                    "Teachback bg evaluated",
+                    extra={
+                        "teachback_id": tb_id,
+                        "score": score,
+                        "fsrs_rating": rating,
+                    },
+                )
+
+            except Exception:
+                logger.exception(
+                    "Teachback background evaluation failed for %s", tb_id
+                )
+                try:
+                    await session.rollback()
+                    result = await session.execute(
+                        select(TeachbackResultModel).where(
+                            TeachbackResultModel.id == tb_id
+                        )
+                    )
+                    tb_row = result.scalar_one_or_none()
+                    if tb_row:
+                        tb_row.status = "error"
+                        await session.commit()
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Failed to mark teachback %s as error", tb_id
+                    )
+
+
+@router.post("/teachback/async", response_model=TeachbackSubmitResponse)
+async def teachback_async(
+    req: TeachbackRequest,
+    session: AsyncSession = Depends(get_db),
+) -> TeachbackSubmitResponse:
+    """Submit teach-back for background evaluation. Returns immediately."""
+    # Validate flashcard
+    card_result = await session.execute(
+        select(FlashcardModel).where(FlashcardModel.id == req.flashcard_id)
+    )
+    card = card_result.scalar_one_or_none()
+    if card is None:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+
+    # Ensure the study session is marked as teachback mode
+    if req.session_id:
+        sess_result = await session.execute(
+            select(StudySessionModel).where(
+                StudySessionModel.id == req.session_id
+            )
+        )
+        study_sess = sess_result.scalar_one_or_none()
+        if study_sess and study_sess.mode != "teachback":
+            study_sess.mode = "teachback"
+
+    # Persist pending row
+    tb_id = str(uuid.uuid4())
+    tb_row = TeachbackResultModel(
+        id=tb_id,
+        flashcard_id=card.id,
+        user_explanation=req.user_explanation,
+        score=0,
+        correct_points=[],
+        missing_points=[],
+        misconceptions=[],
+        status="pending",
+        session_id=req.session_id,
+    )
+    session.add(tb_row)
+    await session.commit()
+    logger.info("Teachback async submitted: id=%s flashcard=%s", tb_id, card.id)
+
+    # Fire background evaluation
+    _fire_and_forget(
+        _evaluate_teachback_bg(
+            tb_id=tb_id,
+            card_id=card.id,
+            card_answer=card.answer,
+            card_document_id=card.document_id,
+            card_question=card.question,
+            user_explanation=req.user_explanation,
+            session_id=req.session_id,
+        )
+    )
+
+    return TeachbackSubmitResponse(id=tb_id)
+
+
+@router.get("/teachback/results", response_model=TeachbackResultsBatchResponse)
+async def get_teachback_results(
+    ids: str = Query(..., description="Comma-separated teachback result IDs"),
+    session: AsyncSession = Depends(get_db),
+) -> TeachbackResultsBatchResponse:
+    """Batch-poll teach-back results by IDs."""
+    id_list = [i.strip() for i in ids.split(",") if i.strip()]
+    if not id_list:
+        return TeachbackResultsBatchResponse(results=[])
+
+    # Fetch results joined with flashcard for question + expected answer text
+    stmt = (
+        select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
+        .join(
+            FlashcardModel,
+            TeachbackResultModel.flashcard_id == FlashcardModel.id,
+            isouter=True,
+        )
+        .where(TeachbackResultModel.id.in_(id_list))
+    )
+    rows = (await session.execute(stmt)).all()
+
+    items: list[TeachbackResultItem] = []
+    for tb, question, expected_answer in rows:
+        rubric_response: TeachbackRubricResponse | None = None
+        if tb.status == "complete" and tb.rubric_json is not None:
+            try:
+                rubric_response = TeachbackRubricResponse(
+                    accuracy=RubricDimensionResponse(**tb.rubric_json["accuracy"]),
+                    completeness=RubricCompletenessResponse(
+                        **tb.rubric_json["completeness"]
+                    ),
+                    clarity=RubricDimensionResponse(**tb.rubric_json["clarity"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                rubric_response = None
+
+        items.append(
+            TeachbackResultItem(
+                id=tb.id,
+                status=tb.status,
+                flashcard_id=tb.flashcard_id,
+                question=question or "",
+                expected_answer=expected_answer or "",
+                score=tb.score if tb.status == "complete" else None,
+                correct_points=tb.correct_points if tb.status == "complete" else [],
+                missing_points=tb.missing_points if tb.status == "complete" else [],
+                misconceptions=tb.misconceptions if tb.status == "complete" else [],
+                rubric=rubric_response,
+                user_explanation=tb.user_explanation if tb.status == "complete" else None,
+            )
+        )
+
+    return TeachbackResultsBatchResponse(results=items)
+
+
+@router.get(
+    "/sessions/{session_id}/teachback-results",
+    response_model=TeachbackResultsBatchResponse,
+)
+async def get_session_teachback_results(
+    session_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> TeachbackResultsBatchResponse:
+    """Get all teach-back results for a study session."""
+    stmt = (
+        select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
+        .join(
+            FlashcardModel,
+            TeachbackResultModel.flashcard_id == FlashcardModel.id,
+            isouter=True,
+        )
+        .where(TeachbackResultModel.session_id == session_id)
+        .order_by(TeachbackResultModel.created_at)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    items: list[TeachbackResultItem] = []
+    for tb, question, expected_answer in rows:
+        rubric_response: TeachbackRubricResponse | None = None
+        if tb.status == "complete" and tb.rubric_json is not None:
+            try:
+                rubric_response = TeachbackRubricResponse(
+                    accuracy=RubricDimensionResponse(**tb.rubric_json["accuracy"]),
+                    completeness=RubricCompletenessResponse(
+                        **tb.rubric_json["completeness"]
+                    ),
+                    clarity=RubricDimensionResponse(**tb.rubric_json["clarity"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                rubric_response = None
+
+        items.append(
+            TeachbackResultItem(
+                id=tb.id,
+                status=tb.status,
+                flashcard_id=tb.flashcard_id,
+                question=question or "",
+                expected_answer=expected_answer or "",
+                score=tb.score if tb.status == "complete" else None,
+                correct_points=tb.correct_points if tb.status == "complete" else [],
+                missing_points=tb.missing_points if tb.status == "complete" else [],
+                misconceptions=tb.misconceptions if tb.status == "complete" else [],
+                rubric=rubric_response,
+                user_explanation=tb.user_explanation if tb.status == "complete" else None,
+            )
+        )
+
+    return TeachbackResultsBatchResponse(results=items)
 
 
 @router.get("/stats/{document_id}", response_model=StudyStatsResponse)
@@ -1476,12 +2323,16 @@ def _parse_teachback_response(raw: str) -> dict:
         return {"score": 0, "correct_points": [], "missing_points": [], "misconceptions": []}
 
 
-async def _generate_correction_flashcard(
+async def _llm_correction_card_payload(
     card: FlashcardModel,
     misconception: str,
-    session: AsyncSession,
-) -> str | None:
-    """Generate and store a correction flashcard targeting a specific misconception."""
+) -> dict | None:
+    """Run the LLM call for a correction flashcard -- no DB I/O.
+
+    Split out from _generate_correction_flashcard so the LLM round-trip can
+    happen OUTSIDE the SQLite write transaction. Holding the write lock during
+    an LLM call starves concurrent HTTP inserts past the busy_timeout.
+    """
     llm = get_llm_service()
     prompt = _CORRECTION_USER_TMPL.format(
         misconception=misconception,
@@ -1502,15 +2353,23 @@ async def _generate_correction_flashcard(
 
     if not isinstance(data, dict):
         return None
+    return data
 
+
+def _insert_correction_flashcard(
+    card: FlashcardModel,
+    payload: dict,
+    session: AsyncSession,
+) -> str:
+    """Insert a correction flashcard row -- caller must have the LLM payload."""
     new_id = str(uuid.uuid4())
     correction = FlashcardModel(
         id=new_id,
         document_id=card.document_id,
         chunk_id=card.chunk_id,
-        question=data.get("question", f"Correction: {card.question}"),
-        answer=data.get("answer", card.answer),
-        source_excerpt=data.get("source_excerpt", ""),
+        question=payload.get("question", f"Correction: {card.question}"),
+        answer=payload.get("answer", card.answer),
+        source_excerpt=payload.get("source_excerpt", ""),
         fsrs_state="new",
         fsrs_stability=0.0,
         fsrs_difficulty=0.0,
@@ -1520,6 +2379,23 @@ async def _generate_correction_flashcard(
     )
     session.add(correction)
     return new_id
+
+
+async def _generate_correction_flashcard(
+    card: FlashcardModel,
+    misconception: str,
+    session: AsyncSession,
+) -> str | None:
+    """LLM-generate and persist a correction flashcard.
+
+    Kept for the sync /teachback endpoint which already runs outside the
+    background semaphore path. New code should call the split helpers so the
+    LLM call happens outside the DB transaction.
+    """
+    payload = await _llm_correction_card_payload(card, misconception)
+    if payload is None:
+        return None
+    return _insert_correction_flashcard(card, payload, session)
 
 
 # ---------------------------------------------------------------------------

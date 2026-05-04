@@ -13,12 +13,12 @@ clean:
 
 dev:
 	@echo "Starting backend and frontend dev servers..."
-	@(cd backend && uv run uvicorn app.main:app --reload --port 7820) &
+	@(cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run uvicorn app.main:app --reload --port 7820) &
 	@(cd frontend && npm run dev) &
 	@wait
 
 backend:
-	cd backend && uv run uvicorn app.main:app --reload --port 7820
+	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run uvicorn app.main:app --reload --port 7820
 
 frontend:
 	cd frontend && npm run dev
@@ -63,8 +63,8 @@ smoke:
 
 eval:
 	@echo "Running retrieval quality evals (backend must be running on :7820)..."
-	cd evals && uv run python run_eval.py --dataset book --assert-thresholds
-	cd evals && uv run python run_eval.py --dataset paper --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --assert-thresholds
 
 luminary:
 	bash scripts/luminary.sh

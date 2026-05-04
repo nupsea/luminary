@@ -7,6 +7,8 @@ from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
     CanonicalTagModel,
+    ChatMessageModel,
+    ChatSessionModel,
     ChunkModel,
     ClipModel,
     ClusterSuggestionModel,
@@ -20,6 +22,8 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     FeynmanTurnModel,
     FlashcardModel,
     GlossaryTermModel,
+    GoldenDatasetModel,
+    GoldenQuestionModel,
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
@@ -29,6 +33,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     NoteModel,
     NoteSourceModel,
     NoteTagIndexModel,
+    PomodoroSessionModel,
     PredictionEventModel,
     QAHistoryModel,
     ReadingPositionModel,
@@ -81,6 +86,16 @@ USING fts5(
 )
 """
 
+CHAT_MESSAGES_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts
+USING fts5(
+    content,
+    title,
+    message_id UNINDEXED,
+    session_id UNINDEXED
+)
+"""
+
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
@@ -114,6 +129,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.execute(text(NOTES_FTS5_DDL))
         await conn.execute(text(IMAGES_FTS5_DDL))
         await conn.execute(text(FLASHCARDS_FTS5_DDL))
+        await conn.execute(text(CHAT_MESSAGES_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
         # S208: Rename note_collections to collections.
@@ -194,6 +210,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE documents ADD COLUMN publication_year INTEGER",
             # S146: PDF page number per chunk for PDF viewer deep-links
             "ALTER TABLE chunks ADD COLUMN pdf_page_number INTEGER",
+            # S224: canonical entity tail for index-time vocabulary bridging
+            "ALTER TABLE chunks ADD COLUMN entities_text TEXT",
             # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
             # S156: structured rubric JSON for teachback results and feynman sessions
@@ -212,11 +230,82 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             # S194: URL validation status for web references
             "ALTER TABLE web_references ADD COLUMN is_valid INTEGER",
             "ALTER TABLE web_references ADD COLUMN last_checked_at DATETIME",
+            # Async teach-back evaluation status
+            "ALTER TABLE teachback_results ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'",
+            # Link teach-back results to study sessions for persistence
+            "ALTER TABLE teachback_results ADD COLUMN session_id TEXT",
+            # Link study sessions to a collection for enclave-scoped history
+            "ALTER TABLE study_sessions ADD COLUMN collection_id TEXT",
+            # Persist the planned queue per session so resume preserves scope
+            "ALTER TABLE study_sessions ADD COLUMN planned_card_ids JSON",
+            # S210: typed learning goals replace the FSRS-readiness goal schema.
+            # Existing databases may already have learning_goals with the old columns
+            # (document_id NOT NULL, target_date). Add the new columns idempotently;
+            # SQLite is permissive about NOT NULL on ALTER ADD when no rows exist.
+            "ALTER TABLE learning_goals ADD COLUMN description TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN goal_type TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN target_value INTEGER",
+            "ALTER TABLE learning_goals ADD COLUMN target_unit TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN deck_id TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN collection_id TEXT",
+            "ALTER TABLE learning_goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+            "ALTER TABLE learning_goals ADD COLUMN completed_at DATETIME",
+            # S213: eval_kind tag + citation_support_rate (S215) on EvalRunModel
+            "ALTER TABLE eval_runs ADD COLUMN eval_kind TEXT",
+            "ALTER TABLE eval_runs ADD COLUMN citation_support_rate REAL",
+            "ALTER TABLE eval_runs ADD COLUMN theme_coverage REAL",
+            "ALTER TABLE eval_runs ADD COLUMN no_hallucination REAL",
+            "ALTER TABLE eval_runs ADD COLUMN conciseness_pct REAL",
+            "ALTER TABLE eval_runs ADD COLUMN factuality REAL",
+            "ALTER TABLE eval_runs ADD COLUMN atomicity REAL",
+            "ALTER TABLE eval_runs ADD COLUMN clarity_avg REAL",
+            "ALTER TABLE eval_runs ADD COLUMN routing_accuracy REAL",
+            "ALTER TABLE eval_runs ADD COLUMN per_route JSON",
+            "ALTER TABLE eval_runs ADD COLUMN ablation_metrics JSON",
         ]:
             try:
                 await conn.execute(text(ddl))
             except Exception:
                 pass  # column already exists
+
+        # S210-fix: learning_goals.document_id was originally created NOT NULL.
+        # Drop the constraint via table-rebuild (SQLite has no ALTER COLUMN).
+        lg_cols = (await conn.execute(text("PRAGMA table_info(learning_goals)"))).fetchall()
+        lg_doc_col = next((r for r in lg_cols if r[1] == "document_id"), None)
+        if lg_doc_col is not None and lg_doc_col[3] == 1:  # notnull == 1
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS learning_goals_rebuild ("
+                    " id TEXT PRIMARY KEY,"
+                    " title TEXT NOT NULL,"
+                    " description TEXT,"
+                    " goal_type TEXT,"
+                    " target_value INTEGER,"
+                    " target_unit TEXT,"
+                    " document_id TEXT,"
+                    " deck_id TEXT,"
+                    " collection_id TEXT,"
+                    " status TEXT NOT NULL DEFAULT 'active',"
+                    " created_at DATETIME,"
+                    " completed_at DATETIME"
+                    ")"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO learning_goals_rebuild"
+                    " (id, title, description, goal_type, target_value, target_unit,"
+                    "  document_id, deck_id, collection_id, status, created_at, completed_at)"
+                    " SELECT id, title, description, goal_type, target_value, target_unit,"
+                    "  document_id, deck_id, collection_id, status, created_at, completed_at"
+                    " FROM learning_goals"
+                )
+            )
+            await conn.execute(text("DROP TABLE learning_goals"))
+            await conn.execute(
+                text("ALTER TABLE learning_goals_rebuild RENAME TO learning_goals")
+            )
+            logger.info("Migrated learning_goals: dropped NOT NULL on document_id")
 
         # S161: migrate distinct group_name values into collections (idempotent).
         # Uses INSERT OR IGNORE so re-running on an already-migrated DB is safe.
@@ -267,6 +356,20 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS idx_collections_auto_doc_id "
                 "ON collections(auto_document_id)"
+            )
+        )
+
+        # S210: indexes for typed learning goal lookups.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_learning_goals_status "
+                "ON learning_goals(status)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_learning_goals_goal_type "
+                "ON learning_goals(goal_type)"
             )
         )
 
