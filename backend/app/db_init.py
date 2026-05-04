@@ -7,6 +7,8 @@ from app.database import Base
 from app.models import (  # noqa: F401 — imported to register ORM models with Base.metadata
     AnnotationModel,
     CanonicalTagModel,
+    ChatMessageModel,
+    ChatSessionModel,
     ChunkModel,
     ClipModel,
     ClusterSuggestionModel,
@@ -84,6 +86,16 @@ USING fts5(
 )
 """
 
+CHAT_MESSAGES_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts
+USING fts5(
+    content,
+    title,
+    message_id UNINDEXED,
+    session_id UNINDEXED
+)
+"""
+
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
@@ -117,6 +129,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.execute(text(NOTES_FTS5_DDL))
         await conn.execute(text(IMAGES_FTS5_DDL))
         await conn.execute(text(FLASHCARDS_FTS5_DDL))
+        await conn.execute(text(CHAT_MESSAGES_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
         # S208: Rename note_collections to collections.

@@ -6,7 +6,7 @@ description: Context efficiency rules for Claude Code agents. Read before perfor
 
 To minimize token usage and maximize response speed, follow these rules.
 
-**Cardinal rule: read every file you will modify before writing code (ralph CLAUDE.md step 7). Efficiency means reading smartly, not reading less.**
+**Cardinal rule: read every file you will modify before writing code. Efficiency means reading smartly, not reading less.**
 
 ## Smart Discovery
 
@@ -17,7 +17,6 @@ To minimize token usage and maximize response speed, follow these rules.
 
 ## Incremental Planning
 
-- When planning a story, use `Grep` to extract the specific story from the PRD rather than reading the entire JSON.
 - For large files (500+ lines), read the section you need with offset/limit rather than the whole file.
 
 ## Schema-First, Code-Second

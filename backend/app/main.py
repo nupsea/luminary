@@ -24,6 +24,7 @@ from app.models import SettingsModel
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.chat_meta import router as chat_meta_router
+from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
 from app.routers.code_executor import router as code_executor_router
 from app.routers.collections import router as collections_router
@@ -202,6 +203,7 @@ app.include_router(annotations_router)
 app.include_router(clips_router)
 app.include_router(collections_router)
 app.include_router(chat_meta_router)
+app.include_router(chat_sessions_router)
 app.include_router(documents_router)
 app.include_router(engagement_router)
 app.include_router(evals_router)
