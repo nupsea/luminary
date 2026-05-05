@@ -14,6 +14,7 @@ build/
 
 # Node / frontend
 node_modules/
+scripts/ralph/flowchart/node_modules/
 dist/
 .parcel-cache/
 
@@ -25,6 +26,20 @@ dist/
 # Data directories (project-local runtime data)
 .luminary/
 .lance/
+
+# Local SQLite databases
+backend/app.db
+backend/*.db
+
+# Personal corpus (only shared fixtures under DATA/books/ are tracked)
+DATA/books/frankenstein.txt
+DATA/code/
+DATA/conversations/
+DATA/notes/
+DATA/papers/
+
+# Claude Code local config
+.claude/
 
 # OS
 .DS_Store
@@ -42,11 +57,8 @@ logs/
 
 # uv
 uv.lock
+.uv-cache/
 
-# Internal harness, agents, and project metadata (not for public repo)
-# These directories remain on disk for local development and the Ralph harness.
-.claude/
-scripts/ralph/
-docs/
+# Internal project metadata (project root only)
 prd.json
 evals/scores_history.jsonl
