@@ -28,7 +28,6 @@ import json
 import logging
 import re
 
-import litellm
 from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 
@@ -41,6 +40,7 @@ from app.models import (
     SummaryModel,
 )
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
+from app.services.llm import LLMUnavailableError, get_llm_service
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
     QA_FACTUAL_SYSTEM_PROMPT,
@@ -560,28 +560,26 @@ async def _decompose_comparison(question: str) -> dict | None:
     Returns {"sides": [list of subject names], "topic": str} or None on failure.
     Handles 2-way, 3-way, and any N-way comparisons.
     """
-    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
     try:
-        response = await litellm.acompletion(
-            **get_litellm_kwargs(),
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Extract ALL subjects being compared and the comparison topic. "
-                        "Reply with exactly this JSON (no prose, no markdown): "
-                        '{"sides": ["subject1", "subject2", ...], '
-                        '"topic": "what is being compared"}. '
-                        "sides must have 2 or more entries. "
-                        "If you cannot extract this structure, reply: null"
-                    ),
-                },
-                {"role": "user", "content": question},
-            ],
-            temperature=0.0,
-        )
-        text = (response.choices[0].message.content or "").strip()
+        text = (
+            await get_llm_service().complete(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract ALL subjects being compared and the comparison topic. "
+                            "Reply with exactly this JSON (no prose, no markdown): "
+                            '{"sides": ["subject1", "subject2", ...], '
+                            '"topic": "what is being compared"}. '
+                            "sides must have 2 or more entries. "
+                            "If you cannot extract this structure, reply: null"
+                        ),
+                    },
+                    {"role": "user", "content": question},
+                ],
+                temperature=0.0,
+            )
+        ).strip()
         if text.lower() == "null":
             return None
         parsed = json.loads(text)
@@ -1043,8 +1041,6 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     try:
-        import litellm as _litellm  # noqa: PLC0415
-
         from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
 
         report = await get_gap_detector().detect_gaps(note_ids, document_id)
@@ -1063,7 +1059,7 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     except Exception as exc:
-        if isinstance(exc, (_litellm.ServiceUnavailableError, _litellm.APIConnectionError)):
+        if isinstance(exc, LLMUnavailableError):
             error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
         else:
             error_msg = "Gap analysis failed. Please try again."
@@ -1130,17 +1126,15 @@ async def socratic_node(state: ChatState) -> dict:
     )
 
     try:
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
-        response = await litellm.acompletion(
-            **get_litellm_kwargs(),
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"Passages:\n{passages}"},
-            ],
-            temperature=0.7,
-        )
-        text = (response.choices[0].message.content or "").strip()
+        text = (
+            await get_llm_service().complete(
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"Passages:\n{passages}"},
+                ],
+                temperature=0.7,
+            )
+        ).strip()
 
         q_text = "What are the main ideas in this material?"
         context_text = "See the document content."
@@ -1159,13 +1153,7 @@ async def socratic_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-    ):
+    except LLMUnavailableError:
         logger.warning("socratic_node: LLM unavailable")
         card = {
             "type": "quiz_question",
@@ -1243,19 +1231,16 @@ async def teach_back_node(state: ChatState) -> dict:
     }
 
     try:
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+        text = (
+            await get_llm_service().complete(
+                messages=[
+                    {"role": "system", "content": _TEACH_BACK_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.3,
+            )
+        ).strip()
 
-        response = await litellm.acompletion(
-            **get_litellm_kwargs(),
-            messages=[
-                {"role": "system", "content": _TEACH_BACK_SYSTEM},
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.3,
-        )
-        text = (response.choices[0].message.content or "").strip()
-
-        # Strip optional markdown code fences
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].strip()
             if text.endswith("```"):
@@ -1277,13 +1262,7 @@ async def teach_back_node(state: ChatState) -> dict:
         }
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-    ):
+    except LLMUnavailableError:
         logger.warning("teach_back_node: LLM unavailable")
         card = {
             "type": "teach_back_result",

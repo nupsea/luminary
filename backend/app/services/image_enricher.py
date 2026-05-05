@@ -18,8 +18,9 @@ import json
 import logging
 from pathlib import Path
 
-import litellm
 import numpy as np
+
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
     """Call the vision LLM and return parsed JSON response.
 
     Falls back to {"image_type": "other", "description": raw_text, ...} if JSON parse fails.
-    Raises litellm.ServiceUnavailableError / APIConnectionError if no model is reachable.
+    Raises LLMUnavailableError if no model is reachable.
 
     When VISION_MODEL is an Ollama model and Ollama is unreachable, automatically falls
     back to LITELLM_DEFAULT_MODEL (e.g. a cloud model) if it is not Ollama-based.
@@ -82,31 +83,33 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
     b64 = base64.b64encode(buf.getvalue()).decode()
 
     last_exc: Exception | None = None
+    raw = ""
     for model in models_to_try:
         try:
-            # Pass api_base for Ollama models so Docker's host.docker.internal
-            # routing is respected (OLLAMA_URL overrides LiteLLM's localhost default).
-            extra_kwargs: dict = {}
+            api_base: str | None = None
             if model.startswith("ollama/"):
-                extra_kwargs["api_base"] = settings.OLLAMA_URL  # type: ignore[attr-defined]
-            response = await litellm.acompletion(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": _VISION_PROMPT},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{b64}"},
-                            },
-                        ],
-                    }
-                ],
-                temperature=0.0,
-                timeout=300.0,
-                **extra_kwargs,
-            )
+                # OLLAMA_URL overrides LiteLLM's localhost default (Docker host routing).
+                api_base = settings.OLLAMA_URL  # type: ignore[attr-defined]
+            raw = (
+                await get_llm_service().complete(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": _VISION_PROMPT},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/png;base64,{b64}"},
+                                },
+                            ],
+                        }
+                    ],
+                    model=model,
+                    temperature=0.0,
+                    timeout=300.0,
+                    api_base=api_base,
+                )
+            ).strip()
             if model != vision_model:
                 logger.info(
                     "_call_vision_llm: VISION_MODEL (%s) unreachable; used fallback model %s",
@@ -114,15 +117,13 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
                     model,
                 )
             break
-        except (litellm.APIConnectionError, litellm.ServiceUnavailableError) as exc:
+        except LLMUnavailableError as exc:
             last_exc = exc
             logger.debug("_call_vision_llm: model %s unavailable (%s), trying next", model, exc)
             continue
     else:
-        # All models exhausted — raise the last connection error so the job is marked failed.
         assert last_exc is not None
         raise last_exc
-    raw = (response.choices[0].message.content or "").strip()
 
     # Strip optional markdown code fences
     if raw.startswith("```"):
@@ -238,7 +239,7 @@ class ImageEnricherService:
                     processed += 1
                     logger.info("image_enricher: analyzed image_id=%s type=%s", img.id, image_type)
 
-                except (litellm.ServiceUnavailableError, litellm.APIConnectionError):
+                except LLMUnavailableError:
                     logger.warning(
                         "image_enricher: vision model(s) unreachable for image_id=%s "
                         "(VISION_MODEL=%s). In cloud mode, set VISION_MODEL to a "

@@ -9,10 +9,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-import litellm
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -22,10 +22,21 @@ from app.models import (
     NoteModel,
     SectionModel,
 )
-from app.services.llm import get_llm_service
+from app.services.llm import (
+    LLMAPIConnectionError,
+    LLMServiceUnavailableError,
+    get_llm_service,
+)
 from app.telemetry import trace_chain
 
 logger = logging.getLogger(__name__)
+
+
+def _get_generation_model() -> str | None:
+    """Return the model override for generation tasks, or None to use default."""
+    m = get_settings().LITELLM_GENERATION_MODEL
+    return m if m else None
+
 
 FLASHCARD_SYSTEM = (
     "You are a learning assistant creating flashcards for active recall. "
@@ -1176,6 +1187,8 @@ class FlashcardService:
             text=combined_text,
         )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         with trace_chain(
             "flashcard.generate",
             input_value=f"doc={document_id} scope={scope} count={count} difficulty={difficulty}",
@@ -1187,7 +1200,10 @@ class FlashcardService:
             if section_heading:
                 span.set_attribute("flashcard.section_heading", section_heading)
 
-            raw = await llm.generate(prompt, system=system_prompt, stream=False)
+            raw = await llm.generate(
+                prompt, system=system_prompt,
+                model=_get_generation_model(), stream=False,
+            )
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
@@ -1324,6 +1340,8 @@ class FlashcardService:
             text=combined_text,
         )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         with trace_chain(
             "flashcard.generate_from_notes",
             input_value=f"tag={tag} note_ids={note_ids} count={count} difficulty={difficulty}",
@@ -1333,7 +1351,9 @@ class FlashcardService:
             span.set_attribute("flashcard.difficulty", difficulty)
 
             raw_concepts = await llm.generate(
-                extract_prompt, system=NOTES_CONCEPT_EXTRACT_SYSTEM, stream=False
+                extract_prompt,
+                system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+                model=_get_generation_model(), stream=False,
             )
             domain, concepts = _parse_concept_extract(raw_concepts)
             concepts = concepts[:count]
@@ -1350,7 +1370,9 @@ class FlashcardService:
                 text=combined_text,
             )
             raw = await llm.generate(
-                card_prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM, stream=False
+                card_prompt,
+                system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+                model=_get_generation_model(), stream=False,
             )
             cards_data = _parse_llm_response(raw, "notes")
             span.set_attribute("flashcard.generated_count", len(cards_data))
@@ -1455,6 +1477,9 @@ class FlashcardService:
                     continue
 
             combined_text = note.content[:_CHUNK_CHAR_LIMIT]
+
+            await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
             # Pass 1: extract typed concepts.
             raw_concepts = await llm.generate(
                 NOTES_CONCEPT_EXTRACT_TMPL.format(
@@ -1462,6 +1487,7 @@ class FlashcardService:
                     text=combined_text,
                 ),
                 system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+                model=_get_generation_model(),
                 stream=False,
             )
             domain, concepts = _parse_concept_extract(raw_concepts)
@@ -1479,6 +1505,7 @@ class FlashcardService:
                     text=combined_text,
                 ),
                 system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+                model=_get_generation_model(),
                 stream=False,
             )
             cards_data = _parse_llm_response(raw, note_id)
@@ -1529,7 +1556,7 @@ class FlashcardService:
         """Generate one flashcard per gap using bounded LLM concurrency (semaphore=5).
 
         Skips gaps whose LLM response cannot be parsed.
-        Raises litellm.ServiceUnavailableError if Ollama is unreachable.
+        Raises LLMServiceUnavailableError if Ollama is unreachable.
         Returns (created_count, card_ids).
         """
         llm = get_llm_service()
@@ -1538,7 +1565,10 @@ class FlashcardService:
         async def _generate_one(gap: str) -> FlashcardModel | None:
             async with semaphore:
                 prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
-                raw = await llm.generate(prompt, system=GAP_FLASHCARD_SYSTEM, stream=False)
+                raw = await llm.generate(
+                    prompt, system=GAP_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(), stream=False,
+                )
                 item = _parse_gap_flashcard(raw, gap)
                 if item is None:
                     return None
@@ -1561,13 +1591,14 @@ class FlashcardService:
                     created_at=now,
                 )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks
         raw_results = await asyncio.gather(
             *[_generate_one(g) for g in gaps], return_exceptions=True
         )
         # Re-raise Ollama-offline errors so the router can map them to 503.
         # Any other unexpected exception is logged and skipped (same policy as malformed JSON).
         for exc in raw_results:
-            if isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+            if isinstance(exc, (LLMServiceUnavailableError, LLMAPIConnectionError)):
                 raise exc
             if isinstance(exc, BaseException):
                 logger.warning("generate_from_gaps: unexpected error for a gap, skipping: %s", exc)
@@ -1599,7 +1630,7 @@ class FlashcardService:
 
         Identical to generate_from_gaps but sets source='feynman',
         deck='feynman', flashcard_type='concept_explanation'.
-        Raises litellm.ServiceUnavailableError if Ollama is unreachable.
+        Raises LLMServiceUnavailableError if Ollama is unreachable.
         Returns (created_count, card_ids).
         """
         llm = get_llm_service()
@@ -1608,7 +1639,10 @@ class FlashcardService:
         async def _generate_one(gap: str) -> FlashcardModel | None:
             async with semaphore:
                 prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
-                raw = await llm.generate(prompt, system=GAP_FLASHCARD_SYSTEM, stream=False)
+                raw = await llm.generate(
+                    prompt, system=GAP_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(), stream=False,
+                )
                 item = _parse_gap_flashcard(raw, gap)
                 if item is None:
                     return None
@@ -1632,11 +1666,12 @@ class FlashcardService:
                     created_at=now,
                 )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks
         raw_results = await asyncio.gather(
             *[_generate_one(g) for g in gaps], return_exceptions=True
         )
         for exc in raw_results:
-            if isinstance(exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+            if isinstance(exc, (LLMServiceUnavailableError, LLMAPIConnectionError)):
                 raise exc
             if isinstance(exc, BaseException):
                 logger.warning(
@@ -1716,7 +1751,10 @@ class FlashcardService:
                     context=context,
                     count=cards_per_pair,
                 )
-                raw = await llm.generate(prompt, system=GRAPH_FLASHCARD_SYSTEM, stream=False)
+                raw = await llm.generate(
+                    prompt, system=GRAPH_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(), stream=False,
+                )
                 cards_data = _parse_llm_response(raw, document_id)
 
                 now = datetime.now(UTC)
@@ -1751,6 +1789,7 @@ class FlashcardService:
                     )
                 return cards
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks
         raw_results = await asyncio.gather(
             *[_generate_one(a, b, label) for a, b, label, _conf in pairs],
             return_exceptions=True,
@@ -1758,7 +1797,7 @@ class FlashcardService:
 
         all_cards: list[FlashcardModel] = []
         for res in raw_results:
-            if isinstance(res, (litellm.ServiceUnavailableError, litellm.APIConnectionError)):
+            if isinstance(res, (LLMServiceUnavailableError, LLMAPIConnectionError)):
                 raise res  # type: ignore[misc]
             if isinstance(res, BaseException):
                 logger.warning("generate_from_graph: error for a pair: %s", res)
@@ -1829,6 +1868,8 @@ class FlashcardService:
             text=combined_text,
         )
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         with trace_chain(
             "flashcard.generate_technical",
             input_value=f"doc={document_id} scope={scope} count={count}",
@@ -1838,7 +1879,10 @@ class FlashcardService:
             span.set_attribute("flashcard.requested_count", count)
             span.set_attribute("flashcard.mode", "technical")
 
-            raw = await llm.generate(prompt, system=TECH_FLASHCARD_SYSTEM, stream=False)
+            raw = await llm.generate(
+                prompt, system=TECH_FLASHCARD_SYSTEM,
+                model=_get_generation_model(), stream=False,
+            )
             cards_data = _parse_llm_response(raw, document_id)
             span.set_attribute("flashcard.generated_count", len(cards_data))
 
@@ -1927,6 +1971,8 @@ class FlashcardService:
 
         prompt = CLOZE_USER_TMPL.format(count=count, text=combined_text)
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         with trace_chain(
             "flashcard.generate_cloze",
             input_value=f"section={section_id} count={count}",
@@ -1935,7 +1981,10 @@ class FlashcardService:
             span.set_attribute("flashcard.requested_count", count)
             span.set_attribute("flashcard.mode", "cloze")
 
-            raw = await llm.generate(prompt, system=CLOZE_SYSTEM, stream=False)
+            raw = await llm.generate(
+                prompt, system=CLOZE_SYSTEM,
+                model=_get_generation_model(), stream=False,
+            )
             items = _parse_cloze_llm_response(raw)
 
             if not items:
@@ -1943,7 +1992,10 @@ class FlashcardService:
                     "generate_cloze: no valid cards on first attempt for section=%s, retrying",
                     section_id,
                 )
-                raw2 = await llm.generate(prompt, system=CLOZE_SYSTEM, stream=False)
+                raw2 = await llm.generate(
+                prompt, system=CLOZE_SYSTEM,
+                model=_get_generation_model(), stream=False,
+            )
                 items = _parse_cloze_llm_response(raw2)
 
             span.set_attribute("flashcard.generated_count", len(items))

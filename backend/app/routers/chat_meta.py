@@ -3,7 +3,6 @@
 import asyncio
 import logging
 
-import litellm
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,6 +10,7 @@ from sqlalchemy import select
 from app.database import get_session_factory
 from app.models import ChatSuggestionHistoryModel, DocumentModel, SectionModel
 from app.services.graph import get_graph_service
+from app.services.llm import LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -249,13 +249,7 @@ async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-    ):
+    except LLMUnavailableError:
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
@@ -313,13 +307,7 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)
                 return SuggestionResponse(suggestions=[SuggestionItem(**i) for i in items])
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-    ):
+    except LLMUnavailableError:
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
     # Fallback to S187 template logic

@@ -24,7 +24,7 @@ import asyncio
 import json
 import logging
 
-import litellm
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,6 @@ class DiagramExtractorService:
 
         from app.database import get_session_factory  # noqa: PLC0415
         from app.models import ImageModel  # noqa: PLC0415
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             result = await session.execute(
@@ -165,13 +164,14 @@ class DiagramExtractorService:
 
             async with _EXTRACT_SEM:
                 try:
-                    response = await litellm.acompletion(
-                        **get_litellm_kwargs(background=True),
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.0,
-                    )
-                    raw = (response.choices[0].message.content or "").strip()
-                except litellm.ServiceUnavailableError:
+                    raw = (
+                        await get_llm_service().complete(
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.0,
+                            background=True,
+                        )
+                    ).strip()
+                except LLMUnavailableError:
                     logger.warning(
                         "diagram_extractor: LLM unavailable for image_id=%s "
                         "-- Ollama is unreachable, start with: ollama serve",

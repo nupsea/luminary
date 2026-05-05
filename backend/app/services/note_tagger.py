@@ -5,8 +5,6 @@ import logging
 import re
 from functools import lru_cache
 
-import litellm
-
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
@@ -46,27 +44,19 @@ class NoteTaggerService:
         """
         if len(content) < 20:
             return []
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+        from app.services.llm import LLMUnavailableError, get_llm_service  # noqa: PLC0415
 
         prompt = _USER_TMPL.format(content=content[:2000])
         try:
-            response = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            raw = await get_llm_service().complete(
                 messages=[
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,
             )
-            raw = response.choices[0].message.content or ""
             return _parse_tag_list(raw)
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ):
+        except LLMUnavailableError:
             logger.warning("LLM unavailable during note tagging; returning empty tags")
             return []
 

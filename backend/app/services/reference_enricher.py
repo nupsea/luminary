@@ -11,7 +11,6 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-import litellm
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import SectionSummaryModel, WebReferenceModel
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -72,24 +72,21 @@ async def _extract_references(section_content: str) -> list[dict]:
     """Call the LLM to extract canonical references from a section summary.
 
     Returns list of dicts on success, [] on parse failure (non-fatal).
-    Raises litellm.ServiceUnavailableError if Ollama is unreachable.
+    Raises LLMUnavailableError if the LLM is unreachable.
     """
-    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
     user_prompt = (
         f"Section summary:\n{section_content}\n\n"
         "Extract up to 5 key technical terms and for each provide a canonical reference."
     )
-    response = await litellm.acompletion(
-        **get_litellm_kwargs(background=True),
+    raw = await get_llm_service().complete(
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.0,
         timeout=30.0,
+        background=True,
     )
-    raw = response.choices[0].message.content or ""
     cleaned = _strip_fences(raw)
     try:
         parsed = json.loads(cleaned)
@@ -114,7 +111,7 @@ class ReferenceEnricherService:
         """Generate web references for section summaries that have none yet.
 
         Returns count of new WebReferenceModel rows created.
-        Raises litellm.ServiceUnavailableError (propagates to worker to mark job failed).
+        Raises LLMUnavailableError (propagates to worker to mark job failed).
         """
         settings = get_settings()
         provider = settings.WEB_SEARCH_PROVIDER
@@ -152,7 +149,7 @@ class ReferenceEnricherService:
 
             try:
                 refs = await _extract_references(summary.content)
-            except litellm.ServiceUnavailableError:
+            except LLMUnavailableError:
                 raise
             except Exception as exc:
                 logger.warning(
@@ -254,7 +251,7 @@ class ReferenceEnricherService:
 
         try:
             refs = await _extract_references(summary.content)
-        except litellm.ServiceUnavailableError as exc:
+        except LLMUnavailableError as exc:
             raise HTTPException(
                 status_code=503,
                 detail="Ollama is unreachable. Start it with: ollama serve",
@@ -338,7 +335,7 @@ async def web_refs_handler(document_id: str, job_id: str) -> None:
 
     Called by EnrichmentQueueWorker for each web_refs job.
     Delegates to ReferenceEnricherService.enrich().
-    litellm.ServiceUnavailableError propagates to mark job 'failed'.
+    LLMUnavailableError propagates to mark job 'failed'.
     """
     logger.info("web_refs_handler: starting doc=%s job=%s", document_id, job_id)
     svc = ReferenceEnricherService()

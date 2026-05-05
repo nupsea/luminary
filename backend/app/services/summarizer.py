@@ -18,7 +18,6 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 
-import litellm
 from sqlalchemy import delete, select
 
 from app.database import get_session_factory
@@ -29,7 +28,7 @@ from app.models import (
     SectionSummaryModel,
     SummaryModel,
 )
-from app.services.llm import get_llm_service
+from app.services.llm import LLMAuthenticationError, get_llm_service
 from app.services.section_summarizer import _is_metadata_section
 
 logger = logging.getLogger(__name__)
@@ -357,7 +356,7 @@ class SummarizationService:
             )
             if isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, litellm.AuthenticationError):
+            elif isinstance(exc, LLMAuthenticationError):
                 msg = "LLM API key is invalid. Check your key in Settings."
             else:
                 msg = "LLM service unavailable. If using Ollama, run: ollama serve"
@@ -672,7 +671,7 @@ class SummarizationService:
             logger.warning("stream_library_summary failed", exc_info=exc)
             if isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, litellm.AuthenticationError):
+            elif isinstance(exc, LLMAuthenticationError):
                 msg = "LLM API key is invalid. Check your key in Settings."
             else:
                 msg = "LLM service unavailable. If using Ollama, run: ollama serve"

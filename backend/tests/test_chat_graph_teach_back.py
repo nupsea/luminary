@@ -127,7 +127,7 @@ async def test_teach_back_node_returns_card():
     mock_acompletion = AsyncMock(return_value=mock_response)
     with (
         patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
-        patch("app.runtime.chat_graph.litellm.acompletion", new=mock_acompletion),
+        patch("app.services.llm.litellm.acompletion", new=mock_acompletion),
         patch("app.config.get_settings") as mock_settings,
     ):
         mock_settings.return_value.LITELLM_DEFAULT_MODEL = "ollama/test"
@@ -170,7 +170,7 @@ async def test_teach_back_malformed_json_fallback():
     mock_acompletion = AsyncMock(return_value=mock_response)
     with (
         patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
-        patch("app.runtime.chat_graph.litellm.acompletion", new=mock_acompletion),
+        patch("app.services.llm.litellm.acompletion", new=mock_acompletion),
         patch("app.config.get_settings") as mock_settings,
     ):
         mock_settings.return_value.LITELLM_DEFAULT_MODEL = "ollama/test"
@@ -205,7 +205,7 @@ async def test_teach_back_ollama_offline():
     with (
         patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
         patch(
-            "app.runtime.chat_graph.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             side_effect=_litellm.ServiceUnavailableError(
                 llm_provider="ollama", model="ollama/test", message="Connection refused"
             ),
@@ -270,7 +270,7 @@ async def test_teach_back_fenced_json_parsed():
     mock_acompletion = AsyncMock(return_value=mock_response)
     with (
         patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
-        patch("app.runtime.chat_graph.litellm.acompletion", new=mock_acompletion),
+        patch("app.services.llm.litellm.acompletion", new=mock_acompletion),
         patch("app.config.get_settings") as mock_settings,
     ):
         mock_settings.return_value.LITELLM_DEFAULT_MODEL = "ollama/test"

@@ -92,7 +92,7 @@ def test_detect_gaps_returns_report(client):
     mock_retriever = MagicMock()
     mock_retriever.retrieve = AsyncMock(return_value=[])
 
-    with patch("app.services.gap_detector.litellm.acompletion", AsyncMock(return_value=mock_resp)):
+    with patch("app.services.llm.litellm.acompletion", AsyncMock(return_value=mock_resp)):
         with patch("app.services.retriever.get_retriever", return_value=mock_retriever):
             resp = client.post(
                 "/notes/gap-detect",
@@ -121,7 +121,7 @@ def test_detect_gaps_malformed_llm(client):
     mock_retriever = MagicMock()
     mock_retriever.retrieve = AsyncMock(return_value=[])
 
-    with patch("app.services.gap_detector.litellm.acompletion", AsyncMock(return_value=mock_resp)):
+    with patch("app.services.llm.litellm.acompletion", AsyncMock(return_value=mock_resp)):
         with patch("app.services.retriever.get_retriever", return_value=mock_retriever):
             resp = client.post(
                 "/notes/gap-detect",
@@ -172,7 +172,7 @@ def test_alice_gap_detection_slow(all_books_ingested):
         )
 
         with patch(
-            "app.services.gap_detector.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             AsyncMock(return_value=mock_resp),
         ):
             resp = c.post(

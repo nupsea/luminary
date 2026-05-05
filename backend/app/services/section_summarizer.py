@@ -11,11 +11,11 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-import litellm
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import SectionModel, SectionSummaryModel
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -116,22 +116,19 @@ class SectionSummarizerService:
         total_inserted = 0
 
         async def _summarize_unit(unit_index: int, unit: dict) -> None:
-            from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
             nonlocal total_inserted
             async with semaphore:
                 try:
-                    response = await litellm.acompletion(
-                        **get_litellm_kwargs(background=True),
+                    summary_text = await get_llm_service().complete(
                         messages=[
                             {"role": "system", "content": _SYSTEM_PROMPT},
                             {"role": "user", "content": unit["text"][:TEXT_HARD_CAP]},
                         ],
                         temperature=0.0,
                         timeout=90.0,
+                        background=True,
                     )
-                    summary_text = response.choices[0].message.content or ""
-                except litellm.ServiceUnavailableError:
+                except LLMUnavailableError:
                     raise
                 except Exception as exc:
                     logger.warning(
@@ -159,7 +156,7 @@ class SectionSummarizerService:
 
         try:
             await asyncio.gather(*[_summarize_unit(i, unit) for i, unit in enumerate(units)])
-        except litellm.ServiceUnavailableError:
+        except LLMUnavailableError:
             logger.warning(
                 "section_summarizer: LLM unavailable — skipping section summaries",
                 extra={"doc_id": document_id},

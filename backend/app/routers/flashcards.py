@@ -14,6 +14,8 @@ Routes:
   GET  /flashcards/{document_id}                        — list cards ordered by created_at desc
   PUT  /flashcards/{card_id}                — update question/answer, sets is_user_edited
   DELETE /flashcards/{card_id}              — delete a card (204)
+  POST /flashcards/bulk-delete              — delete multiple cards by ID
+  DELETE /flashcards/document/{document_id} — delete all cards for a document (204)
   POST /flashcards/{card_id}/review         — FSRS review with rating
   GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel (S155)
 
@@ -29,7 +31,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-import litellm
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -54,6 +55,7 @@ from app.services.flashcard import (
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
 from app.services.fsrs_service import FSRSService, get_fsrs_service
+from app.services.llm import LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +311,16 @@ async def generate_flashcards(
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> list[FlashcardResponse]:
     """Generate flashcards for a document using LLM."""
+    logger.info(
+        "Flashcard generation requested",
+        extra={
+            "document_id": req.document_id,
+            "scope": req.scope,
+            "count": req.count,
+            "difficulty": req.difficulty,
+            "has_context": bool(req.context),
+        },
+    )
     try:
         cards = await service.generate(
             document_id=req.document_id,
@@ -319,11 +331,7 @@ async def generate_flashcards(
             session=session,
             context=req.context,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -351,11 +359,7 @@ async def generate_from_gaps(
             document_id=req.document_id,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is unreachable. Start it with: ollama serve",
@@ -425,11 +429,7 @@ async def generate_flashcards_from_graph(
             k=req.k,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -456,11 +456,7 @@ async def generate_technical_flashcards(
             count=req.count,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -543,11 +539,7 @@ async def generate_cloze_flashcards(
             count=count,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -603,11 +595,7 @@ async def fill_audit_gaps(
     try:
         report = await audit_service.analyze_coverage(document_id, session)
         created = await audit_service.fill_gaps(document_id, report["gaps"], session)
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is unreachable. Start it with: ollama serve",
@@ -857,19 +845,58 @@ async def delete_flashcard(
     logger.info("Deleted flashcard", extra={"card_id": card_id})
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[str] = Field(min_length=1)
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: int
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_flashcards(
+    req: BulkDeleteRequest,
+    session: AsyncSession = Depends(get_db),
+) -> BulkDeleteResponse:
+    """Delete multiple flashcards in one call. Keeps FTS index in sync per I-4."""
+    existing = (
+        await session.execute(
+            select(FlashcardModel.id).where(FlashcardModel.id.in_(req.ids))
+        )
+    ).scalars().all()
+    for card_id in existing:
+        await _delete_flashcard_fts(card_id, session)
+    if existing:
+        await session.execute(
+            delete(FlashcardModel).where(FlashcardModel.id.in_(existing))
+        )
+    await session.commit()
+    logger.info("Bulk deleted flashcards", extra={"count": len(existing)})
+    return BulkDeleteResponse(deleted=len(existing))
+
+
 @router.delete("/document/{document_id}", status_code=204)
 async def delete_all_document_flashcards(
     document_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete all flashcards for a specific document."""
-    await session.execute(
-        delete(FlashcardModel)
-        .where(FlashcardModel.id.isnot(None))
-        .where(FlashcardModel.document_id == document_id)
-    )
+    """Delete all flashcards for a specific document. Keeps FTS index in sync per I-4."""
+    ids = (
+        await session.execute(
+            select(FlashcardModel.id).where(FlashcardModel.document_id == document_id)
+        )
+    ).scalars().all()
+    for card_id in ids:
+        await _delete_flashcard_fts(card_id, session)
+    if ids:
+        await session.execute(
+            delete(FlashcardModel).where(FlashcardModel.document_id == document_id)
+        )
     await session.commit()
-    logger.info("Deleted all flashcards for document", extra={"document_id": document_id})
+    logger.info(
+        "Deleted all flashcards for document",
+        extra={"document_id": document_id, "count": len(ids)},
+    )
 
 
 @router.post("/{card_id}/review", response_model=FlashcardResponse)
@@ -904,6 +931,23 @@ async def review_flashcard(
         _task = asyncio.create_task(_tracker.update_coverage(card.document_id))
         _background_tasks.add(_task)
         _task.add_done_callback(_background_tasks.discard)
+
+    # Fire-and-forget XP award for the review.
+    async def _award_review_xp() -> None:
+        try:
+            from app.database import get_session_factory  # noqa: PLC0415
+            from app.services.engagement_service import EngagementService  # noqa: PLC0415
+
+            async with get_session_factory()() as xp_session:
+                svc = EngagementService(xp_session)
+                await svc.award_flashcard_xp(req.rating, card_id)
+                await xp_session.commit()
+        except Exception:
+            logger.warning("Failed to award XP for flashcard review", exc_info=True)
+
+    _xp_task = asyncio.create_task(_award_review_xp())
+    _background_tasks.add(_xp_task)
+    _xp_task.add_done_callback(_background_tasks.discard)
 
     logger.info("Reviewed flashcard", extra={"card_id": card_id, "rating": req.rating})
     return _to_response(card)

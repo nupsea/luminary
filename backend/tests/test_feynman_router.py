@@ -100,21 +100,17 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
         assert resp.json()["opening_message"] == opening_message
 
         # Step 2: Post a learner message and stream response
-        # Mock litellm.acompletion for streaming
-        async def mock_stream():
-            chunk = MagicMock()
-            chunk.choices[0].delta.content = tutor_response
-            yield chunk
-            end_chunk = MagicMock()
-            end_chunk.choices[0].delta.content = ""
-            yield end_chunk
+        async def mock_token_stream():
+            yield tutor_response
 
-        with patch("litellm.acompletion", return_value=mock_stream()):
-            with patch("app.services.feynman_service.get_llm_service"):
-                resp2 = await client.post(
-                    f"/feynman/sessions/{session_id}/message",
-                    json={"content": "A closure is a function that captures its environment."},
-                )
+        with patch("app.services.feynman_service.get_llm_service") as mock_stream_factory:
+            mock_stream_svc = AsyncMock()
+            mock_stream_svc.stream_messages = AsyncMock(return_value=mock_token_stream())
+            mock_stream_factory.return_value = mock_stream_svc
+            resp2 = await client.post(
+                f"/feynman/sessions/{session_id}/message",
+                json={"content": "A closure is a function that captures its environment."},
+            )
         assert resp2.status_code == 200
         # Parse SSE events
         events = [line[6:] for line in resp2.text.splitlines() if line.startswith("data: ")]

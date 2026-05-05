@@ -11,13 +11,19 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 
-import litellm
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
-from app.services.llm import get_llm_service
+from app.services.llm import (
+    LLMAPIConnectionError,
+    LLMAuthenticationError,
+    LLMNotFoundError,
+    LLMRateLimitError,
+    LLMServiceUnavailableError,
+    get_llm_service,
+)
 from app.telemetry import trace_chain
 from app.types import ScoredChunk
 
@@ -367,20 +373,20 @@ class QAService:
                     )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
-                    elif isinstance(exc, litellm.AuthenticationError):
+                    elif isinstance(exc, LLMAuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
-                    elif isinstance(exc, litellm.RateLimitError):
+                    elif isinstance(exc, LLMRateLimitError):
                         msg = (
                             "Rate limit reached. Free tier quota exhausted"
                             " — wait and retry, or switch provider."
                         )
-                    elif isinstance(exc, litellm.NotFoundError):
+                    elif isinstance(exc, LLMNotFoundError):
                         msg = (
                             f"Model not found ({type(exc).__name__})."
                             " Check the model name in Settings."
                         )
                     elif isinstance(
-                        exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)
+                        exc, (LLMServiceUnavailableError, LLMAPIConnectionError)
                     ):
                         msg = (
                             "LLM unreachable. Check your network or Settings"
@@ -497,20 +503,20 @@ class QAService:
                     )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
-                    elif isinstance(exc, litellm.AuthenticationError):
+                    elif isinstance(exc, LLMAuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
-                    elif isinstance(exc, litellm.RateLimitError):
+                    elif isinstance(exc, LLMRateLimitError):
                         msg = (
                             "Rate limit reached. Free tier quota exhausted"
                             " — wait and retry, or switch provider."
                         )
-                    elif isinstance(exc, litellm.NotFoundError):
+                    elif isinstance(exc, LLMNotFoundError):
                         msg = (
                             f"Model not found ({type(exc).__name__})."
                             " Check the model name in Settings."
                         )
                     elif isinstance(
-                        exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)
+                        exc, (LLMServiceUnavailableError, LLMAPIConnectionError)
                     ):
                         msg = (
                             "LLM unreachable. Check your network or Settings"

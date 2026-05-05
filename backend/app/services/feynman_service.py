@@ -21,7 +21,6 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-import litellm
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +31,7 @@ from app.models import (
     SectionModel,
     SectionSummaryModel,
 )
-from app.services.llm import get_llm_service
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -251,19 +250,15 @@ class FeynmanService:
 
         opening_prompt = _FEYNMAN_OPENING_TMPL.format(concept=concept)
 
+        await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
+
         try:
             raw = await llm.generate(
                 prompt=opening_prompt,
                 system=system_prompt,
                 stream=False,
             )
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ) as exc:
+        except LLMUnavailableError as exc:
             raise HTTPException(
                 status_code=503,
                 detail="LLM unavailable. Check Settings — if using Ollama, run: ollama serve",
@@ -366,36 +361,20 @@ class FeynmanService:
             created_at=datetime.now(UTC),
         )
         db_session.add(learner_turn)
-        await db_session.flush()
-
-        # Stream LLM response
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+        await db_session.commit()  # Commit learner turn to release write locks during LLM stream
 
         accumulated = ""
 
         try:
-            stream_resp = await litellm.acompletion(
-                **get_litellm_kwargs(),
-                messages=messages,
-                stream=True,
-            )
-            async for chunk in stream_resp:
-                delta = chunk.choices[0].delta.content or ""
+            stream = await get_llm_service().stream_messages(messages=messages)
+            async for delta in stream:
                 if delta:
                     accumulated += delta
-                    # Stream tokens but suppress the gaps: block once it starts
                     if "\ngaps:" not in accumulated and "gaps:" not in accumulated[-20:]:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ) as exc:
+        except LLMUnavailableError as exc:
             logger.warning("Feynman stream_turn: LLM unavailable: %s", exc)
-            # Learner turn was flushed but not committed; roll back so no orphan row
             await db_session.rollback()
             error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
@@ -477,13 +456,7 @@ class FeynmanService:
                     document_id=feynman_session.document_id,
                     session=db_session,
                 )
-            except (
-                litellm.ServiceUnavailableError,
-                litellm.APIConnectionError,
-                litellm.NotFoundError,
-                litellm.RateLimitError,
-                litellm.AuthenticationError,
-            ):
+            except LLMUnavailableError:
                 logger.warning(
                     "Feynman complete_session: LLM unavailable; skipping flashcard generation"
                 )
@@ -560,36 +533,26 @@ class FeynmanService:
             section_context=section_context,
         )
 
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+        await db_session.commit()  # Release read locks to prevent WAL deadlocks during LLM stream
 
         accumulated = ""
 
         try:
-            stream_resp = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            stream = await get_llm_service().stream_messages(
                 messages=[
                     {"role": "system", "content": _MODEL_EXPLANATION_SYSTEM},
                     {"role": "user", "content": prompt},
                 ],
-                stream=True,
             )
-            async for chunk in stream_resp:
-                delta = chunk.choices[0].delta.content or ""
+            async for delta in stream:
                 if delta:
                     accumulated += delta
-                    # Suppress key_points: block once it starts
                     tail = accumulated[-20:]
                     kp_started = "\nkey_points:" in accumulated or "key_points:" in tail
                     if not kp_started:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ) as exc:
+        except LLMUnavailableError as exc:
             logger.warning("generate_model_explanation: LLM unavailable: %s", exc)
             await db_session.rollback()
             error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
@@ -657,6 +620,7 @@ class FeynmanService:
                 "status": s.status,
                 "gap_count": gap_counts.get(s.id, 0),
                 "created_at": s.created_at,
+                "section_id": s.section_id,
             }
             for s in sessions
         ]

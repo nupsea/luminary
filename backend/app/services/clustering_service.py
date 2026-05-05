@@ -14,7 +14,6 @@ import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
 
-import litellm
 import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +23,7 @@ from app.models import (
     CollectionModel,
     NoteModel,
 )
+from app.services.llm import get_llm_service
 from app.services.naming import normalize_collection_name, normalize_tag_slug
 
 logger = logging.getLogger(__name__)
@@ -144,14 +144,11 @@ class ClusteringService:
 
         Falls back to 'Notes Cluster' if LLM is unavailable.
         """
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         if not excerpts:
             return "Notes Cluster"
         excerpts_text = "\n---\n".join(excerpts)
         try:
-            response = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            raw = await get_llm_service().complete(
                 messages=[
                     {
                         "role": "system",
@@ -165,9 +162,7 @@ class ClusteringService:
                 ],
                 temperature=0.0,
             )
-            raw = (response.choices[0].message.content or "").strip()
-            # Sanitize: take first line, limit to 60 chars
-            name = raw.split("\n")[0].strip()[:60]
+            name = raw.strip().split("\n")[0].strip()[:60]
             return name if name else "Notes Cluster"
         except Exception as exc:
             logger.warning("LLM cluster naming failed (non-fatal): %s", exc)

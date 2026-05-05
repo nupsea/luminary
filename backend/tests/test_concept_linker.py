@@ -306,9 +306,9 @@ async def test_ac2_contradiction_detection(monkeypatch):
     async def mock_litellm_acompletion(**kwargs):
         return MockLLMResponse()
 
-    import app.services.concept_linker as cl_module
+    import app.services.llm as llm_module
 
-    monkeypatch.setattr(cl_module.litellm, "acompletion", mock_litellm_acompletion)
+    monkeypatch.setattr(llm_module.litellm, "acompletion", mock_litellm_acompletion)
 
     mock_graph = MockGraphService()
     monkeypatch.setattr("app.services.concept_linker.get_graph_service", lambda: mock_graph)
@@ -437,9 +437,9 @@ async def test_ac3_same_concept_edge_in_real_kuzu(tmp_path, monkeypatch):
 
         choices = [_Choice()]
 
-    import app.services.concept_linker as cl_module
+    import app.services.llm as llm_module
 
-    monkeypatch.setattr(cl_module.litellm, "acompletion", lambda **kw: _FakeLLMResp())
+    monkeypatch.setattr(llm_module.litellm, "acompletion", lambda **kw: _FakeLLMResp())
 
     # Minimal mock session: returns doc_tech_b as other document
     class MockResult:

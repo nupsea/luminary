@@ -13,11 +13,11 @@ import logging
 import re
 from functools import lru_cache
 
-import litellm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import NoteModel
+from app.services.llm import LLMUnavailableError, get_llm_service
 from app.types import GapReport
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class GapDetectorService:
 
         Raises:
             ValueError: if no notes found for the given IDs
-            litellm.ServiceUnavailableError: if Ollama is unreachable
+            LLMUnavailableError: if the LLM is unreachable
         """
         if session is None:
             from app.database import get_session_factory  # noqa: PLC0415
@@ -90,27 +90,20 @@ class GapDetectorService:
         chunks = await get_retriever().retrieve(query_used, [document_id], k=k)
         book_context = "\n\n".join(c.text for c in chunks)[:_BOOK_CAP]
 
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         user_msg = f"NOTES:\n{notes_text}\n\nBOOK PASSAGES:\n{book_context}"
 
         try:
-            response = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            raw = await get_llm_service().complete(
                 messages=[
                     {"role": "system", "content": _ANALYSIS_SYSTEM},
                     {"role": "user", "content": user_msg},
                 ],
                 temperature=0.0,
             )
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-        ) as exc:
-            raise exc  # propagated to API layer
+        except LLMUnavailableError:
+            raise
 
-        raw = (response.choices[0].message.content or "").strip()
-        parsed = _extract_json(raw)
+        parsed = _extract_json(raw.strip())
         if not parsed or "gaps" not in parsed or "covered" not in parsed:
             logger.warning("detect_gaps: unexpected LLM JSON shape, raw=%r", raw[:200])
             return GapReport(

@@ -177,7 +177,7 @@ async def test_enrich_creates_refs_from_multi_term_summary(test_db):
     ]
 
     with patch(
-        "app.services.reference_enricher.litellm.acompletion",
+        "app.services.llm.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=_make_mock_llm_response(mock_refs),
     ):
@@ -241,7 +241,7 @@ async def test_no_http_calls_when_provider_none(test_db, monkeypatch):
 
     with (
         patch(
-            "app.services.reference_enricher.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             new_callable=AsyncMock,
             return_value=_make_mock_llm_response(mock_refs),
         ),
@@ -310,7 +310,7 @@ async def test_enrichment_creates_rows_with_source_quality(test_db):
     ]
 
     with patch(
-        "app.services.reference_enricher.litellm.acompletion",
+        "app.services.llm.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=_make_mock_llm_response(mock_refs),
     ):

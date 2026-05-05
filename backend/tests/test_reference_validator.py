@@ -301,7 +301,7 @@ async def test_extraction_validates_refs_before_persisting(test_db):
 
     with (
         patch(
-            "app.services.reference_enricher.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             new_callable=AsyncMock,
             return_value=mock_llm_resp,
         ),

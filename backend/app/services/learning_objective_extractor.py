@@ -9,8 +9,6 @@ import logging
 import re
 import uuid
 
-import litellm
-
 from app.database import get_session_factory
 
 logger = logging.getLogger(__name__)
@@ -31,7 +29,7 @@ class LearningObjectiveExtractorService:
         Returns a list of objective strings (possibly empty).
         Never raises — returns [] on any failure.
         """
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+        from app.services.llm import LLMUnavailableError, get_llm_service  # noqa: PLC0415
 
         prompt = (
             "Extract learning objectives from the following chapter introduction.\n"
@@ -40,14 +38,13 @@ class LearningObjectiveExtractorService:
             f"Text:\n{text[:600]}"
         )
         try:
-            response = await litellm.acompletion(
-                **get_litellm_kwargs(background=True),
+            raw = await get_llm_service().complete(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
+                background=True,
             )
-            raw = response.choices[0].message.content or ""
             return _parse_objectives(raw)
-        except litellm.ServiceUnavailableError as exc:
+        except LLMUnavailableError as exc:
             logger.warning(
                 "LLM unavailable during objective extraction for section %s: %s",
                 section_id,

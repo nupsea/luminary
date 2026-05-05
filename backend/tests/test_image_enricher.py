@@ -177,7 +177,7 @@ async def test_enrich_sets_description_and_image_type(
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion", new_callable=AsyncMock
+            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
@@ -265,7 +265,7 @@ async def test_decorative_image_skips_llm(session_factory, tmp_path: Path) -> No
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion", new_callable=AsyncMock
+            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
@@ -308,7 +308,7 @@ async def test_offline_503_propagates(doc_and_image, session_factory, tmp_path: 
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             new_callable=AsyncMock,
             side_effect=_litellm.ServiceUnavailableError(
                 message="Ollama unreachable", llm_provider="ollama", model="llava"
@@ -357,7 +357,7 @@ async def test_images_fts_keyword_search(doc_and_image, session_factory, tmp_pat
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion", new_callable=AsyncMock
+            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,

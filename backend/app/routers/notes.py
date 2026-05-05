@@ -95,6 +95,14 @@ class SuggestedTagsResponse(BaseModel):
     tags: list[str]
 
 
+class NoteTitleSuggestRequest(BaseModel):
+    content: str
+
+
+class NoteTitleSuggestResponse(BaseModel):
+    title: str
+
+
 class NoteSearchItem(BaseModel):
     note_id: str
     content: str
@@ -418,6 +426,24 @@ async def create_note(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
+
+    # Fire-and-forget XP award for note creation.
+    async def _award_note_xp() -> None:
+        try:
+            from app.database import get_session_factory  # noqa: PLC0415
+            from app.services.engagement_service import EngagementService  # noqa: PLC0415
+
+            async with get_session_factory()() as xp_session:
+                svc = EngagementService(xp_session)
+                await svc.award_note_xp(note.id, len(tags))
+                await xp_session.commit()
+        except Exception:
+            logger.warning("Failed to award XP for note creation", exc_info=True)
+
+    _xp_task = asyncio.create_task(_award_note_xp())
+    _background_tasks.add(_xp_task)
+    _xp_task.add_done_callback(_background_tasks.discard)
+
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note, source_document_ids=req.source_document_ids)
 
@@ -769,9 +795,8 @@ async def generate_note_flashcards(
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteFlashcardItem] | NoteFlashcardGenerateResponse:
     """Generate flashcards from user notes scoped by tag, note IDs, or collection (S169)."""
-    import litellm  # noqa: PLC0415
-
     from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
+    from app.services.llm import LLMUnavailableError  # noqa: PLC0415
 
     # 422 guard: collection_id and note_ids are mutually exclusive
     if req.collection_id and req.note_ids:
@@ -806,11 +831,7 @@ async def generate_note_flashcards(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is unavailable. Start it with: ollama serve",
@@ -1308,9 +1329,8 @@ async def gap_detect(
     if not req.note_ids:
         raise HTTPException(status_code=422, detail="note_ids must be non-empty")
 
-    import litellm  # noqa: PLC0415
-
     from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
+    from app.services.llm import LLMUnavailableError  # noqa: PLC0415
 
     try:
         report = await get_gap_detector().detect_gaps(
@@ -1320,11 +1340,7 @@ async def gap_detect(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is unavailable. Start it with: ollama serve",
@@ -1365,3 +1381,14 @@ async def suggest_tags(
     tags = [n for t in raw_tags if (n := _norm_tag(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)
+
+
+@router.post("/suggest-title", response_model=NoteTitleSuggestResponse)
+async def suggest_title(
+    req: NoteTitleSuggestRequest,
+) -> NoteTitleSuggestResponse:
+    """Return LLM-suggested title for the provided note content."""
+    from app.services.note_title_generator import get_title_generator  # noqa: PLC0415
+
+    title = await get_title_generator().suggest_title(req.content)
+    return NoteTitleSuggestResponse(title=title)

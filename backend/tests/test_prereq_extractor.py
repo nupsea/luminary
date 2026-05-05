@@ -169,7 +169,7 @@ async def test_prereq_edges_written_after_enrich(tmp_path):
 
     from app.services.prereq_extractor import PrereqExtractorService
 
-    patch_target = "app.services.prereq_extractor.litellm.acompletion"
+    patch_target = "app.services.llm.litellm.acompletion"
     with patch(patch_target, new=AsyncMock(return_value=mock_response)):
         svc = PrereqExtractorService()
         count = await svc.enrich(doc_id)

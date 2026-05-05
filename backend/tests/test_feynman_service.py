@@ -291,7 +291,7 @@ async def test_generate_model_explanation_stores_text(test_db):
         return _gen()
 
     svc = FeynmanService()
-    patch_target = "app.services.feynman_service.litellm.acompletion"
+    patch_target = "app.services.llm.litellm.acompletion"
     with patch(patch_target, new=AsyncMock(side_effect=_mock_stream)):
         async with factory() as session:
             events = [e async for e in svc.generate_model_explanation(session_id, session)]

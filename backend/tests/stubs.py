@@ -15,8 +15,8 @@ class MockEmbeddingService:
 class MockLLMService:
     """Deterministic LLM stub for unit tests.
 
-    Returns fixed content for any prompt. Handles both streaming (stream=True)
-    and non-streaming modes. Tracks call_count for assertion purposes.
+    Mirrors services.llm.LLMService surface: generate(prompt, system, stream=...),
+    complete(messages, ...), stream_messages(messages, ...).
     """
 
     def __init__(self, response: str = "mock response", tokens: list[str] | None = None):
@@ -29,26 +29,30 @@ class MockLLMService:
     ):
         self.call_count += 1
         if stream:
-
-            async def _gen():
-                for t in self._tokens:
-                    yield t
-
-            return _gen()
+            return self._token_gen()
         return self._response
+
+    async def complete(self, messages, **kwargs):
+        self.call_count += 1
+        return self._response
+
+    async def stream_messages(self, messages, **kwargs):
+        self.call_count += 1
+        return self._token_gen()
+
+    async def _token_gen(self):
+        for t in self._tokens:
+            yield t
 
 
 class CapturingLLMService(MockLLMService):
-    """Extends MockLLMService to record every prompt and system argument.
-
-    Use when a test needs to assert on what was passed to the LLM
-    (e.g. verifying that the right instruction mode is in the system prompt).
-    """
+    """Extends MockLLMService to record arguments passed to the LLM."""
 
     def __init__(self, response: str = "ok", tokens: list[str] | None = None):
         super().__init__(response=response, tokens=tokens)
         self.captured_prompts: list[str] = []
         self.captured_systems: list[str] = []
+        self.captured_messages: list[list[dict]] = []
 
     async def generate(
         self, prompt: str, system: str = "", stream: bool = False, model=None, **kwargs
@@ -56,3 +60,11 @@ class CapturingLLMService(MockLLMService):
         self.captured_prompts.append(prompt)
         self.captured_systems.append(system)
         return await super().generate(prompt, system, stream, model)
+
+    async def complete(self, messages, **kwargs):
+        self.captured_messages.append(messages)
+        return await super().complete(messages, **kwargs)
+
+    async def stream_messages(self, messages, **kwargs):
+        self.captured_messages.append(messages)
+        return await super().stream_messages(messages, **kwargs)

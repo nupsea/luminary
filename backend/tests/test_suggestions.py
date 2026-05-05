@@ -290,7 +290,7 @@ async def test_suggestions_not_in_history(db_session):
             "app.routers.chat_meta.get_graph_service",
         ) as mock_graph,
         patch(
-            "app.services.suggestion_service.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             return_value=mock_llm_response,
         ),
         patch(
@@ -408,7 +408,7 @@ async def test_fallback_on_llm_unavailable(db_session):
     with (
         patch("app.routers.chat_meta.get_graph_service") as mock_graph,
         patch(
-            "app.services.suggestion_service.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             side_effect=litellm_mod.ServiceUnavailableError(
                 message="Service unavailable",
                 model="test",

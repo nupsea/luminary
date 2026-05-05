@@ -7,11 +7,11 @@ import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
 
-import litellm
 from sqlalchemy import func, select, update
 
 from app.database import get_session_factory
 from app.models import ChatSuggestionHistoryModel, SummaryModel
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -218,8 +218,6 @@ class SuggestionService:
         target_bloom: int,
     ) -> list[dict]:
         """Call LLM to generate Bloom-level questions. Returns parsed list."""
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         history = await self.get_recent_history(document_id)
         history_text = "\n".join(f"- {h}" for h in history) if history else "(none)"
         bloom_label = _BLOOM_LABELS.get(target_bloom, "Evaluate")
@@ -250,25 +248,17 @@ class SuggestionService:
             )
 
         try:
-            response = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            raw = await get_llm_service().complete(
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
                 temperature=0.7,
             )
-            raw = response.choices[0].message.content or ""
             candidates = _parse_questions(raw)
             filtered = self.filter_near_duplicates(candidates, history)
             return filtered[:6]
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ):
+        except LLMUnavailableError:
             logger.warning("LLM unavailable for suggestion generation; falling back to templates")
             raise
 

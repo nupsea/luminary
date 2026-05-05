@@ -302,7 +302,7 @@ async def test_gap_report_weak_field(test_db):
 
     with (
         patch(
-            "app.services.gap_detector.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             side_effect=fake_acompletion,
         ),
         patch("app.services.mastery_service.get_graph_service") as mock_graph_factory,

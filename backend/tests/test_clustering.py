@@ -125,7 +125,7 @@ async def test_cluster_notes_basic(test_db):
     with (
         patch("app.services.vector_store.get_lancedb_service") as mock_lancedb,
         patch(
-            "app.services.clustering_service.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             new_callable=AsyncMock,
         ) as mock_llm,
         patch("sklearn.cluster.HDBSCAN", return_value=mock_hdbscan_instance),
