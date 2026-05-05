@@ -19,6 +19,12 @@ import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./HighlightsPanel"
+import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
+import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
+import { useReaderTabs } from "./hooks/useReaderTabs"
+import { useReadingProgress } from "./hooks/useReadingProgress"
+import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
+import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
 import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
 import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
 import { NoteCreationDialog } from "./NoteCreationDialog"
@@ -28,7 +34,6 @@ import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
 import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
 import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
 import { SelectionActionBar } from "./SelectionActionBar"
-import type { SourceRef } from "./SelectionActionBar"
 import { SummaryPanel } from "./SummaryPanel"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
@@ -90,74 +95,6 @@ interface NoteEntry {
   section_id: string | null
 }
 
-// ---------------------------------------------------------------------------
-// Reading progress tracking (S110)
-// ---------------------------------------------------------------------------
-
-async function postReadingProgress(documentId: string, sectionId: string): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/reading/progress`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document_id: documentId, section_id: sectionId }),
-    })
-  } catch {
-    // Best-effort: network errors must never interrupt reading
-  }
-}
-
-function useReadingProgress(documentId: string, sectionCount: number) {
-  const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  // Track whether any progress was posted so we can invalidate the library
-  // query on unmount and keep the progress bar in sync within the same session.
-  const progressPosted = useRef(false)
-  const qc = useQueryClient()
-
-  useEffect(() => {
-    if (sectionCount === 0) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const sectionId = (entry.target as HTMLElement).dataset["sectionId"]
-          if (!sectionId) continue
-
-          if (entry.isIntersecting) {
-            if (!timers.current.has(sectionId)) {
-              const t = setTimeout(() => {
-                timers.current.delete(sectionId)
-                progressPosted.current = true
-                void postReadingProgress(documentId, sectionId)
-              }, 3000)
-              timers.current.set(sectionId, t)
-            }
-          } else {
-            const t = timers.current.get(sectionId)
-            if (t !== undefined) {
-              clearTimeout(t)
-              timers.current.delete(sectionId)
-            }
-          }
-        }
-      },
-      { threshold: 0.5 },
-    )
-
-    const elements = document.querySelectorAll("[data-section-id]")
-    for (const el of elements) observer.observe(el)
-
-    return () => {
-      observer.disconnect()
-      for (const t of timers.current.values()) clearTimeout(t)
-      timers.current.clear()
-      // Invalidate the library query so progress bars reflect this session.
-      if (progressPosted.current) {
-        void qc.invalidateQueries({ queryKey: ["documents"] })
-        progressPosted.current = false
-      }
-    }
-  }, [documentId, sectionCount, qc])
-}
 
 interface DocumentReaderProps {
   documentId: string
@@ -187,11 +124,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
+
+  const {
+    leftTab,
+    setLeftTab,
+    pdfViewVisited,
+    setPdfViewVisited,
+    bookViewVisited,
+    setBookViewVisited,
+  } = useReaderTabs({ format: doc?.format })
+
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [leftTab, setLeftTab] = useState<"sections" | "pdfview" | "bookview" | "read">("sections")
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -206,10 +152,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const highlightsPanelRef = useRef<HTMLDivElement>(null)
   const highlightsToggleRef = useRef<HTMLButtonElement>(null)
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
-  // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
-  const [pdfViewVisited, setPdfViewVisited] = useState(false)
-  // S149: tracks whether the Book View tab has been visited at least once (lazy-mount)
-  const [bookViewVisited, setBookViewVisited] = useState(false)
   // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
   // S144: Feynman mode — section id to open dialog for; null = closed
@@ -219,17 +161,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // the sticky banner in the sections tab and the active-row visual treatment.
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
-  // In-document navigation stack: every user-initiated navigation (tab change,
-  // Read click, PDF jump, citation deep-link) pushes the current place. The
-  // Back button (and Cmd/Ctrl+[) pops it.
-  type ReaderPlace = {
-    tab: "sections" | "pdfview" | "bookview" | "read"
-    sectionId: string | null
-    pdfPage: number | null
-  }
-  const historyRef = useRef<ReaderPlace[]>([])
-  const currentPlaceRef = useRef<ReaderPlace>({ tab: "sections", sectionId: null, pdfPage: null })
-  const [historyDepth, setHistoryDepth] = useState(0)
   // S197: noteCount for "Compare my notes" button visibility
   const [noteCount, setNoteCount] = useState(0)
   // S151: in-document Cmd+F search state
@@ -245,16 +176,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // throttle timer: one POST per 10 seconds max
   const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // S147: SelectionActionBar dialog state
-  const [selectionNoteOpen, setSelectionNoteOpen] = useState(false)
-  const [selectionNoteText, setSelectionNoteText] = useState("")
-  const [selectionNoteSourceRef, setSelectionNoteSourceRef] = useState<SourceRef | null>(null)
-  const [selectionNoteHeading, setSelectionNoteHeading] = useState<string | undefined>(undefined)
-  const [editingCreatedNote, setEditingCreatedNote] = useState<Note | null>(null)
-  const [selectionFlashcardOpen, setSelectionFlashcardOpen] = useState(false)
-  const [selectionFlashcardText, setSelectionFlashcardText] = useState("")
-  const [selectionFlashcardSourceRef, setSelectionFlashcardSourceRef] = useState<SourceRef | null>(null)
-  const [selectionFlashcardHeading, setSelectionFlashcardHeading] = useState<string | undefined>(undefined)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const setChatPreload = useAppStore((s) => s.setChatPreload)
@@ -281,72 +202,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [doc?.sections])
 
-  // Parent -> direct children (ids), and total-descendant count per parent.
-  // Used by the collapsible hierarchy in the sections list.
-  const sectionTree = useMemo(() => {
-    const childrenOf = new Map<string, string[]>()
-    const descendantCount = new Map<string, number>()
-    const sections = doc?.sections ?? []
-    for (const s of sections) {
-      if (!s.parent_section_id) continue
-      const arr = childrenOf.get(s.parent_section_id) ?? []
-      arr.push(s.id)
-      childrenOf.set(s.parent_section_id, arr)
-    }
-    // Walk parent chain to accumulate descendant counts.
-    for (const s of sections) {
-      let pid = s.parent_section_id
-      while (pid) {
-        descendantCount.set(pid, (descendantCount.get(pid) ?? 0) + 1)
-        pid = sectionMap.get(pid)?.parent_section_id ?? null
-      }
-    }
-    return { childrenOf, descendantCount }
-  }, [doc?.sections, sectionMap])
+  const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload })
 
-  // Sections collapsed by default: any level<=2 parent that owns level>=3
-  // descendants in a long doc. Keeps the dashboard scannable for tech books
-  // without hiding structure for short articles.
-  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set())
-  const initialCollapsedKey = doc?.id
-  const initialCollapsedRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!doc?.sections || initialCollapsedRef.current === initialCollapsedKey) return
-    initialCollapsedRef.current = initialCollapsedKey ?? null
-    if (doc.sections.length <= 30) {
-      setCollapsedParents(new Set())
-      return
-    }
-    const next = new Set<string>()
-    for (const s of doc.sections) {
-      if (s.level > 2) continue
-      const kids = sectionTree.childrenOf.get(s.id) ?? []
-      const hasDeep = kids.some((cid) => (sectionMap.get(cid)?.level ?? 0) >= 3)
-      if (hasDeep) next.add(s.id)
-    }
-    setCollapsedParents(next)
-  }, [doc?.sections, initialCollapsedKey, sectionTree, sectionMap])
-
-  const toggleCollapsed = useCallback((sid: string) => {
-    setCollapsedParents((prev) => {
-      const next = new Set(prev)
-      if (next.has(sid)) next.delete(sid)
-      else next.add(sid)
-      return next
-    })
-  }, [])
-
-  const isSectionHidden = useCallback(
-    (sec: SectionItem): boolean => {
-      let pid = sec.parent_section_id
-      while (pid) {
-        if (collapsedParents.has(pid)) return true
-        pid = sectionMap.get(pid)?.parent_section_id ?? null
-      }
-      return false
-    },
-    [collapsedParents, sectionMap],
-  )
+  const {
+    sectionTree,
+    collapsedParents,
+    setCollapsedParents,
+    toggleCollapsed,
+    isSectionHidden,
+  } = useSectionListCollapse(doc?.sections, sectionMap, doc?.id)
 
   const audioUrl = (isAudio && !isYouTube) ? `${API_BASE}/documents/${documentId}/audio` : null
   const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
@@ -418,25 +282,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (next) setActiveSectionId(next)
   }, [feynmanSection, readSectionId, activeSectionGoals, openNoteEditor])
 
-  // Mirror the current place into a ref so navigation handlers can read it
-  // synchronously when pushing onto the history stack.
-  useEffect(() => {
-    currentPlaceRef.current = {
-      tab: leftTab,
-      sectionId: activeSectionId,
-      pdfPage: leftTab === "pdfview" ? pdfCurrentPage : null,
-    }
-  }, [leftTab, activeSectionId, pdfCurrentPage])
-
-  // Push the current place onto the history stack. Pass an override when the
-  // caller knows the "place to return to" better than current state — e.g. a
-  // Read button click should return to the clicked section, not to whatever
-  // activeSectionId happened to be when the click fired.
-  const pushHistory = useCallback((override?: Partial<ReaderPlace>) => {
-    const base = { ...currentPlaceRef.current }
-    historyRef.current.push({ ...base, ...override })
-    setHistoryDepth(historyRef.current.length)
-  }, [])
 
   // Scroll the active section card into view inside the sections list.
   // If any ancestor is collapsed, expand the chain first so the target row
@@ -495,10 +340,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // intended scroll target in a ref and let an effect fire it after render.
   const pendingScrollRef = useRef<string | null>(null)
 
-  const goBack = useCallback(() => {
-    const prev = historyRef.current.pop()
-    setHistoryDepth(historyRef.current.length)
-    if (!prev) return
+  const navigateToPlace = useCallback((prev: ReaderPlace) => {
     if (prev.sectionId) {
       setActiveSectionId(prev.sectionId)
       setReadSectionId(prev.sectionId)
@@ -517,7 +359,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       setBookViewVisited(true)
     }
     setLeftTab(prev.tab)
-  }, [])
+  }, [setLeftTab, setPdfViewVisited, setBookViewVisited])
+
+  const { historyDepth, pushHistory, goBack } = useReaderHistory({
+    currentPlace: {
+      tab: leftTab,
+      sectionId: activeSectionId,
+      pdfPage: leftTab === "pdfview" ? pdfCurrentPage : null,
+    },
+    navigateTo: navigateToPlace,
+  })
 
   // Fire the pending scroll once the Sections tab has actually rendered.
   // scrollActiveSectionIntoView itself retries with RAF until the row exists
@@ -529,18 +380,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     scrollActiveSectionIntoView(sid)
   }, [leftTab, scrollActiveSectionIntoView])
 
-  // Cmd/Ctrl+[ — Back. Cmd/Ctrl+] — Forward (not supported yet, no-op).
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey)) return
-      if (e.key === "[") {
-        e.preventDefault()
-        goBack()
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [goBack])
 
   // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
   useEffect(() => {
@@ -628,40 +467,24 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [searchResults])
 
-  // S151: Cmd+F / Ctrl+F keydown listener — opens inline search bar
-  useEffect(() => {
-    function handleCmdF(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
-        e.preventDefault()
-        setSearchOpen(true)
-      }
-    }
-    document.addEventListener("keydown", handleCmdF)
-    return () => document.removeEventListener("keydown", handleCmdF)
+  const closeReaderSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchResults([])
+    setSearchHitIndex(0)
   }, [])
 
-  // S151: Escape closes the search bar when it is open
-  useEffect(() => {
-    if (!searchOpen) return
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setSearchOpen(false)
-        setSearchResults([])
-        setSearchHitIndex(0)
-      }
-    }
-    document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [searchOpen])
+  const openReaderSearch = useCallback(() => setSearchOpen(true), [])
 
-  // S151: close search bar when switching away from the sections tab
+  useReaderKeyboardShortcuts({
+    onBack: goBack,
+    onOpenSearch: openReaderSearch,
+    onCloseSearch: closeReaderSearch,
+    searchOpen,
+  })
+
   useEffect(() => {
-    if (leftTab !== "sections" && searchOpen) {
-      setSearchOpen(false)
-      setSearchResults([])
-      setSearchHitIndex(0)
-    }
-  }, [leftTab, searchOpen])
+    if (leftTab !== "sections" && searchOpen) closeReaderSearch()
+  }, [leftTab, searchOpen, closeReaderSearch])
 
   // S151: scroll current hit into view when hitIndex or results change
   useEffect(() => {
@@ -835,68 +658,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setSheetOpen(true)
   }, [])
 
-  const handleSelectionAddToNote = useCallback((text: string, sourceRef: SourceRef) => {
-    const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
-    setSelectionNoteText(text)
-    setSelectionNoteSourceRef(sourceRef)
-    setSelectionNoteHeading(heading)
-    setSelectionNoteOpen(true)
-  }, [sectionMap])
-
-  const handleSelectionCreateFlashcard = useCallback((text: string, sourceRef: SourceRef) => {
-    const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
-    setSelectionFlashcardText(text)
-    setSelectionFlashcardSourceRef(sourceRef)
-    setSelectionFlashcardHeading(heading)
-    setSelectionFlashcardOpen(true)
-  }, [sectionMap])
-
-  const handleSelectionAskInChat = useCallback((text: string) => {
-    setChatPreload({ text: `Explain this excerpt:\n\n> ${text}`, documentId, autoSubmit: true })
-    window.dispatchEvent(new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }))
-  }, [documentId, setChatPreload])
-
-  const handleSelectionHighlight = useCallback(async (text: string, sourceRef: SourceRef, color: AnnotationItem["color"]) => {
-    try {
-      const res = await fetch(`${API_BASE}/annotations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sourceRef.sectionId,
-          selected_text: text,
-          color,
-          page_number: sourceRef.pageNumber,
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to save highlight")
-      void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
-      toast.success("Highlight saved")
-    } catch (err) {
-      toast.error("Could not save highlight")
-    }
-  }, [documentId, qc])
-
-  const handleSelectionClip = useCallback(async (text: string, sourceRef: SourceRef) => {
-    try {
-      const res = await fetch(`${API_BASE}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sourceRef.sectionId,
-          content: `> ${text}`,
-          tags: ["clipped"],
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to clip")
-      void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-      toast.success("Clipped to notes")
-    } catch (err) {
-      toast.error("Could not clip to notes")
-    }
-  }, [documentId, qc])
-
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
     pushHistory()
     if (doc?.format === "pdf" && ann.page_number) {
@@ -921,22 +682,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       toast.error("Could not remove highlight")
     }
   }, [documentId, qc])
-
-  useEffect(() => {
-    if (leftTab === "pdfview") {
-      if (doc?.format !== "pdf") {
-        setLeftTab("sections")
-      } else {
-        setPdfViewVisited(true)
-      }
-    } else if (leftTab === "bookview") {
-      if (doc?.format !== "epub") {
-        setLeftTab("sections")
-      } else {
-        setBookViewVisited(true)
-      }
-    }
-  }, [leftTab, doc?.format])
 
   useEffect(() => {
     if (!highlightsPanelOpen) return
@@ -1294,11 +1039,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             containerRef={readerContainerRef}
             resolveSourceRef={resolveSourceRef}
             onExplain={handleExplain}
-            onAddToNote={handleSelectionAddToNote}
-            onCreateFlashcard={handleSelectionCreateFlashcard}
-            onAskInChat={handleSelectionAskInChat}
-            onHighlight={(text, sourceRef, color) => void handleSelectionHighlight(text, sourceRef, color)}
-            onClip={(text, sourceRef) => void handleSelectionClip(text, sourceRef)}
+            onAddToNote={selection.handleAddToNote}
+            onCreateFlashcard={selection.handleCreateFlashcard}
+            onAskInChat={selection.handleAskInChat}
+            onHighlight={(text, sourceRef, color) => void selection.handleHighlight(text, sourceRef, color)}
+            onClip={(text, sourceRef) => void selection.handleClip(text, sourceRef)}
           />
 
           {/* Section list */}
@@ -1493,43 +1238,43 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
       {/* S147: Note creation dialog — pre-filled with selected text blockquote */}
       <NoteCreationDialog
-        open={selectionNoteOpen}
-        selectedText={selectionNoteText}
-        sourceRef={selectionNoteSourceRef}
-        sectionHeading={selectionNoteHeading}
-        onClose={() => setSelectionNoteOpen(false)}
+        open={selection.noteOpen}
+        selectedText={selection.noteText}
+        sourceRef={selection.noteSourceRef}
+        sectionHeading={selection.noteHeading}
+        onClose={selection.closeNote}
         onSaved={(note: Note) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
           void qc.invalidateQueries({ queryKey: ["reader-notes"] })
           void qc.invalidateQueries({ queryKey: ["notes"] })
           void qc.invalidateQueries({ queryKey: ["notes-groups"] })
           void qc.invalidateQueries({ queryKey: ["collections"] })
-          setEditingCreatedNote(note)
+          selection.setEditingCreatedNote(note)
         }}
       />
 
       {/* NoteEditorDialog -- opens after NoteCreationDialog saves for full editing */}
       <NoteEditorDialog
-        note={editingCreatedNote}
-        onClose={() => setEditingCreatedNote(null)}
+        note={selection.editingCreatedNote}
+        onClose={selection.clearEditingCreatedNote}
         onSaved={(_updated) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
           void qc.invalidateQueries({ queryKey: ["reader-notes"] })
           void qc.invalidateQueries({ queryKey: ["notes"] })
           void qc.invalidateQueries({ queryKey: ["notes-groups"] })
           void qc.invalidateQueries({ queryKey: ["collections"] })
-          setEditingCreatedNote(null)
+          selection.clearEditingCreatedNote()
         }}
       />
 
       {/* S147: Flashcard generation dialog — scoped to selected text context */}
       <DocumentFlashcardDialog
-        open={selectionFlashcardOpen}
+        open={selection.flashcardOpen}
         documentId={documentId}
-        sectionId={selectionFlashcardSourceRef?.sectionId}
-        sectionHeading={selectionFlashcardHeading}
-        context={selectionFlashcardText}
-        onClose={() => setSelectionFlashcardOpen(false)}
+        sectionId={selection.flashcardSourceRef?.sectionId}
+        sectionHeading={selection.flashcardHeading}
+        context={selection.flashcardText}
+        onClose={selection.closeFlashcard}
       />
 
       {/* Explanation sheet */}
