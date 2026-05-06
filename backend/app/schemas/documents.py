@@ -1,0 +1,206 @@
+"""Pydantic request/response schemas for the documents router.
+
+Extracted from `app/routers/documents.py` as part of the audit #2 refactor.
+The router re-exports these names under their original (private) aliases
+via `__all__` so existing imports keep working.
+"""
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel
+
+from app.workflows.ingestion import ContentType
+
+
+class DocumentListItem(BaseModel):
+    id: str
+    title: str
+    format: str
+    content_type: str
+    word_count: int
+    page_count: int
+    stage: str
+    tags: list[str]
+    created_at: datetime
+    last_accessed_at: datetime
+    summary_one_sentence: str | None
+    flashcard_count: int
+    learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
+    chapter_count: int | None
+    chunk_count: int
+    reading_progress_pct: float
+    audio_duration_seconds: float | None
+    source_url: str | None = None
+    video_title: str | None = None
+    channel_name: str | None = None
+    youtube_url: str | None = None
+    enrichment_status: str | None = None
+    objective_progress_pct: float | None = None
+
+
+class DocumentListResponse(BaseModel):
+    items: list[DocumentListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+class PatchTagsRequest(BaseModel):
+    tags: list[str]
+
+
+class PatchDocumentRequest(BaseModel):
+    title: str | None = None
+    tags: list[str] | None = None
+    content_type: ContentType | None = None
+
+
+class SectionItem(BaseModel):
+    id: str
+    heading: str
+    level: int
+    page_start: int
+    page_end: int
+    section_order: int
+    preview: str
+    admonition_type: str | None = None
+    parent_section_id: str | None = None
+
+
+class DocumentDiagnostics(BaseModel):
+    chunk_count: int
+    fts_count: int
+    entity_count: int
+    edge_count: int
+    vector_count: int
+
+
+class DocumentDetail(BaseModel):
+    id: str
+    title: str
+    format: str
+    content_type: str
+    word_count: int
+    page_count: int
+    stage: str
+    tags: list[str]
+    created_at: datetime
+    last_accessed_at: datetime
+    sections: list[SectionItem]
+    reading_progress_pct: float
+    audio_duration_seconds: float | None = None
+    source_url: str | None = None
+    video_title: str | None = None
+    channel_name: str | None = None
+    youtube_url: str | None = None
+
+
+class ChunkItem(BaseModel):
+    id: str
+    chunk_index: int
+    text: str
+    section_id: str | None = None
+    speaker: str | None = None
+    start_time: float | None = None
+
+
+class UrlIngestRequest(BaseModel):
+    url: str
+
+
+class YouTubeIngestRequest(BaseModel):
+    url: str
+
+
+class KindleIngestResponse(BaseModel):
+    document_ids: list[str]
+    book_count: int
+
+
+class CodeSnippetItem(BaseModel):
+    id: str
+    chunk_id: str
+    section_id: str | None
+    language: str | None
+    signature: str | None
+    content: str
+
+
+class PDFMetaResponse(BaseModel):
+    page_count: int
+    has_toc: bool
+
+
+class EpubChapterTocItem(BaseModel):
+    chapter_index: int
+    title: str
+    word_count: int
+
+
+class EpubTocResponse(BaseModel):
+    document_id: str
+    chapters: list[EpubChapterTocItem]
+
+
+class EpubChapterResponse(BaseModel):
+    chapter_index: int
+    chapter_title: str
+    html: str
+    word_count: int
+    section_ids: list[str]
+
+
+# S151: in-document FTS5 search response model
+class DocumentSectionSearchResult(BaseModel):
+    section_id: str
+    section_heading: str
+    match_count: int
+    snippet: str  # FTS5 snippet() output with <mark> tags wrapping matched terms
+
+
+class LearningObjectiveItem(BaseModel):
+    id: str
+    section_id: str
+    text: str
+    covered: bool
+
+
+class LearningObjectivesResponse(BaseModel):
+    document_id: str
+    objectives: list[LearningObjectiveItem]
+
+
+class ChapterProgressItem(BaseModel):
+    section_id: str
+    heading: str
+    total_objectives: int
+    covered_objectives: int
+    progress_pct: float  # 0.0-100.0
+
+
+class DocumentProgressResponse(BaseModel):
+    document_id: str
+    total_objectives: int
+    covered_objectives: int
+    progress_pct: float  # 0.0-100.0
+    by_chapter: list[ChapterProgressItem]
+
+
+class SavePositionRequest(BaseModel):
+    last_section_id: str | None = None
+    last_section_heading: str | None = None
+    last_pdf_page: int | None = None
+    last_epub_chapter_index: int | None = None
+
+
+class ReadingPositionResponse(BaseModel):
+    document_id: str
+    last_section_id: str | None
+    last_section_heading: str | None
+    last_pdf_page: int | None
+    last_epub_chapter_index: int | None

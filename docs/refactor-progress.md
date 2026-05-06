@@ -45,8 +45,15 @@ this file tracks **only what's still pending**. Completed work is in
   - `routers/study.py` re-exports the schemas + helpers (under their
     private aliases) via `__all__` so existing imports in `feynman.py`
     and tests keep working.
-- Remaining for audit #2: `documents.py:1714`, `notes.py:1377`,
-  `flashcards.py:1002` -- same pattern.
+- `routers/documents.py` 1,749 -> 1,550 lines. Done:
+  - All 24 Pydantic schemas extracted to new `app/schemas/documents.py`.
+  - Pure helpers (`_delete_raw_file`, `_safe_tags`, `_section_to_dict`,
+    `_parsed_to_dict`, `_derive_learning_status`) extracted to new
+    `app/services/documents_service.py`.
+  - `routers/documents.py` re-exports them under their private aliases
+    via `__all__` so `routers/study.py` (5 import sites) and
+    `tests/test_documents.py` keep working.
+- Remaining for audit #2: `notes.py:1394`, `flashcards.py:1005` -- same pattern.
 
 ## Lower priority items from the audit (not yet started)
 

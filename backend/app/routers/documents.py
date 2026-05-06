@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import json
 import logging
 import re
 import shutil
@@ -11,7 +10,6 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from sqlalchemy import case, delete, func, select, text
 
 from app.config import Settings, get_settings
@@ -37,9 +35,49 @@ from app.models import (
     SummaryModel,
     WebReferenceModel,
 )
+from app.schemas.documents import (
+    BulkDeleteRequest,
+    ChapterProgressItem,
+    ChunkItem,
+    CodeSnippetItem,
+    DocumentDetail,
+    DocumentDiagnostics,
+    DocumentListItem,
+    DocumentListResponse,
+    DocumentProgressResponse,
+    DocumentSectionSearchResult,
+    EpubChapterResponse,
+    EpubChapterTocItem,
+    EpubTocResponse,
+    KindleIngestResponse,
+    LearningObjectiveItem,
+    LearningObjectivesResponse,
+    PatchDocumentRequest,
+    PatchTagsRequest,
+    PDFMetaResponse,
+    ReadingPositionResponse,
+    SavePositionRequest,
+    SectionItem,
+    UrlIngestRequest,
+    YouTubeIngestRequest,
+)
+from app.services.documents_service import (
+    delete_raw_file as _delete_raw_file,
+)
+from app.services.documents_service import (
+    derive_learning_status as _derive_learning_status,
+)
+from app.services.documents_service import (
+    parsed_to_dict as _parsed_to_dict,
+)
+from app.services.documents_service import (
+    safe_tags as _safe_tags,
+)
+from app.services.documents_service import (
+    section_to_dict as _section_to_dict,
+)
 from app.services.parser import DocumentParser
 from app.services.vector_store import get_lancedb_service
-from app.types import ParsedDocument, Section
 from app.workflows.ingestion import STAGE_PROGRESS, ContentType, run_ingestion
 
 logger = logging.getLogger(__name__)
@@ -53,234 +91,40 @@ _ALLOWED_EXTENSIONS = frozenset(
 )
 
 
-def _delete_raw_file(document_id: str) -> None:
-    """Remove any raw uploaded file matching ~/.luminary/raw/{doc_id}.*"""
-    settings = get_settings()
-    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
-    for match in raw_dir.glob(f"{document_id}.*"):
-        try:
-            match.unlink()
-            logger.info("Deleted raw file %s", match)
-        except OSError:
-            logger.warning("Failed to delete raw file %s", match)
-
-
-def _safe_tags(raw: object) -> list[str]:
-    """Deserialize tags regardless of how they were stored.
-
-    SQLite's JSON column occasionally surfaces the raw JSON text string instead
-    of a Python list (e.g. when rows were written by a different code path).
-    This helper normalises all three cases: already-a-list, JSON string, or
-    None.
-    """
-    if raw is None:
-        return []
-    if isinstance(raw, list):
-        return [str(t) for t in raw]
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                return [str(t) for t in parsed]
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return []
-
-
-# ---------------------------------------------------------------------------
-# Pydantic response / request models
-# ---------------------------------------------------------------------------
-
-
-class DocumentListItem(BaseModel):
-    id: str
-    title: str
-    format: str
-    content_type: str
-    word_count: int
-    page_count: int
-    stage: str
-    tags: list[str]
-    created_at: datetime
-    last_accessed_at: datetime
-    summary_one_sentence: str | None
-    flashcard_count: int
-    learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
-    chapter_count: int | None
-    chunk_count: int
-    reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
-    audio_duration_seconds: float | None
-    source_url: str | None = None
-    video_title: str | None = None
-    channel_name: str | None = None
-    youtube_url: str | None = None
-    enrichment_status: str | None = None  # None if no enrichment job; else latest job status
-    # S143: None = no objectives extracted; 0.0 = objectives exist but none covered
-    objective_progress_pct: float | None = None
-
-
-class DocumentListResponse(BaseModel):
-    items: list[DocumentListItem]
-    total: int
-    page: int
-    page_size: int
-
-
-class BulkDeleteRequest(BaseModel):
-    ids: list[str]
-
-
-class PatchTagsRequest(BaseModel):
-    tags: list[str]
-
-
-class PatchDocumentRequest(BaseModel):
-    title: str | None = None
-    tags: list[str] | None = None
-    content_type: ContentType | None = None
-
-
-class SectionItem(BaseModel):
-    id: str
-    heading: str
-    level: int
-    page_start: int
-    page_end: int
-    section_order: int
-    preview: str
-    admonition_type: str | None = None
-    parent_section_id: str | None = None
-
-
-class DocumentDiagnostics(BaseModel):
-    chunk_count: int
-    fts_count: int
-    entity_count: int
-    edge_count: int
-    vector_count: int
-
-
-class DocumentDetail(BaseModel):
-    id: str
-    title: str
-    format: str
-    content_type: str
-    word_count: int
-    page_count: int
-    stage: str
-    tags: list[str]
-    created_at: datetime
-    last_accessed_at: datetime
-    sections: list[SectionItem]
-    reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
-    audio_duration_seconds: float | None = None
-    source_url: str | None = None
-    video_title: str | None = None
-    channel_name: str | None = None
-    youtube_url: str | None = None
-
-
-class ChunkItem(BaseModel):
-    id: str
-    chunk_index: int
-    text: str
-    section_id: str | None = None
-    speaker: str | None = None
-    start_time: float | None = None  # seconds from start; null if not available
-
-
-class UrlIngestRequest(BaseModel):
-    url: str
-
-
-class YouTubeIngestRequest(BaseModel):
-    url: str
-
-
-class KindleIngestResponse(BaseModel):
-    document_ids: list[str]
-    book_count: int
-
-
-class CodeSnippetItem(BaseModel):
-    id: str
-    chunk_id: str
-    section_id: str | None
-    language: str | None
-    signature: str | None
-    content: str
-
-
-class PDFMetaResponse(BaseModel):
-    page_count: int
-    has_toc: bool
-
-
-class EpubChapterTocItem(BaseModel):
-    chapter_index: int
-    title: str
-    word_count: int
-
-
-class EpubTocResponse(BaseModel):
-    document_id: str
-    chapters: list[EpubChapterTocItem]
-
-
-class EpubChapterResponse(BaseModel):
-    chapter_index: int
-    chapter_title: str
-    html: str
-    word_count: int
-    section_ids: list[str]
-
-
-# S151: in-document FTS5 search response model
-class DocumentSectionSearchResult(BaseModel):
-    section_id: str
-    section_heading: str
-    match_count: int
-    snippet: str  # FTS5 snippet() output with <mark> tags wrapping matched terms
-
-
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
-
-def _section_to_dict(s: Section) -> dict:
-    return {
-        "heading": s.heading,
-        "level": s.level,
-        "text": s.text,
-        "page_start": s.page_start,
-        "page_end": s.page_end,
-    }
-
-
-def _parsed_to_dict(p: ParsedDocument) -> dict:
-    return {
-        "title": p.title,
-        "format": p.format,
-        "pages": p.pages,
-        "word_count": p.word_count,
-        "sections": [_section_to_dict(s) for s in p.sections],
-        "raw_text": p.raw_text,
-    }
-
-
-def _derive_learning_status(
-    study_session_count: int,
-    flashcard_count: int,
-    summary_count: int,
-) -> str:
-    if study_session_count > 0:
-        return "studied"
-    if flashcard_count > 0:
-        return "flashcards_generated"
-    if summary_count > 0:
-        return "summarized"
-    return "not_started"
+# Back-compat re-exports for tests and routers/study.py that import these
+# private aliases from this module.
+__all__ = [
+    "BulkDeleteRequest",
+    "ChapterProgressItem",
+    "ChunkItem",
+    "CodeSnippetItem",
+    "DocumentDetail",
+    "DocumentDiagnostics",
+    "DocumentListItem",
+    "DocumentListResponse",
+    "DocumentProgressResponse",
+    "DocumentSectionSearchResult",
+    "EpubChapterResponse",
+    "EpubChapterTocItem",
+    "EpubTocResponse",
+    "KindleIngestResponse",
+    "LearningObjectiveItem",
+    "LearningObjectivesResponse",
+    "PDFMetaResponse",
+    "PatchDocumentRequest",
+    "PatchTagsRequest",
+    "ReadingPositionResponse",
+    "SavePositionRequest",
+    "SectionItem",
+    "UrlIngestRequest",
+    "YouTubeIngestRequest",
+    "_delete_raw_file",
+    "_derive_learning_status",
+    "_parsed_to_dict",
+    "_safe_tags",
+    "_section_to_dict",
+    "router",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -1527,18 +1371,6 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     ]
 
 
-class LearningObjectiveItem(BaseModel):
-    id: str
-    section_id: str
-    text: str
-    covered: bool
-
-
-class LearningObjectivesResponse(BaseModel):
-    document_id: str
-    objectives: list[LearningObjectiveItem]
-
-
 @router.get("/{document_id}/objectives", response_model=LearningObjectivesResponse)
 async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     """Return extracted learning objectives for a document.
@@ -1577,22 +1409,6 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
 # ---------------------------------------------------------------------------
 # S143: Document learning progress endpoints
 # ---------------------------------------------------------------------------
-
-
-class ChapterProgressItem(BaseModel):
-    section_id: str
-    heading: str
-    total_objectives: int
-    covered_objectives: int
-    progress_pct: float  # 0.0-100.0
-
-
-class DocumentProgressResponse(BaseModel):
-    document_id: str
-    total_objectives: int
-    covered_objectives: int
-    progress_pct: float  # 0.0-100.0
-    by_chapter: list[ChapterProgressItem]
 
 
 @router.get("/{document_id}/progress", response_model=DocumentProgressResponse)
@@ -1652,21 +1468,6 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
 # ---------------------------------------------------------------------------
 # S152: Reading position persistence -- resume-where-you-left-off
 # ---------------------------------------------------------------------------
-
-
-class SavePositionRequest(BaseModel):
-    last_section_id: str | None = None
-    last_section_heading: str | None = None
-    last_pdf_page: int | None = None
-    last_epub_chapter_index: int | None = None
-
-
-class ReadingPositionResponse(BaseModel):
-    document_id: str
-    last_section_id: str | None
-    last_section_heading: str | None
-    last_pdf_page: int | None
-    last_epub_chapter_index: int | None
 
 
 @router.post("/{document_id}/position", response_model=ReadingPositionResponse, status_code=200)
