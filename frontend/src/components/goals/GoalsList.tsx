@@ -1,0 +1,150 @@
+// ---------------------------------------------------------------------------
+// GoalsList (S211) -- Goals sub-section rendered above the deck list on the
+// Study tab and reused on the Progress tab.
+//
+// Each row shows: title, type icon, description preview (stripMarkdown), and a
+// type-aware progress bar. Clicking a row opens GoalDetailPanel.
+// ---------------------------------------------------------------------------
+
+import { useState } from "react"
+import { useQueries, useQuery } from "@tanstack/react-query"
+import { AlertCircle, Plus, Target } from "lucide-react"
+import { stripMarkdown } from "@/lib/utils"
+import { GoalCreateDialog } from "./GoalCreateDialog"
+import { GoalDetailPanel } from "./GoalDetailPanel"
+import { GoalProgressBar } from "./GoalProgressBar"
+import { GOAL_TYPE_ICON, GOAL_TYPE_LABEL } from "./goalTypeMeta"
+import {
+  type Goal,
+  type GoalProgress,
+  getGoalProgress,
+  listGoals,
+} from "@/lib/goalsApi"
+
+export function GoalsList() {
+  const [createOpen, setCreateOpen] = useState(false)
+  const [detailGoalId, setDetailGoalId] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
+
+  const goalsQuery = useQuery<Goal[]>({
+    queryKey: ["goals", showAll ? "all" : "active"],
+    queryFn: () => (showAll ? listGoals() : listGoals("active")),
+    staleTime: 30_000,
+  })
+
+  const goals = goalsQuery.data ?? []
+
+  // Run a /progress query per visible goal. useQueries lets each one fail
+  // independently (one bad goal doesn't kill the others).
+  const progressQueries = useQueries({
+    queries: goals.map((g) => ({
+      queryKey: ["goal-progress", g.id],
+      queryFn: () => getGoalProgress(g.id),
+      staleTime: 30_000,
+    })),
+  })
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Target size={18} className="text-primary" />
+          <h2 className="text-lg font-semibold text-foreground">Goals</h2>
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="rounded-md border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:bg-accent"
+          >
+            {showAll ? "Active only" : "Show all"}
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+        >
+          <Plus size={14} />
+          New goal
+        </button>
+      </div>
+
+      {goalsQuery.isLoading ? (
+        <div className="flex flex-col gap-2" aria-label="Loading goals">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-20 animate-pulse rounded-md bg-muted" />
+          ))}
+        </div>
+      ) : goalsQuery.isError ? (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+        >
+          <AlertCircle size={14} />
+          Could not load goals. Please try refreshing.
+        </div>
+      ) : goals.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border bg-muted/20 px-4 py-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            No goals yet -- create one to focus your learning.
+          </p>
+        </div>
+      ) : (
+        <ul className="grid gap-2 grid-cols-1 md:grid-cols-2">
+          {goals.map((g, idx) => {
+            const pq = progressQueries[idx]
+            const progress: GoalProgress | undefined = pq?.data
+            const TypeIcon = GOAL_TYPE_ICON[g.goal_type]
+            return (
+              <li key={g.id}>
+                <button
+                  type="button"
+                  onClick={() => setDetailGoalId(g.id)}
+                  className="w-full text-left rounded-md border border-border bg-card p-3 hover:border-primary/40 hover:bg-card/80 transition-colors flex flex-col gap-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <TypeIcon size={10} aria-hidden="true" />
+                          {GOAL_TYPE_LABEL[g.goal_type]}
+                        </span>
+                        {g.status !== "active" && (
+                          <span className="text-[9px] uppercase tracking-wide text-muted-foreground">
+                            {g.status}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {g.title}
+                      </span>
+                      {g.description && (
+                        <span className="text-xs text-muted-foreground truncate">
+                          {stripMarkdown(g.description)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <GoalProgressBar
+                    goal={g}
+                    metrics={progress?.metrics}
+                    loading={pq?.isLoading}
+                    errored={pq?.isError}
+                  />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <GoalCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <GoalDetailPanel
+        goalId={detailGoalId}
+        open={detailGoalId !== null}
+        onOpenChange={(o) => {
+          if (!o) setDetailGoalId(null)
+        }}
+      />
+    </section>
+  )
+}

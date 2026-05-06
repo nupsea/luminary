@@ -4,13 +4,11 @@
  *
  * Sections:
  *   1. System Status -- Ollama, Phoenix, Langfuse, Active Model
- *   2. RAG Quality -- grouped BarChart per dataset (HR@5, MRR, Faithfulness, AR, CP)
- *   3. Retrieval Quality Over Time -- HR@5 sparkline per dataset
- *   4. Model Usage -- PieChart (local vs cloud) + BarChart (latency by model)
- *   5. Ingestion Queue -- in-progress documents
- *   6. Recent Traces -- last 50 Phoenix spans
- *   7. Eval Runs -- table with HR@5 row coloring
- *   8. Concept Mastery heatmap
+ *   2. Model Usage -- PieChart (local vs cloud) + BarChart (latency by model)
+ *   3. Ingestion Queue -- in-progress documents
+ *   4. Recent Traces -- last 50 Phoenix spans
+ *   5. Concept Mastery heatmap
+ * Eval results/runs moved to Quality page (Results tab).
  *
  * Each section fetches independently: if one endpoint fails the rest render normally.
  */
@@ -24,11 +22,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -68,50 +63,15 @@ interface MonitoringOverview {
   avg_latency_ms: number | null
 }
 
-interface EvalRun {
-  id: string
-  dataset_name: string
-  model_used: string
-  run_at: string
-  hit_rate_5: number | null
-  mrr: number | null
-  faithfulness: number | null
-  answer_relevance: number | null
-  context_precision: number | null
-  context_recall: number | null
-}
-
 interface ModelUsageItem {
   model: string
   call_count: number
   avg_latency_ms: number | null
 }
 
-interface EvalHistoryItem {
-  timestamp: string
-  dataset: string
-  model: string
-  hr5: number | null
-  mrr: number | null
-  faithfulness: number | null
-  passed: boolean
-}
-
 interface LLMSettings {
   processing_mode: string
   active_model: string
-}
-
-interface EvalResultItem {
-  dataset: string
-  run_at: string
-  hit_rate_5: number | null
-  mrr: number | null
-  faithfulness: number | null
-  context_precision: number | null
-  context_recall: number | null
-  answer_relevancy: number | null
-  passed_thresholds: boolean | null
 }
 
 interface PhoenixUrl {
@@ -156,12 +116,6 @@ async function fetchTraces(): Promise<TracesResponse> {
   return res.json() as Promise<TracesResponse>
 }
 
-async function fetchEvalRuns(): Promise<EvalRun[]> {
-  const res = await fetch(`${API_BASE}/monitoring/evals`)
-  if (!res.ok) throw new Error("evals failed")
-  return res.json() as Promise<EvalRun[]>
-}
-
 async function fetchModelUsage(): Promise<ModelUsageItem[]> {
   const res = await fetch(`${API_BASE}/monitoring/model-usage`)
   if (!res.ok) throw new Error("model-usage failed")
@@ -183,37 +137,10 @@ async function fetchDocuments(): Promise<Document[]> {
   return (data as { items?: Document[] }).items ?? []
 }
 
-async function fetchEvalHistory(): Promise<EvalHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/monitoring/eval-history`)
-  if (!res.ok) throw new Error("eval-history failed")
-  return res.json() as Promise<EvalHistoryItem[]>
-}
-
 async function fetchPhoenixUrl(): Promise<PhoenixUrl> {
   const res = await fetch(`${API_BASE}/monitoring/phoenix-url`)
   if (!res.ok) throw new Error("phoenix-url failed")
   return res.json() as Promise<PhoenixUrl>
-}
-
-async function fetchEvalResults(): Promise<EvalResultItem[]> {
-  const res = await fetch(`${API_BASE}/evals/results`)
-  if (!res.ok) throw new Error("evals/results failed")
-  return res.json() as Promise<EvalResultItem[]>
-}
-
-async function fetchEvalDatasets(): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/evals/datasets`)
-  if (!res.ok) throw new Error("evals/datasets failed")
-  return res.json() as Promise<string[]>
-}
-
-async function triggerEvalRun(dataset: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/evals/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataset }),
-  })
-  if (!res.ok) throw new Error(`evals/run failed: ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -360,123 +287,6 @@ function MetricCardSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Eval History Sparkline — HR@5 over time per dataset
-// ---------------------------------------------------------------------------
-
-const DATASET_COLORS: Record<string, string> = {
-  book: "#6366f1",
-  book_time_machine: "#8b5cf6",
-  book_alice: "#ec4899",
-  book_odyssey: "#f97316",
-  paper: "#0ea5e9",
-  notes: "#22c55e",
-  conversation: "#f59e0b",
-  code: "#a78bfa",
-}
-
-function buildSparklineData(history: EvalHistoryItem[]) {
-  const datasets = Array.from(new Set(history.map((h) => h.dataset)))
-  const allTimestamps = Array.from(new Set(history.map((h) => h.timestamp))).sort()
-  return allTimestamps.map((ts, i) => {
-    const row: Record<string, number | string> = { run: i + 1, ts }
-    for (const ds of datasets) {
-      const item = history.find((h) => h.timestamp === ts && h.dataset === ds)
-      if (item && item.hr5 !== null) {
-        row[ds] = item.hr5
-      }
-    }
-    return row
-  })
-}
-
-function EvalHistorySparkline({ history }: { history: EvalHistoryItem[] }) {
-  if (history.length === 0) {
-    return <EmptyState message="No eval history yet. Run make eval to populate." />
-  }
-  const data = buildSparklineData(history)
-  const datasets = Array.from(new Set(history.map((h) => h.dataset)))
-  return (
-    <ResponsiveContainer width="100%" height={200}>
-      <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis dataKey="run" label={{ value: "Run", position: "insideBottomRight", offset: -4, fontSize: 10 }} tick={{ fontSize: 10 }} />
-        <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} />
-        <Tooltip
-          formatter={(v, name) =>
-            typeof v === "number" ? [v.toFixed(3), name ?? ""] : [(v ?? "—"), name ?? ""]
-          }
-        />
-        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-        <ReferenceLine y={0.6} stroke="#6366f1" strokeDasharray="4 4" label={{ value: "threshold 0.60", position: "insideTopRight", fontSize: 9 }} />
-        {datasets.map((ds) => (
-          <Line
-            key={ds}
-            type="monotone"
-            dataKey={ds}
-            name={ds}
-            stroke={DATASET_COLORS[ds] ?? "#94a3b8"}
-            dot={{ r: 3 }}
-            connectNulls
-          />
-        ))}
-      </LineChart>
-    </ResponsiveContainer>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// RAG Quality BarChart — grouped by dataset
-// ---------------------------------------------------------------------------
-
-const METRIC_BARS = [
-  { key: "hit_rate_5", label: "HR@5", color: "#6366f1" },
-  { key: "mrr", label: "MRR", color: "#0ea5e9" },
-  { key: "faithfulness", label: "Faithfulness", color: "#22c55e" },
-  { key: "answer_relevance", label: "Answer Rel.", color: "#f59e0b" },
-  { key: "context_precision", label: "Ctx Prec.", color: "#ec4899" },
-]
-
-function buildRagChartData(evalRuns: EvalRun[]) {
-  const byDataset: Record<string, EvalRun> = {}
-  for (const run of evalRuns) {
-    if (!byDataset[run.dataset_name]) {
-      byDataset[run.dataset_name] = run
-    }
-  }
-  return Object.entries(byDataset).map(([dataset, run]) => ({
-    dataset,
-    hit_rate_5: run.hit_rate_5 ?? 0,
-    mrr: run.mrr ?? 0,
-    faithfulness: run.faithfulness ?? 0,
-    answer_relevance: run.answer_relevance ?? 0,
-    context_precision: run.context_precision ?? 0,
-  }))
-}
-
-function RAGQualityChart({ evalRuns }: { evalRuns: EvalRun[] }) {
-  const data = buildRagChartData(evalRuns)
-  if (data.length === 0) {
-    return <EmptyState message="No eval runs yet. Run evals/run_eval.py to populate." />
-  }
-  return (
-    <ResponsiveContainer width="100%" height={260}>
-      <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis dataKey="dataset" tick={{ fontSize: 11 }} />
-        <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(v) => (typeof v === "number" ? v.toFixed(3) : (v ?? "—"))} />
-        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-        <ReferenceLine y={0.65} stroke="#6366f1" strokeDasharray="4 4" label={{ value: "HR@5 target 0.65", position: "insideTopRight", fontSize: 10 }} />
-        <ReferenceLine y={0.9} stroke="#22c55e" strokeDasharray="4 4" label={{ value: "Faith. target 0.9", position: "insideBottomRight", fontSize: 10 }} />
-        {METRIC_BARS.map((m) => (
-          <Bar key={m.key} dataKey={m.key} name={m.label} fill={m.color} />
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Model Usage — PieChart + latency BarChart
 // ---------------------------------------------------------------------------
 
@@ -569,161 +379,6 @@ function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
       >
         View Traces
       </button>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// EvalPanel — RAGAS eval results from /evals/results with threshold coloring
-// ---------------------------------------------------------------------------
-
-const EVAL_THRESHOLDS: Record<string, number> = {
-  hit_rate_5: 0.60,
-  mrr: 0.45,
-  faithfulness: 0.65,
-  context_precision: 0.65,
-}
-
-function scoreColor(value: number | null, metricKey: string): string {
-  if (value === null) return "text-muted-foreground"
-  const threshold = EVAL_THRESHOLDS[metricKey]
-  if (threshold === undefined) return "text-foreground"
-  if (value >= threshold) return "text-green-700 dark:text-green-400 font-semibold"
-  if (value >= threshold * 0.75) return "text-amber-600 dark:text-amber-400 font-semibold"
-  return "text-muted-foreground"
-}
-
-function EvalPanel() {
-  const [state, setState] = useState<SectionState<EvalResultItem[]>>(initSection([]))
-  const [datasetsState, setDatasetsState] = useState<SectionState<string[]>>(initSection([]))
-  const [runningDatasets, setRunningDatasets] = useState<Set<string>>(new Set())
-  const [selectedDataset, setSelectedDataset] = useState<string>("")
-
-  useEffect(() => {
-    let cancelled = false
-    fetchEvalResults()
-      .then((d) => {
-        if (!cancelled) setState({ loading: false, data: d, error: false })
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] EvalPanel fetch failed", e)
-        if (!cancelled) setState({ loading: false, data: [], error: true })
-      })
-
-    fetchEvalDatasets()
-      .then((d) => {
-        if (!cancelled) {
-           setDatasetsState({ loading: false, data: d, error: false })
-           if (d.length > 0) setSelectedDataset(d[0])
-        }
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] EvalDatasets fetch failed", e)
-        if (!cancelled) setDatasetsState({ loading: false, data: [], error: true })
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  function handleRunEval(dataset: string) {
-    if (!dataset) return
-    setRunningDatasets((prev) => new Set(prev).add(dataset))
-    triggerEvalRun(dataset)
-      .then(() => {
-        toast.success(`Eval run started for dataset: ${dataset}`)
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] EvalPanel run failed", dataset, e)
-        toast.error(`Failed to start eval for dataset: ${dataset}`)
-      })
-      .finally(() => {
-        setRunningDatasets((prev) => {
-          const next = new Set(prev)
-          next.delete(dataset)
-          return next
-        })
-      })
-  }
-
-  if (state.loading || datasetsState.loading) {
-    return <SectionSkeleton rows={3} />
-  }
-  if (state.error) {
-    return <SectionErrorCard name="RAGAS Eval Results" />
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <select
-          value={selectedDataset}
-          onChange={(e) => setSelectedDataset(e.target.value)}
-          className="rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {datasetsState.data.map(d => <option key={d} value={d}>{d}</option>)}
-          {datasetsState.data.length === 0 && <option value="" disabled>No datasets found</option>}
-        </select>
-        <button
-          onClick={() => handleRunEval(selectedDataset)}
-          disabled={!selectedDataset || runningDatasets.has(selectedDataset)}
-          className="rounded px-3 py-1 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-        >
-          {runningDatasets.has(selectedDataset) ? "Starting..." : "Run New Eval"}
-        </button>
-      </div>
-
-      {state.data.length === 0 ? (
-        <EmptyState message="No eval results yet. Run an eval above to populate." />
-      ) : (
-        <div className="overflow-auto rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-secondary/50">
-                <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Dataset</th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Run At</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">HR@5</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">MRR</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Faithfulness</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Ctx Precision</th>
-                <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.data.map((item) => (
-                <tr key={item.dataset} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2 font-medium text-foreground">{item.dataset}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
-                    {item.run_at ? new Date(item.run_at).toLocaleString() : "—"}
-                  </td>
-                  <td className={`px-4 py-2 text-right ${scoreColor(item.hit_rate_5, "hit_rate_5")}`}>
-                    {item.hit_rate_5 !== null ? item.hit_rate_5.toFixed(3) : "—"}
-                  </td>
-                  <td className={`px-4 py-2 text-right ${scoreColor(item.mrr, "mrr")}`}>
-                    {item.mrr !== null ? item.mrr.toFixed(3) : "—"}
-                  </td>
-                  <td className={`px-4 py-2 text-right ${scoreColor(item.faithfulness, "faithfulness")}`}>
-                    {item.faithfulness !== null ? item.faithfulness.toFixed(3) : "—"}
-                  </td>
-                  <td className={`px-4 py-2 text-right ${scoreColor(item.context_precision, "context_precision")}`}>
-                    {item.context_precision !== null ? item.context_precision.toFixed(3) : "—"}
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    <button
-                      onClick={() => handleRunEval(item.dataset)}
-                      disabled={runningDatasets.has(item.dataset)}
-                      className="rounded px-2 py-1 text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-                    >
-                      {runningDatasets.has(item.dataset) ? "Starting..." : "Run Again"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   )
 }
@@ -978,10 +633,6 @@ export default function Admin() {
   const [tracesState, setTracesState] = useState<SectionState<TracesResponse>>(
     initSection({ traces: [] }),
   )
-  const [evalRunsState, setEvalRunsState] = useState<SectionState<EvalRun[]>>(initSection([]))
-  const [evalHistState, setEvalHistState] = useState<SectionState<EvalHistoryItem[]>>(
-    initSection([]),
-  )
   const [modelUsageState, setModelUsageState] = useState<SectionState<ModelUsageItem[]>>(
     initSection([]),
   )
@@ -1012,24 +663,6 @@ export default function Admin() {
       .catch((e: unknown) => {
         logger.warn("[Monitoring] section failed", "Recent Traces", e)
         if (!cancelled) setTracesState({ loading: false, data: { traces: [] }, error: true })
-      })
-
-    fetchEvalRuns()
-      .then((d) => {
-        if (!cancelled) setEvalRunsState({ loading: false, data: d, error: false })
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] section failed", "Eval Runs", e)
-        if (!cancelled) setEvalRunsState({ loading: false, data: [], error: true })
-      })
-
-    fetchEvalHistory()
-      .then((d) => {
-        if (!cancelled) setEvalHistState({ loading: false, data: d, error: false })
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] section failed", "Eval History", e)
-        if (!cancelled) setEvalHistState({ loading: false, data: [], error: true })
       })
 
     fetchModelUsage()
@@ -1161,32 +794,7 @@ export default function Admin() {
         )}
       </section>
 
-      {/* 2. RAG Quality */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-foreground">RAG Quality</h2>
-        {evalRunsState.loading ? (
-          <SectionSkeleton rows={4} />
-        ) : evalRunsState.error ? (
-          <SectionErrorCard name="RAG Quality" />
-        ) : (
-          <RAGQualityChart evalRuns={evalRunsState.data} />
-        )}
-      </section>
-
-      {/* 3. HR@5 Over Time */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-foreground">Retrieval Quality Over Time</h2>
-        <p className="text-xs text-muted-foreground">HR@5 per dataset across eval runs. Dashed line = 0.60 threshold.</p>
-        {evalHistState.loading ? (
-          <SectionSkeleton rows={3} />
-        ) : evalHistState.error ? (
-          <SectionErrorCard name="Retrieval Quality Over Time" />
-        ) : (
-          <EvalHistorySparkline history={evalHistState.data} />
-        )}
-      </section>
-
-      {/* 4. Model Usage */}
+      {/* 2. Model Usage */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Model Usage</h2>
         {modelUsageState.loading ? (
@@ -1275,69 +883,6 @@ export default function Admin() {
               </div>
             )}
           </>
-        )}
-      </section>
-
-      {/* 7a. RAGAS Eval Results — from /evals/results */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-foreground">RAGAS Eval Results</h2>
-        <p className="text-xs text-muted-foreground">
-          Latest result per dataset. Green = meets threshold, amber = close, grey = below. Click Run Eval to trigger a background eval run.
-        </p>
-        <EvalPanel />
-      </section>
-
-      {/* 7b. Eval Runs (legacy /monitoring/evals) */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-foreground">Eval Runs</h2>
-        {evalRunsState.loading ? (
-          <SectionSkeleton rows={4} />
-        ) : evalRunsState.error ? (
-          <SectionErrorCard name="Eval Runs" />
-        ) : evalRunsState.data.length === 0 ? (
-          <EmptyState message="No evaluation runs yet. Run evals/run_eval.py to populate." />
-        ) : (
-          <div className="overflow-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Dataset</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Run At</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">HR@5</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">MRR</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Faithfulness</th>
-                </tr>
-              </thead>
-              <tbody>
-                {evalRunsState.data.map((run) => {
-                  const hr5 = run.hit_rate_5
-                  const rowBg =
-                    hr5 !== null && hr5 < 0.5
-                      ? "bg-red-50 dark:bg-red-950/30"
-                      : hr5 !== null && hr5 > 0.7
-                        ? "bg-green-50 dark:bg-green-950/30"
-                        : ""
-                  return (
-                    <tr key={run.id} className={`border-b border-border last:border-0 ${rowBg}`}>
-                      <td className="px-4 py-2 font-medium text-foreground">{run.dataset_name}</td>
-                      <td className="px-4 py-2 text-xs text-muted-foreground">
-                        {new Date(run.run_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2 text-right text-foreground">
-                        {hr5 !== null ? hr5.toFixed(2) : "—"}
-                      </td>
-                      <td className="px-4 py-2 text-right text-foreground">
-                        {run.mrr !== null ? run.mrr.toFixed(2) : "—"}
-                      </td>
-                      <td className="px-4 py-2 text-right text-foreground">
-                        {run.faithfulness !== null ? run.faithfulness.toFixed(2) : "—"}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
         )}
       </section>
 

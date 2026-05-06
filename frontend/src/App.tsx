@@ -3,18 +3,21 @@ import {
   QueryClient,
   QueryClientProvider,
   useIsFetching,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon } from "lucide-react"
+import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { BrowserRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom"
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
 import { useAppStore } from "./store"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
+import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
+import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
@@ -25,6 +28,7 @@ const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
 const Study = lazy(() => import("./pages/Study"))
 const Viz = lazy(() => import("./pages/Viz"))
+const Quality = lazy(() => import("./pages/Quality"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
 
@@ -115,6 +119,7 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchFn: prefetchDueCards,
   },
   { to: "/notes", icon: StickyNote, label: "Notes" },
+  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
   {
     to: "/progress",
     icon: TrendingUp,
@@ -232,7 +237,11 @@ function Sidebar() {
             )}
           </NavLink>
         ))}
-        <div className="mt-auto flex flex-col items-center gap-2">
+        {/* Streak & XP widget */}
+        <div className="mt-auto mb-2">
+          <StreakXPWidget />
+        </div>
+        <div className="flex flex-col items-center gap-2">
           {/* Dev Tools link -- hidden from nav, accessible via this small icon at the bottom */}
           <NavLink
             to="/admin"
@@ -271,6 +280,7 @@ function Sidebar() {
 
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
+  const [ollamaWarningDismissed, setOllamaWarningDismissed] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
   const chatPanelOpen = useAppStore(s => s.chatPanelOpen)
@@ -278,6 +288,21 @@ function AppShell() {
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
+
+  // Surface a global warning when Ollama is unreachable in private mode
+  const { data: llmData } = useQuery<{
+    processing_mode: string
+    mode: string
+  }>({
+    queryKey: ["llm-settings"],
+    queryFn: prefetchLLMSettings as () => Promise<{ processing_mode: string; mode: string }>,
+    staleTime: 30_000,
+  })
+  const ollamaUnavailable = llmData?.mode === "private" && llmData?.processing_mode === "unavailable"
+  // Reset dismissed state when Ollama comes back online
+  useEffect(() => {
+    if (!ollamaUnavailable) setOllamaWarningDismissed(false)
+  }, [ollamaUnavailable])
 
   // S118: review reminder notifications
   useReviewNotification()
@@ -375,12 +400,29 @@ function AppShell() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar />
       <main className="flex-1 h-full overflow-auto relative animate-[fadeIn_0.2s_ease-out]">
+        {ollamaUnavailable && !ollamaWarningDismissed && (
+          <div className="mx-4 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span className="flex-1">
+              Ollama is not running. LLM features (chat, teach-back, flashcard generation) are unavailable. Start it with: <code className="font-mono font-semibold">ollama serve</code>
+            </span>
+            <button onClick={() => setOllamaWarningDismissed(true)} className="shrink-0 hover:text-amber-900 dark:hover:text-amber-100" aria-label="Dismiss">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {/* S209: global focus timer pill -- visible on every tab */}
+        <div className="flex items-center justify-end gap-2 px-4 pt-3">
+          <FocusTimerPill />
+        </div>
         <Routes>
           <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
           <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
+          <Route path="/quality" element={<Suspense fallback={<PageSkeleton />}><Quality /></Suspense>} />
+          <Route path="/evals" element={<Navigate to="/quality" replace />} />
           <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
           <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
           <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />

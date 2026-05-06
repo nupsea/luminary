@@ -20,6 +20,12 @@ import { RubricCard, type Rubric } from "@/components/RubricCard"
 import { computeExplanationDiff, splitSentences, type DiffSegment } from "@/lib/explanationDiff"
 
 import { API_BASE } from "@/lib/config"
+import {
+  fetchSummary,
+  summaryCache,
+  summaryCacheKey,
+  summaryInflight,
+} from "./feynmanSummaryCache"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,47 +109,41 @@ export function FeynmanDialog({
 
   useEffect(() => {
     let cancelled = false
-    async function loadSummary() {
-      setSummaryLoading(true)
+    const key = summaryCacheKey(documentId, sectionId)
+
+    // Cache hit: render summary synchronously, no skeleton flash.
+    const cached = summaryCache.get(key)
+    if (cached !== undefined) {
+      setSummaryContent(cached)
+      setSummaryLoading(false)
       setSummaryError(null)
-      try {
-        // Try cached section summary first
-        const res = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-        if (!res.ok || cancelled) throw new Error("No cached summary")
-        const data = (await res.json()) as {
-          summaries: Record<string, { id: string; content: string }>
-        }
-        if (cancelled) return
-        // Use executive mode if available
-        if (data.summaries["executive"]) {
-          setSummaryContent(data.summaries["executive"].content)
-          return
-        }
-      } catch {
-        // fall through to section preview
-      }
+      return
+    }
 
-      // Fallback: fetch section preview via document sections
-      try {
-        const res2 = await fetch(`${API_BASE}/documents/${documentId}`)
-        if (!res2.ok || cancelled) throw new Error("Could not fetch document")
-        const doc = (await res2.json()) as { sections: Array<{ id: string; preview: string; heading: string }> }
-        const section = doc.sections.find((s) => s.id === sectionId)
-        if (cancelled) return
-        if (section?.preview) {
-          setSummaryContent(section.preview)
-          return
-        }
-      } catch {
-        // ignore
-      }
+    setSummaryLoading(true)
+    setSummaryError(null)
 
-      if (!cancelled) {
+    // Reuse an in-flight prefetch if one was started on hover/focus.
+    const inflight = summaryInflight.get(key) ?? (() => {
+      const p = fetchSummary(documentId, sectionId).then((content) => {
+        summaryInflight.delete(key)
+        if (content !== null) summaryCache.set(key, content)
+        return content
+      })
+      summaryInflight.set(key, p)
+      return p
+    })()
+
+    void inflight.then((content) => {
+      if (cancelled) return
+      if (content !== null) {
+        setSummaryContent(content)
+      } else {
         setSummaryContent(null)
         setSummaryError("No summary available for this section.")
       }
-    }
-    void loadSummary()
+    })
+
     return () => { cancelled = true }
   }, [documentId, sectionId])
 

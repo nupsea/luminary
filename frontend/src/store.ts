@@ -31,6 +31,9 @@ interface AppState {
   // S197: Pre-fill new note content from gap analysis "Take a note" action.
   notePreload: { content: string; collectionId?: string } | null
   setNotePreload: (preload: { content: string; collectionId?: string } | null) => void
+  // Persisted study session ID for teach-back results across tab switches
+  studySessionId: string | null
+  setStudySessionId: (id: string | null) => void
   // S191: Document filter for Notes tab (set by doc action menu).
   notesDocumentId: string | null
   setNotesDocumentId: (id: string | null) => void
@@ -45,6 +48,12 @@ interface AppState {
   setChatSelectedDocId: (id: string | null) => void
   chatQaError: string | null
   setChatQaError: (err: string | null) => void
+  // Persisted chat session id; null means "no session yet, will be created on first send".
+  activeChatSessionId: string | null
+  setActiveChatSessionId: (id: string | null) => void
+  // Sidebar visibility (persisted across reloads).
+  chatSidebarOpen: boolean
+  setChatSidebarOpen: (open: boolean) => void
   clearChat: () => void
   setActiveDocument: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
@@ -74,6 +83,8 @@ export const useAppStore = create<AppState>()(
       setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
       activeCollectionId: null,
       activeTag: null,
+      studySessionId: null,
+      setStudySessionId: (id) => set({ studySessionId: id }),
       notePreload: null,
       setNotePreload: (preload) => set({ notePreload: preload }),
       notesDocumentId: null,
@@ -86,7 +97,11 @@ export const useAppStore = create<AppState>()(
       setChatSelectedDocId: (id) => set({ chatSelectedDocId: id }),
       chatQaError: null,
       setChatQaError: (err) => set({ chatQaError: err }),
-      clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all" }),
+      activeChatSessionId: null,
+      setActiveChatSessionId: (id) => set({ activeChatSessionId: id }),
+      chatSidebarOpen: true,
+      setChatSidebarOpen: (open) => set({ chatSidebarOpen: open }),
+      clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all", activeChatSessionId: null }),
       setActiveDocument: (id) => set({ activeDocumentId: id }),
       setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
       setLibraryView: (view) => set({ libraryView: view }),
@@ -111,6 +126,9 @@ export const useAppStore = create<AppState>()(
         libraryView: state.libraryView,
         notesView: state.notesView,
         reviewRemindersEnabled: state.reviewRemindersEnabled,
+        studySessionId: state.studySessionId,
+        activeChatSessionId: state.activeChatSessionId,
+        chatSidebarOpen: state.chatSidebarOpen,
       }),
     }
   )
