@@ -17,6 +17,7 @@ node_modules/
 scripts/ralph/flowchart/node_modules/
 dist/
 .parcel-cache/
+.vite/
 
 # Environment
 .env
