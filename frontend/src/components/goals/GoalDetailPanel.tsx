@@ -205,6 +205,17 @@ export function GoalDetailPanel({ goalId, open, onOpenChange }: Props) {
                         </span>
                       </div>
                     )}
+                  {progressQuery.data.metrics.surface_minutes &&
+                    Object.keys(progressQuery.data.metrics.surface_minutes).length > 0 && (
+                      <div className="col-span-2">
+                        Activity mix:{" "}
+                        <span className="font-mono text-foreground">
+                          {Object.entries(progressQuery.data.metrics.surface_minutes)
+                            .map(([surface, minutes]) => `${surface}:${minutes}m`)
+                            .join(" ")}
+                        </span>
+                      </div>
+                    )}
                 </div>
               )}
             </section>

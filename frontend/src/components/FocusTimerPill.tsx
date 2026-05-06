@@ -289,6 +289,10 @@ export function FocusTimerPill() {
   }
 
   async function handleStop() {
+    if (phase === "break") {
+      enterIdle()
+      return
+    }
     if (!sessionId) {
       enterIdle()
       return

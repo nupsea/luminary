@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  acceptedSurfacesForGoalType,
   defaultTargetUnitForGoalType,
   expectedSurfaceForGoalType,
   progressLabel,
@@ -8,6 +9,10 @@ import {
 } from "./goalTypeMeta"
 
 describe("expectedSurfaceForGoalType", () => {
+  it("maps studying to no single required surface", () => {
+    expect(expectedSurfaceForGoalType("studying")).toBe("none")
+  })
+
   it("maps read|recall|write|explore to matching surfaces", () => {
     expect(expectedSurfaceForGoalType("read")).toBe("read")
     expect(expectedSurfaceForGoalType("recall")).toBe("recall")
@@ -16,8 +21,31 @@ describe("expectedSurfaceForGoalType", () => {
   })
 })
 
+describe("acceptedSurfacesForGoalType", () => {
+  it("allows all surfaces to count toward studying goals", () => {
+    expect(acceptedSurfacesForGoalType("studying")).toEqual([
+      "read",
+      "recall",
+      "write",
+      "explore",
+      "none",
+    ])
+  })
+
+  it("allows write sessions to count toward read goals", () => {
+    expect(acceptedSurfacesForGoalType("read")).toEqual(["read", "write"])
+  })
+
+  it("keeps other goal types strict", () => {
+    expect(acceptedSurfacesForGoalType("recall")).toEqual(["recall"])
+    expect(acceptedSurfacesForGoalType("write")).toEqual(["write"])
+    expect(acceptedSurfacesForGoalType("explore")).toEqual(["explore"])
+  })
+})
+
 describe("defaultTargetUnitForGoalType", () => {
   it("returns sensible default units", () => {
+    expect(defaultTargetUnitForGoalType("studying")).toBe("minutes")
     expect(defaultTargetUnitForGoalType("read")).toBe("minutes")
     expect(defaultTargetUnitForGoalType("recall")).toBe("cards")
     expect(defaultTargetUnitForGoalType("write")).toBe("notes")
@@ -41,6 +69,11 @@ describe("progressLabel", () => {
     expect(out).toBe("18 minutes")
   })
 
+  it("formats studying goals from focused minutes", () => {
+    const out = progressLabel("studying", { minutes_focused: 40 }, 120, null)
+    expect(out).toBe("40 / 120 minutes")
+  })
+
   it("falls back to 0 when the matching metric is absent", () => {
     expect(progressLabel("write", {}, 5, "notes")).toBe("0 / 5 notes")
     expect(progressLabel("explore", {}, null, null)).toBe("0 turns")
@@ -59,8 +92,13 @@ describe("progressPercent", () => {
 
 describe("surfaceMismatchWarning", () => {
   it("returns null when surfaces agree", () => {
+    expect(surfaceMismatchWarning("studying", "explore")).toBeNull()
     expect(surfaceMismatchWarning("recall", "recall")).toBeNull()
     expect(surfaceMismatchWarning("read", "read")).toBeNull()
+  })
+
+  it("returns null when a read goal is attached from the write surface", () => {
+    expect(surfaceMismatchWarning("read", "write")).toBeNull()
   })
 
   it("returns null when active surface is none", () => {

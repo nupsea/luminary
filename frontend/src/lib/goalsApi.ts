@@ -4,7 +4,7 @@
 
 import { API_BASE } from "@/lib/config"
 
-export type GoalType = "read" | "recall" | "write" | "explore"
+export type GoalType = "studying" | "read" | "recall" | "write" | "explore"
 export type TargetUnit = "minutes" | "pages" | "cards" | "notes" | "turns"
 export type GoalStatus = "active" | "paused" | "completed" | "archived"
 
@@ -30,6 +30,13 @@ export interface GoalProgressMetrics {
   notes_created?: number
   turns?: number
   sessions_completed?: number
+  surface_minutes?: Record<string, number>
+  surface_sessions?: Record<string, number>
+  metadata?: {
+    document_id: string | null
+    deck_id: string | null
+    collection_id: string | null
+  }
   completed_pct?: number
 }
 

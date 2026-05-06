@@ -374,7 +374,7 @@ class ReadingProgressModel(Base):
 
 
 class LearningGoalModel(Base):
-    """S210: typed learning goal (read|recall|write|explore).
+    """S210: typed learning goal (studying|read|recall|write|explore).
 
     Replaces the older document-centric goal/FSRS-readiness schema. Sessions in
     pomodoro_sessions can attribute progress via the nullable goal_id column;
@@ -387,7 +387,7 @@ class LearningGoalModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # read|recall|write|explore
+    # studying|read|recall|write|explore
     goal_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     # minutes|pages|cards|notes|turns -- nullable for goals with no quantitative target
     target_value: Mapped[int | None] = mapped_column(Integer, nullable=True)

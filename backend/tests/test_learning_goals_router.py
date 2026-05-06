@@ -265,6 +265,40 @@ async def test_delete_unknown_goal_returns_404(test_db):
 
 
 @pytest.mark.asyncio
+async def test_get_progress_studying_shape(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        goal = await c.post(
+            "/goals",
+            json={
+                "title": "Studying",
+                "goal_type": "studying",
+                "target_value": 60,
+                "target_unit": "minutes",
+                "collection_id": "collection-1",
+            },
+        )
+        gid = goal.json()["id"]
+        resp = await c.get(f"/goals/{gid}/progress")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["goal_id"] == gid
+    assert body["goal_type"] == "studying"
+    metrics = body["metrics"]
+    assert set(metrics.keys()) == {
+        "minutes_focused",
+        "sessions_completed",
+        "surface_minutes",
+        "surface_sessions",
+        "metadata",
+        "completed_pct",
+    }
+    assert metrics["minutes_focused"] == 0
+    assert metrics["sessions_completed"] == 0
+    assert metrics["surface_minutes"] == {}
+    assert metrics["metadata"]["collection_id"] == "collection-1"
+
+
+@pytest.mark.asyncio
 async def test_get_progress_read_shape(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         goal = await c.post(

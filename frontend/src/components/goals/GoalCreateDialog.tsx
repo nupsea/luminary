@@ -96,7 +96,7 @@ const TARGET_UNITS: TargetUnit[] = [
   "turns",
 ]
 
-const GOAL_TYPES: GoalType[] = ["read", "recall", "write", "explore"]
+const GOAL_TYPES: GoalType[] = ["studying", "read", "recall", "write", "explore"]
 
 interface Props {
   open: boolean
@@ -107,10 +107,10 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
   const qc = useQueryClient()
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [goalType, setGoalType] = useState<GoalType>("read")
+  const [goalType, setGoalType] = useState<GoalType>("studying")
   const [targetValue, setTargetValue] = useState<string>("")
   const [targetUnit, setTargetUnit] = useState<TargetUnit>(
-    defaultTargetUnitForGoalType("read"),
+    defaultTargetUnitForGoalType("studying"),
   )
   const [documentId, setDocumentId] = useState<string>("")
   const [deckId, setDeckId] = useState<string>("")
@@ -141,9 +141,9 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
     if (open) {
       setTitle("")
       setDescription("")
-      setGoalType("read")
+      setGoalType("studying")
       setTargetValue("")
-      setTargetUnit(defaultTargetUnitForGoalType("read"))
+      setTargetUnit(defaultTargetUnitForGoalType("studying"))
       setDocumentId("")
       setDeckId("")
       setCollectionId("")
@@ -203,7 +203,7 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle>New Goal</DialogTitle>
           <DialogDescription>
-            Set a typed learning goal and track progress as you focus.
+            Set a learning goal and track progress as you focus.
           </DialogDescription>
         </DialogHeader>
 
@@ -274,7 +274,7 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
 
           <div className="grid grid-cols-1 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted-foreground">Document (optional)</span>
+              <span className="text-muted-foreground">Book/document (optional)</span>
               <select
                 value={documentId}
                 onChange={(e) => setDocumentId(e.target.value)}

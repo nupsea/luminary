@@ -24,10 +24,10 @@ interface MarkdownRendererProps {
   onEditExcalidrawDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }
 
-const IMAGE_SIZE_CLASS: Record<ImageSize, string> = {
-  small: "prose-img:max-w-[240px] prose-img:max-h-[200px] prose-img:object-contain",
-  medium: "prose-img:max-w-[480px] prose-img:max-h-[360px] prose-img:object-contain",
-  large: "prose-img:max-w-[800px] prose-img:max-h-[600px] prose-img:object-contain",
+const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
+  small: { maxWidth: "240px", maxHeight: "200px", objectFit: "contain" },
+  medium: { maxWidth: "480px", maxHeight: "360px", objectFit: "contain" },
+  large: { maxWidth: "800px", maxHeight: "600px", objectFit: "contain" },
 }
 
 const NOTE_LINK_MARKER_RE = /\[\[([a-f0-9-]+)\|([^\]]+)\]\]/g
@@ -40,6 +40,23 @@ function preprocessLinks(content: string): string {
   // Resolve local mirrored images: __LUMINARY_IMG__/doc_id/filename -> API_BASE/images/local/doc_id/filename
   text = text.replace(/__LUMINARY_IMG__\//g, `${API_BASE}/images/local/`)
   return text
+}
+
+function parseImageAlt(alt?: string): { alt: string; size?: ImageSize } {
+  if (!alt) return { alt: "" }
+
+  const parts = alt.split("|")
+  if (parts.length < 2) return { alt }
+
+  const potentialSize = parts.at(-1)?.trim().toLowerCase()
+  if (potentialSize === "small" || potentialSize === "medium" || potentialSize === "large") {
+    return {
+      alt: parts.slice(0, -1).join("|").trim(),
+      size: potentialSize,
+    }
+  }
+
+  return { alt }
 }
 
 function MermaidBlock({ chart }: { chart: string }) {
@@ -144,7 +161,6 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium" 
       "prose-headings:font-sans prose-headings:font-bold prose-headings:tracking-tight",
       "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
       "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
-      IMAGE_SIZE_CLASS[imageSize],
       className
     )}>
       <ReactMarkdown
@@ -168,24 +184,19 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium" 
             return <pre>{preChildren}</pre>
           },
           img: ({ src, alt }) => {
-            let size: ImageSize = imageSize
-            if (alt && alt.includes("|")) {
-              const parts = alt.split("|")
-              const potentialSize = parts[1].trim().toLowerCase()
-              if (["small", "medium", "large"].includes(potentialSize)) {
-                size = potentialSize as ImageSize
-              }
-            }
+            const parsed = parseImageAlt(alt)
+            const size = parsed.size ?? imageSize
             return (
               <img
                 src={src}
-                alt={alt}
+                alt={parsed.alt}
                 className={cn(
                   "rounded-lg shadow-md mx-auto my-4 block",
                   size === "small" && "max-w-[240px] max-h-[200px] object-contain",
                   size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
                   size === "large" && "max-w-[800px] max-h-[600px] object-contain"
                 )}
+                style={IMAGE_SIZE_STYLE[size]}
               />
             )
           },

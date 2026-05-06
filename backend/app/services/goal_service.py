@@ -1,8 +1,11 @@
 """S210: LearningGoalsService -- typed learning goals + progress aggregation.
 
 Goal types and progress semantics:
+- studying -- minutes_focused = sum(focus_minutes) of every completed linked
+              session, with surface breakdowns for analytics.
 - read    -- minutes_focused = sum(focus_minutes) of completed linked sessions
-             with surface='read'.
+             with surface='read' or surface='write' so website reading with
+             note-taking still attributes to reading goals.
 - recall  -- cards_reviewed = distinct flashcards reviewed within completed
              linked sessions with surface='recall'; avg_retention = mean of
              ReviewEventModel.is_correct.
@@ -42,7 +45,7 @@ from app.models import (
 logger = logging.getLogger(__name__)
 
 
-VALID_GOAL_TYPES = {"read", "recall", "write", "explore"}
+VALID_GOAL_TYPES = {"studying", "read", "recall", "write", "explore"}
 VALID_TARGET_UNITS = {"minutes", "pages", "cards", "notes", "turns"}
 VALID_STATUSES = {"active", "paused", "completed", "archived"}
 
@@ -251,6 +254,8 @@ class LearningGoalsService:
 
     async def compute_progress(self, goal_id: str) -> dict[str, Any]:
         goal = await self._get(goal_id)
+        if goal.goal_type == "studying":
+            return await self._progress_studying(goal)
         if goal.goal_type == "read":
             return await self._progress_read(goal)
         if goal.goal_type == "recall":
@@ -262,13 +267,23 @@ class LearningGoalsService:
         raise InvalidGoalType(f"unknown goal_type: {goal.goal_type}")
 
     async def _completed_sessions(
-        self, goal_id: str, surface: str
+        self, goal_id: str, surfaces: str | list[str]
     ) -> list[PomodoroSessionModel]:
+        surface_values = [surfaces] if isinstance(surfaces, str) else surfaces
         result = await self._session.execute(
             select(PomodoroSessionModel).where(
                 PomodoroSessionModel.goal_id == goal_id,
                 PomodoroSessionModel.status == "completed",
-                PomodoroSessionModel.surface == surface,
+                PomodoroSessionModel.surface.in_(surface_values),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def _all_completed_sessions(self, goal_id: str) -> list[PomodoroSessionModel]:
+        result = await self._session.execute(
+            select(PomodoroSessionModel).where(
+                PomodoroSessionModel.goal_id == goal_id,
+                PomodoroSessionModel.status == "completed",
             )
         )
         return list(result.scalars().all())
@@ -279,8 +294,33 @@ class LearningGoalsService:
             return None
         return round(min(100.0, (numerator / target) * 100.0), 2)
 
+    def _goal_metadata(self, goal: LearningGoalModel) -> dict[str, str | None]:
+        return {
+            "document_id": goal.document_id,
+            "deck_id": goal.deck_id,
+            "collection_id": goal.collection_id,
+        }
+
+    async def _progress_studying(self, goal: LearningGoalModel) -> dict[str, Any]:
+        sessions = await self._all_completed_sessions(goal.id)
+        minutes_focused = sum(s.focus_minutes for s in sessions)
+        surface_minutes: dict[str, int] = {}
+        surface_sessions: dict[str, int] = {}
+        for sess in sessions:
+            surface = sess.surface or "none"
+            surface_minutes[surface] = surface_minutes.get(surface, 0) + sess.focus_minutes
+            surface_sessions[surface] = surface_sessions.get(surface, 0) + 1
+        return {
+            "minutes_focused": minutes_focused,
+            "sessions_completed": len(sessions),
+            "surface_minutes": surface_minutes,
+            "surface_sessions": surface_sessions,
+            "metadata": self._goal_metadata(goal),
+            "completed_pct": self._pct(minutes_focused, goal.target_value),
+        }
+
     async def _progress_read(self, goal: LearningGoalModel) -> dict[str, Any]:
-        sessions = await self._completed_sessions(goal.id, "read")
+        sessions = await self._completed_sessions(goal.id, ["read", "write"])
         minutes_focused = sum(s.focus_minutes for s in sessions)
         sessions_completed = len(sessions)
         completed_pct = self._pct(minutes_focused, goal.target_value)

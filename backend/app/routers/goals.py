@@ -13,7 +13,7 @@ Endpoints (literal paths registered before parametric per FastAPI ordering rule)
 - DELETE /goals/{id}       delete the goal; sets goal_id=NULL on linked sessions
 
 Replaces the old document-centric /goals API (FSRS readiness projection). The new
-schema uses typed goals (read|recall|write|explore) with optional document/deck/
+schema uses typed goals (studying|read|recall|write|explore) with optional document/deck/
 collection links; progress is aggregated from completed Pomodoro sessions plus
 domain-specific tables (review_events, notes, qa_history).
 """
@@ -47,7 +47,7 @@ router = APIRouter(prefix="/goals", tags=["goals"])
 # ---------------------------------------------------------------------------
 
 
-GoalTypeLiteral = Literal["read", "recall", "write", "explore"]
+GoalTypeLiteral = Literal["studying", "read", "recall", "write", "explore"]
 TargetUnitLiteral = Literal["minutes", "pages", "cards", "notes", "turns"]
 StatusLiteral = Literal["active", "paused", "completed", "archived"]
 

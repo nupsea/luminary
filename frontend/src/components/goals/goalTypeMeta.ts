@@ -4,11 +4,12 @@
 // (node env) can cover them without DOM mounting.
 // ---------------------------------------------------------------------------
 
-import { BookOpen, Brain, Compass, Pencil, type LucideIcon } from "lucide-react"
+import { BookOpen, Brain, Compass, GraduationCap, Pencil, type LucideIcon } from "lucide-react"
 import type { GoalType, GoalProgressMetrics, TargetUnit } from "@/lib/goalsApi"
 import type { Surface } from "@/lib/focusUtils"
 
 export const GOAL_TYPE_LABEL: Record<GoalType, string> = {
+  studying: "Studying",
   read: "Read",
   recall: "Recall",
   write: "Write",
@@ -16,6 +17,7 @@ export const GOAL_TYPE_LABEL: Record<GoalType, string> = {
 }
 
 export const GOAL_TYPE_ICON: Record<GoalType, LucideIcon> = {
+  studying: GraduationCap,
   read: BookOpen,
   recall: Brain,
   write: Pencil,
@@ -26,6 +28,8 @@ export const GOAL_TYPE_ICON: Record<GoalType, LucideIcon> = {
 // progress. Returns "none" only if no surface meaningfully attributes.
 export function expectedSurfaceForGoalType(goalType: GoalType): Surface {
   switch (goalType) {
+    case "studying":
+      return "none"
     case "read":
       return "read"
     case "recall":
@@ -37,9 +41,26 @@ export function expectedSurfaceForGoalType(goalType: GoalType): Surface {
   }
 }
 
+export function acceptedSurfacesForGoalType(goalType: GoalType): Surface[] {
+  switch (goalType) {
+    case "studying":
+      return ["read", "recall", "write", "explore", "none"]
+    case "read":
+      return ["read", "write"]
+    case "recall":
+      return ["recall"]
+    case "write":
+      return ["write"]
+    case "explore":
+      return ["explore"]
+  }
+}
+
 // Suggest a default target_unit per goal type. The user can still override.
 export function defaultTargetUnitForGoalType(goalType: GoalType): TargetUnit {
   switch (goalType) {
+    case "studying":
+      return "minutes"
     case "read":
       return "minutes"
     case "recall":
@@ -62,6 +83,9 @@ export function progressLabel(
   const unit = targetUnit ?? defaultTargetUnitForGoalType(goalType)
   let actual: number
   switch (goalType) {
+    case "studying":
+      actual = metrics.minutes_focused ?? 0
+      break
     case "read":
       actual = metrics.minutes_focused ?? 0
       break
@@ -94,10 +118,11 @@ export function surfaceMismatchWarning(
   goalType: GoalType,
   inferredSurface: Surface,
 ): string | null {
-  const expected = expectedSurfaceForGoalType(goalType)
-  if (inferredSurface === expected) return null
+  const accepted = acceptedSurfacesForGoalType(goalType)
+  if (accepted.includes(inferredSurface)) return null
   // We only nag when the user is on one of the four learning surfaces and it
   // disagrees. Unknown surface ("none") is not flagged.
   if (inferredSurface === "none") return null
+  const expected = expectedSurfaceForGoalType(goalType)
   return `This goal is ${expected} but the active tab is ${inferredSurface} -- progress may not count.`
 }
