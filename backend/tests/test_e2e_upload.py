@@ -179,11 +179,11 @@ async def test_status_polling_contract():
 
 class _MockEmbeddingService:
     def encode(self, texts: list[str]) -> list[list[float]]:
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * 384 for _ in texts]
 
 
 class _MockEntityExtractor:
-    def extract(self, chunks: list[dict]) -> list[dict]:
+    def extract(self, chunks: list[dict], content_type: str | None = None) -> list[dict]:
         if not chunks:
             return []
         doc_id = chunks[0]["document_id"]
