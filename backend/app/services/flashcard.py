@@ -22,6 +22,37 @@ from app.models import (
     NoteModel,
     SectionModel,
 )
+from app.services.flashcard_parsers import (
+    _CLOZE_BLANK_RE,
+    _build_cloze_question,
+    _parse_cloze_llm_response,
+    _parse_cloze_text,
+    _parse_concept_extract,
+    _parse_gap_flashcard,
+    _parse_llm_response,
+)
+from app.services.flashcard_prompts import (
+    _BLOOM_L3_INSTRUCTION,
+    _BOOK_CONTENT_GUIDELINE,
+    _DIFFICULTY_GUIDELINES,
+    _TECH_TITLE_KEYWORDS,
+    CLOZE_SYSTEM,
+    CLOZE_USER_TMPL,
+    FLASHCARD_SYSTEM,
+    FLASHCARD_USER_TMPL,
+    GAP_FLASHCARD_SYSTEM,
+    GAP_FLASHCARD_USER_TMPL,
+    GRAPH_FLASHCARD_SYSTEM,
+    GRAPH_FLASHCARD_USER_TMPL,
+    NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+    NOTES_CARD_FROM_CONCEPTS_TMPL,
+    NOTES_CONCEPT_EXTRACT_SYSTEM,
+    NOTES_CONCEPT_EXTRACT_TMPL,
+    TECH_FLASHCARD_SYSTEM,
+    TECH_FLASHCARD_USER_TMPL,
+    _build_genre_system_prompt,
+    _infer_genre,
+)
 from app.services.flashcard_search import (
     FlashcardSearchService,
     _delete_flashcard_fts,
@@ -35,11 +66,38 @@ from app.services.llm import (
 )
 from app.telemetry import trace_chain
 
-# Re-exported from flashcard_search for back-compat (tests + routers import these here).
+# Re-exported for back-compat (tests + routers import these here).
 __all__ = [
+    "CLOZE_SYSTEM",
+    "CLOZE_USER_TMPL",
+    "FLASHCARD_SYSTEM",
+    "FLASHCARD_USER_TMPL",
     "FlashcardSearchService",
     "FlashcardService",
+    "GAP_FLASHCARD_SYSTEM",
+    "GAP_FLASHCARD_USER_TMPL",
+    "GRAPH_FLASHCARD_SYSTEM",
+    "GRAPH_FLASHCARD_USER_TMPL",
+    "NOTES_CARD_FROM_CONCEPTS_SYSTEM",
+    "NOTES_CARD_FROM_CONCEPTS_TMPL",
+    "NOTES_CONCEPT_EXTRACT_SYSTEM",
+    "NOTES_CONCEPT_EXTRACT_TMPL",
+    "TECH_FLASHCARD_SYSTEM",
+    "TECH_FLASHCARD_USER_TMPL",
+    "_BLOOM_L3_INSTRUCTION",
+    "_BOOK_CONTENT_GUIDELINE",
+    "_CLOZE_BLANK_RE",
+    "_DIFFICULTY_GUIDELINES",
+    "_TECH_TITLE_KEYWORDS",
+    "_build_cloze_question",
+    "_build_genre_system_prompt",
     "_delete_flashcard_fts",
+    "_infer_genre",
+    "_parse_cloze_llm_response",
+    "_parse_cloze_text",
+    "_parse_concept_extract",
+    "_parse_gap_flashcard",
+    "_parse_llm_response",
     "_sanitize_fts5_query",
     "_sync_flashcard_fts",
     "get_flashcard_service",
@@ -54,153 +112,8 @@ def _get_generation_model() -> str | None:
     return m if m else None
 
 
-FLASHCARD_SYSTEM = (
-    "You are a learning assistant creating flashcards for active recall. "
-    "Generate questions that test understanding, not surface recall. "
-    "Match the question structure to the type of knowledge being tested: "
-    "causal knowledge -> ask why or what causes; "
-    "comparative knowledge -> ask how two things differ or what distinguishes them; "
-    "process or role knowledge -> ask what role X plays in Y or how X enables Y; "
-    "definitional knowledge -> ask what X is or what characterises X; "
-    "speculative or argued knowledge -> ask what the argument or evidence for X is. "
-    "AVOID: list-regurgitation questions whose answer is just an enumeration of items; "
-    "trivia about exact wording; yes/no questions; "
-    "questions whose answer is not derivable from the provided text. "
-    "CRITICAL -- NEVER use deictic or source-referencing words in a question: "
-    "'in this passage', 'in this text', 'in this excerpt', 'in this book', "
-    "'in this document', 'according to the text', 'as described', 'as stated', "
-    "'this scenario', 'the scenario', 'this situation', 'this case', 'this context', "
-    "'this example', 'the author', 'the writer'. "
-    "These make no sense on a flashcard viewed without the source. "
-    "Instead, name the specific concept, entity, technology, or idea directly in the question. "
-    "CRITICAL -- question framing must match the answer exactly: "
-    "if the answer explains a cause, the question must ask for that cause; "
-    "if the answer describes a role, the question must ask for that role. "
-    "The answer must be a concise explanation in 1-3 sentences -- never a bare list of items. "
-    "Before writing each question, verify: does someone without the source text understand "
-    "exactly what is being asked, and does the answer directly satisfy the question? "
-    "Output a JSON array starting with [ and ending with ]. "
-    "Write no explanation, preamble, or markdown fences."
-)
-
-FLASHCARD_USER_TMPL = (
-    "Generate {count} {difficulty}-level flashcard pairs from the text below.\n"
-    "Difficulty guidelines: {difficulty_guidelines}\n"
-    "{extra_instructions}"
-    "Each card must be answerable from the provided text only.\n"
-    "Format: "
-    '[{{"question": "...", "answer": "...", "source_excerpt": "...",'
-    ' "bloom_level": N}}]\n'
-    "bloom_level is an integer 1-6 "
-    "(1=remember, 2=understand, 3=apply, "
-    "4=analyze, 5=evaluate, 6=create).\n"
-    'The "answer" field may use Markdown (bold, lists) for clarity.\n\n'
-    "Text:\n{text}\n\n"
-    "JSON array:"
-)
-
-NOTES_CONCEPT_EXTRACT_SYSTEM = (
-    "You are a learning analyst. Given a learner's notes, your job is two steps. "
-    "STEP 1 -- DOMAIN: Identify the primary subject domain of the notes in a single short phrase. "
-    "The domain is what the learner is actively trying to understand or remember. "
-    "It is never the setting, date, location, or context in which the notes were written. "
-    "STEP 2 -- CONCEPTS: Extract atomic, learnable concepts that are directly about that domain. "
-    "A concept must be an insight, claim, argument, principle, or relationship within the domain. "
-    "STRICT GROUNDING: extract only what is explicitly stated or directly implied by the notes. "
-    "Never introduce knowledge from outside the notes. "
-    "REJECT any concept that is about: "
-    "the physical setting (weather, environment, location, surroundings); "
-    "people or events incidental to the subject; "
-    "bare enumerations with no explanatory content; "
-    "meta-commentary about the notes. "
-    "For each accepted concept, assign a type: "
-    "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
-    'Output ONLY a JSON object with keys "domain" (string) and '
-    '"concepts" (array of {"concept": "...", "type": "..."}). '
-    "No explanation, no preamble, no markdown fences."
-)
-
-NOTES_CONCEPT_EXTRACT_TMPL = (
-    "Identify the domain and extract up to {max_concepts} learnable concepts from these notes.\n\n"
-    "Notes:\n{text}\n\n"
-    "JSON object:"
-)
-
-NOTES_CARD_FROM_CONCEPTS_SYSTEM = (
-    "You are a flashcard designer. You receive a subject domain, a list of typed concepts, "
-    "and the original notes they were drawn from. "
-    "DOMAIN GATE: only generate cards for concepts that are directly about the stated domain. "
-    "Skip any concept outside the domain even if it appears in the notes. "
-    "GROUNDING GATE: only generate a card if the answer can be written using the notes alone. "
-    "If the notes do not contain sufficient information, skip that concept. "
-    "Never hallucinate or use external knowledge. "
-    "The question structure MUST match the knowledge type: "
-    "causal-claim -> ask why X leads to Y, or what causes X; "
-    "comparison -> ask how X and Y differ, or what distinguishes X from Y; "
-    "process-role -> ask what X collectively enables or achieves within Y "
-    "(not: list the components of X); "
-    "factual-definition -> ask what X is or what characterises X; "
-    "speculative-claim -> ask what the argument or reasoning behind X is. "
-    "The question must name the specific concept directly. "
-    "NEVER use context-dependent words: 'this scenario', 'the scenario', 'this situation', "
-    "'this case', 'this context', 'this example', 'the author', 'the text', 'these notes', "
-    "'the man', 'the person', 'the writer'. "
-    "The question must stand alone -- understandable without the notes. "
-    "The answer must be derived from the notes in 1-3 sentences. "
-    "For process-role: explain what the collective activity achieves or why it matters -- "
-    "never enumerate the individual components as the answer. "
-    'Output ONLY a JSON array: [{{"question": "...", "answer": "...", "source_excerpt": ""}}]. '
-    "No explanation, no preamble, no markdown fences."
-)
-
-NOTES_CARD_FROM_CONCEPTS_TMPL = (
-    "Subject domain: {domain}\n"
-    "Difficulty: {difficulty}. {difficulty_guidelines}\n\n"
-    "Concepts:\n{concepts_json}\n\n"
-    "Notes:\n{text}\n\n"
-    "JSON array:"
-)
-
-_DIFFICULTY_GUIDELINES = {
-    "easy": (
-        "Focus on basic recall, key characters, main plot points, and obvious facts. "
-        "Questions should be straightforward."
-    ),
-    "medium": (
-        "Focus on comprehension, connecting ideas, identifying themes, and explaining 'why'. "
-        "Questions should require some thought and understanding."
-    ),
-    "hard": (
-        "Focus on analysis, evaluation, complex relationships, subtle themes, and application "
-        "to new contexts. Questions should be challenging and require deep insight."
-    ),
-}
-
-_BOOK_CONTENT_GUIDELINE = (
-    "IMPORTANT: Focus exclusively on the primary narrative or subject matter "
-    "(story, characters, plot, themes, or core arguments). "
-    "STRICTLY AVOID generating any flashcard about: "
-    "Project Gutenberg, publication details, copyright notices, licensing, "
-    "translators, editors, publishers, prefaces, forewords, introductions, "
-    "the purpose of publishing the work, or any other front/back matter. "
-    "These are irrelevant to learning the content and must be completely ignored. "
-    "If the provided text starts with publisher boilerplate or editorial notes, "
-    "skip past them entirely and generate questions only from the actual narrative or subject.\n"
-)
-
-
 # Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)
 _CHUNK_CHAR_LIMIT = 10_000
-
-# S188: Bloom L3+ instruction appended to the genre system prompt
-_BLOOM_L3_INSTRUCTION = (
-    "\nBLOOM LEVEL TARGETING: Generate questions at Bloom's Taxonomy Level 3 or higher "
-    "(application, analysis, synthesis, evaluation). At least 50% of questions must require "
-    "the learner to apply, analyze, or evaluate -- not merely recall or describe. "
-    'For each card, include a "bloom_level" integer (1-6) indicating the cognitive level. '
-    "ANSWER CITATION: Each answer must reference the section or chapter where the concept "
-    "appears (e.g., 'In Chapter XII...', 'In the section on X...'). "
-)
 
 
 async def _get_section_context_for_chunks(
@@ -462,240 +375,8 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
     return combined, chunks[0].id
 
 
-def _parse_concept_extract(raw: str) -> tuple[str, list[dict]]:
-    """Parse the concept-extraction response: {"domain": "...", "concepts": [...]}.
-
-    Returns (domain, concepts). Falls back gracefully if the LLM deviates from the format.
-    """
-    raw = raw.strip()
-    # Strip markdown fences if present.
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1]
-        raw = raw.rsplit("```", 1)[0].strip()
-    # Try to find the outermost JSON object.
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    if start != -1 and end > start:
-        try:
-            obj = json.loads(raw[start:end])
-            domain = str(obj.get("domain", "")).strip()
-            concepts = [
-                c for c in obj.get("concepts", []) if isinstance(c, dict) and c.get("concept")
-            ]
-            return domain, concepts
-        except (json.JSONDecodeError, ValueError):
-            pass
-    # Fallback: try to extract a bare array (old format compatibility).
-    start = raw.find("[")
-    end = raw.rfind("]") + 1
-    if start != -1 and end > start:
-        try:
-            concepts = json.loads(raw[start:end])
-            return "", [c for c in concepts if isinstance(c, dict) and c.get("concept")]
-        except (json.JSONDecodeError, ValueError):
-            pass
-    logger.warning("Concept extract parse failed: %r", raw[:200])
-    return "", []
-
-
-def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
-    """Extract a JSON array from the LLM response.
-
-    Handles:
-    - Clean JSON array responses
-    - Responses wrapped in markdown code fences
-    - Responses with preamble prose before the array
-    - Responses with trailing text after the array
-    """
-    raw = raw.strip()
-
-    # Strip markdown code fences
-    raw = re.sub(r"^```[^\n]*\n?", "", raw)
-    raw = re.sub(r"\n?```$", "", raw)
-    raw = raw.strip()
-
-    # If it already looks like a clean array, try parsing directly
-    if raw.startswith("["):
-        try:
-            data = json.loads(raw)
-            if isinstance(data, list):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # Fall back: find the first '[' and last ']' and parse that slice
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start != -1 and end > start:
-        try:
-            data = json.loads(raw[start : end + 1])
-            if isinstance(data, list):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
-    return []
-
-
-TECH_FLASHCARD_SYSTEM = (
-    "You are a technical learning assistant creating flashcards based on Bloom's Taxonomy. "
-    "For each card choose exactly one of these flashcard types: "
-    "definition (L1), syntax_recall (L1), concept_explanation (L2), analogy (L2), "
-    "code_completion (L3), api_signature (L3), trace (L4), pattern_recognition (L4), "
-    "design_decision (L5), complexity (L5), implementation (L6). "
-    "Choose the type that best matches what the card asks the learner to do. "
-    "For code_completion cards: show a code block with a blank rendered as ____ where the "
-    "learner must supply the missing part. "
-    "For trace cards: show a code snippet and ask the learner to predict its output. "
-    "For design_decision cards: ask the learner to justify a technical choice. "
-    "For complexity cards: ask the learner to state and justify Big-O for an algorithm. "
-    "Questions must be self-contained. "
-    "NEVER use phrases like 'in this passage' or 'in this text'. "
-    "Output a JSON array starting with [ and ending with ]. "
-    'Each element: {"question": "...", "answer": "...", '
-    '"source_excerpt": "...", "flashcard_type": "...", "bloom_level": N}. '
-    "bloom_level is an integer 1-6. "
-    "Write no explanation, preamble, or markdown fences."
-)
-
-TECH_FLASHCARD_USER_TMPL = (
-    "Generate {count} technical flashcards from the text below.\n"
-    "Prefer higher Bloom levels (trace, code_completion, design_decision) when the text "
-    "contains code blocks, API signatures, or trade-off discussions.\n"
-    "When the section heading contains 'vs' or 'trade-off', generate at least one "
-    "design_decision card (bloom_level=5).\n"
-    "When the text contains an admonition type of 'warning', generate at least one "
-    "definition card (bloom_level=1) that captures the warning.\n"
-    "Each card must be answerable from the provided text only.\n"
-    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "...", '
-    '"flashcard_type": "...", "bloom_level": N}}]\n\n'
-    "Section heading: {section_heading}\n"
-    "Has code blocks: {has_code}\n"
-    "Admonition type: {admonition_type}\n\n"
-    "Text:\n{text}\n\n"
-    "JSON array:"
-)
-
-
-GAP_FLASHCARD_SYSTEM = (
-    "You are a learning assistant. Generate exactly ONE flashcard for the given knowledge gap. "
-    'Output ONLY a JSON object with two keys: {"front": "...", "back": "..."} '
-    "where 'front' is the question and 'back' is a concise answer. "
-    "Write no explanation, preamble, or markdown fences. Output only the JSON object."
-)
-
-GAP_FLASHCARD_USER_TMPL = (
-    'Knowledge gap: "{gap}"\n\n'
-    'Generate one flashcard as JSON: {{"front": "question", "back": "answer"}}'
-)
-
-GRAPH_FLASHCARD_SYSTEM = (
-    "You are a learning assistant creating flashcards that test understanding of relationships "
-    "between concepts. Each question must ask how two named entities are connected, "
-    "what one entity means in the context of the other, "
-    "or what role one plays relative to the other. "
-    "NEVER frame a question as a definition question ('What is X?'). "
-    "NEVER use phrases like 'in this passage' or 'according to this text'. "
-    "Questions must be self-contained. "
-    "Output a JSON array starting with [ and ending with ]. "
-    "Write no explanation, preamble, or markdown fences."
-)
-
-GRAPH_FLASHCARD_USER_TMPL = (
-    "Entity A: {name_a}\n"
-    "Entity B: {name_b}\n"
-    "Relationship hint: {relation_label}\n\n"
-    "Context passages:\n{context}\n\n"
-    "Generate {count} flashcard(s) testing the relationship between '{name_a}' and '{name_b}'.\n"
-    "Each question must be framed as a relationship question "
-    "('How does X relate to Y?', 'What connects X and Y?', 'What role does X play in Y?').\n"
-    'Format: [{{"question": "...", "answer": "...", "source_excerpt": "..."}}]\n'
-    "JSON array:"
-)
-
-
-def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
-    """Parse a single {front, back} JSON object from LLM response for one gap."""
-    raw = raw.strip()
-    raw = re.sub(r"^```[^\n]*\n?", "", raw)
-    raw = re.sub(r"\n?```$", "", raw)
-    raw = raw.strip()
-
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end > start:
-        try:
-            data = json.loads(raw[start : end + 1])
-            if isinstance(data, dict) and data.get("front") and data.get("back"):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    logger.warning("Gap flashcard JSON parse failed for gap %r: %r", gap[:50], raw[:200])
-    return None
-
-
 # ---------------------------------------------------------------------------
-# S154: Cloze deletion helpers and prompts
-# ---------------------------------------------------------------------------
-
-CLOZE_SYSTEM = (
-    "You are a learning assistant creating cloze deletion (fill-in-the-blank) flashcards. "
-    "Extract 3-5 key technical terms or concepts from the section text. "
-    "For each term, produce a sentence that embeds the term using {{term}} syntax. "
-    "Each sentence must make sense without the blank and use one or two blanks only. "
-    "Output a JSON array starting with [ and ending with ]. "
-    'Each element: {"cloze_text": "...", "source_excerpt": "..."}. '
-    "cloze_text uses {{term}} markers. source_excerpt is a verbatim passage from the text. "
-    "Write no explanation, preamble, or markdown fences."
-)
-
-CLOZE_USER_TMPL = (
-    "Generate {count} cloze deletion cards from the text below.\n"
-    "Each card must contain at least one {{{{term}}}} blank. "
-    "Use exactly one or two blanks per sentence.\n"
-    "Text:\n{text}\n\n"
-    "JSON array:"
-)
-
-_CLOZE_BLANK_RE = re.compile(r"\{\{(.+?)\}\}")
-
-
-def _parse_cloze_text(cloze_text: str) -> list[str]:
-    """Return list of blank terms extracted from {{term}} markers in order."""
-    return _CLOZE_BLANK_RE.findall(cloze_text)
-
-
-def _build_cloze_question(cloze_text: str) -> str:
-    """Replace {{term}} markers with [____] for list-view display."""
-    return _CLOZE_BLANK_RE.sub("[____]", cloze_text)
-
-
-def _parse_cloze_llm_response(raw: str) -> list[dict]:
-    """Parse the LLM JSON array response for cloze cards.
-
-    Filters out any element whose cloze_text has no {{}} markers (malformed).
-    Returns only valid elements.
-    """
-    items = _parse_llm_response(raw, "cloze")
-    valid = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        cloze_text = str(item.get("cloze_text", "")).strip()
-        if not cloze_text:
-            continue
-        blanks = _parse_cloze_text(cloze_text)
-        if not blanks:
-            logger.warning("Cloze item has no {{}} markers, skipping: %r", cloze_text[:100])
-            continue
-        valid.append(item)
-    return valid
-
-
-# ---------------------------------------------------------------------------
-# S179: Chunk classifier and genre-aware prompt helpers
+# S179: Chunk classifier helpers
 # ---------------------------------------------------------------------------
 
 _ANALOGY_PATTERNS = re.compile(
@@ -722,13 +403,6 @@ _CONCEPT_PATTERNS = re.compile(
 _TRANSITION_PATTERNS = re.compile(
     r"\b(in the next|in the following|as we saw|moving on|in summary|"
     r"to recap|we have seen|in this chapter)\b",
-    re.IGNORECASE,
-)
-
-_TECH_TITLE_KEYWORDS = re.compile(
-    r"\b(programming|systems|distributed|database|algorithm|machine learning"
-    r"|software|engineering|computer|kubernetes|docker|linux|network|security"
-    r"|data structures|operating system)\b",
     re.IGNORECASE,
 )
 
@@ -781,53 +455,6 @@ def _filter_chunks_by_classification(
                 eligible_indices.add(i + 1)
 
     return [(chunks[i], labels[i]) for i in sorted(eligible_indices)]
-
-
-def _infer_genre(doc: "DocumentModel | None") -> str:  # type: ignore[name-defined]
-    """Infer document genre for system prompt tuning."""
-    if doc is None:
-        return "narrative"
-    content_type = (doc.content_type or "").lower()
-    title = (doc.title or "").lower()
-    if content_type == "book":
-        if _TECH_TITLE_KEYWORDS.search(title):
-            return "technical"
-        return "non-fiction"
-    if content_type in ("pdf", "web"):
-        return "academic"
-    return "narrative"
-
-
-def _build_genre_system_prompt(genre: str) -> str:
-    """Build a genre-aware flashcard generation system prompt."""
-    genre_hint = f"This is a {genre} document. " if genre != "narrative" else ""
-    quality_rules = (
-        "QUALITY RULES for concept-focused questions:\n"
-        "- Do NOT write questions whose answer is a proper noun drawn from an analogy or "
-        "illustrative story used to explain a concept (e.g., do not ask 'What animal did the "
-        "author compare X to?').\n"
-        "- Questions must be answerable by someone who understands the underlying concept but "
-        "has NOT read the specific analogy or illustration.\n"
-        "- Prefer 'Explain X in your own words' and 'What is the practical implication of Y' "
-        "over 'According to the text, what does Z do'.\n"
-        "- Frame questions in terms of WHY or HOW, not WHAT was mentioned in an example.\n"
-    )
-    return (
-        genre_hint + "You are a learning assistant creating flashcards for active recall. "
-        "Generate questions that test understanding of core concepts and principles. "
-        "Prefer questions that: (1) ask the learner to explain a concept in their own words, "
-        "(2) apply a concept to a new situation, "
-        "(3) distinguish between similar concepts, "
-        "or (4) evaluate a claim or argument. "
-        "AVOID: trivia questions about exact wording, hypothetical questions not grounded "
-        "in the content, questions whose answer is not in the text, yes/no questions. "
-        "CRITICAL -- questions must be fully self-contained. "
-        "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
-        "'in this book', 'in this document', or any similar reference to the source material. "
-        "A flashcard question must make complete sense on its own without seeing the original"
-        " text. " + quality_rules + "Output a JSON array starting with [ and ending with ]. "
-        "Write no explanation, preamble, or markdown fences."
-    )
 
 
 async def _fetch_existing_embeddings(

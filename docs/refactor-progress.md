@@ -6,12 +6,21 @@ this file tracks **only what's still pending**. Completed work is in
 
 ## Next: audit #1 -- split `FlashcardService` (in progress)
 
-- File: `backend/app/services/flashcard.py` (now 1,861 lines, was 2,054).
+- File: `backend/app/services/flashcard.py` (now 1,488 lines, was 2,054).
 - Done: extracted `search` + FTS5 helpers (`_sanitize_fts5_query`,
   `_sync_flashcard_fts`, `_delete_flashcard_fts`) into
   `services/flashcard_search.py` as `FlashcardSearchService`.
   `FlashcardService(FlashcardSearchService)` preserves the call-site API
   for routers/tests; helpers are re-exported from `flashcard.py`.
+- Done: extracted prompt strings + system-prompt builders into
+  `services/flashcard_prompts.py` (FLASHCARD/NOTES/TECH/GAP/GRAPH/CLOZE
+  templates, `_DIFFICULTY_GUIDELINES`, `_BOOK_CONTENT_GUIDELINE`,
+  `_BLOOM_L3_INSTRUCTION`, `_TECH_TITLE_KEYWORDS`, `_infer_genre`,
+  `_build_genre_system_prompt`); pure JSON parsers into
+  `services/flashcard_parsers.py` (`_parse_llm_response`,
+  `_parse_concept_extract`, `_parse_gap_flashcard`, `_parse_cloze_*`,
+  `_build_cloze_question`, `_CLOZE_BLANK_RE`). Re-exported from
+  `flashcard.py` for tests/routers.
 - Remaining: 9 large `async` generate methods (`generate`,
   `generate_from_notes`, `generate_from_collection`, `generate_from_gaps`,
   `generate_from_feynman_gaps`, `generate_from_graph`, `generate_technical`,
