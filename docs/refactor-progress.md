@@ -53,7 +53,18 @@ this file tracks **only what's still pending**. Completed work is in
   - `routers/documents.py` re-exports them under their private aliases
     via `__all__` so `routers/study.py` (5 import sites) and
     `tests/test_documents.py` keep working.
-- Remaining for audit #2: `notes.py:1394`, `flashcards.py:1005` -- same pattern.
+- `routers/notes.py` 1,394 -> 1,062 lines. Done:
+  - All 26 Pydantic schemas extracted to new `app/schemas/notes.py`.
+  - Pure helpers (`_to_response`, `_fts_insert`, `_fts_delete`, `_fts_update`,
+    `_sync_tag_index`, `_sync_note_sources`, `_upsert_note_graph`,
+    `_embed_and_store_note`) extracted to new `app/services/notes_service.py`.
+  - `routers/notes.py` re-exports them under their private aliases via
+    `__all__` so `routers/tags.py` (3 import sites of `_sync_tag_index`)
+    and `tests/test_naming_migration.py` keep working.
+  - `_apply_note_update` stays in the router because it is tightly coupled
+    to module-level `_background_tasks` and orchestrates the lifted
+    helpers via fire-and-forget tasks.
+- Remaining for audit #2: `flashcards.py:1005` -- same pattern.
 
 ## Lower priority items from the audit (not yet started)
 
