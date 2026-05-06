@@ -6,7 +6,7 @@ AC10: POST /feynman/sessions with Ollama unreachable returns 503 with 'ollama se
 
 import json
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
