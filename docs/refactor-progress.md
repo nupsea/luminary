@@ -6,7 +6,7 @@ this file tracks **only what's still pending**. Completed work is in
 
 ## Next: audit #1 -- split `FlashcardService` (in progress)
 
-- File: `backend/app/services/flashcard.py` (now 1,488 lines, was 2,054).
+- File: `backend/app/services/flashcard.py` (now 1,267 lines, was 2,054).
 - Done: extracted `search` + FTS5 helpers (`_sanitize_fts5_query`,
   `_sync_flashcard_fts`, `_delete_flashcard_fts`) into
   `services/flashcard_search.py` as `FlashcardSearchService`.
@@ -21,11 +21,15 @@ this file tracks **only what's still pending**. Completed work is in
   `_parse_concept_extract`, `_parse_gap_flashcard`, `_parse_cloze_*`,
   `_build_cloze_question`, `_CLOZE_BLANK_RE`). Re-exported from
   `flashcard.py` for tests/routers.
-- Remaining: 9 large `async` generate methods (`generate`,
-  `generate_from_notes`, `generate_from_collection`, `generate_from_gaps`,
-  `generate_from_feynman_gaps`, `generate_from_graph`, `generate_technical`,
-  `generate_cloze`). Each is a near-clone -- duplicated chunk fetch,
-  prompt build, LLM call, parse, dedup, persist.
+- Done: collapsed `generate_from_gaps` and `generate_from_feynman_gaps`
+  into shared `_run_gap_generation` (gap fan-out + parse + persist).
+- Done: lifted `generate_technical` and `generate_cloze` into
+  `services/flashcard_generators.py` as module-level async functions;
+  `FlashcardService` thin-delegates. Generators indirect through
+  `flashcard.get_llm_service` so existing test patches still apply.
+- Remaining: `generate`, `generate_from_notes`, `generate_from_collection`,
+  `generate_from_graph`. Same lift-to-module pattern; biggest payoff is
+  `generate` itself.
 - Refactor approach: split into `FlashcardGenerator` strategy family
   (one strategy per source), with shared `_build_prompt` /
   `_parse_llm_response` helpers already module-level (lines 446-712).
