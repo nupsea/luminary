@@ -385,6 +385,41 @@ async def test_delete_all_document_flashcards(test_db):
         assert len(other_resp.json()) == 1
 
 
+async def test_bulk_delete_flashcards(test_db):
+    """POST /flashcards/bulk-delete removes only the requested IDs."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    keep_id = str(uuid.uuid4())
+    drop_a = str(uuid.uuid4())
+    drop_b = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_flashcard(card_id=keep_id, doc_id=doc_id, question="Keep?"))
+        session.add(_make_flashcard(card_id=drop_a, doc_id=doc_id, question="DropA?"))
+        session.add(_make_flashcard(card_id=drop_b, doc_id=doc_id, question="DropB?"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/flashcards/bulk-delete",
+            json={"ids": [drop_a, drop_b, "missing-id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"deleted": 2}
+
+        get_resp = await client.get(f"/flashcards/{doc_id}")
+        remaining = get_resp.json()
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == keep_id
+
+
+async def test_bulk_delete_empty_ids_rejected(test_db):
+    """POST /flashcards/bulk-delete with empty ids list returns 422."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/flashcards/bulk-delete", json={"ids": []})
+        assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # Endpoint integration tests
 # ---------------------------------------------------------------------------

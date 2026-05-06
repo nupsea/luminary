@@ -43,14 +43,42 @@ class SearchResponse(BaseModel):
 async def search(
     q: str = Query(..., min_length=1),
     content_types: str = Query(default=""),
+    document_id: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
+    hyde: bool = Query(default=False),
+    rerank: bool = Query(default=False),
+    graph_expand: bool = Query(default=True),
+    strategy: str = Query(default="rrf", pattern="^(rrf|vector|fts|graph)$"),
     session: AsyncSession = Depends(get_db),
     retriever: HybridRetriever = Depends(get_retriever),
 ) -> SearchResponse:
-    """Hybrid search across all documents. Returns results grouped by document."""
+    """Hybrid search across all documents. Returns results grouped by document.
+
+    When ``document_id`` is supplied, retrieval is scoped to that single
+    document. Eval pipelines (S212) need this to measure per-document
+    retrieval quality without having the target document drowned out by
+    the rest of the corpus in global ranking.
+
+    When ``hyde`` is true, the retriever calls the local LLM to generate a
+    hypothetical answer and uses ``"<q> <answer>"`` for retrieval. Slower
+    by one LLM call (~1s) but bridges question/answer phrasing divergence.
+
+    When ``graph_expand`` is true (default), entities detected in the query
+    are resolved to canonical labels via Kuzu's alias graph and appended to
+    the query. Deterministic and local-first per I-16; pairs with S224
+    index-time entity injection.
+
+    When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
+    cross-encoder and the top-N returned. Adds ~100-300ms per query (CPU)
+    but recovers answer chunks whose vocabulary diverges from the
+    question's surface form -- the remaining S212 failure mode after
+    HyDE. Local-first per I-16. Fails soft on any reranker error.
+    """
     # Resolve document_ids for content_type filter
     document_ids: list[str] | None = None
-    if content_types:
+    if document_id:
+        document_ids = [document_id]
+    elif content_types:
         type_list = [t.strip() for t in content_types.split(",") if t.strip()]
         if type_list:
             result = await session.execute(
@@ -61,7 +89,15 @@ async def search(
                 return SearchResponse(results=[])
 
     # Hybrid retrieval (vector + BM25)
-    scored_chunks = await retriever.retrieve(q, document_ids=document_ids, k=limit)
+    scored_chunks = await retriever.retrieve(
+        q,
+        document_ids=document_ids,
+        k=limit,
+        hyde=hyde,
+        rerank=rerank,
+        graph_expand=graph_expand,
+        strategy=strategy,  # type: ignore[arg-type]
+    )
 
     if not scored_chunks:
         return SearchResponse(results=[])

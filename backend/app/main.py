@@ -24,10 +24,12 @@ from app.models import SettingsModel
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.chat_meta import router as chat_meta_router
+from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
 from app.routers.code_executor import router as code_executor_router
 from app.routers.collections import router as collections_router
 from app.routers.documents import router as documents_router
+from app.routers.engagement import router as engagement_router
 from app.routers.evals import router as evals_router
 from app.routers.explain import router as explain_router
 from app.routers.feynman import router as feynman_router
@@ -38,6 +40,7 @@ from app.routers.images import router as images_router
 from app.routers.mastery import router as mastery_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
+from app.routers.pomodoro import router as pomodoro_router
 from app.routers.qa import router as qa_router
 from app.routers.reading import router as reading_router
 from app.routers.references import router as references_router
@@ -200,7 +203,9 @@ app.include_router(annotations_router)
 app.include_router(clips_router)
 app.include_router(collections_router)
 app.include_router(chat_meta_router)
+app.include_router(chat_sessions_router)
 app.include_router(documents_router)
+app.include_router(engagement_router)
 app.include_router(evals_router)
 app.include_router(explain_router)
 app.include_router(goals_router)
@@ -210,6 +215,7 @@ app.include_router(graph_router)
 app.include_router(images_router)
 app.include_router(monitoring_router)
 app.include_router(notes_router)
+app.include_router(pomodoro_router)
 app.include_router(qa_router)
 app.include_router(reading_router)
 app.include_router(references_router)

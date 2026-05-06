@@ -2,7 +2,8 @@ import asyncio
 import logging
 import re
 from collections import defaultdict
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from sqlalchemy import text
 
@@ -12,6 +13,8 @@ from app.types import ScoredChunk
 
 logger = logging.getLogger(__name__)
 
+RetrievalStrategy = Literal["rrf", "vector", "fts", "graph"]
+
 RRF_K = 60
 # Fraction of top-k chunks from one section that triggers diversity re-ranking.
 _DIVERSITY_THRESHOLD = 0.6
@@ -20,6 +23,52 @@ _DIVERSITY_THRESHOLD = 0.6
 _EXPANSION_TYPES = {"book", "conversation", "notes"}
 # Score multiplier for neighbour chunks added by context expansion.
 _EXPANSION_SCORE_FACTOR = 0.75
+
+# Cross-encoder reranker (S212 iter 5). Direct query/chunk semantic scoring
+# complements RRF: when question phrasing diverges from answer phrasing, a
+# cross-encoder still surfaces chunks that contain the answer fact. Local-first
+# per I-16 -- runs on CPU, ~80MB model, no external service. The model is
+# loaded lazily on first use; failures fail-soft to the original RRF order so
+# a missing model never breaks /search.
+_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# Top-N RRF candidates fed into the reranker. 50 is generous enough for the
+# answer chunk to be reachable when its rank in either vector or BM25 is in
+# the 30s, while keeping cross-encoder latency under ~250ms per query on CPU.
+_RERANK_CANDIDATE_POOL = 50
+
+# HyDE (Hypothetical Document Embeddings) prompt -- generates a brief, plausible
+# answer to the user's question so retrieval can match on the *answer's*
+# vocabulary, not the question's. Mitigates question/answer phrasing
+# divergence (S212): e.g. "What was the name of the Eloi girl?" embeds far from
+# the answer chunk "her name was Weena" because the question never mentions
+# Weena. The hypothetical answer bridges that gap. Local Ollama default per I-16.
+#
+# Output is intentionally terse: a verbose hypothetical dilutes the BM25 signal
+# with model-introduced filler vocabulary that does not exist in the source
+# text. We want concrete answer keywords, not natural prose.
+_HYDE_SYSTEM = (
+    "You are a knowledgeable assistant. Given a question, write a brief 1-2 "
+    "sentence factual answer that would plausibly appear in the source text. "
+    "Make a reasonable guess based on common knowledge if uncertain -- do not "
+    "refuse or say 'I don't know'. Output the answer only, no preamble."
+)
+# llama3.2:3b is fast (~1s warm) and produces usable hypotheticals for general
+# questions. For domain-specific questions where the model lacks knowledge, the
+# hypothetical at worst adds neutral noise; the call fails-soft so retrieval
+# is never worse than the no-hyde baseline. Local-first per I-16.
+_HYDE_MODEL = "ollama/llama3.2:3b"
+_HYDE_TIMEOUT_S = 20.0
+
+# Graph-augmented deterministic query expansion (S225). Detect entities in the
+# query via GLiNER, resolve to canonical labels via EntityDisambiguator, then
+# fetch alias surface forms from the Kuzu Entity.aliases column. The expanded
+# query bridges the question/answer vocabulary gap deterministically (no LLM
+# in the query path -> no hallucination, no run-to-run variance, I-16 clean).
+# Pairs with S224 index-time entity injection so both sides speak the same
+# canonical-entity vocabulary.
+_GRAPH_EXPAND_TYPES = {"PERSON", "ORGANIZATION", "PLACE", "CONCEPT"}
+_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY = 5
+_GRAPH_EXPAND_MAX_TOKENS = 30
 
 
 def _round_robin(
@@ -144,6 +193,8 @@ async def _expand_context(
     if not chunks:
         return chunks
 
+    expanded_by_id: dict[str, ScoredChunk] = {chunk.chunk_id: chunk for chunk in chunks}
+
     # Collect all document_ids to fetch content_types in a single query.
     doc_ids = list({c.document_id for c in chunks})
 
@@ -163,79 +214,265 @@ async def _expand_context(
         if not eligible_docs:
             return chunks
 
-        # Fetch chunk_index for all input chunks
-        chunk_ids = [c.chunk_id for c in chunks]
-        idx_result = await session.execute(
-            text(
-                "SELECT id, chunk_index FROM chunks WHERE id IN ("
-                + ", ".join(f"'{cid}'" for cid in chunk_ids)
-                + ")"
-            )
-        )
-        chunk_index_map: dict[str, int] = {row[0]: row[1] for row in idx_result.fetchall()}
-
-        # Gather all (document_id, target_index) pairs we need to fetch
-        neighbor_queries: list[tuple[str, int, float]] = []
         for chunk in chunks:
             if chunk.document_id not in eligible_docs:
                 continue
-            cidx = chunk_index_map.get(chunk.chunk_id)
-            if cidx is None:
-                continue
-            for delta in range(-window, window + 1):
-                if delta == 0:
-                    continue
-                neighbor_queries.append(
-                    (chunk.document_id, cidx + delta, chunk.score * _EXPANSION_SCORE_FACTOR)
-                )
 
-        # Build result set: start with original chunks
-        result_map: dict[str, ScoredChunk] = {c.chunk_id: c for c in chunks}
-
-        # Fetch neighbors
-        for doc_id, target_idx, neighbor_score in neighbor_queries:
-            nb_result = await session.execute(
+            surrounding_result = await session.execute(
                 text(
-                    "SELECT id, text, speaker, chunk_index FROM chunks "
-                    "WHERE document_id = :doc_id AND chunk_index = :cidx"
+                    "SELECT id, chunk_index, text, page_number, speaker FROM chunks "
+                    "WHERE document_id = :doc_id "
+                    "AND chunk_index >= :start_idx AND chunk_index <= :end_idx "
+                    "ORDER BY chunk_index ASC"
                 ),
-                {"doc_id": doc_id, "cidx": target_idx},
+                {
+                    "doc_id": chunk.document_id,
+                    "start_idx": chunk.chunk_index - window,
+                    "end_idx": chunk.chunk_index + window,
+                },
             )
-            row = nb_result.fetchone()
-            if row is None:
-                continue
-            nb_id, nb_text, nb_speaker, nb_cidx = row
 
-            if nb_id in result_map:
-                # Dedup: keep higher score
-                if neighbor_score > result_map[nb_id].score:
-                    result_map[nb_id] = ScoredChunk(
-                        chunk_id=nb_id,
-                        document_id=doc_id,
-                        text=nb_text,
-                        section_heading="",
-                        page=0,
-                        score=neighbor_score,
-                        source="context_expansion",
-                        chunk_index=nb_cidx,
-                        speaker=nb_speaker or None,
-                    )
-            else:
-                result_map[nb_id] = ScoredChunk(
-                    chunk_id=nb_id,
-                    document_id=doc_id,
-                    text=nb_text,
-                    section_heading="",
-                    page=0,
+            for row in surrounding_result.fetchall():
+                neighbor_id = row[0]
+                if neighbor_id == chunk.chunk_id:
+                    continue
+
+                neighbor_score = chunk.score * _EXPANSION_SCORE_FACTOR
+                existing = expanded_by_id.get(neighbor_id)
+                if existing is not None and existing.score >= neighbor_score:
+                    continue
+
+                expanded_by_id[neighbor_id] = ScoredChunk(
+                    chunk_id=neighbor_id,
+                    document_id=chunk.document_id,
+                    text=row[2],
+                    section_heading=chunk.section_heading,
+                    page=row[3] or 0,
                     score=neighbor_score,
                     source="context_expansion",
-                    chunk_index=nb_cidx,
-                    speaker=nb_speaker or None,
+                    chunk_index=row[1],
+                    speaker=row[4],
                 )
 
-    # Sort by score desc, cap at k * 2
-    expanded = sorted(result_map.values(), key=lambda c: c.score, reverse=True)
-    return expanded[: k * 2]
+    return sorted(expanded_by_id.values(), key=lambda c: c.score, reverse=True)[: k * 2]
+
+
+class _CrossEncoderReranker:
+    """Lazy singleton wrapping the sentence-transformers CrossEncoder.
+
+    Held at module level so the (slow) model load happens once per process.
+    The model file is cached under ``$DATA_DIR/models/ms-marco-minilm`` -- same
+    pattern as the embedder so all ML weights live under one folder.
+    """
+
+    def __init__(self) -> None:
+        self._model: Any = None
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        from sentence_transformers import CrossEncoder  # noqa: PLC0415
+
+        from app.config import get_settings  # noqa: PLC0415
+
+        settings = get_settings()
+        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "ms-marco-minilm"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        self._model = CrossEncoder(_RERANK_MODEL, cache_folder=str(cache_dir), device="cpu")
+        logger.info("Loaded cross-encoder reranker %s", _RERANK_MODEL)
+
+    def score(self, query: str, texts: list[str]) -> list[float]:
+        self._load()
+        if not texts:
+            return []
+        pairs = [(query, t) for t in texts]
+        raw = self._model.predict(pairs, batch_size=32, show_progress_bar=False)
+        return [float(s) for s in raw]
+
+
+_reranker: _CrossEncoderReranker | None = None
+
+
+def _get_reranker() -> _CrossEncoderReranker:
+    global _reranker
+    if _reranker is None:
+        _reranker = _CrossEncoderReranker()
+    return _reranker
+
+
+def _rerank_candidates(
+    query: str,
+    candidates: list[ScoredChunk],
+    k: int,
+) -> list[ScoredChunk]:
+    """Re-score *candidates* with a cross-encoder and return the top *k*.
+
+    The cross-encoder reads each (query, chunk_text) pair jointly, unlike
+    bi-encoder retrieval which embeds them independently. This catches
+    chunks whose vocabulary diverges from the question's surface form but
+    semantically answer it -- the dominant S212 failure mode.
+
+    Fails soft: any model load or inference error logs a warning and falls
+    back to ``candidates[:k]`` so retrieval is never harder than the no-rerank
+    baseline.
+    """
+    if not candidates:
+        return candidates
+    try:
+        scores = _get_reranker().score(query, [c.text for c in candidates])
+    except Exception as exc:
+        logger.warning("rerank failed, falling back to RRF order: %s", exc)
+        return candidates[:k]
+
+    rescored = [
+        ScoredChunk(
+            chunk_id=c.chunk_id,
+            document_id=c.document_id,
+            text=c.text,
+            section_heading=c.section_heading,
+            page=c.page,
+            score=s,
+            source=c.source,
+            chunk_index=c.chunk_index,
+            speaker=c.speaker,
+        )
+        for c, s in zip(candidates, scores, strict=True)
+    ]
+    rescored.sort(key=lambda c: c.score, reverse=True)
+    return rescored[:k]
+
+
+async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
+    """Generate a hypothetical answer to *query* and return *query + " " + answer*.
+
+    Used to bridge question/answer phrasing divergence in retrieval. Fails
+    soft: any LLM error (Ollama down, timeout, model missing) returns the
+    original query unchanged so the eval can still proceed and the user
+    still gets standard hybrid retrieval.
+    """
+    try:
+        from app.services.llm import get_llm_service  # noqa: PLC0415
+
+        llm = get_llm_service()
+        result = await llm.generate(
+            prompt=f"Question: {query}\n\nAnswer:",
+            system=_HYDE_SYSTEM,
+            model=_HYDE_MODEL,
+            timeout=timeout,
+        )
+        if isinstance(result, str) and result.strip():
+            return f"{query} {result.strip()}"
+    except Exception as exc:
+        logger.warning("hyde_expand failed, falling back to original query: %s", exc)
+    return query
+
+
+async def _graph_expand(query: str) -> str:
+    """Expand *query* with canonical entity labels and aliases from the graph.
+
+    Detects entities in the query via GLiNER, resolves them to canonical
+    surface forms via :func:`find_canonical`, and fetches up to
+    :data:`_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY` aliases per entity from the
+    Kuzu ``Entity.aliases`` column. The total appended tokens are capped at
+    :data:`_GRAPH_EXPAND_MAX_TOKENS` to bound BM25 dilution.
+
+    Fails soft -- returns *query* unchanged when GLiNER finds no entities,
+    when Kuzu is unreachable, or when any error occurs in the pipeline. No
+    LLM is called and no external API is touched (I-16 clean).
+    """
+    try:
+        # I-5: lazy imports to avoid retriever <-> services circular chains.
+        from app.services.entity_disambiguator import find_canonical  # noqa: PLC0415
+        from app.services.graph import get_graph_service  # noqa: PLC0415
+        from app.services.ner import get_entity_extractor  # noqa: PLC0415
+
+        extractor = get_entity_extractor()
+        # Direct sync call -- single short query, GLiNER inference takes ~30ms
+        # warm. Wrapping in asyncio.to_thread here causes ThreadPoolExecutor /
+        # LanceDB BackgroundLoop contention in pytest that surfaces as an
+        # IO Spill error during prior ingestion steps (S225 iter).
+        entities = extractor.extract(
+            [{"id": "q", "document_id": "q", "text": query}],
+            "general",
+        )
+        # Filter to query-relevant types and dedupe by canonical label.
+        canonical_seen: set[str] = set()
+        canonical_entities: list[tuple[str, str]] = []
+        for ent in entities:
+            etype = ent.get("type", "")
+            ename = (ent.get("name") or "").strip()
+            if etype not in _GRAPH_EXPAND_TYPES or not ename:
+                continue
+            canonical = find_canonical(ename, etype, []).lower()
+            if canonical in canonical_seen:
+                continue
+            canonical_seen.add(canonical)
+            canonical_entities.append((canonical, etype))
+
+        if not canonical_entities:
+            logger.debug("graph_expand: no entities detected; passthrough")
+            return query
+
+        graph = get_graph_service()
+        existing_query_tokens = {t.lower() for t in query.split()}
+        expansion_tokens: list[str] = []
+
+        def _lookup_aliases(name: str) -> str:
+            with graph._lock:
+                result = graph._conn.execute(
+                    "MATCH (e:Entity) WHERE toLower(e.name) = $name"
+                    " RETURN e.aliases LIMIT 1",
+                    {"name": name},
+                )
+                if not result.has_next():
+                    return ""
+                row = result.get_next()
+                return (row[0] or "") if row else ""
+
+        for canonical, _etype in canonical_entities:
+            for tok in canonical.split():
+                tok_lc = tok.lower()
+                if tok_lc and tok_lc not in existing_query_tokens:
+                    expansion_tokens.append(tok)
+                    existing_query_tokens.add(tok_lc)
+
+            try:
+                # I-2: Kuzu is synchronous and not thread-safe; offload to a
+                # worker thread so the event loop is not blocked.
+                aliases_str = await asyncio.to_thread(_lookup_aliases, canonical)
+            except Exception as exc:
+                logger.warning(
+                    "graph_expand: kuzu lookup failed for %r, skipping: %s",
+                    canonical,
+                    exc,
+                )
+                continue
+
+            if not aliases_str:
+                continue
+
+            alias_forms = [a.strip() for a in aliases_str.split("|") if a.strip()]
+            for alias in alias_forms[:_GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY]:
+                for tok in alias.split():
+                    tok_lc = tok.lower()
+                    if tok_lc and tok_lc not in existing_query_tokens:
+                        expansion_tokens.append(tok)
+                        existing_query_tokens.add(tok_lc)
+
+        if not expansion_tokens:
+            return query
+
+        capped = expansion_tokens[:_GRAPH_EXPAND_MAX_TOKENS]
+        logger.info(
+            "graph_expand: entities_detected=%d aliases_added=%d expanded_query_tokens=%d",
+            len(canonical_entities),
+            len(expansion_tokens),
+            len(capped),
+        )
+        return f"{query} {' '.join(capped)}"
+    except Exception as exc:
+        logger.warning("graph_expand failed, falling back to original query: %s", exc)
+        return query
 
 
 class HybridRetriever:
@@ -365,8 +602,17 @@ class HybridRetriever:
         vector_results: list[ScoredChunk],
         keyword_results: list[ScoredChunk],
         k: int = 10,
+        *,
+        diversify: bool = True,
     ) -> list[ScoredChunk]:
-        """Reciprocal Rank Fusion — combine, re-rank, then apply section diversity."""
+        """Reciprocal Rank Fusion — combine, re-rank, then apply section diversity.
+
+        When ``diversify=False``, returns the top-k by RRF score with no
+        section/speaker re-ranking. Use this for focused per-document
+        queries where breadth is undesirable -- diversification trades
+        high-scoring chunks for section variety, which collapses HR@5
+        when the question targets one section (S212 fix).
+        """
         scores: dict[str, float] = {}
         meta: dict[str, ScoredChunk] = {}
         sources: dict[str, set[str]] = {}
@@ -406,6 +652,8 @@ class HybridRetriever:
                 )
             )
 
+        if not diversify:
+            return candidates[:k]
         return _diversify(candidates, k)
 
     async def retrieve(
@@ -413,14 +661,119 @@ class HybridRetriever:
         query: str,
         document_ids: list[str] | None,
         k: int,
+        *,
+        hyde: bool = False,
+        rerank: bool = False,
+        graph_expand: bool = True,
+        strategy: RetrievalStrategy = "rrf",
     ) -> list[ScoredChunk]:
-        """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion."""
+        """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
+
+        Diversity re-ranking is disabled when the query is scoped to a
+        single document. In that case the user is asking a focused
+        question and wants the highest-scoring chunks, not section
+        breadth -- the diversifier was authored for broad cross-document
+        queries where variety helps. Without this skip, top-scored
+        chunks from one chapter get bumped down by less-relevant chunks
+        from elsewhere in the same book and HR@5 collapses (S212).
+
+        When *hyde* is True, generates a hypothetical answer via the local
+        LLM and uses ``"<query> <answer>"`` as the search query for both
+        vector and BM25. This bridges question/answer phrasing divergence
+        (S212): the hypothetical contains likely answer vocabulary that
+        the bare question lacks. Falls back to the original query on LLM
+        failure so retrieval is never harder than the no-hyde baseline.
+
+        When *rerank* is True, the top-N RRF candidates are re-scored by a
+        cross-encoder and the top-k of that re-ranking is returned. The
+        cross-encoder reads (query, chunk) pairs jointly, so it catches
+        answer chunks whose vocabulary diverges from the question's surface
+        form -- the dominant remaining S212 failure mode. Diversification
+        is skipped when reranking (the cross-encoder already optimises for
+        relevance, and section breadth would dilute the rerank signal).
+        Fails soft: any reranker error returns the RRF order unchanged.
+        """
+        scoped_single_doc = bool(document_ids) and len(document_ids or []) == 1
+        # Widen the candidate pool when scoped to a single document. With a
+        # cross-document corpus, 20+20 leaves enough headroom for RRF; with
+        # a single book of ~500 chunks where the question phrasing diverges
+        # from the answer phrasing, the right chunk can sit at rank 25-40
+        # in vector or BM25 alone and never reach RRF (S212).
+        # When rerank=True we always need a wide pool (50) so the cross-encoder
+        # has enough headroom to recover answer chunks at deep ranks.
+        if rerank:
+            candidate_pool = _RERANK_CANDIDATE_POOL
+        elif scoped_single_doc:
+            candidate_pool = 50
+        else:
+            candidate_pool = 20
+
+        # graph_expand flows only into the dense vector search. Embeddings
+        # reward semantic similarity, so appending canonical entity tokens
+        # helps match chunks whose surface form differs from the question.
+        # SQLite FTS5 MATCH uses AND semantics across terms, so appending
+        # tokens that may be absent from the corpus collapses BM25 recall to
+        # zero (S225 iter 8) -- keep the keyword side on the unexpanded query.
+        # HyDE, by contrast, augments with a full hypothetical answer that is
+        # designed to share vocabulary with the source text, so it flows into
+        # both vector and keyword (preserving the S212 iter 4 behavior).
+        vector_query = await _graph_expand(query) if graph_expand and strategy == "rrf" else query
+        keyword_query = query
+        if hyde:
+            vector_query = await _hyde_expand(vector_query)
+            keyword_query = vector_query
+
         with trace_retrieval("hybrid", query=query) as span:
+            span.set_attribute("retrieval.hyde", hyde)
+            span.set_attribute("retrieval.rerank", rerank)
+            span.set_attribute("retrieval.graph_expand", graph_expand)
+            span.set_attribute("retrieval.strategy", strategy)
+            if strategy == "vector":
+                results = await asyncio.to_thread(
+                    self.vector_search, query, document_ids, candidate_pool
+                )
+                results = results[:k]
+                span.set_attribute("retrieval.chunk_count", len(results))
+                return results
+            if strategy == "fts":
+                results = await self.keyword_search(query, document_ids, k=candidate_pool)
+                results = results[:k]
+                span.set_attribute("retrieval.chunk_count", len(results))
+                return results
+            if strategy == "graph":
+                expanded_query = await _graph_expand(query)
+                results = await asyncio.to_thread(
+                    self.vector_search, expanded_query, document_ids, candidate_pool
+                )
+                results = results[:k]
+                span.set_attribute("retrieval.chunk_count", len(results))
+                return results
+
             vector_results, keyword_results = await asyncio.gather(
-                asyncio.to_thread(self.vector_search, query, document_ids, 20),
-                self.keyword_search(query, document_ids, k=20),
+                asyncio.to_thread(self.vector_search, vector_query, document_ids, candidate_pool),
+                self.keyword_search(keyword_query, document_ids, k=candidate_pool),
             )
-            results = self.rrf_merge(vector_results, keyword_results, k=k)
+            # When reranking, ask rrf_merge for the full candidate pool so the
+            # cross-encoder can re-score them. Skip diversification regardless
+            # of single-doc scope -- relevance reranking and section breadth
+            # are orthogonal goals; mixing them dilutes the rerank signal.
+            merge_k = candidate_pool if rerank else k
+            diversify = (not rerank) and (not scoped_single_doc)
+            results = self.rrf_merge(
+                vector_results,
+                keyword_results,
+                k=merge_k,
+                diversify=diversify,
+            )
+            if rerank:
+                # Use the original query (not the HyDE-augmented one) for the
+                # cross-encoder. Iteration 6 verified that passing the augmented
+                # query regresses Time Machine HR@5 (0.50 -> 0.43): the LLM
+                # hypothetical introduces vocabulary that does not appear in the
+                # source text, and the cross-encoder rewards chunks containing
+                # that hallucinated vocabulary over the answer chunks. The
+                # original query is the user's authoritative intent. (S212)
+                results = await asyncio.to_thread(_rerank_candidates, query, results, k)
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:

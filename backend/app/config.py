@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     OLLAMA_URL: str = "http://localhost:11434"
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/gemma4"
+    # Model for high-quality generation (flashcards, etc).
+    # Falls back to DEFAULT_MODEL when empty.
+    LITELLM_GENERATION_MODEL: str = ""
     PHOENIX_ENABLED: bool = True
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""

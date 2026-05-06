@@ -63,6 +63,7 @@ class FeynmanSessionListItem(BaseModel):
     status: str
     gap_count: int
     created_at: datetime
+    section_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ async def list_feynman_sessions(
             status=s["status"],
             gap_count=s["gap_count"],
             created_at=s["created_at"],
+            section_id=s.get("section_id"),
         )
         for s in sessions
     ]

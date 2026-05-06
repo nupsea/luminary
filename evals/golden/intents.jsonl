@@ -1,0 +1,50 @@
+{"question": "Summarize this document", "expected_route": "summary"}
+{"question": "Give me an overview of the book", "expected_route": "summary"}
+{"question": "What are the main themes?", "expected_route": "summary"}
+{"question": "Outline the key ideas", "expected_route": "summary"}
+{"question": "What is this book about?", "expected_route": "summary"}
+{"question": "Brief me on this chapter", "expected_route": "summary"}
+{"question": "List the key takeaways", "expected_route": "summary"}
+{"question": "What are the main points?", "expected_route": "summary"}
+{"question": "Give a synopsis", "expected_route": "summary"}
+{"question": "High level summary please", "expected_route": "summary"}
+{"question": "What are the central themes?", "expected_route": "summary"}
+{"question": "Recap the document", "expected_route": "summary"}
+{"question": "What are the major topics?", "expected_route": "summary"}
+{"question": "How are Alice and the White Rabbit connected?", "expected_route": "graph"}
+{"question": "What is the relationship between Ulysses and Telemachus?", "expected_route": "graph"}
+{"question": "Explain the connection between Eloi and Morlocks", "expected_route": "graph"}
+{"question": "How does Penelope relate to the suitors?", "expected_route": "graph"}
+{"question": "What links Calypso and Ulysses?", "expected_route": "graph"}
+{"question": "How are Time Traveller and Weena related?", "expected_route": "graph"}
+{"question": "Relationship between Neptune and Polyphemus", "expected_route": "graph"}
+{"question": "What connects Minerva to Telemachus?", "expected_route": "graph"}
+{"question": "How did Morlocks interact with Eloi?", "expected_route": "graph"}
+{"question": "What ties the White Sphinx to the Time Machine?", "expected_route": "graph"}
+{"question": "How is the Queen connected to Alice?", "expected_route": "graph"}
+{"question": "Explain the relation between Cyclops and Ulysses", "expected_route": "graph"}
+{"question": "What is the relationship between Nestor and Telemachus?", "expected_route": "graph"}
+{"question": "Compare Alice and the Queen", "expected_route": "comparative"}
+{"question": "Contrast the Eloi and the Morlocks", "expected_route": "comparative"}
+{"question": "What is the difference between Ulysses and Telemachus?", "expected_route": "comparative"}
+{"question": "Compare and contrast Calypso and Circe", "expected_route": "comparative"}
+{"question": "How are Penelope and Minerva different?", "expected_route": "comparative"}
+{"question": "Similarities between the Sirens and Calypso", "expected_route": "comparative"}
+{"question": "Eloi versus Morlocks", "expected_route": "comparative"}
+{"question": "How do they differ?", "expected_route": "comparative"}
+{"question": "What do Alice and the Rabbit have in common?", "expected_route": "comparative"}
+{"question": "Compare the Time Traveller and Filby", "expected_route": "comparative"}
+{"question": "Difference between the Cyclops and the suitors", "expected_route": "comparative"}
+{"question": "Contrast Pylos and Sparta", "expected_route": "comparative"}
+{"question": "Who was Calypso?", "expected_route": "search"}
+{"question": "What label was on the bottle?", "expected_route": "search"}
+{"question": "When did Alice see the Rabbit?", "expected_route": "search"}
+{"question": "Where was Ulysses detained?", "expected_route": "search"}
+{"question": "What did the Dodo declare?", "expected_route": "search"}
+{"question": "Who sent the model Time Machine?", "expected_route": "search"}
+{"question": "What did Filby say?", "expected_route": "search"}
+{"question": "Define the Fourth Dimension", "expected_route": "search"}
+{"question": "Which god persecuted Ulysses?", "expected_route": "search"}
+{"question": "What was Alice cat named?", "expected_route": "search"}
+{"question": "How many dimensions are discussed?", "expected_route": "search"}
+{"question": "What did Penelope weave?", "expected_route": "search"}
