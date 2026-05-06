@@ -4,32 +4,31 @@ Active modularity refactor on this branch. Per the user's preference,
 this file tracks **only what's still pending**. Completed work is in
 `git log` (search for `refactor:` and `chore:` since the branch root).
 
-## Next: audit #1 -- split `FlashcardService` (in progress)
+## audit #1 -- split `FlashcardService` (DONE)
 
-- File: `backend/app/services/flashcard.py` (now 1,267 lines, was 2,054).
+- File: `backend/app/services/flashcard.py` is now 718 lines (was 2,054).
 - Done: extracted `search` + FTS5 helpers (`_sanitize_fts5_query`,
   `_sync_flashcard_fts`, `_delete_flashcard_fts`) into
   `services/flashcard_search.py` as `FlashcardSearchService`.
   `FlashcardService(FlashcardSearchService)` preserves the call-site API
   for routers/tests; helpers are re-exported from `flashcard.py`.
 - Done: extracted prompt strings + system-prompt builders into
-  `services/flashcard_prompts.py` (FLASHCARD/NOTES/TECH/GAP/GRAPH/CLOZE
-  templates, `_DIFFICULTY_GUIDELINES`, `_BOOK_CONTENT_GUIDELINE`,
-  `_BLOOM_L3_INSTRUCTION`, `_TECH_TITLE_KEYWORDS`, `_infer_genre`,
-  `_build_genre_system_prompt`); pure JSON parsers into
-  `services/flashcard_parsers.py` (`_parse_llm_response`,
-  `_parse_concept_extract`, `_parse_gap_flashcard`, `_parse_cloze_*`,
-  `_build_cloze_question`, `_CLOZE_BLANK_RE`). Re-exported from
-  `flashcard.py` for tests/routers.
+  `services/flashcard_prompts.py`; pure JSON parsers into
+  `services/flashcard_parsers.py`. Re-exported from `flashcard.py` for
+  tests/routers.
 - Done: collapsed `generate_from_gaps` and `generate_from_feynman_gaps`
   into shared `_run_gap_generation` (gap fan-out + parse + persist).
-- Done: lifted `generate_technical` and `generate_cloze` into
-  `services/flashcard_generators.py` as module-level async functions;
-  `FlashcardService` thin-delegates. Generators indirect through
-  `flashcard.get_llm_service` so existing test patches still apply.
-- Remaining: `generate`, `generate_from_notes`, `generate_from_collection`,
-  `generate_from_graph`. Same lift-to-module pattern; biggest payoff is
-  `generate` itself.
+- Done: lifted all eight generation methods (`generate`,
+  `generate_from_notes`, `generate_from_collection`, `generate_from_graph`,
+  `generate_technical`, `generate_cloze`) into
+  `services/flashcard_generators.py` as module-level async functions.
+  `FlashcardService` is now thin delegations only (the gap pair stays as
+  service methods because they share `_run_gap_generation`). Generators
+  indirect through `flashcard.get_llm_service` so test patches keep
+  working.
+- Net: flashcard.py is 35 % of its original size; remaining helpers in
+  `flashcard.py` are document/chunk plumbing (`_fetch_chunks`, `_build_text`,
+  `_classify_chunk`, etc.) that several generators import.
 - Refactor approach: split into `FlashcardGenerator` strategy family
   (one strategy per source), with shared `_build_prompt` /
   `_parse_llm_response` helpers already module-level (lines 446-712).
