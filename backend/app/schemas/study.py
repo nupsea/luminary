@@ -1,0 +1,337 @@
+"""Pydantic schemas for the /study router.
+
+Extracted from ``app.routers.study`` so the router file holds endpoints
+and orchestration only. ``app.routers.study`` re-exports every name here
+for back-compat with existing imports in tests and other routers.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel
+
+from app.routers.flashcards import FlashcardResponse
+
+# ---------------------------------------------------------------------------
+# Sessions
+# ---------------------------------------------------------------------------
+
+
+class StartSessionRequest(BaseModel):
+    document_id: str | None = None
+    collection_id: str | None = None
+    mode: str = "flashcard"
+    planned_card_ids: list[str] | None = None
+
+
+class SessionResponse(BaseModel):
+    id: str
+    document_id: str | None
+    collection_id: str | None = None
+    started_at: datetime
+    ended_at: datetime | None
+    cards_reviewed: int
+    cards_correct: int
+    mode: str
+
+    model_config = {"from_attributes": True}
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    cards_reviewed: int
+    cards_correct: int
+    accuracy_pct: float
+    ended_at: datetime
+
+
+class SessionListItem(BaseModel):
+    id: str
+    started_at: datetime
+    ended_at: datetime | None
+    duration_minutes: float | None
+    cards_reviewed: int
+    cards_correct: int
+    accuracy_pct: float | None
+    document_id: str | None
+    document_title: str | None
+    collection_id: str | None = None
+    collection_name: str | None = None
+    mode: str
+    has_pending_evaluations: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class SessionListResponse(BaseModel):
+    items: list[SessionListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class SessionCardDetail(BaseModel):
+    flashcard_id: str
+    question: str
+    rating: str
+    is_correct: bool
+    reviewed_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Gaps
+# ---------------------------------------------------------------------------
+
+
+class GapResult(BaseModel):
+    section_heading: str | None
+    weak_card_count: int
+    avg_stability: float
+    sample_questions: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Teachback
+# ---------------------------------------------------------------------------
+
+
+class TeachbackRequest(BaseModel):
+    flashcard_id: str
+    user_explanation: str
+    session_id: str | None = None
+
+
+class RubricDimensionResponse(BaseModel):
+    score: int
+    evidence: str
+
+
+class RubricCompletenessResponse(BaseModel):
+    score: int
+    missed_points: list[str]
+
+
+class TeachbackRubricResponse(BaseModel):
+    accuracy: RubricDimensionResponse
+    completeness: RubricCompletenessResponse
+    clarity: RubricDimensionResponse
+
+
+class TeachbackResponse(BaseModel):
+    score: int
+    correct_points: list[str]
+    missing_points: list[str]
+    misconceptions: list[str]
+    correction_flashcard_id: str | None = None
+    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric LLM call fails
+
+
+class TeachbackSubmitResponse(BaseModel):
+    """Returned by POST /study/teachback/async -- evaluation runs in background."""
+
+    id: str
+
+
+class TeachbackResultItem(BaseModel):
+    """Single item in batch-poll response."""
+
+    id: str
+    status: str  # "pending" | "complete" | "error"
+    flashcard_id: str
+    question: str = ""
+    expected_answer: str = ""
+    score: int | None = None
+    correct_points: list[str] = []
+    missing_points: list[str] = []
+    misconceptions: list[str] = []
+    correction_flashcard_id: str | None = None
+    rubric: TeachbackRubricResponse | None = None
+    user_explanation: str | None = None
+
+
+class TeachbackResultsBatchResponse(BaseModel):
+    results: list[TeachbackResultItem]
+
+
+# ---------------------------------------------------------------------------
+# Stats & history
+# ---------------------------------------------------------------------------
+
+
+class SectionStabilityItem(BaseModel):
+    section_heading: str | None
+    avg_stability: float
+    card_count: int
+
+
+class CardStabilityItem(BaseModel):
+    card_id: str
+    stability: float
+    due_date: str | None
+
+
+class StudyStatsResponse(BaseModel):
+    total_cards: int
+    cards_mastered: int
+    avg_retention: float
+    current_streak: int
+    total_study_time_minutes: float
+    due_today: int
+    new_today: int
+    mastery_pct: float
+    per_section_stability: list[SectionStabilityItem]
+    all_card_stabilities: list[CardStabilityItem]
+
+
+class DailyHistoryItem(BaseModel):
+    date: str  # YYYY-MM-DD
+    cards_reviewed: int
+    study_time_minutes: float
+
+
+class StrugglingCardItem(BaseModel):
+    flashcard_id: str
+    document_id: str | None
+    question: str
+    again_count: int
+    source_section_id: str | None
+
+
+class SectionHeatmapItem(BaseModel):
+    section_id: str
+    fragility_score: float | None
+    due_card_count: int
+    avg_retention_pct: float | None
+
+
+class SectionHeatmapResponse(BaseModel):
+    heatmap: dict[str, SectionHeatmapItem]
+
+
+class DueCountResponse(BaseModel):
+    due_today: int
+
+
+# ---------------------------------------------------------------------------
+# Collection dashboard
+# ---------------------------------------------------------------------------
+
+
+class CollectionTopic(BaseModel):
+    tag: str
+    card_count: int
+    note_count: int
+
+
+class CollectionSource(BaseModel):
+    id: str
+    title: str
+    type: str  # "document" | "note"
+
+
+class CollectionSubEnclave(BaseModel):
+    id: str
+    name: str
+    card_count: int
+
+
+class StudyCollectionDashboardResponse(BaseModel):
+    collection_id: str
+    collection_name: str
+    due_today: int
+    new_today: int
+    mastery_pct: float
+    topics: list[CollectionTopic]
+    sources: list[CollectionSource]
+    sub_collections: list[CollectionSubEnclave] = []
+
+
+# ---------------------------------------------------------------------------
+# Per-document session API (start/review)
+# ---------------------------------------------------------------------------
+
+
+class SessionCardResponse(BaseModel):
+    card_id: str
+    question: str
+    answer: str
+    cards_remaining: int
+
+
+class SessionStartResponse(BaseModel):
+    card_id: str
+    question: str
+    answer: str
+    cards_remaining: int
+
+
+class SessionReviewRequest(BaseModel):
+    card_id: str
+    rating: int  # 1=again 2=hard 3=good 4=easy
+
+
+class SessionReviewResponse(BaseModel):
+    done: bool
+    next_card: SessionCardResponse | None = None
+
+
+# ---------------------------------------------------------------------------
+# Session plan
+# ---------------------------------------------------------------------------
+
+
+class SessionPlanItem(BaseModel):
+    type: Literal["review", "gap", "read"]
+    title: str
+    minutes: int
+    action_label: str
+    action_target: str
+
+
+class SessionPlanResponse(BaseModel):
+    total_minutes: int
+    items: list[SessionPlanItem]
+
+
+# ---------------------------------------------------------------------------
+# Session remaining cards
+# ---------------------------------------------------------------------------
+
+
+class SessionRemainingResponse(BaseModel):
+    answered_count: int
+    planned_count: int
+    cards: list[FlashcardResponse]
+
+
+# ---------------------------------------------------------------------------
+# Study path & start concepts (S139)
+# ---------------------------------------------------------------------------
+
+
+class StudyPathItemResponse(BaseModel):
+    concept: str
+    mastery: float
+    skip: bool
+    reason: str
+    avg_stability_days: float
+
+
+class StudyPathAPIResponse(BaseModel):
+    concept: str
+    document_id: str
+    path: list[StudyPathItemResponse]
+
+
+class StartConceptItemResponse(BaseModel):
+    concept: str
+    prereq_chain_length: int
+    flashcard_count: int
+    rationale: str
+
+
+class StartConceptsAPIResponse(BaseModel):
+    document_id: str
+    concepts: list[StartConceptItemResponse]

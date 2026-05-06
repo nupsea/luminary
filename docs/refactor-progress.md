@@ -35,15 +35,18 @@ this file tracks **only what's still pending**. Completed work is in
 - Likely also drains several `noqa: PLC0415` inline imports (current
   count: 299 across `backend/app/`).
 
-## Then: audit #2 -- split god routers
+## audit #2 -- split god routers (in progress)
 
-- `routers/study.py` (2,429 lines, 25 endpoints, 77 top-level defs):
-  schemas (lines 117-445) move to `schemas/study.py`; helpers
-  (`_compute_gaps:185`, `_compute_section_heatmap:356`,
-  `_build_session_plan:441`) into existing `services/study_session_service.py`.
-- Same problem in `documents.py:1714`, `notes.py:1377`, `flashcards.py:1002`.
-- Mechanical but touches many files -- do it once `services/` is cleaner so
-  this is not just shuffling.
+- `routers/study.py` 2,472 -> 2,123 lines. Done:
+  - All 36 Pydantic schemas extracted to new `app/schemas/study.py`.
+  - Pure helpers (`compute_gaps`, `compute_section_heatmap`,
+    `build_session_plan`) extracted to new
+    `app/services/study_session_service.py`.
+  - `routers/study.py` re-exports the schemas + helpers (under their
+    private aliases) via `__all__` so existing imports in `feynman.py`
+    and tests keep working.
+- Remaining for audit #2: `documents.py:1714`, `notes.py:1377`,
+  `flashcards.py:1002` -- same pattern.
 
 ## Lower priority items from the audit (not yet started)
 

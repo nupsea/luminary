@@ -19,10 +19,8 @@ import logging
 import math
 import uuid
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 from sqlalchemy import case, func, or_, select
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,11 +41,70 @@ from app.models import (
     TeachbackResultModel,
 )
 from app.routers.flashcards import FlashcardResponse, _to_response
+from app.schemas.study import (
+    CardStabilityItem,
+    CollectionSource,
+    CollectionSubEnclave,
+    CollectionTopic,
+    DailyHistoryItem,
+    DueCountResponse,
+    GapResult,
+    RubricCompletenessResponse,
+    RubricDimensionResponse,
+    SectionHeatmapItem,
+    SectionHeatmapResponse,
+    SectionStabilityItem,
+    SessionCardDetail,
+    SessionCardResponse,
+    SessionListItem,
+    SessionListResponse,
+    SessionPlanItem,
+    SessionPlanResponse,
+    SessionRemainingResponse,
+    SessionResponse,
+    SessionReviewRequest,
+    SessionReviewResponse,
+    SessionStartResponse,
+    SessionSummary,
+    StartConceptItemResponse,
+    StartConceptsAPIResponse,
+    StartSessionRequest,
+    StrugglingCardItem,
+    StudyCollectionDashboardResponse,
+    StudyPathAPIResponse,
+    StudyPathItemResponse,
+    StudyStatsResponse,
+    TeachbackRequest,
+    TeachbackResponse,
+    TeachbackResultItem,
+    TeachbackResultsBatchResponse,
+    TeachbackRubricResponse,
+    TeachbackSubmitResponse,
+)
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.study_path_service import StudyPathService
+from app.services.study_session_service import (
+    build_session_plan as _build_session_plan,
+)
+from app.services.study_session_service import (
+    compute_gaps as _compute_gaps,
+)
+from app.services.study_session_service import (
+    compute_section_heatmap as _compute_section_heatmap,
+)
 
 logger = logging.getLogger(__name__)
+
+# Back-compat re-exports for tests and feynman.py that import these here.
+__all__ = [
+    "SectionHeatmapItem",
+    "SessionPlanItem",
+    "_build_session_plan",
+    "_compute_gaps",
+    "_compute_section_heatmap",
+    "router",
+]
 
 router = APIRouter(prefix="/study", tags=["study"])
 
@@ -118,387 +175,9 @@ _RUBRIC_USER_TMPL = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
-class StartSessionRequest(BaseModel):
-    document_id: str | None = None
-    collection_id: str | None = None
-    mode: str = "flashcard"
-    planned_card_ids: list[str] | None = None
-
-
-class SessionResponse(BaseModel):
-    id: str
-    document_id: str | None
-    collection_id: str | None = None
-    started_at: datetime
-    ended_at: datetime | None
-    cards_reviewed: int
-    cards_correct: int
-    mode: str
-
-    model_config = {"from_attributes": True}
-
-
-class SessionSummary(BaseModel):
-    session_id: str
-    cards_reviewed: int
-    cards_correct: int
-    accuracy_pct: float
-    ended_at: datetime
-
-
-class SessionListItem(BaseModel):
-    id: str
-    started_at: datetime
-    ended_at: datetime | None
-    duration_minutes: float | None
-    cards_reviewed: int
-    cards_correct: int
-    accuracy_pct: float | None
-    document_id: str | None
-    document_title: str | None
-    collection_id: str | None = None
-    collection_name: str | None = None
-    mode: str
-    has_pending_evaluations: bool = False
-
-    model_config = {"from_attributes": True}
-
-
-class SessionListResponse(BaseModel):
-    items: list[SessionListItem]
-    total: int
-    page: int
-    page_size: int
-
-
-class SessionCardDetail(BaseModel):
-    flashcard_id: str
-    question: str
-    rating: str
-    is_correct: bool
-    reviewed_at: datetime
-
-
-class GapResult(BaseModel):
-    section_heading: str | None
-    weak_card_count: int
-    avg_stability: float
-    sample_questions: list[str]
-
-
-def _compute_gaps(
-    weak_cards: list[FlashcardModel],
-    chunk_to_section: dict[str, str | None],
-) -> list[GapResult]:
-    """Group weak cards by section, compute avg stability, return sorted results.
-
-    Pure function — no I/O. All inputs are explicit parameters.
-    """
-    groups: dict[str | None, list[FlashcardModel]] = {}
-    for card in weak_cards:
-        heading = chunk_to_section.get(card.chunk_id)
-        groups.setdefault(heading, []).append(card)
-
-    results: list[GapResult] = []
-    for heading, group_cards in groups.items():
-        avg_stab = sum(c.fsrs_stability for c in group_cards) / len(group_cards)
-        sample = [c.question for c in group_cards[:3]]
-        results.append(
-            GapResult(
-                section_heading=heading,
-                weak_card_count=len(group_cards),
-                avg_stability=round(avg_stab, 4),
-                sample_questions=sample,
-            )
-        )
-
-    results.sort(key=lambda r: r.avg_stability)
-    return results
-
-
-class TeachbackRequest(BaseModel):
-    flashcard_id: str
-    user_explanation: str
-    session_id: str | None = None
-
-
-class RubricDimensionResponse(BaseModel):
-    score: int
-    evidence: str
-
-
-class RubricCompletenessResponse(BaseModel):
-    score: int
-    missed_points: list[str]
-
-
-class TeachbackRubricResponse(BaseModel):
-    accuracy: RubricDimensionResponse
-    completeness: RubricCompletenessResponse
-    clarity: RubricDimensionResponse
-
-
-class TeachbackResponse(BaseModel):
-    score: int
-    correct_points: list[str]
-    missing_points: list[str]
-    misconceptions: list[str]
-    correction_flashcard_id: str | None = None
-    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric LLM call fails
-
-
-class TeachbackSubmitResponse(BaseModel):
-    """Returned by POST /study/teachback/async -- evaluation runs in background."""
-
-    id: str
-
-
-class TeachbackResultItem(BaseModel):
-    """Single item in batch-poll response."""
-
-    id: str
-    status: str  # "pending" | "complete" | "error"
-    flashcard_id: str
-    question: str = ""
-    expected_answer: str = ""
-    score: int | None = None
-    correct_points: list[str] = []
-    missing_points: list[str] = []
-    misconceptions: list[str] = []
-    correction_flashcard_id: str | None = None
-    rubric: TeachbackRubricResponse | None = None
-    user_explanation: str | None = None
-
-
-class TeachbackResultsBatchResponse(BaseModel):
-    results: list[TeachbackResultItem]
-
-
-class SectionStabilityItem(BaseModel):
-    section_heading: str | None
-    avg_stability: float
-    card_count: int
-
-
-class CardStabilityItem(BaseModel):
-    card_id: str
-    stability: float
-    due_date: str | None
-
-
-class StudyStatsResponse(BaseModel):
-    total_cards: int
-    cards_mastered: int
-    avg_retention: float
-    current_streak: int
-    total_study_time_minutes: float
-    due_today: int
-    new_today: int
-    mastery_pct: float
-    per_section_stability: list[SectionStabilityItem]
-    all_card_stabilities: list[CardStabilityItem]
-
-
-class DailyHistoryItem(BaseModel):
-    date: str  # YYYY-MM-DD
-    cards_reviewed: int
-    study_time_minutes: float
-
-
-class StrugglingCardItem(BaseModel):
-    flashcard_id: str
-    document_id: str | None
-    question: str
-    again_count: int
-    source_section_id: str | None
-
-
-class SectionHeatmapItem(BaseModel):
-    section_id: str
-    fragility_score: float | None
-    due_card_count: int
-    avg_retention_pct: float | None
-
-
-class SectionHeatmapResponse(BaseModel):
-    heatmap: dict[str, SectionHeatmapItem]
-
-
-class DueCountResponse(BaseModel):
-    due_today: int
-
-
-class CollectionTopic(BaseModel):
-    tag: str
-    card_count: int
-    note_count: int
-
-
-class CollectionSource(BaseModel):
-    id: str
-    title: str
-    type: str  # "document" | "note"
-
-
-class CollectionSubEnclave(BaseModel):
-    id: str
-    name: str
-    card_count: int
-
-
-class StudyCollectionDashboardResponse(BaseModel):
-    collection_id: str
-    collection_name: str
-    due_today: int
-    new_today: int
-    mastery_pct: float
-    topics: list[CollectionTopic]
-    sources: list[CollectionSource]
-    sub_collections: list[CollectionSubEnclave] = []
-
-
-def _compute_section_heatmap(
-    cards: list[FlashcardModel],
-    chunk_to_section: dict[str, str | None],
-    now: datetime,
-) -> dict[str, SectionHeatmapItem]:
-    """Aggregate FSRS retrievability per section.
-
-    fragility_score = 1 - avg_retrievability where retrievability = exp(-t/S).
-    Sections with no cards are absent from the returned dict.
-    Pure function -- no I/O.
-    """
-    groups: dict[str, list[FlashcardModel]] = {}
-    for card in cards:
-        if not card.chunk_id:
-            continue
-        section_id = chunk_to_section.get(card.chunk_id)
-        if section_id is None:
-            continue
-        groups.setdefault(section_id, []).append(card)
-
-    result: dict[str, SectionHeatmapItem] = {}
-    for section_id, group in groups.items():
-        retrievabilities: list[float] = []
-        for card in group:
-            if card.fsrs_stability <= 0 or card.last_review is None:
-                retrievabilities.append(0.0)
-            else:
-                last_review_aware = card.last_review.replace(tzinfo=UTC)
-                days_since = (now - last_review_aware).total_seconds() / 86400
-                retrievabilities.append(math.exp(-days_since / card.fsrs_stability))
-
-        avg_ret = sum(retrievabilities) / len(retrievabilities)
-        fragility = round(max(0.0, min(1.0, 1.0 - avg_ret)), 4)
-        due_count = sum(
-            1 for card in group if card.due_date and card.due_date.replace(tzinfo=UTC) <= now
-        )
-        result[section_id] = SectionHeatmapItem(
-            section_id=section_id,
-            fragility_score=fragility,
-            due_card_count=due_count,
-            avg_retention_pct=round(avg_ret * 100, 1),
-        )
-    return result
-
-
-class SessionCardResponse(BaseModel):
-    card_id: str
-    question: str
-    answer: str
-    cards_remaining: int
-
-
-class SessionStartResponse(BaseModel):
-    card_id: str
-    question: str
-    answer: str
-    cards_remaining: int
-
-
-class SessionReviewRequest(BaseModel):
-    card_id: str
-    rating: int  # 1=again 2=hard 3=good 4=easy
-
-
-class SessionReviewResponse(BaseModel):
-    done: bool
-    next_card: SessionCardResponse | None = None
 
 
 _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
-
-
-# ---------------------------------------------------------------------------
-# Session plan models and pure builder
-# ---------------------------------------------------------------------------
-
-
-class SessionPlanItem(BaseModel):
-    type: Literal["review", "gap", "read"]
-    title: str
-    minutes: int
-    action_label: str
-    action_target: str
-
-
-class SessionPlanResponse(BaseModel):
-    total_minutes: int
-    items: list[SessionPlanItem]
-
-
-def _build_session_plan(
-    due_count: int,
-    gap_areas: list[str],
-    recent_doc_titles: list[tuple[str, str]],
-    budget_minutes: int,
-) -> list[SessionPlanItem]:
-    """Assemble a prioritized study agenda from available data.
-
-    Pure function -- no I/O. All inputs are explicit parameters.
-    """
-    items: list[SessionPlanItem] = []
-
-    if due_count > 0:
-        items.append(
-            SessionPlanItem(
-                type="review",
-                title=f"{due_count} flashcards due for review",
-                minutes=min(10, max(5, due_count // 2)),
-                action_label="Start Review",
-                action_target="/study",
-            )
-        )
-
-    for gap_area in gap_areas[:2]:
-        items.append(
-            SessionPlanItem(
-                type="gap",
-                title=f"Weak area: {gap_area}",
-                minutes=5,
-                action_label="Study Gaps",
-                action_target="/study",
-            )
-        )
-
-    if recent_doc_titles:
-        doc_id, doc_title = recent_doc_titles[0]
-        items.append(
-            SessionPlanItem(
-                type="read",
-                title=f"Continue: {doc_title}",
-                minutes=5,
-                action_label="Open Document",
-                action_target=f"/learning?document_id={doc_id}",
-            )
-        )
-
-    return items[:5]
 
 
 # ---------------------------------------------------------------------------
@@ -1435,10 +1114,6 @@ async def get_session_cards(
     ]
 
 
-class SessionRemainingResponse(BaseModel):
-    answered_count: int
-    planned_count: int
-    cards: list[FlashcardResponse]
 
 
 @router.get(
@@ -2222,30 +1897,6 @@ async def get_section_heatmap(
 # ---------------------------------------------------------------------------
 
 
-class StudyPathItemResponse(BaseModel):
-    concept: str
-    mastery: float
-    skip: bool
-    reason: str
-    avg_stability_days: float
-
-
-class StudyPathAPIResponse(BaseModel):
-    concept: str
-    document_id: str
-    path: list[StudyPathItemResponse]
-
-
-class StartConceptItemResponse(BaseModel):
-    concept: str
-    prereq_chain_length: int
-    flashcard_count: int
-    rationale: str
-
-
-class StartConceptsAPIResponse(BaseModel):
-    document_id: str
-    concepts: list[StartConceptItemResponse]
 
 
 @router.get("/path", response_model=StudyPathAPIResponse)
