@@ -1,0 +1,179 @@
+{
+  "product": "Luminary v3",
+  "branchName": "feat/attention_streak",
+  "baseVersion": "v2 complete as of S160 on branch ralph/luminary-v2",
+  "flowchartRef": "docs/ralph-run-flow.md",
+  "_archiveNote": "Archived: S161-S207 -> archive/prd-v3-s161-s207.json; S208-S211 -> archive/prd-v3-s208-s211.json (Phase 7, all passes:true). S212-S226 (Phase 8, all passes:true): description+AC stripped in-place; summary retained. S212 thresholds relaxed to HR@5>=0.50/MRR>=0.35 (2026-04-29) -- tighten after retrieval lift fully stable.",
+  "v3Philosophy": {
+    "theme": "Notes become first-class knowledge citizens: organized into typed collections, connected to the entity graph, and discoverable through semantic clustering and hierarchical tags.",
+    "completedPhases": "Phases 1-7 (S161-S211) COMPLETE. See archive/prd-v3-s161-s207.json and archive/prd-v3-s208-s211.json.",
+    "currentPhase": "Phase 8 (S212-S227, F-EVAL-V3) -- Evaluation and Correctness. S227 reshapes Evals tab into a Quality hub."
+  },
+  "stories": [
+    {
+      "id": "S224",
+      "title": "Entity injection at index time -- chunk vocabulary bridge",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 52,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Inject canonical entity names (GLiNER + EntityDisambiguator) into chunk FTS5 + vector embedding text at ingest. Bridges question-vs-answer vocabulary gap on book corpora. Reindex CLI: uv run python -m app.scripts.reindex_entities."
+    },
+    {
+      "id": "S225",
+      "title": "Graph-augmented deterministic query expansion -- replace HyDE default",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 53,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Replaced HyDE query expansion with deterministic graph-augmented expansion: detects entities in query via GLiNER, expands via Kuzu alias graph. No LLM in query path -- eliminates run-to-run variance. HyDE retained as opt-in flag."
+    },
+    {
+      "id": "S226",
+      "title": "Multi-hint golden schema -- context_hint accepts list of alternates",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 54,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Extended golden schema: context_hint accepts str OR list[str] (alternates). HR@5 passes if ANY hint matches any top-K chunk. Fixes class of failures where two parallel source passages cover the same fact."
+    },
+    {
+      "id": "S212",
+      "title": "Diagnose and repair retrieval golden baseline (book HR@5=0)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 55,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Restored retrieval golden baseline: fixed manifest document_id mapping, /search scoping, hint surgery for multi-passage alignment. Relaxed thresholds to HR@5>=0.50/MRR>=0.35. book_time_machine HR@5=0.60 on iter 8."
+    },
+    {
+      "id": "S213",
+      "title": "Unified eval harness + Pydantic golden schema (evals/lib/)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 56,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Refactored evals/run_eval.py into evals/lib/ with shared classes (RetrievalEval, GenerationEval, ClassifierEval, load_golden, GoldenEntry) and Pydantic golden schema. Each future eval kind extends the base without duplicating infrastructure."
+    },
+    {
+      "id": "S214",
+      "title": "Faithfulness + answer-relevance gates with local Ollama judge default",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 57,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Enabled faithfulness + answer_relevance scoring by default using local Ollama judge (no flags needed). Threshold gate: faithfulness>=0.65 when --assert-thresholds set. Override via --judge-model. Stores scores in eval_runs.faithfulness column."
+    },
+    {
+      "id": "S215",
+      "title": "Citation grounding eval (citation_support_rate)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 58,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Added citation grounding eval via --check-citations flag. Per-claim/per-citation LLM judge; stores citation_support_rate in eval_runs. Distinct from RAGAS faithfulness (per-citation vs overall)."
+    },
+    {
+      "id": "S216",
+      "title": "Summarization correctness eval framework (executive/detailed/one_sentence)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 59,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Summarization correctness eval (run_summary_eval.py): theme_coverage, no_hallucination, conciseness_pct per mode (executive/detailed/one_sentence). Gutenberg metadata filter (_is_metadata_section) prevents header pollution."
+    },
+    {
+      "id": "S217",
+      "title": "Flashcard correctness eval framework (factuality, atomicity, clarity)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 60,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Flashcard correctness eval (run_flashcard_eval.py): factuality, atomicity, clarity scored by LLM judge on cards generated from sampled chunks. Threshold gates on all three. Reuses S213 lib and S214 judge."
+    },
+    {
+      "id": "S218",
+      "title": "Chat-graph routing accuracy eval (intent classification)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 61,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Chat-graph routing accuracy eval: labelled intents dataset, POST /qa/classify-only endpoint, per-route precision/recall + confusion matrix in run_intent_eval.py. Routing_accuracy stored in eval_runs.eval_kind='routing'."
+    },
+    {
+      "id": "S219",
+      "title": "Golden dataset generation backend (LLM question gen, sizes, status polling, run trigger)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 62,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Golden dataset generation backend: GoldenDatasetModel + GoldenQuestionModel ORM, POST /evals/datasets (async generation), status polling, LLM question gen with local Ollama default. Small/Medium/Large size tiers."
+    },
+    {
+      "id": "S220",
+      "title": "Evals tab UI - dataset list, Generate dialog, dataset detail, Run trigger, scores",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 63,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Evals tab UI (between Notes and Monitoring): DatasetCard grid, GenerateDatasetDialog, DatasetDetail Sheet, RunEvalDialog, ScoresTable, QuestionList, paginated past-runs table. TanStack Query with 5s polling while generating."
+    },
+    {
+      "id": "S221",
+      "title": "Eval regression detection + Monitoring Eval Trends panel",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 64,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Regression detection: moving baseline (last 5 runs, 5% threshold), alert badge in Monitoring Eval Trends panel, line chart of HR@5/MRR/Faithfulness over time per dataset."
+    },
+    {
+      "id": "S222",
+      "title": "Retrieval-strategy ablation eval (vector vs FTS vs graph vs RRF)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 65,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Retrieval-strategy ablation: --ablation flag runs vector/fts/graph/rrf in isolation per query. Per-strategy HR@5/MRR table stored in eval_runs.ablation_metrics (JSON). Diagnosable without rerunning full pipeline."
+    },
+    {
+      "id": "S223",
+      "title": "Activate cross-domain golden datasets (paper, conversation, notes, code)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 66,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "summary": "Activated cross-domain goldens (paper, conversation, notes, code): wired into manifest.json, sample documents ingested from DATA/ at eval time. Per-domain thresholds; each stresses different pipeline stage."
+    },
+    {
+      "id": "S227",
+      "title": "Rename Evals to Quality + tabbed hub (Datasets, Runs, Routing, Ablations, Regressions)",
+      "phase": "V3 Phase 8 - Evaluation and Correctness",
+      "priority": 67,
+      "featureRef": "F-EVAL-V3",
+      "passes": true,
+      "description": "CONTEXT: The Evals tab today is a flat dataset card grid. Phase 8 has produced metrics that have no home: S218 chat-graph routing accuracy, S221 regression detection, S222 retrieval-strategy ablations, and the global eval_runs history. File-backed golden datasets (evals/golden/*.jsonl) are also second-class -- their cards show last_run scores after the recent fix in app/routers/evals.py, but cards are not clickable, there is no detail panel, and there is no in-app way to trigger a run for them (only legacy CLI). Faithfulness is null on most file-backed runs because users were not passing --judge-model. DECISION: Rename the tab from 'Evals' to 'Quality' and restructure the page as a tabbed hub.\n\nUSER JOURNEY: User clicks 'Quality' in top nav -> lands on the Datasets sub-tab (current grid, but every card is now clickable, including file-backed ones). Clicking a file-backed card opens the same DatasetDetail Sheet as db-backed datasets, populated with: metadata (name, source=file, question count from JSONL), a paginated preview of questions read from the JSONL, the existing past-runs table (rows from eval_runs filtered by dataset_name), and a 'Run Eval' button that opens RunEvalDialog and submits to POST /evals/run with judge_model / check_citations / max_questions. Other sub-tabs: Runs (flat reverse-chronological list of eval_runs across all datasets, filterable by dataset, eval_kind, model), Routing (chat-graph routing accuracy from S218 -- confusion matrix + per-intent accuracy), Ablations (S222 ablation_metrics rendered as a grouped bar chart: vector vs FTS vs graph vs RRF, per dataset), Regressions (S221 trend lines + flagged regressions, window=5, 5% threshold).\n\nCROSS-STORY IMPACT: Renames the App.tsx nav entry. Reuses S220 components (DatasetCard, DatasetDetail, RunEvalDialog, ScoresTable, QuestionList). Surfaces existing data from S218/S221/S222 -- does not change their backends except as noted below. The old 'Evals' label is removed.\n\nIMPLEMENTATION NOTES:\n- App.tsx nav: rename 'Evals' to 'Quality'. Order: Learning | Chat | Viz | Study | Notes | Quality | Monitoring.\n- Rename frontend/src/pages/Evals.tsx -> Quality.tsx. Wrap content in shadcn Tabs with values datasets|runs|routing|ablations|regressions. Default tab 'datasets'. Persist active tab in URL hash for shareability.\n- Datasets sub-tab: existing grid. DatasetCard becomes clickable for source=file too -- onSelect fires for both. DatasetDetail must branch on source: db-backed reads questions from GET /evals/datasets/{id}, file-backed reads from a new GET /evals/golden/{name} that streams the JSONL as paginated questions (limit/offset). Past-runs table for file-backed pulls a new GET /evals/runs?dataset_name={name}&limit=50 (see backend below). RunEvalDialog wired: source=db -> POST /evals/datasets/{id}/run; source=file -> POST /evals/run with {dataset, judge_model, check_citations, max_questions}.\n- Backend additions in app/routers/evals.py:\n  - GET /evals/runs -> paginated list of EvalRunModel rows. Query params: dataset_name?, eval_kind?, model?, limit (default 50, max 200), offset. Order by run_at DESC. Powers the Runs sub-tab and file-backed past-runs table.\n  - GET /evals/golden/{name} -> reads evals/golden/{name}.jsonl (validate name against allowlist of files in that directory, reject path traversal). Returns {name, total, questions: [...]} with limit/offset. Each question echoes the JSONL row shape (q, a, hint or context_hint, etc.).\n  - Extend POST /evals/run to accept JSON body {dataset, judge_model?, check_citations?, max_questions?} (currently triggers retrieval-only). Wire these through to _run_eval_subprocess command flags.\n- Routing sub-tab: read from existing S218 endpoint (likely GET /evals/routing or eval_runs rows where eval_kind='routing'). Render confusion matrix (shadcn Table) + per-intent accuracy bars. If no data: empty state with copy 'Run a routing eval to populate this view' and a button that POSTs to the existing routing eval trigger.\n- Ablations sub-tab: read latest eval_runs row per dataset where eval_kind='ablation' and ablation_metrics JSON column is non-null. Render grouped bar chart (recharts already in deps if present, else simple HTML/SVG bars -- no new deps). Each group = strategy (vector|fts|graph|rrf), value = HR@5.\n- Regressions sub-tab: reuse S221 Monitoring Eval Trends component if extractable; otherwise render a simple line chart per dataset of HR@5 / MRR over the last 30 runs and highlight the regressions table from the existing S221 endpoint.\n- TanStack Query hooks: useEvalRuns(filters), useGoldenFile(name, page), useRoutingResults(), useAblationResults(), useRegressionFlags(). 30s stale time on Runs/Routing/Ablations/Regressions; no polling.\n- Empty + loading + error states per I-10 on every sub-tab. Use stripMarkdown for question previews per I-12.\n- Faithfulness UX: in RunEvalDialog, when judge_model is set to 'disabled' the dialog warns 'Faithfulness, answer-relevance, and citation grounding will be n/a without a judge model'. Default judge model stays ollama/mistral per I-16 (local-first).\n- DO NOT rename backend routes (still /evals/...). The page rename is frontend-only.\n- No new dependencies. No changes to eval_runs schema.",
+      "acceptanceCriteria": [
+        "Top-nav entry renamed from 'Evals' to 'Quality'; URL/hash navigation still works.",
+        "Quality page renders five sub-tabs: Datasets, Runs, Routing, Ablations, Regressions. Default = Datasets. Active tab persisted in URL hash.",
+        "On the Datasets sub-tab, file-backed dataset cards are clickable and open DatasetDetail Sheet with metadata, paginated question preview from JSONL, past-runs table, and Run Eval button.",
+        "GET /evals/golden/{name} returns 200 with {name, total, questions:[...]} for valid file names; 404 for unknown; 400 for path-traversal attempts (e.g., '../foo'). Smoke covers all three.",
+        "GET /evals/runs returns paginated eval_runs filtered by dataset_name, eval_kind, model; defaults limit=50; orders by run_at DESC.",
+        "POST /evals/run accepts JSON body {dataset, judge_model?, check_citations?, max_questions?} and forwards flags to run_eval.py subprocess.",
+        "Run Eval from a file-backed dataset card produces a new row in eval_runs (verified by smoke: trigger run, poll GET /evals/runs?dataset_name=... until row appears).",
+        "Runs sub-tab lists recent eval_runs across all datasets with filter controls for dataset_name, eval_kind, model; empty state when no runs.",
+        "Routing sub-tab renders confusion matrix + per-intent accuracy from S218 results; empty state with explicit copy when no routing eval has run.",
+        "Ablations sub-tab renders grouped bar chart (vector|fts|graph|rrf) per dataset from eval_kind='ablation' rows; empty state when no ablation_metrics rows exist.",
+        "Regressions sub-tab surfaces S221 trend chart + flagged regressions; empty state when window<5.",
+        "Every sub-tab has loading skeleton, inline error message, and empty state per I-10.",
+        "Question previews use stripMarkdown; no MarkdownRenderer in list cells (I-12).",
+        "RunEvalDialog warns when judge_model='disabled' that faithfulness/answer-relevance/citation grounding will be n/a.",
+        "No new frontend or backend dependencies added (verify package.json and pyproject.toml diff).",
+        "No changes to eval_runs schema.",
+        "npx tsc --noEmit exits 0; uv run ruff check . exits 0; uv run pytest exits 0.",
+        "scripts/smoke/S227.sh exits 0."
+      ]
+    }
+  ],
+  "regressionBaseline": "All tests on branch ralph/luminary-v2 pass before Phase 1 implementation begins (run: uv run pytest from backend/). After each story, the test count must be >= the count at the start of that story's implementation. Any drop is a regression -- stop and fix before setting passes: true."
+}
