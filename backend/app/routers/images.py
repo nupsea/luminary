@@ -6,6 +6,7 @@ Endpoints:
   GET /documents/{id}/enrichment   -- enrichment job list for a document
 """
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -62,7 +63,7 @@ class UploadResponse(BaseModel):
 
 @router.post("/images/notes", response_model=UploadResponse)
 async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
-    """Upload an image for a note (e.g. from paste or screenshot).
+    """Upload a note asset such as an image, SVG diagram, or Excalidraw scene.
 
     Saves to DATA_DIR/images/notes/{uuid}_{filename}.
     Returns the __LUMINARY_IMG__ prefixed path for Markdown resolution.
@@ -72,20 +73,37 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     notes_img_dir = data_dir / "images" / "notes"
     notes_img_dir.mkdir(parents=True, exist_ok=True)
 
-    # Validate file type
     content_type = file.content_type or ""
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    filename = file.filename or "asset"
+    ext = Path(filename).suffix.lower()
+    is_excalidraw_scene = (
+        content_type in {"application/json", "text/json"}
+        and filename.endswith(".excalidraw.json")
+    )
+    if not content_type.startswith("image/") and not is_excalidraw_scene:
+        raise HTTPException(
+            status_code=400,
+            detail="Only image files or Excalidraw JSON scenes are allowed",
+        )
 
-    # Generate unique filename
-    ext = Path(file.filename or "image.png").suffix or ".png"
+    if ext == ".json" and filename.endswith(".excalidraw.json"):
+        ext = ".excalidraw.json"
     unique_filename = f"{uuid.uuid4()}{ext}"
     target_path = notes_img_dir / unique_filename
 
     try:
         content = await file.read()
+        if is_excalidraw_scene:
+            try:
+                scene = json.loads(content)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+            if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
+                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
         with open(target_path, "wb") as f:
             f.write(content)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to save note image: %s", e)
         raise HTTPException(status_code=500, detail="Failed to save image file")
@@ -180,9 +198,12 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
 
     # Detect media type from extension
     ext = filename.rsplit(".", maxsplit=1)[-1].lower()
-    media_type = (
-        f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"] else "image/png"
-    )
+    if ext == "svg":
+        media_type = "image/svg+xml"
+    elif ext == "json":
+        media_type = "application/json"
+    else:
+        media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "image/png"
     return FileResponse(str(abs_path), media_type=media_type)
 
 

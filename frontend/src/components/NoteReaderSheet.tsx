@@ -3,9 +3,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, FileText, LayoutGrid, Loader2, Maximize2, Minimize2, Pencil, Tag, Trash2, Wand2 } from "lucide-react"
+import { Check, FileText, GitBranch, LayoutGrid, Loader2, Maximize2, Minimize2, Pencil, Shapes, Tag, Trash2, Wand2 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import {
   Sheet,
@@ -20,6 +21,12 @@ import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
+import { MERMAID_CHEAT_SHEET, MERMAID_TEMPLATES } from "@/lib/mermaidNotes"
+import { uploadNoteAsset } from "@/lib/noteAssets"
+import {
+  replaceExcalidrawDiagram,
+  type ExcalidrawNoteDiagramRef,
+} from "@/lib/noteDiagrams"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,7 +40,6 @@ interface Note {
   tags: string[]
   group_name: string | null
   collection_ids: string[]
-  // S175: multi-document source linkage
   source_document_ids: string[]
   created_at: string
   updated_at: string
@@ -50,9 +56,7 @@ export interface NoteReaderSheetProps {
   onClose: () => void
   onSaved: (note: Note) => void
   isNew?: boolean
-  /** S197: Pre-fill content when creating a note from gap analysis. */
   initialContent?: string
-  /** S197: Pre-check a collection when creating a note from gap analysis. */
   initialCollectionId?: string
   /** When set, this collection appears checked and cannot be unchecked (reader context). */
   lockedCollectionId?: string | null
@@ -157,6 +161,8 @@ export function NoteReaderSheet({
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [generatedTitle, setGeneratedTitle] = useState("")
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false)
+  const [diagramOpen, setDiagramOpen] = useState(false)
+  const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -506,6 +512,39 @@ export function NoteReaderSheet({
     setSelectedDocIds(note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []))
   }
 
+  function insertAtCursor(markdown: string) {
+    const start = textareaRef.current?.selectionStart ?? editContent.length
+    const end = textareaRef.current?.selectionEnd ?? editContent.length
+    const prefix = start > 0 && !editContent.slice(0, start).endsWith("\n") ? "\n\n" : ""
+    const suffix = editContent.slice(end).startsWith("\n") ? "" : "\n\n"
+    const insertion = `${prefix}${markdown}${suffix}`
+    const next = editContent.substring(0, start) + insertion + editContent.substring(end)
+    setEditContent(next)
+    setTimeout(() => {
+      const newPos = start + insertion.length
+      textareaRef.current?.setSelectionRange(newPos, newPos)
+      textareaRef.current?.focus()
+    }, 0)
+  }
+
+  function handleDiagramSaved(markdown: string) {
+    if (editingDiagramRef) {
+      setEditContent((current) => replaceExcalidrawDiagram(current, editingDiagramRef, markdown))
+      setEditingDiagramRef(null)
+      return
+    }
+    insertAtCursor(markdown)
+  }
+
+  function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
+    if (note && mode === "read") {
+      setEditContent(note.content)
+      setMode("edit")
+    }
+    setEditingDiagramRef(ref)
+    setDiagramOpen(true)
+  }
+
   const title = isNew
     ? "New Note"
     : note
@@ -564,7 +603,9 @@ export function NoteReaderSheet({
                     <Skeleton className="h-4 w-2/3" />
                   </div>
                 ) : note.content.trim() ? (
-                  <MarkdownRenderer>{note.content}</MarkdownRenderer>
+                  <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
+                    {note.content}
+                  </MarkdownRenderer>
                 ) : (
                   <p className="text-muted-foreground italic text-sm">Start writing...</p>
                 )}
@@ -577,7 +618,32 @@ export function NoteReaderSheet({
                 <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${leftPct}%` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Editor</span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <GitBranch size={10} />
+                        Mermaid:
+                      </span>
+                      {MERMAID_TEMPLATES.map((template) => (
+                        <button
+                          key={template.label}
+                          type="button"
+                          onClick={() => insertAtCursor(template.markdown)}
+                          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
+                        >
+                          {template.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingDiagramRef(null)
+                          setDiagramOpen(true)
+                        }}
+                        className="flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
+                      >
+                        <Shapes size={10} />
+                        Draw
+                      </button>
                       <span className="text-[10px] text-muted-foreground">Image spec:</span>
                       {(["small", "medium", "large"] as const).map((size) => (
                         <button
@@ -621,6 +687,16 @@ export function NoteReaderSheet({
                       ))}
                     </div>
                   </div>
+                  <details className="rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+                    <summary className="cursor-pointer select-none font-medium text-foreground">Mermaid cheat sheet</summary>
+                    <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                      {MERMAID_CHEAT_SHEET.map((item) => (
+                        <code key={item} className="rounded bg-background px-1.5 py-1 text-[10px] text-foreground">
+                          {item}
+                        </code>
+                      ))}
+                    </div>
+                  </details>
                   <textarea
                     ref={textareaRef}
                     onScroll={() => syncScroll("write")}
@@ -633,17 +709,8 @@ export function NoteReaderSheet({
                           const file = items[i].getAsFile()
                           if (!file) continue
 
-                          const formData = new FormData()
-                          formData.append("file", file)
-
                           try {
-                            const res = await fetch(`${API_BASE}/images/notes`, {
-                              method: "POST",
-                              body: formData,
-                            })
-                            if (!res.ok) throw new Error("Upload failed")
-                            const data = (await res.json()) as { path: string }
-
+                            const data = await uploadNoteAsset(file)
                             const imgMarkdown = `![Pasted Image|medium](${data.path})`
                             const start = textareaRef.current?.selectionStart ?? editContent.length
                             const end = textareaRef.current?.selectionEnd ?? editContent.length
@@ -686,7 +753,9 @@ export function NoteReaderSheet({
                     className="prose-sm flex-1 overflow-auto px-2 py-2"
                   >
                     {editContent.trim() ? (
-                      <MarkdownRenderer>{editContent}</MarkdownRenderer>
+                      <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
+                        {editContent}
+                      </MarkdownRenderer>
                     ) : (
                       <p className="text-muted-foreground italic text-sm">Preview will appear here...</p>
                     )}
@@ -957,6 +1026,13 @@ export function NoteReaderSheet({
             </>
           )}
         </div>
+
+        <NoteDiagramDialog
+          open={diagramOpen}
+          onOpenChange={setDiagramOpen}
+          scenePath={editingDiagramRef?.scenePath}
+          onSaved={handleDiagramSaved}
+        />
       </SheetContent>
     </Sheet>
   )

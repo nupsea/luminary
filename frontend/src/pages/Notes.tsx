@@ -1,22 +1,3 @@
-/**
- * /notes — standalone notes management page with two-column layout.
- *
- * Audit: 2026-02-26
- * (a) fetchNotes calls GET /notes with params: document_id, group, tag — matches backend ✓
- * (b) Backend accepts document_id, group, tag params ✓
- * (c) Backend uses `content` for note body (not `text` or `body`)
- * (d) POST /notes returns flat NoteResponse (id, document_id, content, tags, group_name, created_at, updated_at)
- * (e) No create form existed — added (textarea, optional tags, doc selector, Save → POST /notes)
- *
- * Fixes applied per S50:
- * - Loading: 3 Skeleton h-12 rows (was 6 h-28 grid)
- * - Empty: "No notes yet. Click + to create your first note." + visible + button
- * - Error: inline amber alert "Could not load notes" + Retry button (was red, no retry)
- * - Create form: textarea + comma-separated tags input + doc selector + Save
- * - Delete: inline "Delete this note? [Yes] [No]" confirmation (was immediate delete)
- * - Edit: uses PATCH /notes/{id} (was PUT)
- */
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -61,7 +42,6 @@ interface Note {
   tags: string[]
   group_name: string | null
   collection_ids: string[]
-  // S175: multi-document source linkage
   source_document_ids: string[]
   created_at: string
   updated_at: string
@@ -185,6 +165,12 @@ interface ClusterSuggestion {
   previews: ClusterNotePreview[]
 }
 
+interface CollectionTreeNode {
+  id: string
+  name: string
+  children?: CollectionTreeNode[]
+}
+
 async function fetchClusterSuggestions(): Promise<ClusterSuggestion[]> {
   const res = await fetch(`${API_BASE}/notes/cluster/suggestions`)
   if (!res.ok) throw new Error(`GET /notes/cluster/suggestions failed: ${res.status}`)
@@ -202,9 +188,6 @@ async function fetchNamingViolations(): Promise<NamingViolation[]> {
   if (!res.ok) throw new Error(`POST /notes/cluster/normalize-check failed: ${res.status}`)
   return res.json() as Promise<NamingViolation[]>
 }
-
-// Individual accept/reject API helpers removed; OrganizationPlanDialog uses batch-accept.
-// Backend endpoints preserved for backward compatibility.
 
 interface NoteSearchItem {
   note_id: string
@@ -638,7 +621,7 @@ export default function NotesPage() {
   const [showOrgPlan, setShowOrgPlan] = useState(false)
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
-  const mountTime = useRef(Date.now())
+  const mountTime = useRef(0)
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
@@ -652,16 +635,16 @@ export default function NotesPage() {
   const navigate = useNavigate()
 
   useEffect(() => {
+    mountTime.current = Date.now()
     logger.info("[Notes] mounted")
   }, [])
 
-  // S197: consume notePreload from store (set by gap analysis "Take a note" action)
   useEffect(() => {
     if (notePreload) {
-      setIsCreating(true)
-      // preload is consumed by NoteReaderSheet via props; clear store after opening
-      // Use a microtask to ensure the sheet opens first
-      queueMicrotask(() => setNotePreload(null))
+      queueMicrotask(() => {
+        setIsCreating(true)
+        setNotePreload(null)
+      })
     }
   }, [notePreload, setNotePreload])
 
@@ -676,19 +659,19 @@ export default function NotesPage() {
     staleTime: 60_000,
   })
 
-  // S165: Fetch tree to resolve ID to name in header
   const { data: tree } = useQuery({
     queryKey: ["collections-tree"],
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/collections/tree`)
-      return (await res.json()) as any[]
+      return (await res.json()) as CollectionTreeNode[]
     },
     staleTime: 30_000,
   })
 
   const getCollectionName = (id: string) => {
     if (!tree) return id.slice(0, 8) + "..."
-    const flat = (items: any[]): any[] => items.flatMap(i => [i, ...flat(i.children || [])])
+    const flat = (items: CollectionTreeNode[]): CollectionTreeNode[] =>
+      items.flatMap((item) => [item, ...flat(item.children ?? [])])
     const found = flat(tree).find(i => i.id === id)
     return found ? found.name : id.slice(0, 8) + "..."
   }
@@ -735,13 +718,11 @@ export default function NotesPage() {
     staleTime: 30_000,
   })
 
-  // S207: naming violations state
   const [namingViolations, setNamingViolations] = useState<NamingViolation[]>([])
 
   async function handleAutoOrganize() {
     setIsClusterQueued(true)
     try {
-      // Fetch naming violations in parallel with clustering
       const [clusterResult, violations] = await Promise.all([
         postCluster(),
         fetchNamingViolations().catch(() => [] as NamingViolation[]),
@@ -749,12 +730,10 @@ export default function NotesPage() {
       setNamingViolations(violations)
 
       if (clusterResult.cached) {
-        // Already have pending suggestions -- show the plan immediately
         setIsClusterQueued(false)
         setShowOrgPlan(true)
         return
       }
-      // Poll suggestions after a short delay to give clustering a head start
       setTimeout(() => {
         void qc.invalidateQueries({ queryKey: ["clusterSuggestions"] }).then(() => {
           setIsClusterQueued(false)
@@ -766,8 +745,6 @@ export default function NotesPage() {
       setIsClusterQueued(false)
     }
   }
-
-  // Individual accept/reject kept as API helpers (backward compat) but UI uses OrganizationPlanDialog
 
   useEffect(() => {
     if (!notesLoading) {
@@ -965,7 +942,6 @@ export default function NotesPage() {
       </div>
     )
   } else if (notesView === "list") {
-    // Build doc title lookup from already-fetched document list
     const docTitleMap = Object.fromEntries(documents.map((d) => [d.id, d.title]))
 
     panelContent = (
@@ -1056,7 +1032,6 @@ export default function NotesPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* Left sidebar */}
       <div className="flex w-[280px] shrink-0 flex-col gap-1 overflow-auto border-r border-border p-4">
         <button
           onClick={() => {
@@ -1090,7 +1065,6 @@ export default function NotesPage() {
           Reading Journal
         </button>
 
-        {/* Collections section */}
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between px-1">
             <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1114,7 +1088,6 @@ export default function NotesPage() {
           </button>
         </div>
 
-        {/* Tags section */}
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between px-1">
             <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1124,7 +1097,6 @@ export default function NotesPage() {
           <TagTree />
         </div>
 
-        {/* Suggested Collections summary + auto-organize trigger */}
         {(clusterSuggestions.length > 0 || isClusterQueued) && (
           <div className="mt-3">
             <div className="mb-1 flex items-center justify-between px-1">
@@ -1169,7 +1141,6 @@ export default function NotesPage() {
           </div>
         )}
 
-        {/* Auto-organize button (always visible even when no suggestions) */}
         {clusterSuggestions.length === 0 && !isClusterQueued && (
           <div className="mt-3">
             <button
@@ -1183,7 +1154,6 @@ export default function NotesPage() {
           </div>
         )}
 
-        {/* Organization Plan dialog */}
         <OrganizationPlanDialog
           open={showOrgPlan}
           onOpenChange={setShowOrgPlan}
@@ -1211,9 +1181,7 @@ export default function NotesPage() {
         />
       </div>
 
-      {/* Right panel */}
       <div className="flex-1 overflow-auto p-6">
-        {/* Panel header with view toggle + button */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">
             {notesDocumentId
@@ -1289,7 +1257,6 @@ export default function NotesPage() {
         {panelContent}
       </div>
 
-      {/* NoteReaderSheet — rendered once at page level for both View and Create */}
       <NoteReaderSheet
         note={editingNote}
         isNew={isCreating}

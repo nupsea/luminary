@@ -1,31 +1,8 @@
-/**
- * NoteEditorDialog -- focused Write + Preview dialog for note editing.
- *
- * Opens when `note` prop is non-null. Two-column layout:
- *   Left:  full-height monospace textarea (Write pane)
- *   Right: real-time MarkdownRenderer (Preview pane)
- *
- * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when not yet saved).
- * Tags section is editable: chips with X to remove, inline input to add.
- *
- * Collections section (S164):
- *   - Scrollable checkbox list of all collections (GET /collections/tree, flattened)
- *   - Pre-checked based on note's collection_ids
- *   - Check: POST /collections/{id}/notes immediately (no Save required)
- *   - Uncheck: DELETE /collections/{id}/notes/{note_id} immediately
- *
- * After save:
- *   - isFetchingTags=true shows 'Suggesting tags...' with Loader2
- *   - If suggest-tags returns novel tags: dashed-border chips shown
- *   - If suggest-tags returns []: 'No suggestions available' shown briefly (2s)
- *   - Dialog NEVER auto-closes -- user always closes via Done or Cancel
- *   - AbortController cancels in-flight fetch when dialog closes
- */
-
 import { useEffect, useRef, useState } from "react"
-import { Link, Loader2, Tag } from "lucide-react"
+import { GitBranch, Link, Loader2, Shapes, Tag } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { LinkAutocomplete } from "@/components/LinkAutocomplete"
 import {
@@ -42,6 +19,12 @@ import { API_BASE } from "@/lib/config"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { detectLinkTrigger, insertLinkAtTrigger } from "@/lib/noteLinkUtils"
+import { MERMAID_CHEAT_SHEET, MERMAID_TEMPLATES } from "@/lib/mermaidNotes"
+import { uploadNoteAsset } from "@/lib/noteAssets"
+import {
+  replaceExcalidrawDiagram,
+  type ExcalidrawNoteDiagramRef,
+} from "@/lib/noteDiagrams"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,7 +38,6 @@ export interface Note {
   tags: string[]
   group_name: string | null
   collection_ids: string[]
-  // S175: multi-document source linkage
   source_document_ids: string[]
   created_at: string
   updated_at: string
@@ -192,11 +174,12 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [noSuggestionsMsg, setNoSuggestionsMsg] = useState(false)
   const [savedNote, setSavedNote] = useState<Note | null>(null)
+  const [diagramOpen, setDiagramOpen] = useState(false)
+  const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
   // Collection IDs that this note belongs to (tracked locally for immediate UI updates).
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(
     new Set(note?.collection_ids ?? []),
   )
-  // S175: source document IDs (multi-select)
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>(
     note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []),
   )
@@ -215,7 +198,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   })
   const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
 
-  // S175: documents list for source picker
   const { data: documents, isLoading: docsLoading } = useQuery({
     queryKey: ["documents-list"],
     queryFn: fetchDocuments,
@@ -223,7 +205,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     enabled: note !== null,
   })
 
-  // Note links query (S171)
   const { data: noteLinks, isLoading: linksLoading } = useQuery({
     queryKey: ["note-links", note?.id],
     queryFn: () => fetchNoteLinks(note!.id),
@@ -362,12 +343,42 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note, saveMut, isSaved, unchanged])
 
   function handleDone() {
     onSaved(savedNote ?? note!)
     handleClose()
+  }
+
+  function insertAtCursor(markdown: string) {
+    const start = textareaRef.current?.selectionStart ?? content.length
+    const end = textareaRef.current?.selectionEnd ?? content.length
+    const prefix = start > 0 && !content.slice(0, start).endsWith("\n") ? "\n\n" : ""
+    const suffix = content.slice(end).startsWith("\n") ? "" : "\n\n"
+    const insertion = `${prefix}${markdown}${suffix}`
+    const next = content.substring(0, start) + insertion + content.substring(end)
+    setContent(next)
+    setIsSaved(false)
+    setTimeout(() => {
+      const newPos = start + insertion.length
+      textareaRef.current?.setSelectionRange(newPos, newPos)
+      textareaRef.current?.focus()
+    }, 0)
+  }
+
+  function handleDiagramSaved(markdown: string) {
+    if (editingDiagramRef) {
+      setContent((current) => replaceExcalidrawDiagram(current, editingDiagramRef, markdown))
+      setIsSaved(false)
+      setEditingDiagramRef(null)
+      return
+    }
+    insertAtCursor(markdown)
+  }
+
+  function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
+    setEditingDiagramRef(ref)
+    setDiagramOpen(true)
   }
 
   return (
@@ -385,7 +396,44 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
           {/* Write pane */}
           <div className="flex w-1/2 flex-col border-r border-border">
             <div className="shrink-0 border-b border-border px-4 py-2">
-              <span className="text-xs font-medium text-muted-foreground">Write</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-auto text-xs font-medium text-muted-foreground">Write</span>
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <GitBranch size={10} />
+                  Mermaid:
+                </span>
+                {MERMAID_TEMPLATES.map((template) => (
+                  <button
+                    key={template.label}
+                    type="button"
+                    onClick={() => insertAtCursor(template.markdown)}
+                    className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
+                  >
+                    {template.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingDiagramRef(null)
+                    setDiagramOpen(true)
+                  }}
+                  className="flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
+                >
+                  <Shapes size={10} />
+                  Draw
+                </button>
+              </div>
+              <details className="mt-2 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+                <summary className="cursor-pointer select-none font-medium text-foreground">Mermaid cheat sheet</summary>
+                <div className="mt-2 grid grid-cols-1 gap-1">
+                  {MERMAID_CHEAT_SHEET.map((item) => (
+                    <code key={item} className="rounded bg-background px-1.5 py-1 text-[10px] text-foreground">
+                      {item}
+                    </code>
+                  ))}
+                </div>
+              </details>
             </div>
             <div className="relative flex-1 min-h-0">
               <textarea
@@ -399,17 +447,8 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                       const file = items[i].getAsFile()
                       if (!file) continue
 
-                      const formData = new FormData()
-                      formData.append("file", file)
-
                       try {
-                        const res = await fetch(`${API_BASE}/images/notes`, {
-                          method: "POST",
-                          body: formData,
-                        })
-                        if (!res.ok) throw new Error("Upload failed")
-                        const data = (await res.json()) as { path: string }
-
+                        const data = await uploadNoteAsset(file)
                         const imgMarkdown = `![Pasted Image](${data.path})`
                         const start = textareaRef.current?.selectionStart ?? content.length
                         const end = textareaRef.current?.selectionEnd ?? content.length
@@ -482,7 +521,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
               />
             </div>
 
-            {/* Source documents section (S175) */}
             <div className="shrink-0 border-t border-border px-4 py-2">
               <p className="mb-1 text-xs font-medium text-muted-foreground">Source documents</p>
               {docsLoading ? (
@@ -559,7 +597,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                 </div>
               )}
             </div>
-            {/* Links section (S171) */}
             <div className="shrink-0 border-t border-border px-4 py-2">
               <p className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
                 <Link size={11} />
@@ -620,6 +657,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                       ? new Set(noteLinks.outgoing.map((l) => l.note_id))
                       : undefined
                   }
+                  onEditExcalidrawDiagram={openDiagramEditor}
                 >
                   {content}
                 </MarkdownRenderer>
@@ -705,6 +743,12 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             </div>
           </div>
         </DialogFooter>
+        <NoteDiagramDialog
+          open={diagramOpen}
+          onOpenChange={setDiagramOpen}
+          scenePath={editingDiagramRef?.scenePath}
+          onSaved={handleDiagramSaved}
+        />
       </DialogContent>
     </Dialog>
   )
