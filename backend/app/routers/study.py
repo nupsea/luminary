@@ -1464,6 +1464,10 @@ async def get_session_remaining_cards(
 
     planned_ids: list[str] = list(sess.planned_card_ids or [])
     if not planned_ids:
+        logger.warning(
+            "remaining-cards: session has empty planned_card_ids",
+            extra={"session_id": session_id, "ended_at": str(sess.ended_at)},
+        )
         return SessionRemainingResponse(
             answered_count=0, planned_count=0, cards=[]
         )

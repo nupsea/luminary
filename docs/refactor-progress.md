@@ -4,19 +4,22 @@ Active modularity refactor on this branch. Per the user's preference,
 this file tracks **only what's still pending**. Completed work is in
 `git log` (search for `refactor:` and `chore:` since the branch root).
 
-## Next: audit #1 -- split `FlashcardService`
+## Next: audit #1 -- split `FlashcardService` (in progress)
 
-- File: `backend/app/services/flashcard.py` (2,034 lines).
-- One class spans lines 907-2029 (~1,120 lines) with 10 large `async`
-  methods: `search`, `generate`, `generate_from_notes`, `generate_from_collection`,
-  `generate_from_gaps`, `generate_from_feynman_gaps`, `generate_from_graph`,
-  `generate_technical`, `generate_cloze`.
-- Each `generate_*` is a near-clone of the others -- duplicated chunk
-  fetch, prompt build, LLM call, parse, dedup, persist.
-- Refactor approach: split into `FlashcardSearchService` +
-  `FlashcardGenerator` strategy family (one strategy per source), with
-  shared `_build_prompt` / `_parse_llm_response` helpers already
-  module-level (lines 446-712).
+- File: `backend/app/services/flashcard.py` (now 1,861 lines, was 2,054).
+- Done: extracted `search` + FTS5 helpers (`_sanitize_fts5_query`,
+  `_sync_flashcard_fts`, `_delete_flashcard_fts`) into
+  `services/flashcard_search.py` as `FlashcardSearchService`.
+  `FlashcardService(FlashcardSearchService)` preserves the call-site API
+  for routers/tests; helpers are re-exported from `flashcard.py`.
+- Remaining: 9 large `async` generate methods (`generate`,
+  `generate_from_notes`, `generate_from_collection`, `generate_from_gaps`,
+  `generate_from_feynman_gaps`, `generate_from_graph`, `generate_technical`,
+  `generate_cloze`). Each is a near-clone -- duplicated chunk fetch,
+  prompt build, LLM call, parse, dedup, persist.
+- Refactor approach: split into `FlashcardGenerator` strategy family
+  (one strategy per source), with shared `_build_prompt` /
+  `_parse_llm_response` helpers already module-level (lines 446-712).
 - Likely also drains several `noqa: PLC0415` inline imports (current
   count: 299 across `backend/app/`).
 

@@ -890,16 +890,6 @@ export function TeachbackSession({
   }
 
   async function handleBackToStudy() {
-    // If the user has submitted teach-backs that are still evaluating, keep
-    // them on the complete screen so they can see the scores come in instead
-    // of bouncing back to the list.
-    if (
-      pendingTeachbacks.length > 0 &&
-      sessionState !== "complete"
-    ) {
-      await completeSession()
-      return
-    }
     await exit(onExit)
   }
 
