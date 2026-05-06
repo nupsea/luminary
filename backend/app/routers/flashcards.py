@@ -24,16 +24,12 @@ to prevent FastAPI from matching literal segments as document_id.
 """
 
 import asyncio
-import csv
-import io
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +42,30 @@ from app.models import (
     ReviewEventModel,
     SectionModel,
 )
+from app.schemas.flashcards import (
+    ArchiveMasteredResponse,
+    BulkDeleteRequest,
+    BulkDeleteResponse,
+    CoverageReportResponse,
+    DeckHealthReportResponse,
+    DeckItem,
+    EntityPairPreview,
+    EntityPairsResponse,
+    FillGapsResponse,
+    FillUncoveredRequest,
+    FillUncoveredResponse,
+    FlashcardGenerateRequest,
+    FlashcardResponse,
+    FlashcardSearchResponse,
+    FlashcardUpdateRequest,
+    FromGapsRequest,
+    FromGapsResponse,
+    GenerateFromGraphRequest,
+    GenerateTechnicalRequest,
+    ReviewRequest,
+    SourceContextResponse,
+    TraceFlashcardRequest,
+)
 from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.flashcard import (
     FlashcardService,
@@ -54,6 +74,12 @@ from app.services.flashcard import (
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
+from app.services.flashcards_router_service import (
+    cards_to_csv as _cards_to_csv,
+)
+from app.services.flashcards_router_service import (
+    to_response as _to_response,
+)
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 from app.services.llm import LLMUnavailableError
 
@@ -64,196 +90,35 @@ router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 # Strong references to fire-and-forget coverage update tasks (asyncio holds only weak refs).
 _background_tasks: set[asyncio.Task] = set()
 
-
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
-class FlashcardGenerateRequest(BaseModel):
-    document_id: str
-    scope: Literal["full", "section"] = "full"
-    section_heading: str | None = None
-    count: int = 10
-    difficulty: Literal["easy", "medium", "hard"] = "medium"
-    context: str | None = None  # selected text from reader; used directly when provided
-
-
-class FromGapsRequest(BaseModel):
-    gaps: list[str] = Field(min_length=1)
-    document_id: str = ""
-
-
-class FromGapsResponse(BaseModel):
-    created: int
-
-
-class FlashcardUpdateRequest(BaseModel):
-    question: str | None = None
-    answer: str | None = None
-
-
-class GenerateFromGraphRequest(BaseModel):
-    document_id: str
-    k: int = Field(default=5, ge=1, le=20)
-
-
-class EntityPairPreview(BaseModel):
-    name_a: str
-    name_b: str
-    relation_label: str
-    confidence: float
-
-
-class EntityPairsResponse(BaseModel):
-    pairs: list[EntityPairPreview]
-
-
-class ReviewRequest(BaseModel):
-    rating: Literal["again", "hard", "good", "easy"]
-    session_id: str | None = None
-
-
-class GenerateTechnicalRequest(BaseModel):
-    document_id: str
-    scope: Literal["full", "section"] = "full"
-    section_heading: str | None = None
-    count: int = 10
-
-
-class FlashcardResponse(BaseModel):
-    id: str
-    document_id: str | None
-    chunk_id: str | None
-    source: str = "document"
-    question: str
-    answer: str
-    source_excerpt: str
-    difficulty: str = "medium"
-    is_user_edited: bool
-    fsrs_state: str
-    fsrs_stability: float
-    fsrs_difficulty: float
-    due_date: datetime | None
-    reps: int
-    lapses: int
-    created_at: datetime
-    # S137: Bloom's Taxonomy fields
-    flashcard_type: str | None = None
-    bloom_level: int | None = None
-    # S138: section_id derived from chunk -- populated by endpoints that do the join
-    section_id: str | None = None
-    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
-    cloze_text: str | None = None
-    # S179: chunk classifier label; null for non-document-chunk cards
-    chunk_classification: str | None = None
-    # S188: section heading for source grounding display
-    section_heading: str | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class CoverageReportResponse(BaseModel):
-    """Response schema for GET /flashcards/audit/{document_id} (S153)."""
-
-    total_cards: int
-    by_bloom_level: dict[str, int]  # JSON keys are always strings
-    by_section: dict[str, dict]  # BloomSectionStat as plain dict
-    coverage_score: float
-    gaps: list[dict]  # BloomGap as plain dict
-
-
-class FillGapsResponse(BaseModel):
-    """Response schema for POST /flashcards/audit/{document_id}/fill (S153)."""
-
-    created: int
-
-
-class DeckHealthReportResponse(BaseModel):
-    """Response schema for GET /flashcards/health/{document_id} (S160)."""
-
-    orphaned: int
-    orphaned_ids: list[str]
-    mastered: int
-    mastered_ids: list[str]
-    stale: int
-    stale_ids: list[str]
-    uncovered_sections: int
-    uncovered_section_ids: list[str]
-    hotspot_sections: list[dict]
-
-
-class ArchiveMasteredResponse(BaseModel):
-    """Response schema for POST /flashcards/health/{document_id}/archive-mastered (S160)."""
-
-    archived: int
-
-
-class FillUncoveredRequest(BaseModel):
-    """Request body for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
-
-    section_ids: list[str] = Field(min_length=1)
-
-
-class FillUncoveredResponse(BaseModel):
-    """Response schema for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
-
-    queued: int
-
-
-class SourceContextResponse(BaseModel):
-    """Response schema for GET /flashcards/{card_id}/source-context (S155)."""
-
-    section_heading: str
-    section_preview: str
-    document_title: str
-    pdf_page_number: int | None
-    section_id: str
-    document_id: str
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _to_response(card: FlashcardModel, section_id: str | None = None) -> FlashcardResponse:
-    return FlashcardResponse(
-        id=card.id,
-        document_id=card.document_id,
-        chunk_id=card.chunk_id,
-        source=card.source if card.source else "document",
-        question=card.question,
-        answer=card.answer,
-        source_excerpt=card.source_excerpt,
-        difficulty=card.difficulty,
-        is_user_edited=card.is_user_edited,
-        fsrs_state=card.fsrs_state,
-        fsrs_stability=card.fsrs_stability,
-        fsrs_difficulty=card.fsrs_difficulty,
-        due_date=card.due_date,
-        reps=card.reps,
-        lapses=card.lapses,
-        created_at=card.created_at,
-        flashcard_type=getattr(card, "flashcard_type", None),
-        bloom_level=getattr(card, "bloom_level", None),
-        section_id=section_id,
-        cloze_text=getattr(card, "cloze_text", None),
-        chunk_classification=getattr(card, "chunk_classification", None),
-        section_heading=getattr(card, "section_heading", None),
-    )
-
-
-# ---------------------------------------------------------------------------
-# S184: Search response model
-# ---------------------------------------------------------------------------
-
-
-class FlashcardSearchResponse(BaseModel):
-    items: list[FlashcardResponse]
-    total: int
-    page: int
-    page_size: int
+# Back-compat re-exports for routers/study.py and tests that import these
+# private aliases from this module.
+__all__ = [
+    "ArchiveMasteredResponse",
+    "BulkDeleteRequest",
+    "BulkDeleteResponse",
+    "CoverageReportResponse",
+    "DeckHealthReportResponse",
+    "DeckItem",
+    "EntityPairPreview",
+    "EntityPairsResponse",
+    "FillGapsResponse",
+    "FillUncoveredRequest",
+    "FillUncoveredResponse",
+    "FlashcardGenerateRequest",
+    "FlashcardResponse",
+    "FlashcardSearchResponse",
+    "FlashcardUpdateRequest",
+    "FromGapsRequest",
+    "FromGapsResponse",
+    "GenerateFromGraphRequest",
+    "GenerateTechnicalRequest",
+    "ReviewRequest",
+    "SourceContextResponse",
+    "TraceFlashcardRequest",
+    "_cards_to_csv",
+    "_to_response",
+    "router",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -368,19 +233,6 @@ async def generate_from_gaps(
     return FromGapsResponse(created=created)
 
 
-def _cards_to_csv(cards: list[FlashcardModel], document_title: str) -> str:
-    """Render flashcards as a CSV string.
-
-    Pure function — no I/O. All inputs are explicit parameters.
-    """
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["question", "answer", "source_excerpt", "document_title"])
-    for card in cards:
-        writer.writerow([card.question, card.answer, card.source_excerpt, document_title])
-    return output.getvalue()
-
-
 @router.get("/entity-pairs", response_model=EntityPairsResponse)
 async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
     """Return top entity pairs for a document from Kuzu (for preview before generation).
@@ -466,14 +318,6 @@ async def generate_technical_flashcards(
         extra={"document_id": req.document_id, "count": len(cards)},
     )
     return [_to_response(c) for c in cards]
-
-
-class TraceFlashcardRequest(BaseModel):
-    question: str  # typically the code block (front of card)
-    answer: str  # correct output + diff explanation (back of card)
-    source_excerpt: str
-    document_id: str | None = None
-    chunk_id: str | None = None
 
 
 @router.post("/create-trace", response_model=FlashcardResponse, status_code=201)
@@ -669,14 +513,6 @@ async def fill_uncovered_sections(
 # ---------------------------------------------------------------------------
 
 
-class DeckItem(BaseModel):
-    deck: str
-    source_type: str  # "document" | "collection" | "note"
-    card_count: int
-    document_id: str | None
-    collection_id: str | None
-
-
 @router.get("/decks", response_model=list[DeckItem])
 async def list_flashcard_decks(
     session: AsyncSession = Depends(get_db),
@@ -843,14 +679,6 @@ async def delete_flashcard(
     await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
     await session.commit()
     logger.info("Deleted flashcard", extra={"card_id": card_id})
-
-
-class BulkDeleteRequest(BaseModel):
-    ids: list[str] = Field(min_length=1)
-
-
-class BulkDeleteResponse(BaseModel):
-    deleted: int
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)

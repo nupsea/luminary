@@ -35,7 +35,7 @@ this file tracks **only what's still pending**. Completed work is in
 - Likely also drains several `noqa: PLC0415` inline imports (current
   count: 299 across `backend/app/`).
 
-## audit #2 -- split god routers (in progress)
+## audit #2 -- split god routers (DONE)
 
 - `routers/study.py` 2,472 -> 2,123 lines. Done:
   - All 36 Pydantic schemas extracted to new `app/schemas/study.py`.
@@ -64,7 +64,18 @@ this file tracks **only what's still pending**. Completed work is in
   - `_apply_note_update` stays in the router because it is tightly coupled
     to module-level `_background_tasks` and orchestrates the lifted
     helpers via fire-and-forget tasks.
-- Remaining for audit #2: `flashcards.py:1005` -- same pattern.
+- `routers/flashcards.py` 1,005 -> 833 lines. Done:
+  - All 22 Pydantic schemas extracted to new `app/schemas/flashcards.py`.
+  - Pure helpers (`_to_response`, `_cards_to_csv`) extracted to new
+    `app/services/flashcards_router_service.py` (named `_router_` to
+    avoid clashing with the existing `flashcard_*` services).
+  - `routers/flashcards.py` re-exports them under their private aliases
+    via `__all__` so `routers/study.py` (imports `_to_response` and
+    `FlashcardResponse`) and `tests/test_flashcard_s188.py` keep working.
+  - `schemas/study.py` redirected to import `FlashcardResponse` directly
+    from `schemas/flashcards` to avoid the router round-trip.
+- audit #2 complete -- all four god routers (study, documents, notes,
+  flashcards) now follow the schemas-and-services split.
 
 ## Lower priority items from the audit (not yet started)
 

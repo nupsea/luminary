@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.routers.flashcards import FlashcardResponse
+from app.schemas.flashcards import FlashcardResponse
 
 # ---------------------------------------------------------------------------
 # Sessions
