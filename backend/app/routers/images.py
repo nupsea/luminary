@@ -19,6 +19,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel, ImageModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["images"])
@@ -127,11 +128,7 @@ async def get_document_images(
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         result = await session.execute(
             select(ImageModel)
@@ -174,11 +171,7 @@ async def serve_image_raw(image_id: str) -> FileResponse:
     Returns 404 if image not found in DB or file missing from disk.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(ImageModel).where(ImageModel.id == image_id))
-        img = result.scalar_one_or_none()
-
-    if img is None:
-        raise HTTPException(status_code=404, detail="Image not found")
+        img = await get_or_404(session, ImageModel, image_id, name="Image")
 
     settings = get_settings()
     abs_path = Path(settings.DATA_DIR).expanduser() / img.path
@@ -215,11 +208,7 @@ async def get_enrichment_jobs(document_id: str) -> list[EnrichmentJobItem]:
     Returns [] if no enrichment jobs have been created yet.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         result = await session.execute(
             select(EnrichmentJobModel)

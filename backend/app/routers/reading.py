@@ -8,12 +8,13 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, ReadingProgressModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,7 @@ async def upsert_reading_progress(body: ReadingProgressRequest) -> ReadingProgre
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc = (
-            await session.execute(
-                select(DocumentModel.id).where(DocumentModel.id == body.document_id)
-            )
-        ).scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, body.document_id, name="Document")
 
         now = datetime.now(UTC)
 

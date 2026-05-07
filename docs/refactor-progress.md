@@ -93,18 +93,22 @@ this file tracks **only what's still pending**. Completed work is in
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
 
-### #8 -- "fetch + check + 404" boilerplate (in progress)
+### #8 -- "fetch + check + 404" boilerplate (DONE -- mechanical pass)
 - Helper landed at `backend/app/services/repo_helpers.py`:
   `get_or_404(session, model, id, *, name=...)` and
   `require_or_404(obj, name)` (for already-fetched rows).
-- Migrated routers: `clips.py` (2), `documents.py` (~21), `tags.py` (4),
-  `references.py` (3), `flashcards.py` (3), `notes.py` (6), `study.py` (1).
-  Roughly 40 of 115 sites done; remaining: `collections.py`, `images.py`,
-  `study.py` (10 multi-line selects), `evals.py`, `annotations.py`,
-  `reading.py`, `summarize.py`, `chat_sessions.py` (service-None mapping
-  -- use `require_or_404`).
-- `goals.py` skipped intentionally -- its 404s are `GoalNotFound`
-  exception mappings from the service layer, not fetch+check boilerplate.
+- Migrated: `clips.py`, `documents.py`, `tags.py`, `references.py`,
+  `flashcards.py`, `notes.py`, `study.py` (1), `collections.py`,
+  `images.py`, `annotations.py`, `reading.py`, `summarize.py`. ~50 sites
+  collapsed; net ~−170 lines across routers.
+- Intentionally skipped:
+  - `goals.py` -- 404s are `GoalNotFound` exception-to-HTTP mappings.
+  - `evals.py` -- already uses `db.get(Model, id)` + 2-line None check;
+    the helper would be a wash.
+  - `chat_sessions.py` -- service-layer returns None; not a fetch+check
+    pattern. Could use `require_or_404` but minimal win.
+  - `study.py` (10 multi-line selects with joins) -- non-uniform shapes;
+    leave to a follow-up if/when those endpoints are touched again.
 
 ### #9 -- 263 direct `session.execute/commit/add/delete` in routers
 - Push into per-entity Repo modules under a new `repos/` layer (does

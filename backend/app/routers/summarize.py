@@ -3,13 +3,14 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, SectionSummaryModel, SummaryModel
+from app.services.repo_helpers import get_or_404
 from app.services.summarizer import get_summarization_service
 
 logger = logging.getLogger(__name__)
@@ -96,12 +97,7 @@ async def summarize_document(document_id: str, req: SummarizeRequest) -> Streami
     database without calling the LLM.  Generates and stores on cache miss.
     """
     async with get_session_factory()() as session:
-        doc = (
-            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        ).scalar_one_or_none()
-
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     svc = get_summarization_service()
     return StreamingResponse(

@@ -10,12 +10,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import AnnotationModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -97,13 +98,7 @@ async def list_annotations(document_id: str) -> list[AnnotationResponse]:
 async def delete_annotation(annotation_id: str) -> None:
     """Delete an annotation. HTTP 204 on success, 404 if not found."""
     async with get_session_factory()() as session:
-        row = (
-            await session.execute(
-                select(AnnotationModel).where(AnnotationModel.id == annotation_id)
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Annotation not found")
+        row = await get_or_404(session, AnnotationModel, annotation_id, name="Annotation")
         await session.delete(row)
         await session.commit()
     logger.info("Deleted annotation %s", annotation_id)

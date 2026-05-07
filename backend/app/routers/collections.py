@@ -26,6 +26,7 @@ from app.models import CollectionMemberModel, CollectionModel, DocumentModel
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 from app.services.naming import normalize_collection_name
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -217,13 +218,9 @@ async def create_collection(
 ) -> CollectionResponse:
     """Create a new collection. Parent must be a top-level collection (max 2-level nesting)."""
     if req.parent_collection_id is not None:
-        parent = (
-            await session.execute(
-                select(CollectionModel).where(CollectionModel.id == req.parent_collection_id)
-            )
-        ).scalar_one_or_none()
-        if parent is None:
-            raise HTTPException(status_code=404, detail="Parent collection not found")
+        parent = await get_or_404(
+            session, CollectionModel, req.parent_collection_id, name="Parent collection"
+        )
         if parent.parent_collection_id is not None:
             raise HTTPException(
                 status_code=422,
@@ -345,11 +342,7 @@ async def create_auto_collection(
         return _to_response(existing)
 
     # Fetch document title
-    doc = (
-        await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-    ).scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
     color = _AUTO_COLLECTION_COLORS.get(doc.content_type, "#6366F1")
     col_name = _make_collection_name(doc.title, doc.content_type)
@@ -475,11 +468,7 @@ async def get_collection(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> CollectionResponse:
-    col = (
-        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
-    ).scalar_one_or_none()
-    if col is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    col = await get_or_404(session, CollectionModel, collection_id, name="Collection")
     return _to_response(col)
 
 
@@ -489,11 +478,7 @@ async def update_collection(
     req: CollectionUpdateRequest,
     session: AsyncSession = Depends(get_db),
 ) -> CollectionResponse:
-    col = (
-        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
-    ).scalar_one_or_none()
-    if col is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    col = await get_or_404(session, CollectionModel, collection_id, name="Collection")
 
     if req.name is not None:
         col.name = normalize_collection_name(req.name)
@@ -519,11 +504,7 @@ async def delete_collection(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a collection. Member rows are removed; items themselves are NOT deleted."""
-    col = (
-        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
-    ).scalar_one_or_none()
-    if col is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    await get_or_404(session, CollectionModel, collection_id, name="Collection")
 
     # Delete child collections' members first
     child_ids_result = await session.execute(
@@ -558,11 +539,7 @@ async def add_members_to_collection(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Add members (notes or documents) to a collection. Idempotent."""
-    col = (
-        await session.execute(select(CollectionModel).where(CollectionModel.id == collection_id))
-    ).scalar_one_or_none()
-    if col is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    await get_or_404(session, CollectionModel, collection_id, name="Collection")
 
     member_ids = req.effective_member_ids
     if not member_ids:
