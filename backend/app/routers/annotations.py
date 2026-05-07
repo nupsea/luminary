@@ -1,22 +1,20 @@
 """POST /annotations, GET /annotations, DELETE /annotations/{id}.
 
-Persistent text highlights anchored to document sections. No document validation
-on write — annotation storage is decoupled from document lifecycle to keep the
-router simple.
+Persistent text highlights anchored to document sections. No document
+validation on write -- annotation storage is decoupled from document
+lifecycle to keep the router simple.
+
+Persistence is delegated to `AnnotationRepo`.
 """
 
 import logging
-import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
 
-from app.database import get_session_factory
-from app.models import AnnotationModel
-from app.services.repo_helpers import get_or_404
+from app.repos.annotation_repo import AnnotationRepo, get_annotation_repo
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +50,12 @@ class AnnotationResponse(BaseModel):
 
 
 @router.post("", response_model=AnnotationResponse, status_code=201)
-async def create_annotation(req: AnnotationCreateRequest) -> AnnotationResponse:
+async def create_annotation(
+    req: AnnotationCreateRequest,
+    repo: AnnotationRepo = Depends(get_annotation_repo),
+) -> AnnotationResponse:
     """Create a text annotation (highlight). HTTP 201 on success."""
-    now = datetime.now(UTC)
-    annotation = AnnotationModel(
-        id=str(uuid.uuid4()),
+    annotation = await repo.create(
         document_id=req.document_id,
         section_id=req.section_id,
         chunk_id=req.chunk_id,
@@ -66,39 +65,26 @@ async def create_annotation(req: AnnotationCreateRequest) -> AnnotationResponse:
         color=req.color,
         note_text=req.note_text,
         page_number=req.page_number,
-        created_at=now,
     )
-    async with get_session_factory()() as session:
-        session.add(annotation)
-        await session.commit()
-        await session.refresh(annotation)
     logger.info("Created annotation %s for doc %s", annotation.id, req.document_id)
     return AnnotationResponse.model_validate(annotation)
 
 
 @router.get("", response_model=list[AnnotationResponse])
-async def list_annotations(document_id: str) -> list[AnnotationResponse]:
+async def list_annotations(
+    document_id: str,
+    repo: AnnotationRepo = Depends(get_annotation_repo),
+) -> list[AnnotationResponse]:
     """Return all annotations for a document ordered by created_at asc."""
-    async with get_session_factory()() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(AnnotationModel)
-                    .where(AnnotationModel.document_id == document_id)
-                    .order_by(AnnotationModel.created_at)
-                )
-            )
-            .scalars()
-            .all()
-        )
+    rows = await repo.list_for_document(document_id)
     return [AnnotationResponse.model_validate(r) for r in rows]
 
 
 @router.delete("/{annotation_id}", status_code=204)
-async def delete_annotation(annotation_id: str) -> None:
+async def delete_annotation(
+    annotation_id: str,
+    repo: AnnotationRepo = Depends(get_annotation_repo),
+) -> None:
     """Delete an annotation. HTTP 204 on success, 404 if not found."""
-    async with get_session_factory()() as session:
-        row = await get_or_404(session, AnnotationModel, annotation_id, name="Annotation")
-        await session.delete(row)
-        await session.commit()
+    await repo.delete(annotation_id)
     logger.info("Deleted annotation %s", annotation_id)
