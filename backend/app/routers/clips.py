@@ -1,29 +1,23 @@
 """CRUD endpoints for passage clips (Reading Journal).
 
 Routes: POST /clips, GET /clips, PATCH /clips/{id}, DELETE /clips/{id}
+
+Persistence is delegated to `ClipRepo`; this module owns only the HTTP
+contract and DTO mapping.
 """
 
 import logging
-import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.models import ClipModel
-from app.services.repo_helpers import get_or_404
+from app.repos.clip_repo import ClipRepo, get_clip_repo
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/clips", tags=["clips"])
-
-
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
 
 
 class ClipCreateRequest(BaseModel):
@@ -53,11 +47,6 @@ class ClipResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _to_response(clip: ClipModel) -> ClipResponse:
     return ClipResponse(
         id=clip.id,
@@ -72,31 +61,20 @@ def _to_response(clip: ClipModel) -> ClipResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.post("", response_model=ClipResponse, status_code=201)
 async def create_clip(
     req: ClipCreateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: ClipRepo = Depends(get_clip_repo),
 ) -> ClipResponse:
     """Create a new passage clip."""
-    clip = ClipModel(
-        id=str(uuid.uuid4()),
+    clip = await repo.create(
         document_id=req.document_id,
         section_id=req.section_id,
         section_heading=req.section_heading,
         pdf_page_number=req.pdf_page_number,
         selected_text=req.selected_text,
         user_note=req.user_note,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
     )
-    session.add(clip)
-    await session.commit()
-    await session.refresh(clip)
     logger.info("Created clip clip_id=%s document_id=%s", clip.id, clip.document_id)
     return _to_response(clip)
 
@@ -104,28 +82,21 @@ async def create_clip(
 @router.get("", response_model=list[ClipResponse])
 async def list_clips(
     document_id: str | None = Query(default=None),
-    session: AsyncSession = Depends(get_db),
+    repo: ClipRepo = Depends(get_clip_repo),
 ) -> list[ClipResponse]:
     """List clips, optionally filtered by document_id. Newest first."""
-    stmt = select(ClipModel).order_by(ClipModel.created_at.desc())
-    if document_id:
-        stmt = stmt.where(ClipModel.document_id == document_id)
-    result = await session.execute(stmt)
-    return [_to_response(c) for c in result.scalars().all()]
+    clips = await repo.list(document_id=document_id)
+    return [_to_response(c) for c in clips]
 
 
 @router.patch("/{clip_id}", response_model=ClipResponse)
 async def patch_clip(
     clip_id: str,
     req: ClipPatchRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: ClipRepo = Depends(get_clip_repo),
 ) -> ClipResponse:
     """Update the user_note on a clip."""
-    clip = await get_or_404(session, ClipModel, clip_id, name="Clip")
-    clip.user_note = req.user_note
-    clip.updated_at = datetime.now(UTC)
-    await session.commit()
-    await session.refresh(clip)
+    clip = await repo.update_note(clip_id, user_note=req.user_note)
     logger.debug("Patched clip clip_id=%s", clip_id)
     return _to_response(clip)
 
@@ -133,10 +104,8 @@ async def patch_clip(
 @router.delete("/{clip_id}", status_code=204)
 async def delete_clip(
     clip_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: ClipRepo = Depends(get_clip_repo),
 ) -> None:
     """Delete a clip by ID. Returns 404 if not found."""
-    await get_or_404(session, ClipModel, clip_id, name="Clip")
-    await session.execute(delete(ClipModel).where(ClipModel.id == clip_id))
-    await session.commit()
+    await repo.delete(clip_id)
     logger.info("Deleted clip clip_id=%s", clip_id)
