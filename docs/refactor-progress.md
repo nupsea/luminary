@@ -147,7 +147,18 @@ this file tracks **only what's still pending**. Completed work is in
     (custom GROUP BY + collection-name source-type derivation),
     review (cross-service FSRS + ReviewEvent + XP), get_source_context
     chunk/section/doc joins.
-- Fan-out next: `DocumentRepo`.
+  - `DocumentRepo` -- 5 unit tests; 39 existing document / search tests
+    pass. Migrated routes: ingest dedup-by-file-hash, get_document
+    (sections + read count), get_document_chunks, patch_document,
+    patch_document_tags. Inline (intentional): list_documents (10+
+    correlated scalar subqueries for derived fields -- not reusable),
+    delete_document (cascading delete across 18 child tables +
+    LanceDB + Kuzu + filesystem orchestration), and the many endpoints
+    that read child entities directly via their own session block.
+- Fan-out done: ClipRepo, AnnotationRepo, CollectionRepo, TagRepo,
+  NoteRepo, FlashcardRepo, DocumentRepo. Audit #9 still tracks the
+  remaining 263-direct-session count, but the highest-leverage
+  routers are now repo-backed.
   Bigger entities (Note, Flashcard, Document) will need their existing
   services to also adopt the repo for consistency rather than keeping
   two paths.

@@ -35,6 +35,7 @@ from app.models import (
     SummaryModel,
     WebReferenceModel,
 )
+from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
     BulkDeleteRequest,
     ChapterProgressItem,
@@ -372,9 +373,7 @@ async def ingest_document(
 
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.
-        existing = (
-            await session.execute(select(DocumentModel).where(DocumentModel.file_hash == file_hash))
-        ).scalar_one_or_none()
+        existing = await DocumentRepo(session).find_by_file_hash(file_hash)
 
         if existing is not None:
             if existing.stage == "complete":
@@ -715,19 +714,10 @@ async def ingest_url(
 async def get_document(document_id: str):
     """Return document detail with sections list."""
     async with get_session_factory()() as session:
-        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-
-        sections_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        sections = sections_result.scalars().all()
-
-        read_count_result = await session.execute(
-            select(func.count()).where(ReadingProgressModel.document_id == document_id)
-        )
-        read_count = read_count_result.scalar_one() or 0
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
+        sections = list(await repo.sections_for_document(document_id))
+        read_count = await repo.read_section_count(document_id)
 
     section_count = len(sections)
     reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
@@ -774,14 +764,9 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
     Used by the YouTube transcript viewer and any other chunk-level consumer.
     """
     async with get_session_factory()() as session:
-        await get_or_404(session, DocumentModel, document_id, name="Document")
-
-        chunks_result = await session.execute(
-            select(ChunkModel)
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.chunk_index)
-        )
-        chunks = chunks_result.scalars().all()
+        repo = DocumentRepo(session)
+        await repo.get_or_404(document_id)
+        chunks = list(await repo.chunks_for_document(document_id))
 
     return [
         ChunkItem(
@@ -1053,7 +1038,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
 @router.patch("/{document_id}")
 async def patch_document(document_id: str, body: PatchDocumentRequest):
     async with get_session_factory()() as session:
-        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
@@ -1062,7 +1048,7 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
             doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         if body.content_type is not None:
             doc.content_type = body.content_type
-        await session.commit()
+        await repo.commit()
     logger.info("Patched document", extra={"document_id": document_id})
     response: dict = {"document_id": document_id, "updated": True}
     if body.content_type is not None:
@@ -1074,12 +1060,13 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
 async def patch_document_tags(document_id: str, body: PatchTagsRequest):
     """Replace the tag list for a document."""
     async with get_session_factory()() as session:
-        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
         from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
         normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         doc.tags = normalized
-        await session.commit()
+        await repo.commit()
     logger.info(
         "Patched document tags",
         extra={"document_id": document_id, "tag_count": len(normalized)},
