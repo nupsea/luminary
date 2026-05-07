@@ -82,6 +82,7 @@ from app.services.flashcards_router_service import (
 )
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 from app.services.llm import LLMUnavailableError
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -644,10 +645,7 @@ async def update_flashcard(
     session: AsyncSession = Depends(get_db),
 ) -> FlashcardResponse:
     """Update a flashcard's question and/or answer. Sets is_user_edited=True."""
-    result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-    card = result.scalar_one_or_none()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    card = await get_or_404(session, FlashcardModel, card_id, name="Flashcard")
 
     if req.question is not None:
         card.question = req.question
@@ -669,10 +667,7 @@ async def delete_flashcard(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a flashcard by ID."""
-    result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-    card = result.scalar_one_or_none()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    await get_or_404(session, FlashcardModel, card_id, name="Flashcard")
 
     # S184: remove from FTS index before deleting
     await _delete_flashcard_fts(card_id, session)
@@ -795,10 +790,7 @@ async def get_source_context(
       - ChunkModel.section_id is null (chunk not section-assigned)
       - SectionModel row not found for that section_id
     """
-    fc_result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-    card = fc_result.scalar_one_or_none()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    card = await get_or_404(session, FlashcardModel, card_id, name="Flashcard")
     if card.chunk_id is None:
         raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
 

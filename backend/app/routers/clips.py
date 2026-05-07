@@ -7,13 +7,14 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import ClipModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +121,7 @@ async def patch_clip(
     session: AsyncSession = Depends(get_db),
 ) -> ClipResponse:
     """Update the user_note on a clip."""
-    result = await session.execute(select(ClipModel).where(ClipModel.id == clip_id))
-    clip = result.scalar_one_or_none()
-    if clip is None:
-        raise HTTPException(status_code=404, detail="Clip not found")
+    clip = await get_or_404(session, ClipModel, clip_id, name="Clip")
     clip.user_note = req.user_note
     clip.updated_at = datetime.now(UTC)
     await session.commit()
@@ -138,10 +136,7 @@ async def delete_clip(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a clip by ID. Returns 404 if not found."""
-    result = await session.execute(select(ClipModel).where(ClipModel.id == clip_id))
-    clip = result.scalar_one_or_none()
-    if clip is None:
-        raise HTTPException(status_code=404, detail="Clip not found")
+    await get_or_404(session, ClipModel, clip_id, name="Clip")
     await session.execute(delete(ClipModel).where(ClipModel.id == clip_id))
     await session.commit()
     logger.info("Deleted clip clip_id=%s", clip_id)

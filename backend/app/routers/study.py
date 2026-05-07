@@ -83,6 +83,7 @@ from app.schemas.study import (
 )
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
+from app.services.repo_helpers import get_or_404
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
@@ -525,10 +526,7 @@ async def end_session(
     db: AsyncSession = Depends(get_db),
 ) -> SessionSummary:
     """Close a study session, tally review events, and return the summary."""
-    result = await db.execute(select(StudySessionModel).where(StudySessionModel.id == session_id))
-    sess = result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    sess = await get_or_404(db, StudySessionModel, session_id, name="Session")
 
     events_result = await db.execute(
         select(ReviewEventModel).where(ReviewEventModel.session_id == session_id)

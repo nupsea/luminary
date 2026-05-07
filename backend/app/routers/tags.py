@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel, TagAliasModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -315,17 +316,8 @@ async def merge_tags(
         raise HTTPException(status_code=422, detail="Source and target tags must differ")
 
     # Validate both tags exist
-    source_tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
-    ).scalar_one_or_none()
-    if source_tag is None:
-        raise HTTPException(status_code=404, detail=f"Source tag '{source_id}' not found")
-
-    target_tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == target_id))
-    ).scalar_one_or_none()
-    if target_tag is None:
-        raise HTTPException(status_code=404, detail=f"Target tag '{target_id}' not found")
+    await get_or_404(session, CanonicalTagModel, source_id, name=f"Source tag '{source_id}'")
+    await get_or_404(session, CanonicalTagModel, target_id, name=f"Target tag '{target_id}'")
 
     # Find all notes with the source tag via NoteTagIndexModel
     note_ids_result = await session.execute(
@@ -792,11 +784,7 @@ async def update_tag(
     session: AsyncSession = Depends(get_db),
 ) -> TagResponse:
     """Rename a tag's display_name or re-parent it."""
-    tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
-    ).scalar_one_or_none()
-    if tag is None:
-        raise HTTPException(status_code=404, detail="Tag not found")
+    tag = await get_or_404(session, CanonicalTagModel, tag_id, name="Tag")
 
     if req.display_name is not None:
         tag.display_name = req.display_name
@@ -817,11 +805,7 @@ async def delete_tag(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a canonical tag. Returns 409 if the tag has notes (note_count > 0)."""
-    tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
-    ).scalar_one_or_none()
-    if tag is None:
-        raise HTTPException(status_code=404, detail="Tag not found")
+    tag = await get_or_404(session, CanonicalTagModel, tag_id, name="Tag")
     if tag.note_count > 0:
         raise HTTPException(
             status_code=409,

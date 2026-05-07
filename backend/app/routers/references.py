@@ -11,13 +11,14 @@ Routes:
 import logging
 from datetime import UTC, datetime, timedelta
 
-from fastapi import HTTPException, Query
+from fastapi import Query
 from fastapi.routing import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, WebReferenceModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -107,11 +108,7 @@ async def get_document_references(
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
-        if doc_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         query = (
             select(WebReferenceModel)
@@ -145,11 +142,7 @@ async def validate_document_references(document_id: str) -> ValidateResponse:
     from app.services.reference_validator import ReferenceValidatorService  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
-        if doc_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     svc = ReferenceValidatorService()
     counts = await svc.validate_references(document_id)
@@ -169,11 +162,7 @@ async def refresh_document_references(document_id: str) -> dict:
     from app.services.reference_enricher import ReferenceEnricherService  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == document_id)
-        )
-        if doc_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         # Delete all existing refs for this document
         existing = await session.execute(

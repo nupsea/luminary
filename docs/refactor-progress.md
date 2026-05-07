@@ -93,8 +93,18 @@ this file tracks **only what's still pending**. Completed work is in
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
 
-### #8 -- "fetch + check + 404" boilerplate (115 sites)
-- Extract `repo.get_or_404(model, id, name)` helpers.
+### #8 -- "fetch + check + 404" boilerplate (in progress)
+- Helper landed at `backend/app/services/repo_helpers.py`:
+  `get_or_404(session, model, id, *, name=...)` and
+  `require_or_404(obj, name)` (for already-fetched rows).
+- Migrated routers: `clips.py` (2), `documents.py` (~21), `tags.py` (4),
+  `references.py` (3), `flashcards.py` (3), `notes.py` (6), `study.py` (1).
+  Roughly 40 of 115 sites done; remaining: `collections.py`, `images.py`,
+  `study.py` (10 multi-line selects), `evals.py`, `annotations.py`,
+  `reading.py`, `summarize.py`, `chat_sessions.py` (service-None mapping
+  -- use `require_or_404`).
+- `goals.py` skipped intentionally -- its 404s are `GoalNotFound`
+  exception mappings from the service layer, not fetch+check boilerplate.
 
 ### #9 -- 263 direct `session.execute/commit/add/delete` in routers
 - Push into per-entity Repo modules under a new `repos/` layer (does

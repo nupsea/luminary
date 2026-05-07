@@ -76,6 +76,7 @@ from app.services.notes_service import (
 from app.services.notes_service import (
     upsert_note_graph as _upsert_note_graph,
 )
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -371,10 +372,7 @@ async def list_notes(
 async def _apply_note_update(
     note_id: str, req: NoteUpdateRequest, session: AsyncSession
 ) -> NoteResponse:
-    result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-    note = result.scalar_one_or_none()
-    if note is None:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = await get_or_404(session, NoteModel, note_id, name="Note")
 
     if req.content is not None:
         note.content = req.content
@@ -467,10 +465,7 @@ async def delete_note(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a note by ID."""
-    result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-    note = result.scalar_one_or_none()
-    if note is None:
-        raise HTTPException(status_code=404, detail="Note not found")
+    await get_or_404(session, NoteModel, note_id, name="Note")
 
     await _fts_delete(note_id, session)
     await _sync_tag_index(note_id, [], session)
@@ -804,17 +799,8 @@ async def create_note_link(
     from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     # Validate source and target exist
-    source = (
-        await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-    ).scalar_one_or_none()
-    if source is None:
-        raise HTTPException(status_code=404, detail="Source note not found")
-
-    target = (
-        await session.execute(select(NoteModel).where(NoteModel.id == req.target_note_id))
-    ).scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status_code=404, detail="Target note not found")
+    await get_or_404(session, NoteModel, note_id, name="Source note")
+    target = await get_or_404(session, NoteModel, req.target_note_id, name="Target note")
 
     # Check uniqueness
     existing = (
@@ -955,11 +941,7 @@ async def get_note(
     Registered AFTER all static-path GET routes (/search, /groups, /flashcards)
     to prevent the dynamic {note_id} segment from shadowing them.
     """
-    note = (
-        await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-    ).scalar_one_or_none()
-    if note is None:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = await get_or_404(session, NoteModel, note_id, name="Note")
 
     member_rows = (
         (
@@ -1033,10 +1015,7 @@ async def suggest_tags(
     session: AsyncSession = Depends(get_db),
 ) -> SuggestedTagsResponse:
     """Return LLM-suggested tags for an existing note. Always HTTP 200 when note exists."""
-    result = await session.execute(select(NoteModel).where(NoteModel.id == note_id))
-    note = result.scalar_one_or_none()
-    if note is None:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = await get_or_404(session, NoteModel, note_id, name="Note")
 
     # Grab content before releasing DB session to avoid holding a connection
     # during a potentially slow LLM call.

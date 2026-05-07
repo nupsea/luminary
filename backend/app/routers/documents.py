@@ -77,6 +77,7 @@ from app.services.documents_service import (
     section_to_dict as _section_to_dict,
 )
 from app.services.parser import DocumentParser
+from app.services.repo_helpers import get_or_404
 from app.services.vector_store import get_lancedb_service
 from app.workflows.ingestion import STAGE_PROGRESS, ContentType, run_ingestion
 
@@ -725,10 +726,7 @@ async def ingest_url(
 async def get_document(document_id: str):
     """Return document detail with sections list."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
         sections_result = await session.execute(
             select(SectionModel)
@@ -787,10 +785,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
     Used by the YouTube transcript viewer and any other chunk-level consumer.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         chunks_result = await session.execute(
             select(ChunkModel)
@@ -816,10 +811,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
 async def serve_audio_file(document_id: str) -> FileResponse:
     """Stream the raw audio file for audio documents (used by the mini-player)."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     if doc.content_type != "audio":
         raise HTTPException(status_code=400, detail="Not an audio document")
     fp = Path(doc.file_path)
@@ -835,10 +827,7 @@ async def serve_audio_file(document_id: str) -> FileResponse:
 async def serve_video_file(document_id: str) -> FileResponse:
     """Stream the raw video file for video documents (used by the HTML5 video player)."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     if doc.content_type != "video":
         raise HTTPException(status_code=400, detail="Not a video document")
     fp = Path(doc.file_path)
@@ -856,10 +845,7 @@ async def serve_document_file(document_id: str) -> FileResponse:
     Returns the file with the appropriate Content-Type based on document format.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     fp = Path(doc.file_path)
     if not fp.exists():
         raise HTTPException(status_code=404, detail="Document file not found on disk")
@@ -882,10 +868,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     Returns 400 if the document is not a PDF (format != 'pdf').
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         if doc.format.lower() != "pdf":
             raise HTTPException(
                 status_code=400,
@@ -918,10 +901,7 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     from app.services.epub_service import get_toc_async  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     if doc.format.lower() != "epub":
         raise HTTPException(
             status_code=400,
@@ -960,10 +940,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         raise HTTPException(status_code=400, detail="chapter_index must be >= 0")
 
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         if doc.format.lower() != "epub":
             raise HTTPException(
                 status_code=400,
@@ -1087,10 +1064,7 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
 @router.patch("/{document_id}")
 async def patch_document(document_id: str, body: PatchDocumentRequest):
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
@@ -1111,10 +1085,7 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
 async def patch_document_tags(document_id: str, body: PatchTagsRequest):
     """Replace the tag list for a document."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
         normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
@@ -1130,10 +1101,7 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
 @router.delete("/{document_id}", status_code=204)
 async def delete_document(document_id: str):
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
         # Delete child rows from all related tables (no FK CASCADE in SQLite without FK pragma)
         await session.execute(
@@ -1201,10 +1169,7 @@ async def delete_document(document_id: str):
 @router.get("/{document_id}/status")
 async def get_document_status(document_id: str):
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     stage = doc.stage
     progress_pct = STAGE_PROGRESS.get(stage, 0)
     logger.debug("Status polled", extra={"document_id": document_id, "stage": stage})
@@ -1227,11 +1192,7 @@ async def get_document_diagnostics(document_id: str):
     All other counts are 0 if the store is unavailable or empty.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         # SQLite chunk count
         chunk_result = await session.execute(
@@ -1292,11 +1253,7 @@ async def search_document_sections(
         return []
 
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     svc = get_document_search_service()
     results = await svc.search(document_id, q, limit=50)
@@ -1316,11 +1273,8 @@ async def get_conversation_metadata(document_id: str) -> dict:
     Returns 404 if not found, 400 if content_type != 'conversation'.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
     if doc.content_type != "conversation":
         raise HTTPException(
             status_code=400,
@@ -1345,11 +1299,7 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         snippets_result = await session.execute(
             select(CodeSnippetModel)
@@ -1379,11 +1329,7 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         result = await session.execute(
             select(LearningObjectiveModel)
@@ -1421,11 +1367,7 @@ async def get_document_progress(document_id: str) -> DocumentProgressResponse:
     from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     tracker = get_objective_tracker_service()
     data = await tracker.get_progress(document_id)
@@ -1447,11 +1389,7 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
     from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     tracker = get_objective_tracker_service()
     await tracker.update_coverage(document_id)
@@ -1481,11 +1419,7 @@ async def save_reading_position(
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         result = await session.execute(
             select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
@@ -1527,11 +1461,7 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     Returns 404 if the document does not exist or has no saved position yet.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
         result = await session.execute(
             select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
