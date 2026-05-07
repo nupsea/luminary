@@ -76,6 +76,7 @@ from app.services.documents_service import (
 from app.services.documents_service import (
     section_to_dict as _section_to_dict,
 )
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.parser import DocumentParser
 from app.services.repo_helpers import get_or_404
 from app.services.vector_store import get_lancedb_service
@@ -423,8 +424,9 @@ async def ingest_document(
                 existing.stage = "parsing"
                 existing.content_type = content_type
                 await session.commit()
-                asyncio.create_task(
-                    run_ingestion(existing.id, existing.file_path, existing.format, content_type)
+                get_ingestion_jobs().launch(
+                    existing.id,
+                    run_ingestion(existing.id, existing.file_path, existing.format, content_type),
                 )
                 logger.info(
                     "Retrying failed ingestion on existing doc",
@@ -473,7 +475,9 @@ async def ingest_document(
         session.add(doc)
         await session.commit()
 
-    asyncio.create_task(run_ingestion(doc_id, str(dest), fmt, content_type))
+    get_ingestion_jobs().launch(
+        doc_id, run_ingestion(doc_id, str(dest), fmt, content_type)
+    )
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -537,11 +541,9 @@ async def ingest_kindle(
             session.add(doc)
             await session.commit()
 
-        from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
-
-        _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "txt", "kindle_clippings"))
-        _background_tasks.add(_task)
-        _task.add_done_callback(_background_tasks.discard)
+        get_ingestion_jobs().launch(
+            doc_id, run_ingestion(doc_id, str(dest), "txt", "kindle_clippings")
+        )
         document_ids.append(doc_id)
         logger.info(
             "Kindle book ingestion started",
@@ -616,12 +618,8 @@ async def ingest_url(
             for s in parsed.sections
         ]
 
-        from app.workflows.ingestion import (
-            _background_tasks,  # noqa: PLC0415
-            run_ingestion,  # noqa: PLC0415
-        )
-
-        _task = asyncio.create_task(
+        get_ingestion_jobs().launch(
+            doc_id,
             run_ingestion(
                 doc_id,
                 str(dest),
@@ -635,10 +633,8 @@ async def ingest_url(
                     "sections": parsed_sections,
                     "raw_text": parsed.raw_text,
                 },
-            )
+            ),
         )
-        _background_tasks.add(_task)
-        _task.add_done_callback(_background_tasks.discard)
         logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
         return {"document_id": doc_id, "status": "processing"}
 
@@ -708,16 +704,9 @@ async def ingest_url(
         session.add(doc)
         await session.commit()
 
-    from app.workflows.ingestion import (
-        _background_tasks,  # noqa: PLC0415
-        run_ingestion,  # noqa: PLC0415
+    get_ingestion_jobs().launch(
+        doc_id, run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
     )
-
-    _task = asyncio.create_task(
-        run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
-    )
-    _background_tasks.add(_task)
-    _task.add_done_callback(_background_tasks.discard)
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -1100,6 +1089,17 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
 
 @router.delete("/{document_id}", status_code=204)
 async def delete_document(document_id: str):
+    # Cancel any in-flight ingestion task before tearing down rows. The workflow
+    # writes to chunks / sections / embeddings as it progresses; if we delete
+    # while it is mid-stage, SQLite holds locks and the workflow can also write
+    # orphan rows back to tables we just emptied.
+    cancelled = await get_ingestion_jobs().cancel(document_id)
+    if cancelled:
+        logger.info(
+            "Cancelled in-flight ingestion before delete",
+            extra={"document_id": document_id},
+        )
+
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 

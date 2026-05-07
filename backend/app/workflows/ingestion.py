@@ -1528,8 +1528,15 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     return {**state, "status": "embedding"}
 
 
-# Strong references to background tasks — prevents GC before they complete.
-# asyncio only holds weak refs to tasks; without this they can be collected mid-run.
+# GC anchor for fire-and-forget *sub-tasks* spawned within or alongside the main
+# ingestion (objective extraction, summary pre-generation, worker dispatch).
+# asyncio holds only weak refs to tasks, so without this strong-ref set they can
+# be collected mid-run.
+#
+# The *main* ingestion task itself is owned by
+# :class:`app.services.ingestion_jobs.IngestionJobRegistry`, which provides
+# per-document lookup and cancellation. Don't conflate the two: tasks added here
+# are not cancellable by document id.
 _background_tasks: set[asyncio.Task] = set()
 
 
