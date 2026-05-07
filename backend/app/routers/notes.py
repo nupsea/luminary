@@ -11,17 +11,17 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import (
     CollectionMemberModel,
-    NoteLinkModel,
     NoteModel,
     NoteSourceModel,
     NoteTagIndexModel,
 )
+from app.repos.note_repo import NoteRepo, get_note_repo
 from app.schemas.notes import (
     BatchAcceptItem,
     BatchAcceptRequest,
@@ -76,7 +76,6 @@ from app.services.notes_service import (
 from app.services.notes_service import (
     upsert_note_graph as _upsert_note_graph,
 )
-from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +135,7 @@ __all__ = [
 async def create_note(
     req: NoteCreateRequest,
     session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteResponse:
     """Create a new note."""
     from app.services.naming import normalize_tag_slug  # noqa: PLC0415
@@ -144,15 +144,12 @@ async def create_note(
     # created within the last 5 seconds, return the existing note instead.
     content_hash = hashlib.sha256(req.content.encode()).hexdigest()[:16]
     dedup_cutoff = datetime.now(UTC) - timedelta(seconds=5)
-    existing_result = await session.execute(
-        select(NoteModel).where(
-            NoteModel.document_id == req.document_id,
-            NoteModel.section_id == req.section_id,
-            NoteModel.content_hash == content_hash,
-            NoteModel.created_at >= dedup_cutoff,
-        )
+    existing = await repo.find_for_dedup(
+        document_id=req.document_id,
+        section_id=req.section_id,
+        content_hash=content_hash,
+        cutoff=dedup_cutoff,
     )
-    existing = existing_result.scalar_one_or_none()
     if existing is not None:
         logger.info("Dedup: returning existing note %s", existing.id)
         return _to_response(existing)
@@ -370,9 +367,9 @@ async def list_notes(
 
 
 async def _apply_note_update(
-    note_id: str, req: NoteUpdateRequest, session: AsyncSession
+    note_id: str, req: NoteUpdateRequest, session: AsyncSession, repo: NoteRepo
 ) -> NoteResponse:
-    note = await get_or_404(session, NoteModel, note_id, name="Note")
+    note = await repo.get_or_404(note_id)
 
     if req.content is not None:
         note.content = req.content
@@ -418,23 +415,12 @@ async def _apply_note_update(
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
     # Re-fetch relevant IDs for a fully populated response
-    coll_rows = (
-        (
-            await session.execute(
-                select(CollectionMemberModel.collection_id).where(
-                    CollectionMemberModel.member_id == note.id,
-                    CollectionMemberModel.member_type == "note",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    coll_rows = await repo.collection_ids_for(note.id)
 
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(
         note,
-        collection_ids=list(coll_rows),
+        collection_ids=coll_rows,
         source_document_ids=list(src_rows),
     )
 
@@ -444,9 +430,10 @@ async def update_note(
     note_id: str,
     req: NoteUpdateRequest,
     session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteResponse:
     """Update a note's content, tags, or group."""
-    return await _apply_note_update(note_id, req, session)
+    return await _apply_note_update(note_id, req, session, repo)
 
 
 @router.patch("/{note_id}", response_model=NoteResponse)
@@ -454,18 +441,20 @@ async def patch_note(
     note_id: str,
     req: NoteUpdateRequest,
     session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteResponse:
     """Partially update a note's content, tags, or group."""
-    return await _apply_note_update(note_id, req, session)
+    return await _apply_note_update(note_id, req, session, repo)
 
 
 @router.delete("/{note_id}", status_code=204)
 async def delete_note(
     note_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> None:
     """Delete a note by ID."""
-    await get_or_404(session, NoteModel, note_id, name="Note")
+    await repo.get_or_404(note_id)
 
     await _fts_delete(note_id, session)
     await _sync_tag_index(note_id, [], session)
@@ -473,8 +462,7 @@ async def delete_note(
     from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     await get_note_graph_service().delete_note_node(note_id)
-    await session.execute(delete(NoteModel).where(NoteModel.id == note_id))
-    await session.commit()
+    await repo.delete_by_id(note_id)
     from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
     get_lancedb_service().delete_note_vector(note_id)
@@ -609,6 +597,7 @@ async def list_note_flashcards(
 @router.post("/cluster", status_code=202)
 async def trigger_cluster(
     session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> dict:
     """Fire-and-forget HDBSCAN clustering over note_vectors_v2.
 
@@ -630,7 +619,7 @@ async def trigger_cluster(
             return {"cached": True, "last_run": last_run.isoformat()}
 
     # Count total notes
-    total_notes = (await session.execute(select(func.count(NoteModel.id)))).scalar_one()
+    total_notes = await repo.count_all()
 
     # Spawn fire-and-forget task with its own session
     async def _run_clustering() -> None:
@@ -764,32 +753,26 @@ async def reject_cluster_suggestion(
 @router.get("/autocomplete", response_model=list[NoteAutocompleteItem])
 async def autocomplete_notes(
     q: str = Query(default="", max_length=200),
-    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> list[NoteAutocompleteItem]:
     """Return up to 8 notes whose content starts with q (case-insensitive). (S171)
 
     Registered BEFORE /{note_id} to prevent FastAPI from matching "autocomplete"
     as a note ID wildcard.
     """
-    if not q.strip():
-        result = await session.execute(
-            select(NoteModel.id, NoteModel.content).order_by(NoteModel.updated_at.desc()).limit(8)
-        )
-    else:
-        result = await session.execute(
-            select(NoteModel.id, NoteModel.content)
-            .where(NoteModel.content.ilike(f"{q}%"))
-            .order_by(NoteModel.updated_at.desc())
-            .limit(8)
-        )
-    return [NoteAutocompleteItem(id=row[0], preview=row[1][:100]) for row in result.all()]
+    rows = (
+        await repo.list_recent(limit=8)
+        if not q.strip()
+        else await repo.autocomplete_content(q, limit=8)
+    )
+    return [NoteAutocompleteItem(id=nid, preview=content[:100]) for nid, content in rows]
 
 
 @router.post("/{note_id}/links", response_model=NoteLinkItem, status_code=201)
 async def create_note_link(
     note_id: str,
     req: NoteLinkCreateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteLinkItem:
     """Create a typed link from note_id to req.target_note_id. (S171)
 
@@ -799,32 +782,19 @@ async def create_note_link(
     from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     # Validate source and target exist
-    await get_or_404(session, NoteModel, note_id, name="Source note")
-    target = await get_or_404(session, NoteModel, req.target_note_id, name="Target note")
+    await repo.get_or_404(note_id, name="Source note")
+    target = await repo.get_or_404(req.target_note_id, name="Target note")
 
     # Check uniqueness
-    existing = (
-        await session.execute(
-            select(NoteLinkModel).where(
-                NoteLinkModel.source_note_id == note_id,
-                NoteLinkModel.target_note_id == req.target_note_id,
-                NoteLinkModel.link_type == req.link_type,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    if await repo.find_link(note_id, req.target_note_id, req.link_type) is not None:
         raise HTTPException(status_code=409, detail="Link already exists")
 
-    link = NoteLinkModel(
-        id=str(uuid.uuid4()),
+    link = await repo.create_link(
         source_note_id=note_id,
         target_note_id=req.target_note_id,
         link_type=req.link_type,
         created_at=datetime.now(UTC),
     )
-    session.add(link)
-    await session.commit()
-    await session.refresh(link)
 
     # Fire-and-forget Kuzu edge upsert
     task = asyncio.create_task(
@@ -847,7 +817,7 @@ async def delete_note_link(
     note_id: str,
     target_note_id: str,
     link_type: str = Query(default="see-also"),
-    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> None:
     """Delete a typed link from note_id to target_note_id. (S171)
 
@@ -855,20 +825,11 @@ async def delete_note_link(
     """
     from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
-    link = (
-        await session.execute(
-            select(NoteLinkModel).where(
-                NoteLinkModel.source_note_id == note_id,
-                NoteLinkModel.target_note_id == target_note_id,
-                NoteLinkModel.link_type == link_type,
-            )
-        )
-    ).scalar_one_or_none()
+    link = await repo.find_link(note_id, target_note_id, link_type)
     if link is None:
         raise HTTPException(status_code=404, detail="Link not found")
 
-    await session.delete(link)
-    await session.commit()
+    await repo.delete_link(link)
 
     task = asyncio.create_task(
         get_note_graph_service().delete_links_to_edge(note_id, target_note_id, link_type)
@@ -880,7 +841,7 @@ async def delete_note_link(
 @router.get("/{note_id}/links", response_model=NoteLinksResponse)
 async def get_note_links(
     note_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteLinksResponse:
     """Return outgoing and incoming links for a note. (S171)
 
@@ -888,45 +849,28 @@ async def get_note_links(
     Incoming: links WHERE target_note_id = note_id (backlinks)
     Each item includes a 100-char preview from the linked note's content.
     """
-    # Outgoing links
-    out_rows = (
-        await session.execute(
-            select(NoteLinkModel, NoteModel.content)
-            .join(NoteModel, NoteLinkModel.target_note_id == NoteModel.id)
-            .where(NoteLinkModel.source_note_id == note_id)
-            .order_by(NoteLinkModel.created_at.desc())
-        )
-    ).all()
-
-    # Incoming links (backlinks)
-    in_rows = (
-        await session.execute(
-            select(NoteLinkModel, NoteModel.content)
-            .join(NoteModel, NoteLinkModel.source_note_id == NoteModel.id)
-            .where(NoteLinkModel.target_note_id == note_id)
-            .order_by(NoteLinkModel.created_at.desc())
-        )
-    ).all()
+    out_rows = await repo.outgoing_links_with_content(note_id)
+    in_rows = await repo.incoming_links_with_content(note_id)
 
     outgoing = [
         NoteLinkItem(
-            id=row[0].id,
-            note_id=row[0].target_note_id,
-            preview=row[1][:100],
-            link_type=row[0].link_type,
-            created_at=row[0].created_at,
+            id=r.link.id,
+            note_id=r.link.target_note_id,
+            preview=r.content[:100],
+            link_type=r.link.link_type,
+            created_at=r.link.created_at,
         )
-        for row in out_rows
+        for r in out_rows
     ]
     incoming = [
         NoteLinkItem(
-            id=row[0].id,
-            note_id=row[0].source_note_id,
-            preview=row[1][:100],
-            link_type=row[0].link_type,
-            created_at=row[0].created_at,
+            id=r.link.id,
+            note_id=r.link.source_note_id,
+            preview=r.content[:100],
+            link_type=r.link.link_type,
+            created_at=r.link.created_at,
         )
-        for row in in_rows
+        for r in in_rows
     ]
     return NoteLinksResponse(outgoing=outgoing, incoming=incoming)
 
@@ -934,40 +878,17 @@ async def get_note_links(
 @router.get("/{note_id}", response_model=NoteResponse)
 async def get_note(
     note_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteResponse:
     """Get a single note by ID, including collection_ids.
 
     Registered AFTER all static-path GET routes (/search, /groups, /flashcards)
     to prevent the dynamic {note_id} segment from shadowing them.
     """
-    note = await get_or_404(session, NoteModel, note_id, name="Note")
-
-    member_rows = (
-        (
-            await session.execute(
-                select(CollectionMemberModel.collection_id).where(
-                    CollectionMemberModel.member_id == note_id,
-                    CollectionMemberModel.member_type == "note",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    # S175: fetch source_document_ids from pivot
-    src_rows = (
-        (
-            await session.execute(
-                select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    return _to_response(note, list(member_rows), list(src_rows))
+    note = await repo.get_or_404(note_id)
+    member_rows = await repo.collection_ids_for(note_id)
+    src_rows = await repo.source_document_ids_for(note_id)
+    return _to_response(note, member_rows, src_rows)
 
 
 @router.post("/gap-detect", response_model=GapDetectResponse)
@@ -1012,10 +933,10 @@ async def gap_detect(
 @router.post("/{note_id}/suggest-tags", response_model=SuggestedTagsResponse)
 async def suggest_tags(
     note_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
 ) -> SuggestedTagsResponse:
     """Return LLM-suggested tags for an existing note. Always HTTP 200 when note exists."""
-    note = await get_or_404(session, NoteModel, note_id, name="Note")
+    note = await repo.get_or_404(note_id)
 
     # Grab content before releasing DB session to avoid holding a connection
     # during a potentially slow LLM call.

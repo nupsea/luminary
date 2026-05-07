@@ -128,7 +128,17 @@ this file tracks **only what's still pending**. Completed work is in
     session ops -- multi-entity transactional flows with bespoke
     rollback semantics (same exception applied to CollectionRepo's
     migrate-naming).
-- Fan-out next: `NoteRepo`, `FlashcardRepo`, `DocumentRepo`.
+  - `NoteRepo` -- 9 unit tests; 46 existing notes/note-links/multi-doc
+    tests pass. Covers `NoteModel` + `NoteLinkModel` + `NoteSourceModel`
+    reads. Migrated routes: dedup-on-create, delete, get,
+    autocomplete, get_note_links, create_note_link, delete_note_link,
+    cluster-trigger count, suggest_tags, plus `_apply_note_update`'s
+    get_or_404 + collection_ids fetch. Inline (intentional): `list_notes`
+    (custom multi-table filter), `_apply_note_update` orchestration
+    (mid-transaction flush + FTS/vector/graph fan-out), the dual
+    NoteSourceModel/CollectionMember bulk reads inside list_notes,
+    flashcard preview/list (other entities), gap_detect, suggest_title.
+- Fan-out next: `FlashcardRepo`, `DocumentRepo`.
   Bigger entities (Note, Flashcard, Document) will need their existing
   services to also adopt the repo for consistency rather than keeping
   two paths.
