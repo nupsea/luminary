@@ -12,7 +12,7 @@ Routes:
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
 from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel, TagAliasModel
+from app.repos.tag_repo import TagRepo, get_tag_repo
 from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
@@ -174,19 +175,13 @@ async def get_tag_graph_endpoint(
 @router.get("/autocomplete", response_model=list[TagAutocompleteResult])
 async def autocomplete_tags(
     q: str = Query(default=""),
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagAutocompleteResult]:
     """Return up to 10 canonical tags matching the prefix q, sorted by note_count DESC."""
     from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     normalized_q = normalize_tag_slug(q) if q else ""
-    result = await session.execute(
-        select(CanonicalTagModel)
-        .where(CanonicalTagModel.id.like(f"{normalized_q}%"))
-        .order_by(CanonicalTagModel.note_count.desc())
-        .limit(10)
-    )
-    tags = result.scalars().all()
+    tags = await repo.autocomplete(normalized_q)
     return [
         TagAutocompleteResult(
             id=t.id,
@@ -200,16 +195,13 @@ async def autocomplete_tags(
 
 @router.get("/tree", response_model=list[TagTreeItem])
 async def get_tag_tree(
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagTreeItem]:
     """Return all canonical tags as a hierarchical tree.
 
     node.note_count is the inclusive count (direct notes + all descendants).
     """
-    all_tags_result = await session.execute(
-        select(CanonicalTagModel).order_by(CanonicalTagModel.id)
-    )
-    all_tags = list(all_tags_result.scalars().all())
+    all_tags = list(await repo.list_by_id())
 
     count_by_id: dict[str, int] = {t.id: t.note_count for t in all_tags}
     children_by_parent: dict[str, list[str]] = {}
@@ -251,43 +243,30 @@ async def get_tag_tree(
 
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagResponse]:
     """Return all canonical tags sorted by note_count DESC."""
-    result = await session.execute(
-        select(CanonicalTagModel).order_by(CanonicalTagModel.note_count.desc())
-    )
-    tags = result.scalars().all()
+    tags = await repo.list_by_count()
     return [_to_response(t) for t in tags]
 
 
 @router.post("", response_model=TagResponse, status_code=201)
 async def create_tag(
     req: TagCreateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> TagResponse:
     """Create a canonical tag. Returns 409 if the slug already exists."""
     from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     normalized_id = normalize_tag_slug(req.id)
-    existing = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == normalized_id)
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    if await repo.find_by_id(normalized_id) is not None:
         raise HTTPException(status_code=409, detail="Tag already exists")
 
-    tag = CanonicalTagModel(
+    tag = await repo.create(
         id=normalized_id,
         display_name=req.display_name,
         parent_tag=req.parent_tag,
-        note_count=0,
-        created_at=datetime.now(UTC),
     )
-    session.add(tag)
-    await session.commit()
-    await session.refresh(tag)
     logger.info("Created canonical tag id=%r", tag.id)
     return _to_response(tag)
 
@@ -759,21 +738,13 @@ async def migrate_tag_naming(
 @router.get("/{tag_id}/notes", response_model=list[NoteItem])
 async def get_notes_for_tag(
     tag_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[NoteItem]:
     """Return notes tagged with tag_id or any child tag (prefix match)."""
-    note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id)
-        .where(
-            (NoteTagIndexModel.tag_full == tag_id) | NoteTagIndexModel.tag_full.like(f"{tag_id}/%")
-        )
-        .distinct()
-    )
-    note_ids = [row[0] for row in note_ids_result.all()]
+    note_ids = await repo.note_ids_with_tag(tag_id, include_descendants=True)
     if not note_ids:
         return []
-    notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-    notes = notes_result.scalars().all()
+    notes = await repo.load_notes(note_ids)
     return [NoteItem(id=n.id, content=n.content, tags=n.tags or []) for n in notes]
 
 
@@ -781,20 +752,18 @@ async def get_notes_for_tag(
 async def update_tag(
     tag_id: str,
     req: TagUpdateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> TagResponse:
     """Rename a tag's display_name or re-parent it."""
-    tag = await get_or_404(session, CanonicalTagModel, tag_id, name="Tag")
-
-    if req.display_name is not None:
-        tag.display_name = req.display_name
+    tag = await repo.get_or_404(tag_id)
     # Use model_fields_set to distinguish "not supplied" from "explicitly null".
     # Setting parent_tag=null in the request clears the tag to top-level.
-    if "parent_tag" in req.model_fields_set:
-        tag.parent_tag = req.parent_tag
-
-    await session.commit()
-    await session.refresh(tag)
+    tag = await repo.update_fields(
+        tag,
+        display_name=req.display_name,
+        parent_tag=req.parent_tag,
+        parent_tag_set="parent_tag" in req.model_fields_set,
+    )
     logger.info("Updated canonical tag id=%r", tag_id)
     return _to_response(tag)
 
@@ -802,10 +771,10 @@ async def update_tag(
 @router.delete("/{tag_id}", status_code=204)
 async def delete_tag(
     tag_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> None:
     """Delete a canonical tag. Returns 409 if the tag has notes (note_count > 0)."""
-    tag = await get_or_404(session, CanonicalTagModel, tag_id, name="Tag")
+    tag = await repo.get_or_404(tag_id)
     if tag.note_count > 0:
         raise HTTPException(
             status_code=409,
@@ -814,9 +783,5 @@ async def delete_tag(
                 " Remove notes from this tag before deleting."
             ),
         )
-
-    # Remove any aliases pointing to this tag
-    await session.execute(delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id))
-    await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
-    await session.commit()
+    await repo.delete_with_aliases(tag_id)
     logger.info("Deleted canonical tag id=%r", tag_id)

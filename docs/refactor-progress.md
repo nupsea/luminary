@@ -121,7 +121,14 @@ this file tracks **only what's still pending**. Completed work is in
     collection-health endpoint tests pass. (Migrate-naming endpoint
     keeps inline session ops for now -- one-shot migration with
     bespoke merge logic.)
-- Fan-out next: `TagRepo`, `NoteRepo`, `FlashcardRepo`, `DocumentRepo`.
+  - `TagRepo` -- 9 unit tests; 42 existing tag tests pass. Migrated
+    routes: list, autocomplete, tree, create, get_notes_for_tag,
+    update, delete. `merge_tags`,
+    `accept_normalization_suggestion`, and `migrate-naming` keep inline
+    session ops -- multi-entity transactional flows with bespoke
+    rollback semantics (same exception applied to CollectionRepo's
+    migrate-naming).
+- Fan-out next: `NoteRepo`, `FlashcardRepo`, `DocumentRepo`.
   Bigger entities (Note, Flashcard, Document) will need their existing
   services to also adopt the repo for consistency rather than keeping
   two paths.
