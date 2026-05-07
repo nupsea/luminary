@@ -17,7 +17,6 @@ from app.main import app
 from app.models import DocumentModel
 from app.services.ingestion_jobs import IngestionJobRegistry, get_ingestion_jobs
 
-
 # ---------------------------------------------------------------------------
 # Registry unit tests (no DB, no FastAPI)
 # ---------------------------------------------------------------------------
