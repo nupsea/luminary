@@ -21,6 +21,7 @@ import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
+import { IngestionProgressPills } from "./components/IngestionProgressPills"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
 // performance. Viz and Monitoring were already lazy -- Chat, Learning, Notes, Study added in S84.
 // S177: Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
@@ -471,6 +472,7 @@ function App() {
         <BrowserRouter>
           <AppShell />
         </BrowserRouter>
+        <IngestionProgressPills />
         <Toaster position="bottom-right" richColors />
       </IngestionTrackerProvider>
     </QueryClientProvider>
