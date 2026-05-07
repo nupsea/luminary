@@ -32,6 +32,8 @@ const SLOW_STAGES = new Set(["embedding", "entity_extract"])
 
 const CONTENT_TYPE_OPTIONS = [
   { value: "book" as const, label: "Book", description: "For novels, non-fiction, full-length documents" },
+  { value: "tech_book" as const, label: "Tech Book", description: "For programming/CS books with code blocks and numbered sections (enables per-section Feynman)" },
+  { value: "tech_article" as const, label: "Tech Article", description: "For technical articles, blog posts, and short technical writing" },
   { value: "conversation" as const, label: "Conversation", description: "For chat exports, interviews, meeting transcripts" },
   { value: "notes" as const, label: "Notes", description: "For personal notes, articles, papers, web clips" },
   { value: "audio" as const, label: "Audio", description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)" },
