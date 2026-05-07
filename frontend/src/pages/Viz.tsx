@@ -28,6 +28,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import NodeHexagonProgram from "@/lib/sigma-hexagon"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
+import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
+import { isDocumentReady } from "@/lib/documentReadiness"
 import { useVizStore } from "../vizStore"
 import {
   ALL_ENTITY_TYPES,
@@ -229,6 +231,7 @@ interface DocListItem {
   id: string
   title: string
   format?: string
+  stage: string
 }
 
 // ---------------------------------------------------------------------------
@@ -567,8 +570,11 @@ function buildClusterGraphology(
 // ---------------------------------------------------------------------------
 
 export default function Viz() {
-  const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  // Effective doc: Viz needs populated graph nodes/edges. An in-progress doc
+  // has none, so fall back to the user's last ready doc until ingestion lands.
+  const { doc: effectiveDoc } = useEffectiveActiveDocument()
+  const activeDocumentId = effectiveDoc?.id ?? null
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const mountTime = useRef(Date.now())
@@ -618,12 +624,15 @@ export default function Viz() {
     staleTime: 30_000,
   })
 
-  // Filtered doc list for the searchable picker
+  // Filtered doc list for the searchable picker. In-progress docs are
+  // intentionally hidden -- their graph is empty and selecting them would do
+  // nothing. The library is the only surface that exposes them.
   const filteredDocList = useMemo(() => {
     if (!docList) return []
-    if (!docPickerSearch.trim()) return docList
+    const ready = docList.filter(isDocumentReady)
+    if (!docPickerSearch.trim()) return ready
     const q = docPickerSearch.toLowerCase()
-    return docList.filter((d) => d.title.toLowerCase().includes(q))
+    return ready.filter((d) => d.title.toLowerCase().includes(q))
   }, [docList, docPickerSearch])
 
   // Close doc picker on outside click
@@ -703,8 +712,12 @@ export default function Viz() {
     enabled: viewMode === "tags",
   })
 
-  // Mastery / retention overlay data
-  const allDocIds = useMemo(() => docList?.map((d) => d.id) ?? [], [docList])
+  // Mastery / retention overlay data. Limit to ready docs so an in-progress
+  // ingestion (no graph yet) doesn't drag down the all-docs query.
+  const allDocIds = useMemo(
+    () => docList?.filter(isDocumentReady).map((d) => d.id) ?? [],
+    [docList],
+  )
   const masteryDocIds = useMemo(
     () => (scope === "document" && activeDocumentId ? [activeDocumentId] : allDocIds),
     [scope, activeDocumentId, allDocIds],

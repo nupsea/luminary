@@ -45,6 +45,8 @@ import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { useAppStore } from "@/store"
+import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
+import { isDocumentReady } from "@/lib/documentReadiness"
 import {
   FLASHCARD_CARD_LIMIT,
   StudySession,
@@ -72,6 +74,7 @@ import {
 interface DocListItem {
   id: string
   title: string
+  stage: string
 }
 
 async function fetchDocList(): Promise<DocListItem[]> {
@@ -1892,11 +1895,16 @@ function FlashcardManager({
 export default function Study() {
   const navigate = useNavigate()
   const {
-    activeDocumentId,
     setActiveDocument,
     activeCollectionId,
     setActiveCollectionId,
   } = useAppStore()
+
+  // Effective doc: ready-only fallback so we never feed an in-progress doc
+  // into prepareStudySession or FlashcardManager. Both depend on populated
+  // chunks/embeddings/flashcards, which simply don't exist mid-ingestion.
+  const { doc: effectiveDoc, isFallingBack } = useEffectiveActiveDocument()
+  const studyDocumentId = effectiveDoc?.id ?? null
 
   // Study-session lifecycle lives entirely in this one state variable.
   // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
@@ -1945,7 +1953,7 @@ export default function Study() {
     setStudyPhase({ phase: "preparing", mode })
     const options: PrepareStudySessionOptions = {
       mode,
-      documentId: activeDocumentId ?? null,
+      documentId: studyDocumentId,
       collectionId: activeCollectionId ?? null,
       filters: filters ?? undefined,
       cardLimit:
@@ -1994,8 +2002,7 @@ export default function Study() {
     return null
   }
 
-  const activeDocTitle =
-    docList.find((d) => d.id === activeDocumentId)?.title ?? null
+  const activeDocTitle = effectiveDoc?.title ?? null
   const activeCollectionName = findCollectionName(collections, activeCollectionId)
   const subjectLabel =
     activeCollectionName || activeDocTitle || null
@@ -2072,8 +2079,8 @@ export default function Study() {
           </h1>
 
           <DocPicker
-            docs={docList}
-            activeId={activeDocumentId}
+            docs={docList.filter(isDocumentReady)}
+            activeId={studyDocumentId}
             onSelect={(id) => {
               setActiveDocument(id)
               if (id) setActiveCollectionId(null)
@@ -2093,12 +2100,20 @@ export default function Study() {
             }
             onNavigateToCollection={(id) => setActiveCollectionId(id)}
           />
-        ) : activeDocumentId ? (
-          <FlashcardManager
-            documentId={activeDocumentId}
-            onStartStudy={handleStartFlashcard}
-            onStartTeachback={(f) => handleStartTeachback(f)}
-          />
+        ) : studyDocumentId ? (
+          <>
+            {isFallingBack && (
+              <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                The selected document is still ingesting. Showing your previous
+                document while it finishes.
+              </div>
+            )}
+            <FlashcardManager
+              documentId={studyDocumentId}
+              onStartStudy={handleStartFlashcard}
+              onStartTeachback={(f) => handleStartTeachback(f)}
+            />
+          </>
         ) : (
           /* Landing page: goals + session manager + collection grid */
           <div className="flex flex-col gap-10">

@@ -30,6 +30,9 @@ import { SortSelect } from "@/components/library/SortSelect"
 import { UploadDialog } from "@/components/library/UploadDialog"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { DocumentCard } from "@/components/library/DocumentCard"
+import { IngestingPlaceholder } from "@/components/library/IngestingPlaceholder"
+import { isDocumentReady } from "@/lib/documentReadiness"
+import { useSelectDocument } from "@/hooks/useSelectDocument"
 import type {
   ContentType,
   DocumentListItem,
@@ -623,6 +626,7 @@ function WhereToStartPanel({
 export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const selectDocument = useSelectDocument()
   const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
   const setChatScope = useAppStore((s) => s.setChatScope)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
@@ -706,7 +710,19 @@ export default function Learning() {
   })
 
   function handleDocumentClick(id: string) {
-    setActiveDocument(id)
+    // Use the readiness-aware selector so lastReadyDocumentId stays in sync,
+    // giving Study/Viz/Chat a sane fallback when active points at an
+    // in-progress doc.
+    const allKnownDocs = [
+      ...(pageData?.items ?? []),
+      ...(recentItems ?? []),
+    ]
+    const doc = allKnownDocs.find((d) => d.id === id)
+    if (doc) {
+      selectDocument(doc)
+    } else {
+      setActiveDocument(id)
+    }
   }
 
   // S191: Document action menu handler
@@ -814,13 +830,36 @@ export default function Learning() {
   }, [docParam])
 
   if (activeDocumentId) {
-    // Look up content_type for the active document from cached data
     const allKnownDocs = [
       ...(pageData?.items ?? []),
       ...(recentItems ?? []),
     ]
     const activeDoc = allKnownDocs.find((d) => d.id === activeDocumentId)
     const activeContentType = activeDoc?.content_type ?? ""
+
+    function returnToLibrary() {
+      setActiveDocument(null)
+      setSavedSectionId(undefined)
+      setSavedChunkId(undefined)
+      setSavedPage(undefined)
+    }
+
+    // Gate the reader on ingestion readiness. If we know the doc from the
+    // cached list and it isn't complete, show the IngestingPlaceholder
+    // (live progress + cancel/delete) instead of mounting the reader against
+    // empty section/chunk/embedding data. Deep-link arrivals where the doc
+    // isn't in any cached list fall through to DocumentReader, which renders
+    // its own loading state and ultimately surfaces backend errors if any.
+    if (activeDoc && !isDocumentReady(activeDoc)) {
+      return (
+        <IngestingPlaceholder
+          documentId={activeDocumentId}
+          title={activeDoc.title}
+          initialStage={activeDoc.stage}
+          onBack={returnToLibrary}
+        />
+      )
+    }
 
     return (
       <div className="flex h-full flex-col">
@@ -831,12 +870,7 @@ export default function Learning() {
         <div className="flex-1 min-h-0">
           <DocumentReader
             documentId={activeDocumentId}
-            onBack={() => {
-              setActiveDocument(null)
-              setSavedSectionId(undefined)
-              setSavedChunkId(undefined)
-              setSavedPage(undefined)
-            }}
+            onBack={returnToLibrary}
             initialSectionId={savedSectionId}
             initialChunkId={savedChunkId}
             initialPage={savedPage}

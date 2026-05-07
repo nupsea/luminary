@@ -8,6 +8,11 @@ interface StudySectionFilter {
 
 interface AppState {
   activeDocumentId: string | null
+  // Most recently *ready* (stage === "complete") document the user activated.
+  // Tabs that need a default ready doc (Study, Viz, Chat) fall back to this
+  // when activeDocumentId points at an in-progress ingestion. Persisted so the
+  // user's last good doc is restored across reloads.
+  lastReadyDocumentId: string | null
   llmMode: "private" | "cloud" | "hybrid"
   currentProvider: string
   libraryView: "grid" | "list"
@@ -56,6 +61,7 @@ interface AppState {
   setChatSidebarOpen: (open: boolean) => void
   clearChat: () => void
   setActiveDocument: (id: string | null) => void
+  setLastReadyDocumentId: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
   setNotesView: (view: "grid" | "list") => void
@@ -71,6 +77,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       activeDocumentId: null,
+      lastReadyDocumentId: null,
       llmMode: "private",
       currentProvider: "openai",
       libraryView: "grid",
@@ -103,6 +110,7 @@ export const useAppStore = create<AppState>()(
       setChatSidebarOpen: (open) => set({ chatSidebarOpen: open }),
       clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all", activeChatSessionId: null }),
       setActiveDocument: (id) => set({ activeDocumentId: id }),
+      setLastReadyDocumentId: (id) => set({ lastReadyDocumentId: id }),
       setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
       setLibraryView: (view) => set({ libraryView: view }),
       setNotesView: (view) => set({ notesView: view }),
@@ -129,6 +137,7 @@ export const useAppStore = create<AppState>()(
         studySessionId: state.studySessionId,
         activeChatSessionId: state.activeChatSessionId,
         chatSidebarOpen: state.chatSidebarOpen,
+        lastReadyDocumentId: state.lastReadyDocumentId,
       }),
     }
   )
