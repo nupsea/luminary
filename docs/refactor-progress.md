@@ -79,10 +79,20 @@ this file tracks **only what's still pending**. Completed work is in
 
 ## Lower priority items from the audit (not yet started)
 
-### #5 -- God class `KuzuService`
-- `backend/app/services/graph.py:60`. 41 methods on one class, file is
-  1,758 lines. Cleanly splits into `KuzuPrereqRepo`, `KuzuConceptRepo`,
-  `KuzuViewRepo` over a shared `KuzuConnection`.
+### #5 -- God class `KuzuService` (in progress)
+- `backend/app/services/graph.py` was 1,793 lines, now 1,414. Phase 1+2:
+  extracted `KuzuConnection` (db + conn + lock + schema DDL,
+  `services/graph_connection.py`) and `KuzuPrereqRepo` (7 methods --
+  add_prerequisite, get_prerequisite_edges_for_document,
+  add_prerequisite_with_section, has_prerequisite_edges,
+  get_entry_point_concepts, get_prerequisite_edges_for_graph,
+  get_learning_path -- in `services/graph_prereq.py`). KuzuService
+  keeps the public method names and delegates; `_db / _conn / _lock`
+  attributes preserved for back-compat (chat_graph reads
+  `service._conn` directly). 73 graph / prereq tests pass.
+- Remaining phases: KuzuConceptRepo (SAME_CONCEPT methods),
+  KuzuViewRepo (graph_for_document + delete_document + count),
+  KuzuTechRepo (CALLS / IMPLEMENTS / VERSION_OF / Diagram*).
 
 ### #6 -- God workflow `runtime/chat_graph.py`
 - 1,871 lines, 34 node fns. Refactor: one file per node group under

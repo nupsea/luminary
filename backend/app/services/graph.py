@@ -36,12 +36,10 @@ contradiction_note (STRING), prefer_source (STRING "a"|"b"|"").
 """
 
 import logging
-import threading
-from pathlib import Path
-
-import kuzu
 
 from app.config import get_settings
+from app.services.graph_connection import KuzuConnection
+from app.services.graph_prereq import KuzuPrereqRepo
 
 logger = logging.getLogger(__name__)
 
@@ -58,76 +56,14 @@ def get_graph_service() -> "KuzuService":
 
 class KuzuService:
     def __init__(self, data_dir: str) -> None:
-        db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
-        self._db = kuzu.Database(db_path)
-        self._conn = kuzu.Connection(self._db)
-        # Kuzu connection is not thread-safe. Serialise all _conn.execute() calls.
-        self._lock = threading.Lock()
-        self._create_schema()
-        logger.info("KuzuService initialized", extra={"db_path": db_path})
-
-    def _create_schema(self) -> None:
-        """Create node and edge tables if they do not exist."""
-        stmts = [
-            # Node tables
-            "CREATE NODE TABLE IF NOT EXISTS Entity("
-            "id STRING PRIMARY KEY, name STRING, type STRING, frequency INT64, aliases STRING)",
-            "CREATE NODE TABLE IF NOT EXISTS Document("
-            "id STRING PRIMARY KEY, title STRING, content_type STRING)",
-            # Diagram-derived node table (S136) -- must be created before DEPICTS edge
-            "CREATE NODE TABLE IF NOT EXISTS DiagramNode("
-            "id STRING PRIMARY KEY, name STRING, node_type STRING,"
-            " source_image_id STRING, document_id STRING, frequency INT64)",
-            # Edge tables
-            "CREATE REL TABLE IF NOT EXISTS MENTIONED_IN(FROM Entity TO Document, count INT64)",
-            "CREATE REL TABLE IF NOT EXISTS CO_OCCURS("
-            "FROM Entity TO Entity, weight FLOAT, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS RELATED_TO("
-            "FROM Entity TO Entity, relation_label STRING, confidence FLOAT)",
-            "CREATE REL TABLE IF NOT EXISTS CALLS(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS PREREQUISITE_OF("
-            "FROM Entity TO Entity, document_id STRING, confidence FLOAT)",
-            # Tech relation edges (S135)
-            "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS EXTENDS(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS USES(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS REPLACES(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS DEPENDS_ON(FROM Entity TO Entity, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS VERSION_OF(FROM Entity TO Entity, document_id STRING)",
-            # Diagram-derived edge tables (S136)
-            "CREATE REL TABLE IF NOT EXISTS CONNECTS_TO("
-            "FROM DiagramNode TO DiagramNode, document_id STRING, label STRING)",
-            "CREATE REL TABLE IF NOT EXISTS STORES_IN("
-            "FROM DiagramNode TO DiagramNode, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS SENDS_TO("
-            "FROM DiagramNode TO DiagramNode, document_id STRING, message STRING)",
-            "CREATE REL TABLE IF NOT EXISTS HAS_FIELD("
-            "FROM DiagramNode TO DiagramNode, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS REFERENCES_DM("
-            "FROM DiagramNode TO DiagramNode, document_id STRING)",
-            "CREATE REL TABLE IF NOT EXISTS LEADS_TO("
-            "FROM DiagramNode TO DiagramNode, document_id STRING, condition STRING)",
-            # DEPICTS: links a diagram-derived node to an existing Entity (S136)
-            "CREATE REL TABLE IF NOT EXISTS DEPICTS("
-            "FROM DiagramNode TO Entity, document_id STRING)",
-            # SAME_CONCEPT: cross-document concept links (S141)
-            # Uses INT64 for contradiction (not BOOLEAN) for Kuzu compatibility
-            "CREATE REL TABLE IF NOT EXISTS SAME_CONCEPT("
-            "FROM Entity TO Entity,"
-            " source_doc_id STRING, target_doc_id STRING,"
-            " confidence FLOAT, contradiction INT64,"
-            " contradiction_note STRING, prefer_source STRING)",
-            # Note graph (S163) -- Note nodes + edges to Entity and Document
-            "CREATE NODE TABLE IF NOT EXISTS Note("
-            "id STRING PRIMARY KEY, note_id STRING, preview STRING, created_at STRING)",
-            "CREATE REL TABLE IF NOT EXISTS WRITTEN_ABOUT(FROM Note TO Entity, confidence FLOAT)",
-            "CREATE REL TABLE IF NOT EXISTS TAG_IS_CONCEPT(FROM Note TO Entity, tag STRING)",
-            "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM(FROM Note TO Document)",
-            # Zettelkasten links (S171) -- explicit typed note-to-note connections
-            "CREATE REL TABLE IF NOT EXISTS LINKS_TO(FROM Note TO Note, link_type STRING)",
-        ]
-        for stmt in stmts:
-            self._conn.execute(stmt)
+        self._connection = KuzuConnection(data_dir)
+        # Back-compat aliases. chat_graph (and possibly tests) read
+        # `service._conn` directly.
+        self._db = self._connection.db
+        self._conn = self._connection.conn
+        self._lock = self._connection.lock
+        self._prereq = KuzuPrereqRepo(self._connection)
+        logger.info("KuzuService initialized")
 
     # -------------------------------------------------------------------------
     # Upsert helpers
@@ -366,59 +302,12 @@ class KuzuService:
         document_id: str,
         confidence: float = 1.0,
     ) -> None:
-        """Create a PREREQUISITE_OF edge from dependent to prerequisite.
-
-        Idempotent: if an edge with the same (dependent, prerequisite, document_id)
-        already exists, it is left unchanged.
-        """
-        result = self._conn.execute(
-            "MATCH (a:Entity {id: $dep})-[r:PREREQUISITE_OF]->(b:Entity {id: $pre})"
-            " WHERE r.document_id = $did RETURN r.confidence",
-            {"dep": dependent_id, "pre": prerequisite_id, "did": document_id},
+        return self._prereq.add_prerequisite(
+            dependent_id, prerequisite_id, document_id, confidence
         )
-        if not result.has_next():
-            self._conn.execute(
-                "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
-                " CREATE (a)-[:PREREQUISITE_OF {document_id: $did, confidence: $conf}]->(b)",
-                {
-                    "dep": dependent_id,
-                    "pre": prerequisite_id,
-                    "did": document_id,
-                    "conf": confidence,
-                },
-            )
 
     def get_prerequisite_edges_for_document(self, document_id: str) -> list[dict]:
-        """Return all PREREQUISITE_OF edges for a document.
-
-        Returns list of dicts:
-            {from_entity, to_entity, from_id, to_id, confidence}
-        """
-        try:
-            result = self._conn.execute(
-                "MATCH (a:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}),"
-                " (b:Entity)-[:MENTIONED_IN]->(d),"
-                " (a)-[r:PREREQUISITE_OF]->(b)"
-                " WHERE r.document_id = $did"
-                " RETURN a.name, b.name, a.id, b.id, r.confidence",
-                {"did": document_id},
-            )
-            edges: list[dict] = []
-            while result.has_next():
-                row = result.get_next()
-                edges.append(
-                    {
-                        "from_entity": row[0],
-                        "to_entity": row[1],
-                        "from_id": row[2],
-                        "to_id": row[3],
-                        "confidence": float(row[4] or 1.0),
-                    }
-                )
-            return edges
-        except Exception:
-            logger.debug("get_prerequisite_edges_for_document failed", exc_info=True)
-            return []
+        return self._prereq.get_prerequisite_edges_for_document(document_id)
 
     def add_prerequisite_with_section(
         self,
@@ -428,289 +317,21 @@ class KuzuService:
         confidence: float,
         source_section_id: str,
     ) -> None:
-        """Create a PREREQUISITE_OF edge with source_section_id; fallback for old DBs.
-
-        Idempotent: if the edge already exists, it is left unchanged.
-        Falls back to 2-property form for databases created before S139 (no source_section_id).
-        """
-        result = self._conn.execute(
-            "MATCH (a:Entity {id: $dep})-[r:PREREQUISITE_OF]->(b:Entity {id: $pre})"
-            " WHERE r.document_id = $did RETURN r.confidence",
-            {"dep": dependent_id, "pre": prerequisite_id, "did": document_id},
+        return self._prereq.add_prerequisite_with_section(
+            dependent_id, prerequisite_id, document_id, confidence, source_section_id
         )
-        if not result.has_next():
-            try:
-                self._conn.execute(
-                    "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
-                    " CREATE (a)-[:PREREQUISITE_OF {document_id: $did,"
-                    " confidence: $conf, source_section_id: $sid}]->(b)",
-                    {
-                        "dep": dependent_id,
-                        "pre": prerequisite_id,
-                        "did": document_id,
-                        "conf": confidence,
-                        "sid": source_section_id,
-                    },
-                )
-            except Exception:
-                # Old DB without source_section_id column -- fall back to 2-property form
-                logger.debug(
-                    "add_prerequisite_with_section: source_section_id absent, fallback",
-                    exc_info=True,
-                )
-                self._conn.execute(
-                    "MATCH (a:Entity {id: $dep}), (b:Entity {id: $pre})"
-                    " CREATE (a)-[:PREREQUISITE_OF {document_id: $did, confidence: $conf}]->(b)",
-                    {
-                        "dep": dependent_id,
-                        "pre": prerequisite_id,
-                        "did": document_id,
-                        "conf": confidence,
-                    },
-                )
 
     def has_prerequisite_edges(self, document_id: str) -> bool:
-        """Return True if the document has any PREREQUISITE_OF edges."""
-        try:
-            result = self._conn.execute(
-                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
-                " WHERE r.document_id = $did RETURN r LIMIT 1",
-                {"did": document_id},
-            )
-            return result.has_next()
-        except Exception:
-            return False
+        return self._prereq.has_prerequisite_edges(document_id)
 
     def get_entry_point_concepts(self, document_id: str, limit: int = 10) -> list[str]:
-        """Return entity names that have no outgoing PREREQUISITE_OF edges for this document.
-
-        These are root concepts (no listed prerequisites) that ARE referenced as
-        prerequisites by other concepts -- valid entry-point starting concepts.
-        Returns at most `limit` names, ordered by MENTIONED_IN count desc.
-        """
-        try:
-            # All concepts with MENTIONED_IN this doc
-            all_result = self._conn.execute(
-                "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
-                " RETURN e.id, e.name, r.count",
-                {"did": document_id},
-            )
-            all_entities: dict[str, tuple[str, int]] = {}  # id -> (name, count)
-            while all_result.has_next():
-                row = all_result.get_next()
-                all_entities[row[0]] = (row[1], int(row[2] or 1))
-
-            # Concepts with outgoing PREREQUISITE_OF edges (they have prerequisites)
-            dep_result = self._conn.execute(
-                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
-                " WHERE r.document_id = $did RETURN DISTINCT a.id",
-                {"did": document_id},
-            )
-            has_prereqs: set[str] = set()
-            while dep_result.has_next():
-                has_prereqs.add(dep_result.get_next()[0])
-
-            # Concepts pointed to as prerequisites (targets in the graph)
-            referenced_result = self._conn.execute(
-                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
-                " WHERE r.document_id = $did RETURN DISTINCT b.id",
-                {"did": document_id},
-            )
-            referenced: set[str] = set()
-            while referenced_result.has_next():
-                referenced.add(referenced_result.get_next()[0])
-
-            # Entry points: in the doc, no outgoing prereq edges, AND are referenced as prereqs
-            entry = [
-                (eid, name, count)
-                for eid, (name, count) in all_entities.items()
-                if eid not in has_prereqs and eid in referenced
-            ]
-            entry.sort(key=lambda x: x[2], reverse=True)
-            return [name for _, name, _ in entry[:limit]]
-        except Exception:
-            logger.debug("get_entry_point_concepts failed", exc_info=True)
-            return []
+        return self._prereq.get_entry_point_concepts(document_id, limit=limit)
 
     def get_prerequisite_edges_for_graph(self, document_id: str) -> list[dict]:
-        """Return PREREQUISITE_OF edges in the graph wire format for Viz rendering.
-
-        Returns list of {source, target, weight, relation} dicts.
-        """
-        raw = self.get_prerequisite_edges_for_document(document_id)
-        return [
-            {
-                "source": e["from_id"],
-                "target": e["to_id"],
-                "weight": e["confidence"],
-                "relation": "PREREQUISITE_OF",
-            }
-            for e in raw
-        ]
+        return self._prereq.get_prerequisite_edges_for_graph(document_id)
 
     def get_learning_path(self, start_entity_name: str, document_id: str) -> dict:
-        """Return topologically sorted prerequisite chain starting from start_entity_name.
-
-        Algorithm:
-        1. Find the Entity node matching start_entity_name (case-insensitive)
-           that is MENTIONED_IN the given document_id.
-        2. BFS traversal following PREREQUISITE_OF edges outward from start,
-           collecting all reachable nodes. Cycles are handled with a seen set.
-        3. Kahn's algorithm topological sort on the subgraph.
-        4. Return {start_entity, document_id, nodes, edges}.
-        Returns empty nodes/edges if start_entity not found or has no prerequisite edges.
-        """
-        from collections import deque  # noqa: PLC0415
-
-        # Step 1: find start entity node (case-insensitive name match)
-        try:
-            name_lower = start_entity_name.lower()
-            result = self._conn.execute(
-                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
-                " RETURN e.id, e.name, e.type",
-                {"did": document_id},
-            )
-            start_id: str | None = None
-            nodes_in_doc: dict[str, dict] = {}  # id -> {name, type}
-            while result.has_next():
-                row = result.get_next()
-                eid, ename, etype = row[0], row[1], row[2]
-                nodes_in_doc[eid] = {"name": ename, "type": etype or "CONCEPT"}
-                if ename and ename.lower() == name_lower:
-                    start_id = eid
-
-            if start_id is None:
-                return {
-                    "start_entity": start_entity_name,
-                    "document_id": document_id,
-                    "nodes": [],
-                    "edges": [],
-                }
-        except Exception:
-            logger.debug("get_learning_path entity lookup failed", exc_info=True)
-            return {
-                "start_entity": start_entity_name,
-                "document_id": document_id,
-                "nodes": [],
-                "edges": [],
-            }
-
-        # Step 2: BFS traversal following PREREQUISITE_OF edges from start
-        try:
-            # Build adjacency list for PREREQUISITE_OF edges scoped to document
-            all_prereq_result = self._conn.execute(
-                "MATCH (a:Entity)-[r:PREREQUISITE_OF]->(b:Entity)"
-                " WHERE r.document_id = $did RETURN a.id, b.id, r.confidence",
-                {"did": document_id},
-            )
-            # adj: from_id -> list of (to_id, confidence)
-            adj: dict[str, list[tuple[str, float]]] = {}
-            while all_prereq_result.has_next():
-                row = all_prereq_result.get_next()
-                from_id, to_id, conf = row[0], row[1], float(row[2] or 1.0)
-                adj.setdefault(from_id, []).append((to_id, conf))
-
-            if start_id not in adj:
-                # Start node exists but has no outgoing prerequisite edges
-                return {
-                    "start_entity": start_entity_name,
-                    "document_id": document_id,
-                    "nodes": [],
-                    "edges": [],
-                }
-
-            # BFS to collect reachable subgraph
-            visited: set[str] = {start_id}
-            queue: deque[str] = deque([start_id])
-            subgraph_nodes: set[str] = {start_id}
-            subgraph_edges: list[tuple[str, str, float]] = []
-
-            while queue:
-                current = queue.popleft()
-                for neighbor_id, conf in adj.get(current, []):
-                    subgraph_edges.append((current, neighbor_id, conf))
-                    if neighbor_id not in visited:
-                        visited.add(neighbor_id)
-                        subgraph_nodes.add(neighbor_id)
-                        queue.append(neighbor_id)
-
-            # Step 3: Kahn's algorithm topological sort
-            # Build in-degree map restricted to subgraph
-            in_degree: dict[str, int] = {n: 0 for n in subgraph_nodes}
-            sub_adj: dict[str, list[str]] = {n: [] for n in subgraph_nodes}
-            for from_id, to_id, _ in subgraph_edges:
-                if from_id in subgraph_nodes and to_id in subgraph_nodes:
-                    sub_adj[from_id].append(to_id)
-                    in_degree[to_id] = in_degree.get(to_id, 0) + 1
-
-            # Initialize queue with nodes that have no incoming edges.
-            # Kahn's on PREREQUISITE_OF edges (dep -> prereq) yields dependents
-            # first.  Reversing gives learning order: deepest prerequisites first.
-            topo_queue: deque[str] = deque(nid for nid in subgraph_nodes if in_degree[nid] == 0)
-            topo_order: list[str] = []
-            while topo_queue:
-                node = topo_queue.popleft()
-                topo_order.append(node)
-                for neighbor in sub_adj.get(node, []):
-                    in_degree[neighbor] -= 1
-                    if in_degree[neighbor] == 0:
-                        topo_queue.append(neighbor)
-
-            # Reverse so prerequisites come first (learning order).
-            topo_order.reverse()
-
-            # Cycle detection: Kahn's drops cyclic nodes (their in-degree never
-            # reaches 0).  Log a warning so data-quality issues are surfaced.
-            if len(topo_order) < len(subgraph_nodes):
-                logger.warning(
-                    "Cyclic PREREQUISITE_OF subgraph detected for document %s"
-                    " (start=%s): %d nodes unreachable via topological sort",
-                    document_id,
-                    start_entity_name,
-                    len(subgraph_nodes) - len(topo_order),
-                )
-
-            # Assign depth: 0 = deepest prerequisite, increasing = closer to start
-            depth_map: dict[str, int] = {}
-            for i, nid in enumerate(topo_order):
-                depth_map[nid] = i
-
-            from app.types import LearningPathNode  # noqa: PLC0415
-
-            sorted_nodes = [
-                LearningPathNode(
-                    entity_id=nid,
-                    name=nodes_in_doc.get(nid, {}).get("name", nid),
-                    entity_type=nodes_in_doc.get(nid, {}).get("type", "CONCEPT"),
-                    depth=depth_map.get(nid, 0),
-                )
-                for nid in topo_order
-                if nid in nodes_in_doc
-            ]
-
-            return_edges = [
-                {
-                    "from_entity": nodes_in_doc.get(f, {}).get("name", f),
-                    "to_entity": nodes_in_doc.get(t, {}).get("name", t),
-                    "confidence": c,
-                }
-                for f, t, c in subgraph_edges
-            ]
-
-            return {
-                "start_entity": start_entity_name,
-                "document_id": document_id,
-                "nodes": sorted_nodes,
-                "edges": return_edges,
-            }
-        except Exception:
-            logger.debug("get_learning_path traversal failed", exc_info=True)
-            return {
-                "start_entity": start_entity_name,
-                "document_id": document_id,
-                "nodes": [],
-                "edges": [],
-            }
+        return self._prereq.get_learning_path(start_entity_name, document_id)
 
     # -------------------------------------------------------------------------
     # SAME_CONCEPT edges (S141)
