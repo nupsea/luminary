@@ -101,9 +101,19 @@ this file tracks **only what's still pending**. Completed work is in
   _get_note_nodes_for_entities, _get_co_occurrence_edges),
   KuzuTechRepo (CALLS / IMPLEMENTS / VERSION_OF / Diagram*).
 
-### #6 -- God workflow `runtime/chat_graph.py`
-- 1,871 lines, 34 node fns. Refactor: one file per node group under
-  `runtime/chat_nodes/` with a thin `chat_graph.py` that just wires them.
+### #6 -- God workflow `runtime/chat_graph.py` (in progress)
+- Was 1,924 lines. Phase 1: created `runtime/chat_nodes/` package
+  with `_shared.py` containing the system-prompt constants
+  (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
+  the `_get_system_prompt` selector, the `_chunk_to_dict` /
+  `_round_robin` helpers, and the module-level `_background_tasks`
+  registry. `chat_graph.py` now imports them from `_shared`. 91
+  chat_graph tests pass; ruff clean.
+- Remaining phases (deferred): move per-node bodies into
+  `chat_nodes/{summary,graph,comparative,search,notes,socratic,
+  synthesize,confidence}.py` with re-exports from chat_graph.py for
+  back-compat (7 test files import node names directly from
+  chat_graph).
 
 ### #7 -- 299 `noqa: PLC0415` inline imports
 - Signals circular deps and routers/services importing each other lazily.

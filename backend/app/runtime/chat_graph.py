@@ -39,12 +39,15 @@ from app.models import (
     SectionSummaryModel,
     SummaryModel,
 )
+from app.runtime.chat_nodes._shared import (
+    _background_tasks,
+    _chunk_to_dict,
+    _get_system_prompt,
+    _round_robin,
+)
 from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
 from app.services.llm import LLMUnavailableError, get_llm_service
 from app.services.qa import (
-    NOT_FOUND_SENTINEL,
-    QA_FACTUAL_SYSTEM_PROMPT,
-    QA_SYSTEM_PROMPT,
     _maybe_rewrite_query,
     _should_use_summary,
 )
@@ -52,56 +55,6 @@ from app.services.retriever import get_retriever
 from app.types import ChatState, ScoredChunk, TransparencyInfo
 
 logger = logging.getLogger(__name__)
-
-# Strong references for fire-and-forget background tasks (asyncio holds weak refs only)
-_background_tasks: set[asyncio.Task] = set()
-
-
-# ---------------------------------------------------------------------------
-# Intent-specific system prompts (used by synthesize_node)
-# ---------------------------------------------------------------------------
-
-_SUMMARY_SYSTEM = (
-    "You are a knowledge assistant. Answer using the provided document summary. "
-    "Be concise and well-structured. Use Markdown headings and bullet points. "
-    f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}."
-)
-
-_RELATIONAL_SYSTEM = (
-    "You are a knowledge assistant. Answer using the knowledge graph connections "
-    "and the supporting passages provided. Name the entities clearly. "
-    "Use Markdown to show relationships between entities. "
-    f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
-    "Do not speculate. "
-    "Write your answer as Markdown prose. "
-    "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
-)
-
-_COMPARATIVE_SYSTEM = (
-    "You are a knowledge assistant. Compare the two subjects using the provided passages. "
-    "Structure your answer as: **Subject A:** ... **Subject B:** ... "
-    f"If the answer is not present, respond exactly: {NOT_FOUND_SENTINEL}. "
-    "Do not speculate. "
-    "Write your answer as Markdown prose. "
-    "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
-)
-
-
-def _get_system_prompt(intent: str | None) -> str:
-    """Return intent-appropriate system prompt for the LLM call."""
-    if intent == "summary":
-        return _SUMMARY_SYSTEM
-    if intent == "relational":
-        return _RELATIONAL_SYSTEM
-    if intent == "comparative":
-        return _COMPARATIVE_SYSTEM
-    if intent == "factual":
-        return QA_FACTUAL_SYSTEM_PROMPT
-    return QA_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -523,35 +476,6 @@ async def graph_node(state: ChatState) -> dict:
 # ---------------------------------------------------------------------------
 # comparative_node — N-way comparison with LLM decomposition + document routing
 # ---------------------------------------------------------------------------
-
-
-def _chunk_to_dict(c: ScoredChunk) -> dict:
-    return {
-        "chunk_id": c.chunk_id,
-        "document_id": c.document_id,
-        "text": c.text,
-        "section_heading": c.section_heading,
-        "page": c.page,
-        "score": c.score,
-        "source": c.source,
-    }
-
-
-def _round_robin(lists: list[list]) -> list:
-    """Round-robin interleave N lists: [l0[0], l1[0], l2[0], l0[1], l1[1], ...]."""
-    result: list = []
-    iters = [iter(lst) for lst in lists]
-    while True:
-        advanced = False
-        for it in iters:
-            try:
-                result.append(next(it))
-                advanced = True
-            except StopIteration:
-                pass
-        if not advanced:
-            break
-    return result
 
 
 async def _decompose_comparison(question: str) -> dict | None:
