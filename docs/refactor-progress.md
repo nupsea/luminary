@@ -80,18 +80,25 @@ this file tracks **only what's still pending**. Completed work is in
 ## Lower priority items from the audit (not yet started)
 
 ### #5 -- God class `KuzuService` (in progress)
-- `backend/app/services/graph.py` was 1,793 lines, now 1,414. Phase 1+2:
-  extracted `KuzuConnection` (db + conn + lock + schema DDL,
-  `services/graph_connection.py`) and `KuzuPrereqRepo` (7 methods --
-  add_prerequisite, get_prerequisite_edges_for_document,
-  add_prerequisite_with_section, has_prerequisite_edges,
-  get_entry_point_concepts, get_prerequisite_edges_for_graph,
-  get_learning_path -- in `services/graph_prereq.py`). KuzuService
-  keeps the public method names and delegates; `_db / _conn / _lock`
-  attributes preserved for back-compat (chat_graph reads
-  `service._conn` directly). 73 graph / prereq tests pass.
-- Remaining phases: KuzuConceptRepo (SAME_CONCEPT methods),
-  KuzuViewRepo (graph_for_document + delete_document + count),
+- `backend/app/services/graph.py` was 1,793 lines, now 1,264. Phases 1-3:
+  - `KuzuConnection` (db + conn + lock + schema DDL,
+    `services/graph_connection.py`).
+  - `KuzuPrereqRepo` (7 methods: add_prerequisite,
+    get_prerequisite_edges_for_document,
+    add_prerequisite_with_section, has_prerequisite_edges,
+    get_entry_point_concepts, get_prerequisite_edges_for_graph,
+    get_learning_path -- in `services/graph_prereq.py`).
+  - `KuzuConceptRepo` (3 methods: add_same_concept_edge,
+    get_same_concept_edges, get_concept_clusters -- in
+    `services/graph_concept.py`).
+  - KuzuService keeps the public method names and delegates;
+    `_db / _conn / _lock` attributes preserved for back-compat
+    (chat_graph reads `service._conn` directly).
+- Remaining phases (deferred -- view/tech sub-repos couple to
+  prereq/concept via service-level orchestration; clean extraction
+  needs an interface-design pass beyond mechanical lift):
+  KuzuViewRepo (get_graph_for_document /_documents,
+  _get_note_nodes_for_entities, _get_co_occurrence_edges),
   KuzuTechRepo (CALLS / IMPLEMENTS / VERSION_OF / Diagram*).
 
 ### #6 -- God workflow `runtime/chat_graph.py`
