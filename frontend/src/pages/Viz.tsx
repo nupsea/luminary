@@ -573,8 +573,10 @@ export default function Viz() {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   // Effective doc: Viz needs populated graph nodes/edges. An in-progress doc
   // has none, so fall back to the user's last ready doc until ingestion lands.
-  const { doc: effectiveDoc } = useEffectiveActiveDocument()
-  const activeDocumentId = effectiveDoc?.id ?? null
+  // effectiveDocumentId is optimistic during the docs query's first load so
+  // the scope useState below sees the user's active book on first render.
+  const { effectiveDocumentId } = useEffectiveActiveDocument()
+  const activeDocumentId = effectiveDocumentId
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const mountTime = useRef(Date.now())

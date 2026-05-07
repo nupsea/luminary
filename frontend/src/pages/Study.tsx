@@ -1903,8 +1903,9 @@ export default function Study() {
   // Effective doc: ready-only fallback so we never feed an in-progress doc
   // into prepareStudySession or FlashcardManager. Both depend on populated
   // chunks/embeddings/flashcards, which simply don't exist mid-ingestion.
-  const { doc: effectiveDoc, isFallingBack } = useEffectiveActiveDocument()
-  const studyDocumentId = effectiveDoc?.id ?? null
+  const { doc: effectiveDoc, effectiveDocumentId, isFallingBack } =
+    useEffectiveActiveDocument()
+  const studyDocumentId = effectiveDocumentId
 
   // Study-session lifecycle lives entirely in this one state variable.
   // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
