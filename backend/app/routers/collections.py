@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import CollectionMemberModel, CollectionModel, DocumentModel
+from app.repos.collection_repo import CollectionRepo, get_collection_repo
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 from app.services.naming import normalize_collection_name
@@ -214,12 +215,12 @@ def _make_collection_name(title: str, content_type: str) -> str:
 @router.post("", response_model=CollectionResponse, status_code=201)
 async def create_collection(
     req: CollectionCreateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> CollectionResponse:
     """Create a new collection. Parent must be a top-level collection (max 2-level nesting)."""
     if req.parent_collection_id is not None:
         parent = await get_or_404(
-            session, CollectionModel, req.parent_collection_id, name="Parent collection"
+            repo.session, CollectionModel, req.parent_collection_id, name="Parent collection"
         )
         if parent.parent_collection_id is not None:
             raise HTTPException(
@@ -227,52 +228,31 @@ async def create_collection(
                 detail="Max nesting depth is 2. The parent already has a parent.",
             )
 
-    col = CollectionModel(
-        id=str(uuid.uuid4()),
+    col = await repo.create(
         name=normalize_collection_name(req.name),
         description=req.description,
         color=req.color,
         icon=req.icon,
         parent_collection_id=req.parent_collection_id,
         sort_order=req.sort_order,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
     )
-    session.add(col)
-    await session.commit()
-    await session.refresh(col)
     logger.info("Created collection id=%s name=%r", col.id, col.name)
     return _to_response(col)
 
 
 @router.get("/tree", response_model=list[CollectionTreeItem])
 async def get_collection_tree(
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> list[CollectionTreeItem]:
     """Return all collections as a 2-level nested tree with item counts."""
-    # Load all collections
-    all_cols_result = await session.execute(
-        select(CollectionModel).order_by(CollectionModel.sort_order, CollectionModel.name)
-    )
-    all_cols = list(all_cols_result.scalars().all())
-
-    # Load counts per collection
-    counts_result = await session.execute(
-        select(
-            CollectionMemberModel.collection_id,
-            CollectionMemberModel.member_type,
-            func.count(CollectionMemberModel.member_id),
-        ).group_by(CollectionMemberModel.collection_id, CollectionMemberModel.member_type)
-    )
-    counts_rows = counts_result.all()
-
-    note_counts: dict[str, int] = {}
-    doc_counts: dict[str, int] = {}
-    for cid, mtype, count in counts_rows:
-        if mtype == "note":
-            note_counts[cid] = count
-        elif mtype == "document":
-            doc_counts[cid] = count
+    all_cols = list(await repo.list_all())
+    counts = await repo.member_counts()
+    note_counts: dict[str, int] = {
+        cid: c for (cid, mtype), c in counts.items() if mtype == "note"
+    }
+    doc_counts: dict[str, int] = {
+        cid: c for (cid, mtype), c in counts.items() if mtype == "document"
+    }
 
     # Assemble tree: top-level first, then attach children
     top_level: list[CollectionTreeItem] = []
@@ -313,14 +293,10 @@ async def get_collection_tree(
 @router.get("/by-document/{document_id}", response_model=CollectionResponse)
 async def get_auto_collection_by_document(
     document_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> CollectionResponse:
     """Return the auto-collection for a document, or 404 if none exists."""
-    col = (
-        await session.execute(
-            select(CollectionModel).where(CollectionModel.auto_document_id == document_id)
-        )
-    ).scalar_one_or_none()
+    col = await repo.find_by_auto_document_id(document_id)
     if col is None:
         raise HTTPException(status_code=404, detail="No auto-collection for this document")
     return _to_response(col)
@@ -329,34 +305,17 @@ async def get_auto_collection_by_document(
 @router.post("/auto/{document_id}", response_model=CollectionResponse, status_code=201)
 async def create_auto_collection(
     document_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> CollectionResponse:
     """Create auto-collection for a document. Idempotent -- returns existing."""
-    # Check if one already exists
-    existing = (
-        await session.execute(
-            select(CollectionModel).where(CollectionModel.auto_document_id == document_id)
-        )
-    ).scalar_one_or_none()
+    existing = await repo.find_by_auto_document_id(document_id)
     if existing is not None:
         return _to_response(existing)
 
-    # Fetch document title
-    doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-
+    doc = await get_or_404(repo.session, DocumentModel, document_id, name="Document")
     color = _AUTO_COLLECTION_COLORS.get(doc.content_type, "#6366F1")
     col_name = _make_collection_name(doc.title, doc.content_type)
-    col = CollectionModel(
-        id=str(uuid.uuid4()),
-        name=col_name,
-        color=color,
-        auto_document_id=document_id,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
-    )
-    session.add(col)
-    await session.commit()
-    await session.refresh(col)
+    col = await repo.create(name=col_name, color=color, auto_document_id=document_id)
     logger.info("Created auto-collection id=%s for document=%s", col.id, document_id)
     return _to_response(col)
 
@@ -466,9 +425,9 @@ async def migrate_collection_naming(
 @router.get("/{collection_id}", response_model=CollectionResponse)
 async def get_collection(
     collection_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> CollectionResponse:
-    col = await get_or_404(session, CollectionModel, collection_id, name="Collection")
+    col = await repo.get_or_404(collection_id)
     return _to_response(col)
 
 
@@ -476,24 +435,17 @@ async def get_collection(
 async def update_collection(
     collection_id: str,
     req: CollectionUpdateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> CollectionResponse:
-    col = await get_or_404(session, CollectionModel, collection_id, name="Collection")
-
-    if req.name is not None:
-        col.name = normalize_collection_name(req.name)
-    if req.description is not None:
-        col.description = req.description
-    if req.color is not None:
-        col.color = req.color
-    if req.icon is not None:
-        col.icon = req.icon
-    if req.sort_order is not None:
-        col.sort_order = req.sort_order
-    col.updated_at = datetime.now(UTC)
-
-    await session.commit()
-    await session.refresh(col)
+    col = await repo.get_or_404(collection_id)
+    col = await repo.update_fields(
+        col,
+        name=normalize_collection_name(req.name) if req.name is not None else None,
+        description=req.description,
+        color=req.color,
+        icon=req.icon,
+        sort_order=req.sort_order,
+    )
     logger.info("Updated collection id=%s", collection_id)
     return _to_response(col)
 
@@ -501,33 +453,11 @@ async def update_collection(
 @router.delete("/{collection_id}", status_code=204)
 async def delete_collection(
     collection_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> None:
     """Delete a collection. Member rows are removed; items themselves are NOT deleted."""
-    await get_or_404(session, CollectionModel, collection_id, name="Collection")
-
-    # Delete child collections' members first
-    child_ids_result = await session.execute(
-        select(CollectionModel.id).where(CollectionModel.parent_collection_id == collection_id)
-    )
-    child_ids = [row[0] for row in child_ids_result.all()]
-    for child_id in child_ids:
-        await session.execute(
-            delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == child_id)
-        )
-
-    # Delete members of this collection
-    await session.execute(
-        delete(CollectionMemberModel).where(CollectionMemberModel.collection_id == collection_id)
-    )
-
-    # Delete child collections
-    for child_id in child_ids:
-        await session.execute(delete(CollectionModel).where(CollectionModel.id == child_id))
-
-    # Delete the collection itself
-    await session.execute(delete(CollectionModel).where(CollectionModel.id == collection_id))
-    await session.commit()
+    await repo.get_or_404(collection_id)
+    await repo.delete_with_children(collection_id)
     logger.info("Deleted collection id=%s", collection_id)
 
 
@@ -536,35 +466,16 @@ async def delete_collection(
 async def add_members_to_collection(
     collection_id: str,
     req: AddMembersRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> dict:
     """Add members (notes or documents) to a collection. Idempotent."""
-    await get_or_404(session, CollectionModel, collection_id, name="Collection")
+    await repo.get_or_404(collection_id)
 
     member_ids = req.effective_member_ids
     if not member_ids:
-        # Pydantic validation: at least one of member_ids or note_ids required
         raise HTTPException(status_code=422, detail="member_ids or note_ids required")
 
-    added = 0
-    for mid in member_ids:
-        await session.execute(
-            text(
-                "INSERT OR IGNORE INTO collection_members"
-                " (id, member_id, collection_id, member_type, added_at)"
-                " VALUES (:id, :member_id, :collection_id, :member_type, :added_at)"
-            ),
-            {
-                "id": str(uuid.uuid4()),
-                "member_id": mid,
-                "collection_id": collection_id,
-                "member_type": req.member_type,
-                "added_at": datetime.now(UTC).isoformat(),
-            },
-        )
-        added += 1
-
-    await session.commit()
+    added = await repo.add_members(collection_id, member_ids, member_type=req.member_type)
     logger.info("Added %d %ss to collection id=%s", added, req.member_type, collection_id)
     return {"added": added, "collection_id": collection_id}
 
@@ -662,13 +573,7 @@ async def archive_stale_notes(
 async def remove_member_from_collection(
     collection_id: str,
     member_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
 ) -> None:
     """Remove a member (note or document) from a collection."""
-    await session.execute(
-        delete(CollectionMemberModel).where(
-            CollectionMemberModel.collection_id == collection_id,
-            CollectionMemberModel.member_id == member_id,
-        )
-    )
-    await session.commit()
+    await repo.remove_member(collection_id, member_id)

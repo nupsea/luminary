@@ -114,15 +114,17 @@ this file tracks **only what's still pending**. Completed work is in
 - New layer: `backend/app/repos/`. Convention: one repo class per
   entity, owns all `session.execute/add/commit/delete` calls; routers
   depend via `Depends(get_X_repo)` and never touch the session.
-- Proof-of-pattern: `ClipRepo` + `routers/clips.py` migration.
-  - 7 unit tests in `tests/test_clip_repo.py` exercise the repo
-    directly (in-memory engine fixture).
-  - All 6 existing `test_clips_api.py` endpoint tests still pass --
-    HTTP contract unchanged.
-- Fan-out order (next): `AnnotationRepo`, `NoteRepo`, `FlashcardRepo`,
-  `CollectionRepo`, `TagRepo`, `DocumentRepo`. Bigger entities (Note,
-  Flashcard, Document) will need their existing services to also adopt
-  the repo for consistency rather than keeping two paths.
+- Proof-of-pattern + first fan-out:
+  - `ClipRepo` -- 7 unit tests + 6 endpoint contract tests pass.
+  - `AnnotationRepo` -- 4 unit tests + 4 endpoint tests pass.
+  - `CollectionRepo` -- 10 unit tests; 24 existing collection +
+    collection-health endpoint tests pass. (Migrate-naming endpoint
+    keeps inline session ops for now -- one-shot migration with
+    bespoke merge logic.)
+- Fan-out next: `TagRepo`, `NoteRepo`, `FlashcardRepo`, `DocumentRepo`.
+  Bigger entities (Note, Flashcard, Document) will need their existing
+  services to also adopt the repo for consistency rather than keeping
+  two paths.
 
 ### #11 -- God pages
 - `pages/Study.tsx` (2,190), `pages/Notes.tsx` (1,318),
