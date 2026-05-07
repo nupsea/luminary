@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -42,6 +42,7 @@ from app.models import (
     ReviewEventModel,
     SectionModel,
 )
+from app.repos.flashcard_repo import FlashcardRepo, get_flashcard_repo
 from app.schemas.flashcards import (
     ArchiveMasteredResponse,
     BulkDeleteRequest,
@@ -82,7 +83,6 @@ from app.services.flashcards_router_service import (
 )
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 from app.services.llm import LLMUnavailableError
-from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -573,18 +573,14 @@ async def list_flashcard_decks(
 async def export_flashcards_csv(
     document_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> StreamingResponse:
     """Export all flashcards for a document as a CSV download."""
     doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     doc = doc_result.scalar_one_or_none()
     document_title = doc.title if doc else ""
 
-    card_result = await session.execute(
-        select(FlashcardModel)
-        .where(FlashcardModel.document_id == document_id)
-        .order_by(FlashcardModel.created_at.desc())
-    )
-    cards = list(card_result.scalars().all())
+    cards = list(await repo.list_for_document(document_id))
 
     return StreamingResponse(
         iter([_cards_to_csv(cards, document_title)]),
@@ -598,7 +594,7 @@ async def list_flashcards(
     document_id: str,
     section_id: str | None = Query(default=None),
     bloom_level_min: int | None = Query(default=None),
-    session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> list[FlashcardResponse]:
     """List flashcards for a document ordered by created_at desc.
 
@@ -607,34 +603,12 @@ async def list_flashcards(
       bloom_level_min -- only cards with bloom_level >= this value (null bloom cards excluded)
     """
     if section_id is not None:
-        # Join through ChunkModel to filter by section
-        stmt = (
-            select(FlashcardModel, ChunkModel.section_id)
-            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .where(
-                FlashcardModel.document_id == document_id,
-                ChunkModel.section_id == section_id,
-            )
+        rows = await repo.list_for_section(
+            document_id, section_id, bloom_level_min=bloom_level_min
         )
-        if bloom_level_min is not None:
-            stmt = stmt.where(
-                FlashcardModel.bloom_level.is_not(None),
-                FlashcardModel.bloom_level >= bloom_level_min,
-            )
-        stmt = stmt.order_by(FlashcardModel.created_at.desc())
-        result = await session.execute(stmt)
-        return [_to_response(row[0], section_id=row[1]) for row in result.all()]
+        return [_to_response(card, section_id=sid) for card, sid in rows]
 
-    # No section filter — preserve existing no-join path
-    stmt = select(FlashcardModel).where(FlashcardModel.document_id == document_id)
-    if bloom_level_min is not None:
-        stmt = stmt.where(
-            FlashcardModel.bloom_level.is_not(None),
-            FlashcardModel.bloom_level >= bloom_level_min,
-        )
-    stmt = stmt.order_by(FlashcardModel.created_at.desc())
-    result = await session.execute(stmt)
-    cards = result.scalars().all()
+    cards = await repo.list_for_document(document_id, bloom_level_min=bloom_level_min)
     return [_to_response(c) for c in cards]
 
 
@@ -643,9 +617,10 @@ async def update_flashcard(
     card_id: str,
     req: FlashcardUpdateRequest,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> FlashcardResponse:
     """Update a flashcard's question and/or answer. Sets is_user_edited=True."""
-    card = await get_or_404(session, FlashcardModel, card_id, name="Flashcard")
+    card = await repo.get_or_404(card_id)
 
     if req.question is not None:
         card.question = req.question
@@ -655,8 +630,7 @@ async def update_flashcard(
 
     # S184: keep FTS index in sync on question/answer edits
     await _sync_flashcard_fts(card, session)
-    await session.commit()
-    await session.refresh(card)
+    await repo.commit_refresh(card)
     logger.info("Updated flashcard", extra={"card_id": card_id})
     return _to_response(card)
 
@@ -665,14 +639,14 @@ async def update_flashcard(
 async def delete_flashcard(
     card_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> None:
     """Delete a flashcard by ID."""
-    await get_or_404(session, FlashcardModel, card_id, name="Flashcard")
+    await repo.get_or_404(card_id)
 
     # S184: remove from FTS index before deleting
     await _delete_flashcard_fts(card_id, session)
-    await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
-    await session.commit()
+    await repo.delete_by_id(card_id)
     logger.info("Deleted flashcard", extra={"card_id": card_id})
 
 
@@ -680,20 +654,13 @@ async def delete_flashcard(
 async def bulk_delete_flashcards(
     req: BulkDeleteRequest,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> BulkDeleteResponse:
     """Delete multiple flashcards in one call. Keeps FTS index in sync per I-4."""
-    existing = (
-        await session.execute(
-            select(FlashcardModel.id).where(FlashcardModel.id.in_(req.ids))
-        )
-    ).scalars().all()
+    existing = await repo.list_existing_ids_in(req.ids)
     for card_id in existing:
         await _delete_flashcard_fts(card_id, session)
-    if existing:
-        await session.execute(
-            delete(FlashcardModel).where(FlashcardModel.id.in_(existing))
-        )
-    await session.commit()
+    await repo.delete_by_ids(existing)
     logger.info("Bulk deleted flashcards", extra={"count": len(existing)})
     return BulkDeleteResponse(deleted=len(existing))
 
@@ -702,20 +669,14 @@ async def bulk_delete_flashcards(
 async def delete_all_document_flashcards(
     document_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> None:
     """Delete all flashcards for a specific document. Keeps FTS index in sync per I-4."""
-    ids = (
-        await session.execute(
-            select(FlashcardModel.id).where(FlashcardModel.document_id == document_id)
-        )
-    ).scalars().all()
+    ids = await repo.list_ids_for_document(document_id)
     for card_id in ids:
         await _delete_flashcard_fts(card_id, session)
     if ids:
-        await session.execute(
-            delete(FlashcardModel).where(FlashcardModel.document_id == document_id)
-        )
-    await session.commit()
+        await repo.delete_for_document(document_id)
     logger.info(
         "Deleted all flashcards for document",
         extra={"document_id": document_id, "count": len(ids)},
@@ -780,6 +741,7 @@ async def review_flashcard(
 async def get_source_context(
     card_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> SourceContextResponse:
     """Return source passage for a flashcard (for SourceContextPanel on Again/Hard).
 
@@ -790,7 +752,7 @@ async def get_source_context(
       - ChunkModel.section_id is null (chunk not section-assigned)
       - SectionModel row not found for that section_id
     """
-    card = await get_or_404(session, FlashcardModel, card_id, name="Flashcard")
+    card = await repo.get_or_404(card_id)
     if card.chunk_id is None:
         raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
 

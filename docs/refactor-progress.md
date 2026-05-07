@@ -138,7 +138,16 @@ this file tracks **only what's still pending**. Completed work is in
     (mid-transaction flush + FTS/vector/graph fan-out), the dual
     NoteSourceModel/CollectionMember bulk reads inside list_notes,
     flashcard preview/list (other entities), gap_detect, suggest_title.
-- Fan-out next: `FlashcardRepo`, `DocumentRepo`.
+  - `FlashcardRepo` -- 8 unit tests; 52 existing flashcard / FSRS /
+    search / source-context tests pass. Migrated routes: list (with
+    optional bloom + section join), update, delete, bulk_delete,
+    delete_all_document_flashcards, export-csv card load,
+    get_source_context get_or_404. Inline (intentional):
+    create_trace_flashcard (FTS sync mid-tx), list_flashcard_decks
+    (custom GROUP BY + collection-name source-type derivation),
+    review (cross-service FSRS + ReviewEvent + XP), get_source_context
+    chunk/section/doc joins.
+- Fan-out next: `DocumentRepo`.
   Bigger entities (Note, Flashcard, Document) will need their existing
   services to also adopt the repo for consistency rather than keeping
   two paths.
