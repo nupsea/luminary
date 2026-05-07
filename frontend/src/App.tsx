@@ -20,6 +20,7 @@ import { SearchDialog } from "./components/SearchDialog"
 import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
+import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
 // performance. Viz and Monitoring were already lazy -- Chat, Learning, Notes, Study added in S84.
 // S177: Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
@@ -465,11 +466,13 @@ function AppShell() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <GlobalLoadingBar />
-      <BrowserRouter>
-        <AppShell />
-      </BrowserRouter>
-      <Toaster position="bottom-right" richColors />
+      <IngestionTrackerProvider>
+        <GlobalLoadingBar />
+        <BrowserRouter>
+          <AppShell />
+        </BrowserRouter>
+        <Toaster position="bottom-right" richColors />
+      </IngestionTrackerProvider>
     </QueryClientProvider>
   )
 }

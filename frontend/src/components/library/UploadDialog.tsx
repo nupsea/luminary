@@ -1,13 +1,19 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, Upload, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { logger } from "@/lib/logger"
 import { Progress } from "@/components/ui/progress"
 
-import { API_BASE } from "@/lib/config"
+import {
+  type ContentTypeValue,
+  submitFile,
+  submitKindleFile,
+  submitUrl,
+} from "@/lib/ingestionApi"
+import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCore"
 
 const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4", ".epub"]
 
@@ -22,107 +28,38 @@ const STAGE_LABELS: Record<string, string> = {
   complete: "Complete!",
 }
 
+const SLOW_STAGES = new Set(["embedding", "entity_extract"])
+
 const CONTENT_TYPE_OPTIONS = [
-  {
-    value: "book" as const,
-    label: "Book",
-    description: "For novels, non-fiction, full-length documents",
-  },
-  {
-    value: "conversation" as const,
-    label: "Conversation",
-    description: "For chat exports, interviews, meeting transcripts",
-  },
-  {
-    value: "notes" as const,
-    label: "Notes",
-    description: "For personal notes, articles, papers, web clips",
-  },
-  {
-    value: "audio" as const,
-    label: "Audio",
-    description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)",
-  },
-  {
-    value: "video" as const,
-    label: "Video",
-    description: "For lecture recordings, screen captures, video talks (MP4)",
-  },
-  {
-    value: "epub" as const,
-    label: "EPUB",
-    description: "For EPUB e-books (auto-detected from .epub files)",
-  },
+  { value: "book" as const, label: "Book", description: "For novels, non-fiction, full-length documents" },
+  { value: "conversation" as const, label: "Conversation", description: "For chat exports, interviews, meeting transcripts" },
+  { value: "notes" as const, label: "Notes", description: "For personal notes, articles, papers, web clips" },
+  { value: "audio" as const, label: "Audio", description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)" },
+  { value: "video" as const, label: "Video", description: "For lecture recordings, screen captures, video talks (MP4)" },
+  { value: "epub" as const, label: "EPUB", description: "For EPUB e-books (auto-detected from .epub files)" },
 ]
 
-type ContentTypeValue =
-  | "book"
-  | "conversation"
-  | "notes"
-  | "audio"
-  | "video"
-  | "epub"
-  | "tech_book"
-  | "tech_article"
 type DialogTab = "upload" | "paste" | "url"
-type Mode = "idle" | "uploading" | "processing" | "success" | "error"
-
-interface StatusResponse {
-  stage: string
-  progress_pct: number
-  done: boolean
-  error_message: string | null
-}
+// "uploading"  = synchronous HTTP POST in flight (blocks close, brief)
+// "tracking"   = doc accepted by backend, ingestion running in the global tracker
+// "success"    = the doc this dialog launched finished
+// "error"      = upload-time failure (tracker errors are surfaced via toast)
+type Mode = "idle" | "uploading" | "tracking" | "success" | "error"
 
 interface UploadDialogProps {
   open: boolean
   onClose: () => void
 }
 
-async function submitFile(file: File, contentType: ContentTypeValue): Promise<string> {
-  const form = new FormData()
-  form.append("file", file)
-  form.append("content_type", contentType)
-  const res = await fetch(`${API_BASE}/documents/ingest`, { method: "POST", body: form })
-  if (!res.ok) throw new Error("Upload failed")
-  const data = (await res.json()) as { document_id: string }
-  return data.document_id
-}
-
-async function submitKindleFile(file: File): Promise<{ document_ids: string[]; book_count: number }> {
-  const form = new FormData()
-  form.append("file", file)
-  const res = await fetch(`${API_BASE}/documents/ingest-kindle`, { method: "POST", body: form })
-  if (!res.ok) {
-    const data = (await res.json()) as { detail?: string }
-    throw new Error(data.detail ?? "Kindle import failed")
-  }
-  return res.json() as Promise<{ document_ids: string[]; book_count: number }>
-}
-
 function isKindleClippings(filename: string): boolean {
   return /clippings/i.test(filename)
-}
-
-async function submitUrl(url: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/documents/ingest-url`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  })
-  if (!res.ok) {
-    const data = (await res.json()) as { detail?: string }
-    throw new Error(data.detail ?? "Ingestion failed")
-  }
-  const data = (await res.json()) as { document_id: string }
-  return data.document_id
 }
 
 export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { track } = useIngestionTracker()
 
-  // Form state
   const [tab, setTab] = useState<DialogTab>("upload")
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -135,25 +72,31 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [urlError, setUrlError] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Upload progress state
   const [mode, setMode] = useState<Mode>("idle")
-  const [progress, setProgress] = useState(0)
-  const [stageLabel, setStageLabel] = useState("")
-  const [currentStage, setCurrentStage] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [docTitle, setDocTitle] = useState("")
   const [fileSizeMB, setFileSizeMB] = useState(0)
-
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [trackedDocId, setTrackedDocId] = useState<string | null>(null)
   const uploadStartRef = useRef<number>(0)
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function clearPolling() {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current)
-      pollIntervalRef.current = null
+  const trackedJob = useIngestionJob(trackedDocId)
+
+  // Surface tracker errors / completions for the doc this dialog launched.
+  useEffect(() => {
+    if (!trackedJob) return
+    if (trackedJob.status === "complete" && mode === "tracking") {
+      setMode("success")
+      autoCloseTimerRef.current = setTimeout(() => {
+        reset()
+        onClose()
+      }, 3000)
+    } else if (trackedJob.status === "error" && mode === "tracking") {
+      setMode("error")
+      setErrorMessage(trackedJob.errorMessage ?? "Ingestion failed")
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedJob?.status])
 
   function clearAutoClose() {
     if (autoCloseTimerRef.current) {
@@ -162,17 +105,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }
   }
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      clearPolling()
-      clearAutoClose()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useEffect(() => () => clearAutoClose(), [])
 
   function reset() {
-    clearPolling()
     clearAutoClose()
     setSelectedFile(null)
     setUploadType(null)
@@ -184,17 +119,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setUrlError("")
     setTab("upload")
     setMode("idle")
-    setProgress(0)
-    setStageLabel("")
-    setCurrentStage("")
     setErrorMessage("")
     setDocTitle("")
     setFileSizeMB(0)
+    setTrackedDocId(null)
   }
 
   function handleClose() {
-    // Prevent close while upload/processing is active
-    if (mode === "uploading" || mode === "processing") return
+    // Only block close during the brief synchronous upload POST. Once the doc is
+    // accepted by the backend, ingestion runs in the global tracker and the user
+    // is free to dismiss the dialog -- progress surfaces via toasts and the library list.
+    if (mode === "uploading") return
     reset()
     onClose()
   }
@@ -209,7 +144,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const file = e.dataTransfer.files[0]
     if (file && isAccepted(file)) {
       setSelectedFile(file)
-      // Auto-set type for EPUB files
       if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
     }
   }
@@ -218,26 +152,24 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const file = e.target.files?.[0]
     if (file && isAccepted(file)) {
       setSelectedFile(file)
-      // Auto-set type for EPUB files
       if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
     }
   }
 
-  // Time estimate — stage-aware.
-  // Embedding and entity extraction are CPU-bound and can run for many minutes
-  // on large documents. A fixed countdown is misleading for those stages.
-  // Fast early stages (parse, classify, chunk) get a rough countdown.
-  const SLOW_STAGES = new Set(["embedding", "entity_extract"])
+  const progress = mode === "success" ? 100 : trackedJob?.progressPct ?? 0
+  const currentStage = trackedJob?.stage ?? ""
+  const stageLabel = useMemo(() => {
+    if (mode === "uploading") return "Uploading..."
+    if (mode === "success") return "Complete!"
+    if (currentStage) return STAGE_LABELS[currentStage] ?? `Processing (${progress}%)...`
+    return ""
+  }, [mode, currentStage, progress])
 
   function timeEstimate(): string {
-    if (progress >= 95 || mode !== "processing") return ""
+    if (mode !== "tracking" || progress >= 95) return ""
     if (SLOW_STAGES.has(currentStage)) {
-      // Don't show a lying countdown — acknowledge the wait qualitatively.
-      return fileSizeMB > 0.3
-        ? "Large documents can take several minutes here"
-        : "Processing..."
+      return fileSizeMB > 0.3 ? "Large documents can take several minutes here" : "Processing..."
     }
-    // For fast early stages give a rough elapsed-based countdown.
     const totalSec = Math.max(20, 15 + Math.ceil(fileSizeMB * 60))
     const elapsed = Math.ceil((Date.now() - uploadStartRef.current) / 1000)
     const remaining = Math.max(0, totalSec - elapsed)
@@ -246,83 +178,20 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     return `About ${remaining}s remaining`
   }
 
-  function startPolling(docId: string, filename: string, startTime: number) {
-    pollIntervalRef.current = setInterval(() => {
-      void (async () => {
-        try {
-          const res = await fetch(`${API_BASE}/documents/${docId}/status`)
-          if (!res.ok) return
-          const data = (await res.json()) as StatusResponse
-
-          if (data.stage === "error" || data.error_message) {
-            clearPolling()
-            const errMsg = data.error_message ?? "Ingestion failed"
-            logger.error("[Upload] failed", { stage: data.stage, error_message: errMsg, doc_id: docId })
-            setMode("error")
-            setErrorMessage(errMsg)
-            toast.error(errMsg, { id: docId })
-            return
-          }
-
-          const label = STAGE_LABELS[data.stage] ?? `Processing (${data.progress_pct}%)...`
-          logger.info("[Upload] stage", {
-            stage: data.stage,
-            progress_pct: data.progress_pct,
-            doc_id: docId,
-            filename,
-          })
-          setProgress(data.progress_pct)
-          setStageLabel(label)
-          setCurrentStage(data.stage)
-          setMode("processing")
-
-          if (data.done) {
-            clearPolling()
-            const elapsed = Date.now() - startTime
-            logger.info("[Upload] complete", { doc_id: docId, filename, elapsed_ms: elapsed })
-            setProgress(100)
-            setStageLabel("Complete!")
-            setMode("success")
-            toast.success("Document added successfully!", { id: docId })
-            void queryClient.invalidateQueries({ queryKey: ["documents"] })
-            void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
-            // Auto-close after 3 seconds
-            autoCloseTimerRef.current = setTimeout(() => {
-              reset()
-              onClose()
-            }, 3000)
-          }
-        } catch {
-          clearPolling()
-          const errMsg = "Could not reach the server."
-          logger.error("[Upload] failed", { stage: "poll", error_message: errMsg, doc_id: docId })
-          setMode("error")
-          setErrorMessage(errMsg)
-          toast.error(errMsg, { id: docId })
-        }
-      })()
-    }, 2000)
-  }
-
   async function doSubmit(file: File, title: string, contentType: ContentTypeValue) {
-    const startTime = Date.now()
-    uploadStartRef.current = startTime
+    uploadStartRef.current = Date.now()
     const sizeMB = file.size / (1024 * 1024)
     setFileSizeMB(sizeMB)
     setMode("uploading")
-    setProgress(0)
-    setStageLabel("Uploading...")
     setDocTitle(title)
     logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2), content_type: contentType })
 
     try {
       const docId = await submitFile(file, contentType)
       logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId })
-      toast.loading("Processing document...", { id: docId })
-      setMode("processing")
-      setProgress(5)
-      setStageLabel("Parsing document...")
-      startPolling(docId, file.name, startTime)
+      track(docId, title)
+      setTrackedDocId(docId)
+      setMode("tracking")
     } catch {
       const errMsg = "Upload failed. Please try again."
       logger.error("[Upload] failed", { stage: "upload", error_message: errMsg, filename: file.name })
@@ -334,13 +203,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function handleUploadSubmit() {
     if (!selectedFile) return
-
-    // Kindle My Clippings.txt: bypass normal content type selection
     if (isKindleClippings(selectedFile.name)) {
       await doSubmitKindle(selectedFile)
       return
     }
-
     if (!uploadType) {
       setTypeError(true)
       return
@@ -351,23 +217,20 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   }
 
   async function doSubmitKindle(file: File) {
-    const startTime = Date.now()
-    uploadStartRef.current = startTime
+    uploadStartRef.current = Date.now()
     setMode("uploading")
-    setProgress(0)
-    setStageLabel("Uploading Kindle clippings...")
     setDocTitle(file.name)
     logger.info("[Upload] kindle start", { filename: file.name })
     try {
       const result = await submitKindleFile(file)
       const bookCount = result.book_count
       logger.info("[Upload] kindle uploaded", { filename: file.name, book_count: bookCount })
-      setProgress(100)
-      setStageLabel(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""}!`)
-      setMode("success")
-      toast.success(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""} from Kindle clippings`)
+      // Each Kindle book ingests independently in the background; register them all.
+      for (const id of result.document_ids) track(id, `Kindle book (${id.slice(0, 8)})`)
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
       void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      toast.success(`Imported ${bookCount} book${bookCount !== 1 ? "s" : ""} from Kindle clippings`)
+      setMode("success")
       autoCloseTimerRef.current = setTimeout(() => {
         reset()
         onClose()
@@ -388,8 +251,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       return
     }
     setTypeError(false)
-    const filename =
-      pasteLabel.trim().replace(/[^a-z0-9_-]/gi, "_").toLowerCase() + ".txt"
+    const filename = pasteLabel.trim().replace(/[^a-z0-9_-]/gi, "_").toLowerCase() + ".txt"
     const file = new File([pasteText], filename, { type: "text/plain" })
     await doSubmit(file, pasteLabel.trim(), pasteType)
   }
@@ -401,20 +263,15 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       return
     }
     setUrlError("")
-    const startTime = Date.now()
-    uploadStartRef.current = startTime
+    uploadStartRef.current = Date.now()
     setMode("uploading")
-    setProgress(0)
-    setStageLabel("Fetching content...")
     setDocTitle(urlValue)
     logger.info("[Upload] url start", { url: urlValue })
     try {
       const docId = await submitUrl(urlValue)
-      toast.loading("Processing...", { id: docId })
-      setMode("processing")
-      setProgress(5)
-      setStageLabel("Ingesting...")
-      startPolling(docId, urlValue, startTime)
+      track(docId, urlValue)
+      setTrackedDocId(docId)
+      setMode("tracking")
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Ingestion failed."
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
@@ -439,9 +296,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   if (!open) return null
 
-  const isActive = mode === "uploading" || mode === "processing"
+  // Only the synchronous upload POST blocks dialog dismissal. Tracking is
+  // background work owned by the global tracker.
+  const closeBlocked = mode === "uploading"
+  const showProgress = mode === "uploading" || mode === "tracking"
 
-  // Shared RadioGroup for content type selection
   function ContentTypeRadioGroup({
     value,
     onChange,
@@ -492,26 +351,23 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop — click disabled while processing */}
       <div
-        className={cn("absolute inset-0 bg-black/40", isActive ? "cursor-not-allowed" : "")}
+        className={cn("absolute inset-0 bg-black/40", closeBlocked ? "cursor-not-allowed" : "")}
         onClick={handleClose}
       />
 
-      {/* Dialog */}
       <div className="relative z-10 w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-foreground">Add Content</h2>
           <button
             onClick={handleClose}
-            disabled={isActive}
+            disabled={closeBlocked}
             className="text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* ── Success state ── */}
         {mode === "success" && (
           <div className="flex flex-col items-center gap-4 py-6 text-center">
             <CheckCircle2 size={48} className="text-green-500" />
@@ -533,8 +389,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           </div>
         )}
 
-        {/* ── Progress state ── */}
-        {(mode === "uploading" || mode === "processing") && (
+        {showProgress && (
           <div className="flex flex-col gap-4 py-2">
             <Progress value={progress} />
             <div className="flex items-center justify-between text-sm">
@@ -542,12 +397,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               <span className="text-xs text-muted-foreground">{timeEstimate()}</span>
             </div>
             <p className="text-center text-xs text-muted-foreground">
-              Please wait — do not close this window
+              {mode === "uploading"
+                ? "Uploading file — please wait"
+                : "Ingestion runs in the background. You can close this dialog and keep working."}
             </p>
           </div>
         )}
 
-        {/* ── Error state ── */}
         {mode === "error" && (
           <div className="flex flex-col gap-4">
             <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3">
@@ -574,10 +430,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           </div>
         )}
 
-        {/* ── Idle state — tabs and form ── */}
         {mode === "idle" && (
           <>
-            {/* Tabs */}
             <div className="mb-4 flex gap-1 rounded-md bg-muted p-1">
               {(["upload", "paste", "url"] as const).map((t) => (
                 <button
@@ -630,7 +484,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               </div>
             ) : tab === "upload" ? (
               <div className="space-y-4">
-                {/* Content type selector — hidden for auto-detected formats */}
                 {selectedFile && isKindleClippings(selectedFile.name) ? (
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
                     <p className="text-sm font-medium text-amber-800">Kindle clippings detected</p>
@@ -639,13 +492,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     </p>
                   </div>
                 ) : (
-                  <ContentTypeRadioGroup
-                    value={uploadType}
-                    onChange={setUploadType}
-                  />
+                  <ContentTypeRadioGroup value={uploadType} onChange={setUploadType} />
                 )}
 
-                {/* Drop zone */}
                 <div
                   onDragOver={(e) => {
                     e.preventDefault()
@@ -694,11 +543,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Content type selector */}
-                <ContentTypeRadioGroup
-                  value={pasteType}
-                  onChange={setPasteType}
-                />
+                <ContentTypeRadioGroup value={pasteType} onChange={setPasteType} />
 
                 <div>
                   <label className="mb-1 block text-sm font-medium text-foreground">
