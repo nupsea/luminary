@@ -120,7 +120,7 @@ async def test_socratic_node_returns_card():
 
     mock_acompletion = AsyncMock(return_value=mock_response)
     with (
-        patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
+        patch("app.runtime.chat_nodes.socratic.get_retriever", return_value=mock_retriever),
         patch("app.services.llm.litellm.acompletion", new=mock_acompletion),
         patch("app.config.get_settings") as mock_settings,
     ):
@@ -159,7 +159,7 @@ async def test_socratic_parse_fallback():
 
     mock_acompletion2 = AsyncMock(return_value=mock_response)
     with (
-        patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
+        patch("app.runtime.chat_nodes.socratic.get_retriever", return_value=mock_retriever),
         patch("app.services.llm.litellm.acompletion", new=mock_acompletion2),
         patch("app.config.get_settings") as mock_settings,
     ):
@@ -190,7 +190,7 @@ async def test_socratic_ollama_offline():
     mock_retriever.retrieve = AsyncMock(return_value=chunks)
 
     with (
-        patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
+        patch("app.runtime.chat_nodes.socratic.get_retriever", return_value=mock_retriever),
         patch(
             "app.services.llm.litellm.acompletion",
             side_effect=_litellm.ServiceUnavailableError(

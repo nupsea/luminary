@@ -32,6 +32,10 @@ dist/
 backend/app.db
 backend/*.db
 
+# Test-run junk: when a test mocks Settings, the GLiNER downloader
+# materialises the str(MagicMock) path as a real directory tree.
+backend/MagicMock/
+
 # Personal corpus (only shared fixtures under DATA/books/ are tracked)
 DATA/books/frankenstein.txt
 DATA/code/
