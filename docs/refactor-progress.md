@@ -181,8 +181,9 @@ starting a new extraction so we don't re-derive them per phase.
   `noqa: PLC0415` count in `app/runtime/chat_graph.py` and
   `app/runtime/chat_nodes/*.py` for `app.services.graph` drops to 0.
 
-### #6 -- God workflow `runtime/chat_graph.py` (in progress)
-- Was 1,924 lines, now 531. Phases:
+### #6 -- God workflow `runtime/chat_graph.py` (DONE -- 9 phases)
+- Was 1,924 lines, now 322 (-83 %). chat_graph.py is now pure
+  StateGraph wiring + classify/route. Phases:
   - Phase 1: `chat_nodes/_shared.py` -- system-prompt constants
     (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
     `_get_system_prompt` selector, `_chunk_to_dict` / `_round_robin`
@@ -227,11 +228,21 @@ starting a new extraction so we don't re-derive them per phase.
     not direct calls, so no in-router test mocks broke.
     `test_chat_graph_web.py` had 4 patches on
     `chat_graph._fetch_doc_titles_for_chunks` /
-    `_fetch_contradiction_context`; all updated to point at
-    `chat_nodes.synthesize.*`. ruff auto-removed
-    `app.services.retriever`, `ChunkModel`, `DocumentModel`,
-    `select`, `get_session_factory` and other now-unused imports
-    from chat_graph.py. 124 chat/confidence tests pass; ruff clean.
+    `_fetch_contradiction_context`; all updated.
+  - Phase 9: `chat_nodes/confidence.py` -- `confidence_gate_node`,
+    `_route_after_confidence_gate`, `augment_node`, `web_augment_node`.
+    Unlike phases 4-8, these are *imported* (not just re-exported)
+    by chat_graph.py because `build_chat_graph` registers them as
+    StateGraph nodes. Test patches updated:
+    `test_confidence_retry.py` (3) -> `chat_nodes.confidence.get_retriever`,
+    `test_chat_graph_nodes.py` (1) -> same,
+    `test_confidence_fixes.py` (2) -> `chat_nodes.search.get_retriever`
+    + `chat_nodes.search._fetch_section_summaries` (the test was
+    actually exercising search_node from phase 7).
+- **Result:** chat_graph.py 322 lines = StateGraph wiring +
+  classify_node + route_node + _route_after_strategy +
+  build_chat_graph + get_chat_graph. 124 chat/confidence tests
+  pass; ruff clean.
 - **Plan for the remaining 1,565 lines.** Order is by risk, lowest
   first. Each phase is one commit; no phase exceeds ~250 lines moved.
   - **Phase 4 -- `chat_nodes/notes.py`**: `notes_node` (~50 lines) +

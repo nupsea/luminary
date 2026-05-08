@@ -285,9 +285,9 @@ async def test_search_node_caps_multi_doc_chunks(test_db):
     }
 
     with (
-        patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
+        patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever),
         patch(
-            "app.runtime.chat_graph._fetch_section_summaries",
+            "app.runtime.chat_nodes.search._fetch_section_summaries",
             new_callable=AsyncMock,
             return_value={},
         ),

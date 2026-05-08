@@ -703,7 +703,7 @@ async def test_augment_node_sets_transparency_augmented(test_db):
         retry_attempted=False,
     )
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
         result = await augment_node(state)
 
     assert result.get("transparency_augmented") is True, (
