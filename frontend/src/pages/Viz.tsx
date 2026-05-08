@@ -591,6 +591,15 @@ export default function Viz() {
   const [search, setSearch] = useState("")
   // Default to "all" when no document is pre-selected so the graph loads immediately
   const [scope, setScope] = useState<"document" | "all">(activeDocumentId ? "document" : "all")
+
+  // If the effective active doc disappears (e.g. the readiness fallback returns
+  // null because no doc is currently ready), drop scope back to "all" so the
+  // graph loads instead of stranding the user on "No document selected".
+  useEffect(() => {
+    if (!activeDocumentId) {
+      setScope("all")
+    }
+  }, [activeDocumentId])
   // Document picker search filter state
   const [docPickerSearch, setDocPickerSearch] = useState("")
   const [docPickerOpen, setDocPickerOpen] = useState(false)
