@@ -137,8 +137,9 @@ starting a new extraction so we don't re-derive them per phase.
 
 ## Lower priority items from the audit (not yet started)
 
-### #5 -- God class `KuzuService` (in progress -- 657 lines remain)
-- `backend/app/services/graph.py` was 1,793 lines, now 657. Phases 1-5:
+### #5 -- God class `KuzuService` (DONE -- 6 phases)
+- `backend/app/services/graph.py` was 1,793 lines, now 333 (-81 %).
+  Phases 1-6:
   - `KuzuConnection` (db + conn + lock + schema DDL,
     `services/graph_connection.py`).
   - `KuzuPrereqRepo` (`services/graph_prereq.py`, 7 methods).
@@ -153,16 +154,21 @@ starting a new extraction so we don't re-derive them per phase.
     add_version_of, get_entities_by_type, _get_diagram_nodes_by_type,
     upsert_diagram_node, add_diagram_edge, add_depicts_edge,
     get_diagram_nodes_for_document, get_diagram_edges_for_document,
-    _get_tech_relation_edges, get_call_graph). KuzuService delegates
-    via self._tech; the View methods call `self._tech._get_tech_relation_edges`
-    + `self._tech._get_diagram_nodes_by_type` directly until ViewRepo
-    lands in Phase 6.
+    _get_tech_relation_edges, get_call_graph).
+  - `KuzuViewRepo` (`services/graph_view.py`, 6 methods --
+    get_entities_for_documents, get_cross_document_entities,
+    get_graph_for_document, get_graph_for_documents,
+    _get_note_nodes_for_entities, _get_co_occurrence_edges).
+    Constructed with both prereq + concept + tech repos so cross-
+    cutting reads stay encapsulated.
   - KuzuService keeps the public method names and delegates;
     `_db / _conn / _lock` attributes preserved for back-compat
-    (chat_graph reads `service._conn` directly). 50 graph + 293 of
-    295 graph/ingest/chat_graph tests pass after Phase 5 (the 2
-    failures are pre-existing youtube-ingest mocks not caused by
-    this refactor).
+    (chat_graph reads `service._conn` directly). 50 graph + 293
+    of 295 graph/ingest/chat_graph tests pass; the 2 failures are
+    pre-existing youtube-ingest mocks (commit 3315023) unrelated
+    to this refactor.
+- **Result:** services/graph.py 333 lines = facade + delete_document
+  + count_for_document + get_all_document_ids + delegations.
 - **Plan for the remaining 1,280 lines** (in priority order):
   - **Phase 4 -- `KuzuEntityRepo`** (`services/graph_entity.py`).
     Lift the 9 entity-CRUD methods that have *no* coupling to other
