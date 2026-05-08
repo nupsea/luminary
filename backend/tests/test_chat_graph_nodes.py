@@ -250,7 +250,7 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db):
     mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
     mock_retriever.retrieve_with_images = AsyncMock(return_value=([mock_chunk], []))
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever):
         state = _make_state(
             question="What happens in the beginning?",
             doc_ids=[doc_id],
