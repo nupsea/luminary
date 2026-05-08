@@ -496,15 +496,18 @@ starting a new extraction so we don't re-derive them per phase.
 - **Acceptance criteria:** zero `fetch(` in `frontend/src/{pages,
   components}/**`; one error-mapping path; eslint enforces it.
 
-### #13 -- God workflow `workflows/ingestion.py` (NEW -- not on
-original audit)
-- File is 1,832 lines, 11 graph nodes plus 5 helper coroutines plus
-  the `IngestionState` TypedDict and graph wiring. Same shape problem
-  as `chat_graph.py` before audit #6 began.
-- **Plan -- mirror the chat_nodes layout:**
-  1. Create `workflows/ingestion_nodes/_shared.py` for
-     `IngestionState`, `_classify`, `_update_stage`, and the
-     `build_entity_tail` helper that several nodes import.
+### #13 -- God workflow `workflows/ingestion.py` (in progress)
+- Was 1,832 lines, now 1,699. Phase 1 done.
+  - **Phase 1: `ingestion_nodes/_shared.py`** -- extracted
+    `IngestionState`, `ContentType`, `CHUNK_CONFIGS`,
+    `ENTITY_TAIL_MAX`, `STAGE_PROGRESS`, `build_entity_tail`,
+    `_classify`, `_update_stage`, `_parser`. Re-exported from
+    `app.workflows.ingestion` for back-compat with 14+ test imports
+    and the `routers/documents.py` STAGE_PROGRESS consumer. ruff
+    auto-removed `re`, `Literal`, `TypedDict`, `DocumentParser`
+    direct imports from ingestion.py. 107 ingestion tests pass.
+- **Remaining phases (in priority order):**
+  1. ~~Create `workflows/ingestion_nodes/_shared.py`~~ DONE.
   2. One module per node, each ~100-300 lines: `parse.py`,
      `classify.py`, `transcribe.py`, `chunk.py` (the biggest --
      contains `_chunk_book`, `_chunk_tech_book`, `_chunk_conversation`,
