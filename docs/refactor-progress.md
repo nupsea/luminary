@@ -576,17 +576,28 @@ starting a new extraction so we don't re-derive them per phase.
   here too: split each into `<service>.py` (public class) +
   `<service>_strategies.py` (the swappable bits). Otherwise leave.
 
-### #15 -- TypeScript model duplication (NEW)
-- Many `*.ts` files re-declare API response types inline (e.g.
-  `type FlashcardResponse = { id: string; ... }` in 6+ components).
-  When the backend Pydantic schema changes, the frontend silently
-  drifts.
-- **Plan:** auto-generate a `frontend/src/types/api.ts` from the
-  FastAPI OpenAPI schema (`uvx openapi-typescript`); replace inline
-  types with imports. Add a make/justfile target so it runs as part
-  of `npm run check`. Low effort, high payoff -- worth doing
-  before the per-page extractions in #11 so the new sub-components
-  pick up the canonical types.
+### #15 -- TypeScript model duplication (DONE -- generator landed)
+- `frontend/src/types/api.ts` is now auto-generated from the FastAPI
+  OpenAPI schema (15,058 lines covering every route + Pydantic
+  schema). Pipeline:
+  - `backend/tools/dump_openapi.py` -- module-load only, no uvicorn,
+    dumps `app.openapi()` to stdout as JSON.
+  - `frontend/scripts/regen-api-types.sh` -- runs the dumper, pipes
+    to `npx openapi-typescript`, writes the result.
+  - `npm run regen:api-types` and `make regen-api-types` invoke the
+    same pipeline.
+  - `openapi-typescript@^7.13.0` pinned as a devDependency (no `--yes`
+    network round-trip on every regen).
+- Replacing inline `type FlashcardResponse = {...}` re-declarations
+  with `components["schemas"]["FlashcardResponse"]` imports is
+  deferred to feature-module work (each api-module migration in #12
+  picks up the canonical types as it goes). Convention documented
+  in `frontend/src/types/README.md`.
+- `npx tsc --noEmit -p tsconfig.app.json` passes against the
+  generated file with no errors.
+- **Acceptance criteria for full migration** (tracks alongside #12):
+  zero `type FooResponse = {...}` re-declarations of fields that
+  also exist in api.ts.
 
 ## Recommended execution order
 

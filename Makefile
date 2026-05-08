@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean
+.PHONY: dev ci backend frontend lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types
 
 clean:
 	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
@@ -88,3 +88,6 @@ endif
 	cd frontend && npm run build
 	cd frontend && npx tsc --noEmit
 	@echo "CI passed."
+
+regen-api-types:
+	cd frontend && npm run regen:api-types
