@@ -112,7 +112,7 @@ async def get_graph(
     """Return merged nodes and edges for multiple documents.
 
     Pass ?doc_ids=id1,id2,id3 to filter by specific documents.
-    Returns all graph data if doc_ids is empty.
+    Returns the union of all known documents when doc_ids is empty.
     Pass ?include_same_concept=true to include SAME_CONCEPT cross-book edges (S141).
     Pass ?include_notes=true to overlay Note nodes connected to entities in scope (S172).
     """
@@ -120,7 +120,9 @@ async def get_graph(
     if doc_ids:
         ids = [d.strip() for d in doc_ids.split(",") if d.strip()]
     else:
-        ids = []
+        # "all docs" scope -- expand to every Document node known to Kuzu so
+        # the service's per-document MENTIONED_IN scan covers the full graph.
+        ids = svc.get_all_document_ids()
     return svc.get_graph_for_documents(
         ids,
         include_same_concept=include_same_concept,

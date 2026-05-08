@@ -371,6 +371,22 @@ class KuzuService:
     # Delete
     # -------------------------------------------------------------------------
 
+    def get_all_document_ids(self) -> list[str]:
+        """Return every Document.id known to the graph (deduplicated, no order)."""
+        try:
+            result = self._conn.execute("MATCH (d:Document) RETURN d.id")
+            ids: list[str] = []
+            seen: set[str] = set()
+            while result.has_next():
+                did = result.get_next()[0]
+                if did and did not in seen:
+                    seen.add(did)
+                    ids.append(did)
+            return ids
+        except Exception:
+            logger.debug("get_all_document_ids failed", exc_info=True)
+            return []
+
     def delete_document(self, document_id: str) -> None:
         """Remove a Document node and all edges connected to it."""
         # Delete MENTIONED_IN edges to this document
