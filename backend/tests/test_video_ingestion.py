@@ -105,7 +105,7 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
         "_audio_chunks": None,
     }
 
-    with patch("app.workflows.ingestion.shutil.which", return_value=None):
+    with patch("app.workflows.ingestion_nodes.transcribe.shutil.which", return_value=None):
         result = await transcribe_node(state)
 
     assert result["status"] == "error"
@@ -166,7 +166,7 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
     mock_proc.wait = AsyncMock(return_value=0)
 
     with (
-        patch("app.workflows.ingestion.shutil.which", return_value="/usr/bin/ffmpeg"),
+        patch("app.workflows.ingestion_nodes.transcribe.shutil.which", return_value="/usr/bin/ffmpeg"),
         patch(
             "asyncio.create_subprocess_exec",
             AsyncMock(return_value=mock_proc),
