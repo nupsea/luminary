@@ -10,6 +10,7 @@ from app.workflows.ingestion_nodes._shared import (
     STAGE_PROGRESS,  # noqa: F401  re-exported for routers/documents.py
     ContentType,  # noqa: F401  re-exported for back-compat
     IngestionState,
+    _background_tasks,  # noqa: F401  re-exported for tests/test_integration.py
     _classify,  # noqa: F401  re-exported for back-compat (tests import from ingestion)
     _parser,  # noqa: F401  re-exported for back-compat
     _update_stage,
