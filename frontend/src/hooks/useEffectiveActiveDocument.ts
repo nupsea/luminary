@@ -1,11 +1,14 @@
 import { useMemo } from "react"
 import type { DocumentListItem } from "@/components/library/types"
-import { isDocumentReady } from "@/lib/documentReadiness"
+import {
+  type DocumentReadinessShape,
+  isDocumentReady,
+} from "@/lib/documentReadiness"
 import { useAppStore } from "@/store"
 import { useReadyDocuments } from "./useReadyDocuments"
 
 interface EffectiveActiveDocumentResult {
-  /** Active doc if it is ready, else the most recently ready doc, else null. */
+  /** Active doc if it passes the readiness predicate, else fallback, else null. */
   doc: DocumentListItem | null
   /**
    * The doc id that learning surfaces should treat as active, including before
@@ -22,29 +25,44 @@ interface EffectiveActiveDocumentResult {
   isLoading: boolean
 }
 
+interface Options {
+  /**
+   * Custom readiness predicate. Defaults to `isDocumentReady`
+   * (stage === "complete"). Tabs that can render with partial pipeline
+   * output (e.g. Viz only needs Kuzu graph data, populated at the
+   * `entity_extract` stage) pass `hasGraphData` instead.
+   */
+  predicate?: (doc: DocumentReadinessShape | null | undefined) => boolean
+}
+
 /**
  * Returns the document that learning-feature tabs should treat as "active".
  *
  * Logic:
- *   1. If `activeDocumentId` exists and the corresponding doc is ready → use it.
- *   2. Otherwise fall back to `lastReadyDocumentId` (if still ready in the
- *      latest list). This preserves the user's prior ready doc as the working
- *      default while a new ingestion is mid-flight.
- *   3. Otherwise null. Consumers render an empty state ("Pick a document").
+ *   1. If `activeDocumentId` exists and the corresponding doc passes the
+ *      readiness predicate → use it.
+ *   2. Otherwise fall back to `lastReadyDocumentId` (if it still passes the
+ *      predicate in the latest list).
+ *   3. Otherwise the most-recently-accessed doc that passes the predicate.
+ *   4. Otherwise null. Consumers render an empty state ("Pick a document").
  *
  * The library tab is the only surface that should iterate every doc regardless
  * of readiness; everywhere else should consume this hook.
  */
-export function useEffectiveActiveDocument(): EffectiveActiveDocumentResult {
+export function useEffectiveActiveDocument(
+  options: Options = {},
+): EffectiveActiveDocumentResult {
+  const { predicate = isDocumentReady } = options
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const lastReadyDocumentId = useAppStore((s) => s.lastReadyDocumentId)
-  const { allDocs, readyDocs, isLoading } = useReadyDocuments()
+  const { allDocs, isLoading } = useReadyDocuments()
 
   const result = useMemo<EffectiveActiveDocumentResult>(() => {
+    const eligibleDocs = allDocs.filter(predicate)
     const active = activeDocumentId
       ? allDocs.find((d) => d.id === activeDocumentId) ?? null
       : null
-    if (isDocumentReady(active)) {
+    if (predicate(active)) {
       return {
         doc: active,
         effectiveDocumentId: active!.id,
@@ -68,7 +86,7 @@ export function useEffectiveActiveDocument(): EffectiveActiveDocumentResult {
       }
     }
     const fallback = lastReadyDocumentId
-      ? readyDocs.find((d) => d.id === lastReadyDocumentId) ?? null
+      ? eligibleDocs.find((d) => d.id === lastReadyDocumentId) ?? null
       : null
     if (fallback) {
       return {
@@ -79,16 +97,16 @@ export function useEffectiveActiveDocument(): EffectiveActiveDocumentResult {
         isLoading,
       }
     }
-    // Last-resort: most-recently-accessed ready doc, if any.
-    const mostRecent = readyDocs[0] ?? null
+    // Last-resort: most-recently-accessed eligible doc, if any.
+    const mostRecent = eligibleDocs[0] ?? null
     return {
       doc: mostRecent,
       effectiveDocumentId: mostRecent?.id ?? null,
       rawActiveId: activeDocumentId,
-      isFallingBack: mostRecent !== null && active !== null && !isDocumentReady(active),
+      isFallingBack: mostRecent !== null && active !== null && !predicate(active),
       isLoading,
     }
-  }, [activeDocumentId, lastReadyDocumentId, allDocs, readyDocs, isLoading])
+  }, [activeDocumentId, lastReadyDocumentId, allDocs, predicate, isLoading])
 
   return result
 }
