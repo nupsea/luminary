@@ -137,15 +137,21 @@ starting a new extraction so we don't re-derive them per phase.
 
 ## Lower priority items from the audit (not yet started)
 
-### #5 -- God class `KuzuService` (in progress -- 1,280 lines remain)
-- `backend/app/services/graph.py` was 1,793 lines, now 1,280. Phases 1-3:
+### #5 -- God class `KuzuService` (in progress -- 1,076 lines remain)
+- `backend/app/services/graph.py` was 1,793 lines, now 1,076. Phases 1-4:
   - `KuzuConnection` (db + conn + lock + schema DDL,
     `services/graph_connection.py`).
   - `KuzuPrereqRepo` (`services/graph_prereq.py`, 7 methods).
   - `KuzuConceptRepo` (`services/graph_concept.py`, 3 methods).
+  - `KuzuEntityRepo` (`services/graph_entity.py`, 9 methods:
+    upsert_entity, get_entities_by_type_for_document, upsert_document,
+    add_mention, add_co_occurrence, add_relation,
+    get_related_entity_pairs_for_document,
+    get_co_occurring_pairs_for_document, match_entity_by_name).
   - KuzuService keeps the public method names and delegates;
     `_db / _conn / _lock` attributes preserved for back-compat
-    (chat_graph reads `service._conn` directly).
+    (chat_graph reads `service._conn` directly). 177 graph-related
+    tests pass after Phase 4.
 - **Plan for the remaining 1,280 lines** (in priority order):
   - **Phase 4 -- `KuzuEntityRepo`** (`services/graph_entity.py`).
     Lift the 9 entity-CRUD methods that have *no* coupling to other
