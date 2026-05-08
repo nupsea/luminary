@@ -218,12 +218,12 @@ async def test_version_mismatch_prompt_extension_fires_when_web_snippets_present
     # Patch pack_context and DB calls so synthesize_node can run without real DB
     with (
         patch(
-            "app.runtime.chat_graph._fetch_doc_titles_for_chunks",
+            "app.runtime.chat_nodes.synthesize._fetch_doc_titles_for_chunks",
             new_callable=AsyncMock,
             return_value={"doc1": "Python in Practice"},
         ),
         patch(
-            "app.runtime.chat_graph._fetch_contradiction_context",
+            "app.runtime.chat_nodes.synthesize._fetch_contradiction_context",
             new_callable=AsyncMock,
             return_value="",
         ),
@@ -262,12 +262,12 @@ async def test_version_mismatch_prompt_not_added_when_no_web_snippets():
 
     with (
         patch(
-            "app.runtime.chat_graph._fetch_doc_titles_for_chunks",
+            "app.runtime.chat_nodes.synthesize._fetch_doc_titles_for_chunks",
             new_callable=AsyncMock,
             return_value={"doc1": "Python in Practice"},
         ),
         patch(
-            "app.runtime.chat_graph._fetch_contradiction_context",
+            "app.runtime.chat_nodes.synthesize._fetch_contradiction_context",
             new_callable=AsyncMock,
             return_value="",
         ),

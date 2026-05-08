@@ -182,7 +182,7 @@ starting a new extraction so we don't re-derive them per phase.
   `app/runtime/chat_nodes/*.py` for `app.services.graph` drops to 0.
 
 ### #6 -- God workflow `runtime/chat_graph.py` (in progress)
-- Was 1,924 lines, now 864. Phases:
+- Was 1,924 lines, now 531. Phases:
   - Phase 1: `chat_nodes/_shared.py` -- system-prompt constants
     (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
     `_get_system_prompt` selector, `_chunk_to_dict` / `_round_robin`
@@ -218,7 +218,20 @@ starting a new extraction so we don't re-derive them per phase.
     `_fetch_section_summaries` + `_fetch_neighbor_chunks`. One
     `get_retriever` patch in
     `test_search_node_augments_chunks_with_section_summaries` updated.
-    124 chat/confidence tests pass; ruff clean.
+  - Phase 8: `chat_nodes/synthesize.py` -- `synthesize_node`
+    (the largest single body, 245 lines) + three helpers
+    (`_fetch_doc_titles_for_chunks`,
+    `_fetch_section_ids_and_pages_for_chunks`,
+    `_fetch_contradiction_context`). augment_node + web_augment_node
+    invoke synthesize_node via the StateGraph wiring (g.add_edge),
+    not direct calls, so no in-router test mocks broke.
+    `test_chat_graph_web.py` had 4 patches on
+    `chat_graph._fetch_doc_titles_for_chunks` /
+    `_fetch_contradiction_context`; all updated to point at
+    `chat_nodes.synthesize.*`. ruff auto-removed
+    `app.services.retriever`, `ChunkModel`, `DocumentModel`,
+    `select`, `get_session_factory` and other now-unused imports
+    from chat_graph.py. 124 chat/confidence tests pass; ruff clean.
 - **Plan for the remaining 1,565 lines.** Order is by risk, lowest
   first. Each phase is one commit; no phase exceeds ~250 lines moved.
   - **Phase 4 -- `chat_nodes/notes.py`**: `notes_node` (~50 lines) +
