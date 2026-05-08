@@ -71,11 +71,26 @@ export function useEffectiveActiveDocument(
         isLoading,
       }
     }
-    // Optimistic path: while the docs query is still loading we don't yet know
-    // whether the active doc is ready. Surface `activeDocumentId` so first-
-    // paint useState initializers and queries see the user's selection. Once
-    // the query resolves the readiness gate above takes over and either keeps
-    // the doc or falls back below.
+    // Optimistic path: surface `activeDocumentId` whenever the user has one
+    // selected but we cannot positively confirm it fails the readiness
+    // predicate. Two cases land here:
+    //   1) The docs query is still loading.
+    //   2) The query resolved but `allDocs` does not (yet) contain the
+    //      active doc -- e.g. the Viz docs query and useReadyDocuments are
+    //      separate caches with their own staleness.
+    // Without this path an explicit click on a doc that briefly isn't in
+    // `allDocs` collapses to the fallback and the user's choice is lost.
+    // Falling back is reserved for the case where we KNOW the active doc
+    // exists but fails the predicate (handled below).
+    if (activeDocumentId && active === null) {
+      return {
+        doc: null,
+        effectiveDocumentId: activeDocumentId,
+        rawActiveId: activeDocumentId,
+        isFallingBack: false,
+        isLoading,
+      }
+    }
     if (isLoading && activeDocumentId) {
       return {
         doc: null,
