@@ -102,7 +102,7 @@ this file tracks **only what's still pending**. Completed work is in
   KuzuTechRepo (CALLS / IMPLEMENTS / VERSION_OF / Diagram*).
 
 ### #6 -- God workflow `runtime/chat_graph.py` (in progress)
-- Was 1,924 lines, now 1,688. Phases:
+- Was 1,924 lines, now 1,565. Phases:
   - Phase 1: `chat_nodes/_shared.py` -- system-prompt constants
     (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
     `_get_system_prompt` selector, `_chunk_to_dict` / `_round_robin`
@@ -116,12 +116,15 @@ this file tracks **only what's still pending**. Completed work is in
     `test_confidence_fixes.py` patch path updated to point at
     `app.runtime.chat_nodes.summary._fetch_library_executive_summary`
     (the chat_graph re-export is a name binding, not the call site).
-    124 chat/confidence tests pass; ruff clean.
+  - Phase 3: `chat_nodes/graph.py` -- `graph_node` +
+    `_extract_entities_from_question`, `_query_kuzu_for_entity`, and the
+    module-level `_ENTITY_RE` / `_CAPITALIZED_RE` regexes. Re-exported
+    from `chat_graph.py`. `import re` dropped from chat_graph.py (no
+    other use). 124 chat/confidence tests pass; ruff clean.
 - Remaining phases (deferred): move per-node bodies into
-  `chat_nodes/{graph,comparative,search,notes,socratic,
+  `chat_nodes/{comparative,search,notes,socratic,
   synthesize,confidence}.py` with re-exports from chat_graph.py for
-  back-compat (7 test files import node names directly from
-  chat_graph).
+  back-compat.
 
 ### #7 -- 299 `noqa: PLC0415` inline imports
 - Signals circular deps and routers/services importing each other lazily.
