@@ -137,8 +137,8 @@ starting a new extraction so we don't re-derive them per phase.
 
 ## Lower priority items from the audit (not yet started)
 
-### #5 -- God class `KuzuService` (in progress -- 1,076 lines remain)
-- `backend/app/services/graph.py` was 1,793 lines, now 1,076. Phases 1-4:
+### #5 -- God class `KuzuService` (in progress -- 657 lines remain)
+- `backend/app/services/graph.py` was 1,793 lines, now 657. Phases 1-5:
   - `KuzuConnection` (db + conn + lock + schema DDL,
     `services/graph_connection.py`).
   - `KuzuPrereqRepo` (`services/graph_prereq.py`, 7 methods).
@@ -148,10 +148,21 @@ starting a new extraction so we don't re-derive them per phase.
     add_mention, add_co_occurrence, add_relation,
     get_related_entity_pairs_for_document,
     get_co_occurring_pairs_for_document, match_entity_by_name).
+  - `KuzuTechRepo` (`services/graph_tech.py`, 12 methods + the
+    `_TECH_REL_TYPES` class var: add_call_edge, add_tech_relation,
+    add_version_of, get_entities_by_type, _get_diagram_nodes_by_type,
+    upsert_diagram_node, add_diagram_edge, add_depicts_edge,
+    get_diagram_nodes_for_document, get_diagram_edges_for_document,
+    _get_tech_relation_edges, get_call_graph). KuzuService delegates
+    via self._tech; the View methods call `self._tech._get_tech_relation_edges`
+    + `self._tech._get_diagram_nodes_by_type` directly until ViewRepo
+    lands in Phase 6.
   - KuzuService keeps the public method names and delegates;
     `_db / _conn / _lock` attributes preserved for back-compat
-    (chat_graph reads `service._conn` directly). 177 graph-related
-    tests pass after Phase 4.
+    (chat_graph reads `service._conn` directly). 50 graph + 293 of
+    295 graph/ingest/chat_graph tests pass after Phase 5 (the 2
+    failures are pre-existing youtube-ingest mocks not caused by
+    this refactor).
 - **Plan for the remaining 1,280 lines** (in priority order):
   - **Phase 4 -- `KuzuEntityRepo`** (`services/graph_entity.py`).
     Lift the 9 entity-CRUD methods that have *no* coupling to other
