@@ -496,18 +496,39 @@ starting a new extraction so we don't re-derive them per phase.
 - **Acceptance criteria:** zero `fetch(` in `frontend/src/{pages,
   components}/**`; one error-mapping path; eslint enforces it.
 
-### #13 -- God workflow `workflows/ingestion.py` (in progress)
-- Was 1,832 lines, now 1,699. Phase 1 done.
-  - **Phase 1: `ingestion_nodes/_shared.py`** -- extracted
-    `IngestionState`, `ContentType`, `CHUNK_CONFIGS`,
-    `ENTITY_TAIL_MAX`, `STAGE_PROGRESS`, `build_entity_tail`,
-    `_classify`, `_update_stage`, `_parser`. Re-exported from
-    `app.workflows.ingestion` for back-compat with 14+ test imports
-    and the `routers/documents.py` STAGE_PROGRESS consumer. ruff
-    auto-removed `re`, `Literal`, `TypedDict`, `DocumentParser`
-    direct imports from ingestion.py. 107 ingestion tests pass.
-- **Remaining phases (in priority order):**
-  1. ~~Create `workflows/ingestion_nodes/_shared.py`~~ DONE.
+### #13 -- God workflow `workflows/ingestion.py` (DONE -- 7 phases)
+- Was 1,832 lines, now 136 (-93 %). ingestion.py is now pure
+  StateGraph wiring (`_build_graph`, `_route_on_status`,
+  `run_ingestion`). Phases:
+  - Phase 1: `ingestion_nodes/_shared.py` -- `IngestionState`,
+    `ContentType`, `CHUNK_CONFIGS`, `ENTITY_TAIL_MAX`,
+    `STAGE_PROGRESS`, `build_entity_tail`, `_classify`,
+    `_update_stage`, `_parser`. Phase 4 then added
+    `_background_tasks` here (the fire-and-forget GC anchor that
+    chunk + finalize both need).
+  - Phase 2: `ingestion_nodes/parse.py` -- `parse_node` +
+    `classify_node`.
+  - Phase 3: `ingestion_nodes/transcribe.py` -- `transcribe_node` +
+    `_chunk_audio`. Two `mock.patch("app.workflows.ingestion.shutil
+    .which")` sites in `test_video_ingestion.py` updated to
+    `chat_nodes.transcribe.shutil.which`.
+  - Phase 4: `ingestion_nodes/chunk.py` -- the chunker family
+    (~700 lines): `chunk_node` dispatcher + `_chunk_book`,
+    `_chunk_tech_book`, `_chunk_conversation`, `_chunk_code_file`
+    + the `_run_objective_extraction` background helper.
+  - Phase 5: `ingestion_nodes/embed.py` -- `embed_node` +
+    `keyword_index_node`.
+  - Phase 6: `ingestion_nodes/entity_extract.py` -- the largest
+    single body (~290 lines): GLiNER NER + Kuzu writes + S224
+    entity-tail writeback + `_build_call_graph`.
+  - Phase 7: `ingestion_nodes/finalize.py` -- the pipeline tail:
+    `section_summarize_node`, `summarize_node`,
+    `error_finalize_node`, `enrichment_enqueue_node`, plus the
+    `_run_pregenerate` background helper.
+- **Result:** ingestion.py 136 lines = StateGraph wiring +
+  run_ingestion. All 107 ingestion / docs / sections / audio /
+  video / EPUB / entity / conversation tests pass at every phase
+  boundary; ruff clean.
   2. One module per node, each ~100-300 lines: `parse.py`,
      `classify.py`, `transcribe.py`, `chunk.py` (the biggest --
      contains `_chunk_book`, `_chunk_tech_book`, `_chunk_conversation`,
