@@ -60,7 +60,7 @@ def mock_llm_calls():
             new=AsyncMock(side_effect=lambda q, d, **kwargs: d),
         ),
         patch(
-            "app.runtime.chat_graph._decompose_comparison",
+            "app.runtime.chat_nodes.comparative._decompose_comparison",
             new=AsyncMock(return_value={"sides": ["side_a", "side_b"], "topic": "comparison"}),
         ),
     ):
@@ -298,7 +298,7 @@ async def test_comparative_node_interleaves_results(test_db):
     # Return side_a for first call, side_b for second
     mock_retriever.retrieve = AsyncMock(side_effect=[side_a, side_b])
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever):
         state = _make_state(
             question="Compare side_a versus side_b",
             intent="comparative",

@@ -182,7 +182,7 @@ starting a new extraction so we don't re-derive them per phase.
   `app/runtime/chat_nodes/*.py` for `app.services.graph` drops to 0.
 
 ### #6 -- God workflow `runtime/chat_graph.py` (in progress)
-- Was 1,924 lines, now 1,193. Phases:
+- Was 1,924 lines, now 992. Phases:
   - Phase 1: `chat_nodes/_shared.py` -- system-prompt constants
     (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
     `_get_system_prompt` selector, `_chunk_to_dict` / `_round_robin`
@@ -208,7 +208,13 @@ starting a new extraction so we don't re-derive them per phase.
     `test_chat_graph_socratic.py` (3) + `test_chat_graph_teach_back.py`
     (4) updated from `chat_graph.get_retriever` to
     `chat_nodes.socratic.get_retriever`. `LLMUnavailableError` import
-    dropped from chat_graph.py. 96 chat/confidence tests pass.
+    dropped from chat_graph.py.
+  - Phase 6: `chat_nodes/comparative.py` -- `comparative_node` +
+    `_decompose_comparison` + `_resolve_side_to_docs`. Test patches
+    in `test_chat_graph_nodes.py` updated for both
+    `_decompose_comparison` (mock_llm_calls fixture) and
+    `get_retriever` (test_comparative_node_interleaves_results). 124
+    chat/confidence tests pass; ruff clean.
 - **Plan for the remaining 1,565 lines.** Order is by risk, lowest
   first. Each phase is one commit; no phase exceeds ~250 lines moved.
   - **Phase 4 -- `chat_nodes/notes.py`**: `notes_node` (~50 lines) +
