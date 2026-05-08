@@ -9,17 +9,26 @@ Holds the cross-node infrastructure that several nodes import:
 - `_classify` heuristic that picks the content type
 - `_update_stage` async helper that writes the document's stage column
 - `_parser` shared `DocumentParser` instance
+- `_background_tasks` set for fire-and-forget tasks
 
 Re-exported from `app.workflows.ingestion` for back-compat with
 existing test imports.
 """
 
+import asyncio
 import logging
 import re
 from typing import Any, Literal, TypedDict
 
 from app.database import get_session_factory
 from app.services.parser import DocumentParser
+
+# Module-level set holding fire-and-forget background tasks (objective
+# extraction, pregenerate, etc.). All ingestion nodes share this so the
+# tasks aren't garbage-collected mid-execution. Each task should add
+# `_background_tasks.discard` as a done-callback so finished tasks don't
+# accumulate.
+_background_tasks: set[asyncio.Task] = set()
 
 logger = logging.getLogger(__name__)
 
