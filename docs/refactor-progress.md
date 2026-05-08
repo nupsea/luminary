@@ -102,15 +102,23 @@ this file tracks **only what's still pending**. Completed work is in
   KuzuTechRepo (CALLS / IMPLEMENTS / VERSION_OF / Diagram*).
 
 ### #6 -- God workflow `runtime/chat_graph.py` (in progress)
-- Was 1,924 lines. Phase 1: created `runtime/chat_nodes/` package
-  with `_shared.py` containing the system-prompt constants
-  (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
-  the `_get_system_prompt` selector, the `_chunk_to_dict` /
-  `_round_robin` helpers, and the module-level `_background_tasks`
-  registry. `chat_graph.py` now imports them from `_shared`. 91
-  chat_graph tests pass; ruff clean.
+- Was 1,924 lines, now 1,688. Phases:
+  - Phase 1: `chat_nodes/_shared.py` -- system-prompt constants
+    (`_SUMMARY_SYSTEM`, `_RELATIONAL_SYSTEM`, `_COMPARATIVE_SYSTEM`),
+    `_get_system_prompt` selector, `_chunk_to_dict` / `_round_robin`
+    helpers, and `_background_tasks` registry.
+  - Phase 2: `chat_nodes/summary.py` -- `summary_node` + its four DB
+    helpers (`_fetch_single_doc_executive_summary`,
+    `_fetch_all_doc_executive_summaries`,
+    `_fetch_library_executive_summary`,
+    `_generate_library_summary_task`). Re-exported from `chat_graph.py`
+    for back-compat with `from app.runtime.chat_graph import summary_node`.
+    `test_confidence_fixes.py` patch path updated to point at
+    `app.runtime.chat_nodes.summary._fetch_library_executive_summary`
+    (the chat_graph re-export is a name binding, not the call site).
+    124 chat/confidence tests pass; ruff clean.
 - Remaining phases (deferred): move per-node bodies into
-  `chat_nodes/{summary,graph,comparative,search,notes,socratic,
+  `chat_nodes/{graph,comparative,search,notes,socratic,
   synthesize,confidence}.py` with re-exports from chat_graph.py for
   back-compat (7 test files import node names directly from
   chat_graph).

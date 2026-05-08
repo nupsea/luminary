@@ -125,12 +125,12 @@ async def test_library_summary_missing_returns_medium(test_db):
 
     with (
         patch(
-            "app.runtime.chat_graph._fetch_library_executive_summary",
+            "app.runtime.chat_nodes.summary._fetch_library_executive_summary",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "app.runtime.chat_graph.asyncio.create_task",
+            "app.runtime.chat_nodes.summary.asyncio.create_task",
             side_effect=_fake_create_task,
         ) as mock_create_task,
     ):
