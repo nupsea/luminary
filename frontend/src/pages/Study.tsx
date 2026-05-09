@@ -71,19 +71,6 @@ import {
 // Document list for the in-tab picker
 // ---------------------------------------------------------------------------
 
-interface DocListItem {
-  id: string
-  title: string
-  stage: string
-}
-
-async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
-}
-
 import { API_BASE } from "@/lib/config"
 import {
   INSIGHTS_SECTIONS,
@@ -94,105 +81,23 @@ import {
 } from "@/lib/studyUtils"
 import type { FlashcardSearchFilters } from "@/lib/studyUtils"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import type {
+  CoverageReport,
+  DeckHealthReport,
+  DocListItem,
+  DocumentSections,
+  Flashcard,
+  FlashcardSearchResponse,
+  GapResult,
+  SectionItem,
+  StrugglingCard,
+} from "./Study/types"
 
-interface Flashcard {
-  id: string
-  document_id: string
-  chunk_id: string
-  question: string
-  answer: string
-  source_excerpt: string
-  is_user_edited: boolean
-  fsrs_state: string
-  reps: number
-  lapses: number
-  due_date: string | null
-  created_at: string
-  // S137: Bloom's Taxonomy fields
-  flashcard_type: string | null
-  bloom_level: number | null
-  // S154: cloze deletion text with {{term}} markers; null for non-cloze cards
-  cloze_text: string | null
-  // S188: section heading for source grounding display
-  section_heading: string | null
-}
-
-interface SectionItem {
-  id: string
-  heading: string
-  level: number
-  section_order: number
-}
-
-interface DocumentSections {
-  sections: SectionItem[]
-}
-
-interface GapResult {
-  section_heading: string | null
-  weak_card_count: number
-  avg_stability: number
-  sample_questions: string[]
-}
-
-interface StrugglingCard {
-  flashcard_id: string
-  document_id: string | null
-  question: string
-  again_count: number
-  source_section_id: string | null
-}
-
-// S160: Deck health report types
-interface HealthSection {
-  section_id: string
-  section_heading: string
-  card_count: number
-}
-
-interface DeckHealthReport {
-  orphaned: number
-  orphaned_ids: string[]
-  mastered: number
-  mastered_ids: string[]
-  stale: number
-  stale_ids: string[]
-  uncovered_sections: number
-  uncovered_section_ids: string[]
-  hotspot_sections: HealthSection[]
-}
-
-
-// S184: Search response type
-interface FlashcardSearchResponse {
-  items: Flashcard[]
-  total: number
-  page: number
-  page_size: number
-}
-
-// S153: Bloom's taxonomy coverage audit types
-interface BloomGap {
-  section_id: string
-  section_heading: string
-  missing_bloom_levels: number[]
-}
-
-interface BloomSectionStat {
-  section_heading: string
-  by_bloom_level: Record<string, number>
-  has_level_3_plus: boolean
-}
-
-interface CoverageReport {
-  total_cards: number
-  by_bloom_level: Record<string, number>
-  by_section: Record<string, BloomSectionStat>
-  coverage_score: number
-  gaps: BloomGap[]
+async function fetchDocList(): Promise<DocListItem[]> {
+  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { items: DocListItem[] }
+  return data.items ?? []
 }
 
 // StudySessionItem, SessionListResponse, SessionCardDetail moved to @/lib/studyApi.ts
@@ -1422,7 +1327,7 @@ function StrugglingPanel({ documentId }: StrugglingPanelProps) {
 // in @/components/goals/GoalsList. Re-export DocListItem for Progress.tsx.
 // ---------------------------------------------------------------------------
 
-export type { DocListItem }
+export type { DocListItem } from "./Study/types"  // re-exported for Progress.tsx
 
 // SessionHistoryTab replaced by SessionManager component
 
