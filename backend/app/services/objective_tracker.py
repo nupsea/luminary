@@ -3,7 +3,18 @@
 Marks LearningObjectiveModel rows covered based on average FSRS stability
 of non-definition flashcards in the same section_id.
 
-Coverage threshold: avg(fsrs_stability) >= 10.0 days.
+Coverage threshold: avg(fsrs_stability) >= 4.0 days. Lowered from the
+original 10-day threshold (audit C, 2026-05) -- 10 days demanded
+weeks of review cadence before the panel ticked, which made the
+feature feel inert. 4 days is roughly "the learner has seen this
+twice with success" and gives feedback within a normal study run.
+
+Update is also now monotonic: only flips False -> True. The
+auto-tracker never silently un-marks a covered objective, so it
+respects manual toggles (PATCH /documents/{id}/objectives/{id})
+and avoids "I marked it yesterday but today it's gone" thrash if
+a learner has a bad-review day that drops the section average.
+Untoggling is the user's job, via the manual checkbox.
 """
 
 import logging
@@ -15,14 +26,14 @@ from app.database import get_session_factory
 
 logger = logging.getLogger(__name__)
 
-_COVERAGE_THRESHOLD = 10.0  # days
+_COVERAGE_THRESHOLD = 4.0  # days
 
 
 class ObjectiveTrackerService:
     """Compute and persist learning objective coverage for a document."""
 
     async def update_coverage(self, document_id: str) -> None:
-        """Mark objectives covered when section avg stability >= 10 days.
+        """Mark objectives covered when section avg stability >= 4 days.
 
         Opens its own session -- safe to call as a fire-and-forget background
         task after the request session has been committed.
@@ -30,6 +41,10 @@ class ObjectiveTrackerService:
         Cards with NULL flashcard_type are treated as non-definition (included).
         Cards without a valid chunk or section_id are excluded from the average.
         If a section has zero qualifying cards, its objectives stay uncovered.
+
+        Monotonic: an already-covered objective is never reset to False
+        here. Manual toggles via PATCH stay in force; only the learner
+        can un-mark a goal.
         """
         from app.models import ChunkModel, FlashcardModel, LearningObjectiveModel  # noqa: PLC0415
 
@@ -73,9 +88,9 @@ class ObjectiveTrackerService:
 
             changed = 0
             for obj in objs:
-                new_covered = obj.section_id in covered_section_ids
-                if obj.covered != new_covered:
-                    obj.covered = new_covered
+                # Monotonic: only promote False -> True. Never auto-revert.
+                if not obj.covered and obj.section_id in covered_section_ids:
+                    obj.covered = True
                     changed += 1
 
             if changed:

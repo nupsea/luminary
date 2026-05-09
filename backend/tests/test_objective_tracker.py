@@ -1,7 +1,8 @@
 """Tests for ObjectiveTrackerService (S143).
 
 Coverage logic: avg(fsrs_stability) of non-definition flashcards in a section.
-Threshold: 10.0 days.
+Threshold: 4.0 days (lowered from 10.0 in audit C, 2026-05).
+Update is monotonic -- only flips False -> True.
 """
 
 import uuid
@@ -140,7 +141,7 @@ def _make_objective(doc_id: str, section_id: str) -> LearningObjectiveModel:
 
 @pytest.mark.asyncio
 async def test_update_coverage_above_threshold(test_db):
-    """Stabilities [5, 12, 18] -> avg=11.67 -> objective covered."""
+    """Stabilities [5, 12, 18] -> avg=11.67 -> objective covered (well above 4.0)."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     section_id = str(uuid.uuid4())
@@ -174,7 +175,7 @@ async def test_update_coverage_above_threshold(test_db):
 
 @pytest.mark.asyncio
 async def test_update_coverage_below_threshold(test_db):
-    """Stabilities [3, 6, 8] -> avg=5.67 -> objective stays uncovered."""
+    """Stabilities [1, 2, 3] -> avg=2.0 -> objective stays uncovered (below 4.0)."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     section_id = str(uuid.uuid4())
@@ -184,9 +185,9 @@ async def test_update_coverage_below_threshold(test_db):
         session.add(_make_section(doc_id, section_id))
         chunk = _make_chunk(doc_id, section_id)
         session.add(chunk)
+        session.add(_make_card(doc_id, chunk.id, 1.0))
+        session.add(_make_card(doc_id, chunk.id, 2.0))
         session.add(_make_card(doc_id, chunk.id, 3.0))
-        session.add(_make_card(doc_id, chunk.id, 6.0))
-        session.add(_make_card(doc_id, chunk.id, 8.0))
         objective = _make_objective(doc_id, section_id)
         session.add(objective)
         await session.commit()
@@ -236,6 +237,44 @@ async def test_update_coverage_no_flashcards(test_db):
 
 
 @pytest.mark.asyncio
+async def test_update_coverage_is_monotonic(test_db):
+    """A manually-covered objective must NOT be reset to False even when
+    the section's avg stability drops below the threshold. Audit C."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    section_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_section(doc_id, section_id))
+        chunk = _make_chunk(doc_id, section_id)
+        session.add(chunk)
+        # Avg([1.0, 2.0]) = 1.5, well below the 4.0 threshold
+        session.add(_make_card(doc_id, chunk.id, 1.0))
+        session.add(_make_card(doc_id, chunk.id, 2.0))
+        # Objective is *already* covered (e.g. user clicked the manual checkbox)
+        objective = _make_objective(doc_id, section_id)
+        objective.covered = True
+        session.add(objective)
+        await session.commit()
+        obj_id = objective.id
+
+    tracker = ObjectiveTrackerService()
+    await tracker.update_coverage(doc_id)
+
+    async with factory() as session:
+        from sqlalchemy import select
+
+        obj = (
+            await session.execute(
+                select(LearningObjectiveModel).where(LearningObjectiveModel.id == obj_id)
+            )
+        ).scalar_one()
+        # Auto-tracker must respect the manual toggle.
+        assert obj.covered is True
+
+
+@pytest.mark.asyncio
 async def test_update_coverage_excludes_definition_type(test_db):
     """Definition-type flashcards are excluded; avg of remaining below threshold stays uncovered."""
     _, factory, _ = test_db
@@ -249,8 +288,8 @@ async def test_update_coverage_excludes_definition_type(test_db):
         session.add(chunk)
         # High-stability definition card that would tip the average above threshold
         session.add(_make_card(doc_id, chunk.id, 100.0, flashcard_type="definition"))
-        # Low-stability non-definition card
-        session.add(_make_card(doc_id, chunk.id, 4.0, flashcard_type="application"))
+        # Low-stability non-definition card (below the 4.0 threshold)
+        session.add(_make_card(doc_id, chunk.id, 2.0, flashcard_type="application"))
         objective = _make_objective(doc_id, section_id)
         session.add(objective)
         await session.commit()
@@ -267,7 +306,7 @@ async def test_update_coverage_excludes_definition_type(test_db):
                 select(LearningObjectiveModel).where(LearningObjectiveModel.id == obj_id)
             )
         ).scalar_one()
-        # avg([4.0]) = 4.0 < 10.0 -> not covered
+        # avg([2.0]) = 2.0 < 4.0 -> not covered (definition card excluded)
         assert obj.covered is False
 
 
