@@ -59,7 +59,6 @@ import {
 
 import { API_BASE } from "@/lib/config"
 import {
-  INSIGHTS_SECTIONS,
   buildSearchParams,
   buildSmartGenerateParams,
   computeMasteryPct,
@@ -72,14 +71,11 @@ import type {
   DocumentSections,
   Flashcard,
   FlashcardSearchResponse,
-  GapResult,
   SectionItem,
-  StrugglingCard,
 } from "./Study/types"
-import { DeckHealthPanel } from "./Study/DeckHealthPanel"
 import { FlashcardCard } from "./Study/FlashcardCard"
-import { HealthReportPanel } from "./Study/HealthReportPanel"
-import { fragileBarColor } from "./Study/utils"
+import { InsightsAccordion } from "./Study/InsightsAccordion"
+import { WeakAreasPanel } from "./Study/WeakAreasPanel"
 async function fetchDocList(): Promise<DocListItem[]> {
   const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
   if (!res.ok) return []
@@ -108,19 +104,6 @@ async function fetchDocumentSections(documentId: string): Promise<DocumentSectio
   return res.json() as Promise<DocumentSections>
 }
 
-async function fetchGaps(documentId: string): Promise<GapResult[]> {
-  const res = await fetch(`${API_BASE}/study/gaps/${documentId}`)
-  if (!res.ok) return []
-  return res.json() as Promise<GapResult[]>
-}
-
-async function fetchStrugglingCards(documentId: string): Promise<StrugglingCard[]> {
-  const res = await fetch(
-    `${API_BASE}/study/struggling?document_id=${encodeURIComponent(documentId)}`
-  )
-  if (!res.ok) throw new Error("Failed to load struggling cards")
-  return res.json() as Promise<StrugglingCard[]>
-}
 
 // fetchSessions, fetchSessionCards, TeachbackResultItem, fetchSessionTeachbackResults,
 // deleteStudySession moved to @/lib/studyApi.ts and @/components/SessionManager.tsx
@@ -236,108 +219,6 @@ async function generateClozeFlashcards(
 
 // FlashcardCard now lives in pages/Study/FlashcardCard.tsx.
 
-// ---------------------------------------------------------------------------
-// WeakAreasPanel
-// ---------------------------------------------------------------------------
-
-interface WeakAreasPanelProps {
-  documentId: string
-  onSelectSection: (heading: string) => void
-}
-
-function WeakAreasPanel({ documentId, onSelectSection }: WeakAreasPanelProps) {
-  const { data: gaps = [], isLoading } = useQuery<GapResult[]>({
-    queryKey: ["gaps", documentId],
-    queryFn: () => fetchGaps(documentId),
-    staleTime: 30_000,
-  })
-
-  if (isLoading) return null
-  if (gaps.length === 0) return null
-
-  return (
-    <section className="flex flex-col gap-3">
-      <h3 className="text-base font-semibold text-foreground">Weak Areas</h3>
-      <div className="flex flex-col gap-2">
-        {gaps.map((gap, i) => {
-          const pct = Math.min(100, Math.round((gap.avg_stability / 10) * 100))
-          const heading = gap.section_heading ?? "Unsectioned"
-          return (
-            <button
-              key={i}
-              onClick={() => {
-                if (gap.section_heading) onSelectSection(gap.section_heading)
-              }}
-              className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/20 p-3 text-left hover:bg-muted/40 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <span className="flex-1 text-sm font-medium text-foreground">{heading}</span>
-                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                  {gap.weak_card_count} weak
-                </span>
-              </div>
-              {/* Fragility bar */}
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-                <div
-                  className={`h-full rounded-full transition-all ${fragileBarColor(gap.avg_stability)}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="text-xs text-muted-foreground">
-                avg stability: {gap.avg_stability.toFixed(2)}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// InsightsAccordion (S185) -- merged DeckHealthPanel + HealthReportPanel + StrugglingPanel
-// Uses INSIGHTS_SECTIONS constant for section enumeration (load-bearing for tests).
-// ---------------------------------------------------------------------------
-
-interface InsightsAccordionProps {
-  documentId: string
-  cards: Flashcard[]
-}
-
-function InsightsAccordion({ documentId, cards }: InsightsAccordionProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const totalCards = cards.length
-  const masteredPct = Math.round(computeMasteryPct(cards))
-
-  return (
-    <section className="flex flex-col gap-2 rounded-md border border-border bg-card p-4">
-      <button
-        className="flex items-center justify-between text-left"
-        onClick={() => setIsOpen((v) => !v)}
-      >
-        <span className="text-base font-semibold text-foreground">
-          Insights ({totalCards} card{totalCards !== 1 ? "s" : ""}, {masteredPct}% mastered)
-        </span>
-        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
-
-      {isOpen && (
-        <div className="flex flex-col gap-4 pt-2">
-          {/* Sections driven by INSIGHTS_SECTIONS constant */}
-          {INSIGHTS_SECTIONS.includes("health_report") && (
-            <HealthReportPanel documentId={documentId} />
-          )}
-          {INSIGHTS_SECTIONS.includes("bloom_audit") && (
-            <DeckHealthPanel documentId={documentId} />
-          )}
-          {INSIGHTS_SECTIONS.includes("struggling") && (
-            <StrugglingPanel documentId={documentId} />
-          )}
-        </div>
-      )}
-    </section>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // GenerateButton (S185) -- single Generate Cards button with chevron disclosure
@@ -599,84 +480,6 @@ function GenerateButton({
   )
 }
 
-// ---------------------------------------------------------------------------
-// StrugglingPanel
-// ---------------------------------------------------------------------------
-
-interface StrugglingPanelProps {
-  documentId: string
-}
-
-function StrugglingPanel({ documentId }: StrugglingPanelProps) {
-  const navigate = useNavigate()
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
-
-  const { data: cards = [], isLoading, isError } = useQuery<StrugglingCard[], Error>({
-    queryKey: ["struggling", documentId],
-    queryFn: () => fetchStrugglingCards(documentId),
-    enabled: !!documentId,
-  })
-
-  function handleReread(card: StrugglingCard) {
-    if (!card.document_id) return
-    setActiveDocument(card.document_id)
-    if (card.source_section_id) {
-      void navigate(`/?section_id=${encodeURIComponent(card.source_section_id)}`)
-    } else {
-      void navigate("/")
-    }
-  }
-
-  if (!documentId) return null
-
-  return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold text-foreground">Struggling Cards</h2>
-
-      {isLoading ? (
-        <div className="flex flex-col gap-2">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-16 animate-pulse rounded-md bg-muted" />
-          ))}
-        </div>
-      ) : isError ? (
-        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <AlertCircle size={14} />
-          Failed to load struggling cards. Please try refreshing.
-        </div>
-      ) : cards.length === 0 ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">
-          No struggling cards in the last 14 days.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {cards.map((card) => (
-            <div
-              key={card.flashcard_id}
-              className="flex items-start justify-between gap-3 rounded-md border border-border bg-card px-4 py-3"
-            >
-              <div className="flex flex-col gap-1 flex-1 min-w-0">
-                <p className="truncate text-sm text-foreground">{card.question}</p>
-                <span className="inline-flex w-fit items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                  {card.again_count}x Again
-                </span>
-              </div>
-              {card.source_section_id && (
-                <button
-                  onClick={() => handleReread(card)}
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded border border-border px-3 py-1 text-xs text-foreground hover:bg-accent"
-                >
-                  <BookOpen size={12} />
-                  Re-read source
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // (S211) Old document-centric GoalsPanel removed in favour of typed-goals UI
