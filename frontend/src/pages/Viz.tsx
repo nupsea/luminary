@@ -7,10 +7,7 @@ import {
   Filter,
   GitBranch,
   Library,
-  Maximize2,
-  Minus,
   Network,
-  Plus,
   Search,
   StickyNote,
   Tag,
@@ -22,7 +19,6 @@ import type { ErrorInfo, ReactNode } from "react"
 import Sigma from "sigma"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
 import { useNavigate } from "react-router-dom"
-import { Skeleton } from "@/components/ui/skeleton"
 import NodeHexagonProgram from "@/lib/sigma-hexagon"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
@@ -83,7 +79,6 @@ class VizErrorBoundary extends Component<{ children: ReactNode }, { error: strin
 // Constants
 // ---------------------------------------------------------------------------
 
-import { API_BASE } from "@/lib/config"
 import TagGraph from "@/components/TagGraph"
 import NodeSquareProgram from "@/lib/sigma-square"
 import NotePreviewPanel from "@/components/NotePreviewPanel"
@@ -96,7 +91,6 @@ import { NOTE_NODE_COLOR } from "@/lib/noteGraphUtils"
 import { masteryColor } from "./Viz/utils"
 import {
   BLIND_SPOT_COLOR,
-  DEFAULT_COLOR,
   DIAGRAM_NODE_TYPES,
   DIM_COLOR,
   LP_EDGE_COLOR,
@@ -121,6 +115,10 @@ import {
   buildGraph,
   buildLearningPathGraph,
 } from "./Viz/graphBuilders"
+import { CameraControls } from "./Viz/CameraControls"
+import { CanvasOverlays } from "./Viz/CanvasOverlays"
+import { GraphLegend } from "./Viz/GraphLegend"
+import { NodePopover } from "./Viz/NodePopover"
 
 
 // ---------------------------------------------------------------------------
@@ -1024,101 +1022,21 @@ export default function Viz() {
               </div>
             )}
 
-            {/* Learning path states (S117) */}
-            {lpNoInput && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
-                <div className="rounded-2xl bg-muted/30 p-6">
-                  <Zap size={48} className="text-muted-foreground/30" />
-                </div>
-                <p className="text-lg font-semibold text-foreground">Enter a start entity</p>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  Type a concept name in the sidebar and press Enter to view its prerequisite chain.
-                </p>
-              </div>
-            )}
-
-            {lpShowLoading && (
-              <div className="absolute inset-0 flex flex-col gap-4 p-6">
-                <Skeleton className="h-8 w-48" />
-                <Skeleton className="flex-1 w-full rounded-lg" />
-              </div>
-            )}
-
-            {lpShowError && (
-              <div className="absolute inset-0 flex items-center justify-center p-6">
-                <div className="flex flex-col items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-8 py-6 text-sm text-red-700">
-                  <p className="font-semibold">Failed to load learning path</p>
-                  <button
-                    onClick={() => void lpRefetch()}
-                    className="rounded-lg border border-red-300 bg-white px-4 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors"
-                  >
-                    Retry
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {lpShowEmpty && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
-                <div className="rounded-2xl bg-muted/30 p-6">
-                  <Network size={48} className="text-muted-foreground/30" />
-                </div>
-                <p className="text-lg font-semibold text-foreground">
-                  No prerequisite path found for &ldquo;{learningPathStart}&rdquo;
-                </p>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  This entity has no PREREQUISITE_OF edges in this document. Try a different concept.
-                </p>
-              </div>
-            )}
-
-            {!noDocSelected && isLoading && viewMode !== "tags" && (
-              <div className="absolute inset-0 flex flex-col gap-4 p-6">
-                <Skeleton className="h-8 w-48" />
-                <Skeleton className="flex-1 w-full rounded-lg" />
-              </div>
-            )}
-
-            {!noDocSelected && !isLoading && isError && viewMode !== "tags" && (
-              <div className="absolute inset-0 flex items-center justify-center p-6">
-                <div className="flex flex-col items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-8 py-6 text-sm text-red-700">
-                  <p className="font-semibold">Failed to load knowledge graph</p>
-                  <button
-                    onClick={() => void refetch()}
-                    className="rounded-lg border border-red-300 bg-white px-4 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 transition-colors"
-                  >
-                    Retry
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {showEmpty && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
-                <div className="rounded-2xl bg-muted/30 p-6">
-                  <Network size={48} className="text-muted-foreground/30" />
-                </div>
-                <p className="text-lg font-semibold text-foreground">No knowledge graph yet</p>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  Ingest a document first -- entities and relationships will appear here.
-                </p>
-              </div>
-            )}
-
-            {showAllHidden && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
-                <div className="rounded-2xl bg-muted/30 p-6">
-                  <Filter size={48} className="text-muted-foreground/30" />
-                </div>
-                <p className="text-lg font-semibold text-foreground">
-                  All entity types are hidden
-                </p>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  {entityNodeCount} {entityNodeCount === 1 ? "entity" : "entities"} found.
-                  Enable at least one entity type in the sidebar.
-                </p>
-              </div>
-            )}
+            {/* Learning path + knowledge graph state overlays */}
+            <CanvasOverlays
+              lpNoInput={lpNoInput}
+              lpShowLoading={lpShowLoading}
+              lpShowError={lpShowError}
+              lpShowEmpty={Boolean(lpShowEmpty)}
+              learningPathStart={learningPathStart}
+              onLpRetry={() => void lpRefetch()}
+              kgShowLoading={!noDocSelected && isLoading && viewMode !== "tags"}
+              kgShowError={!noDocSelected && !isLoading && isError && viewMode !== "tags"}
+              showEmpty={showEmpty}
+              showAllHidden={showAllHidden}
+              entityNodeCount={entityNodeCount}
+              onKgRetry={() => void refetch()}
+            />
 
             {/* Tag co-occurrence graph (S167) */}
             {viewMode === "tags" && (
@@ -1152,77 +1070,21 @@ export default function Viz() {
             )}
 
             {/* Camera controls (bottom-right) */}
-            {(filteredGraph && filteredGraph.order > 0) || viewMode === "tags" ? (
-              <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
-                <button
-                  onClick={zoomIn}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/90 text-foreground shadow-sm hover:bg-accent transition-all backdrop-blur-sm"
-                  title="Zoom in"
-                >
-                  <Plus size={14} />
-                </button>
-                <button
-                  onClick={zoomOut}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/90 text-foreground shadow-sm hover:bg-accent transition-all backdrop-blur-sm"
-                  title="Zoom out"
-                >
-                  <Minus size={14} />
-                </button>
-                <div className="h-px bg-border/50 mx-1" />
-                <button
-                  onClick={resetCamera}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/90 text-foreground shadow-sm hover:bg-accent transition-all backdrop-blur-sm"
-                  title="Fit to screen"
-                >
-                  <Maximize2 size={14} />
-                </button>
-              </div>
-            ) : null}
+            <CameraControls
+              visible={
+                Boolean(filteredGraph && filteredGraph.order > 0) || viewMode === "tags"
+              }
+              onZoomIn={zoomIn}
+              onZoomOut={zoomOut}
+              onReset={resetCamera}
+            />
 
             {/* Graph legend (bottom-left) -- switches between entity types and retention */}
-            {showRetention && filteredGraph && filteredGraph.order > 0 ? (
-              <div className="absolute bottom-4 left-4 z-10 rounded-xl border border-border bg-background/90 backdrop-blur-sm shadow-sm px-3 py-2.5 max-w-[240px]">
-                <p className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-2">Retention Strength</p>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {([
-                    ["#ef4444", "Critical (<15%)"],
-                    ["#f97316", "Weak (15-40%)"],
-                    ["#84cc16", "Good (40-70%)"],
-                    ["#22c55e", "Strong (>70%)"],
-                    [BLIND_SPOT_COLOR, "No flashcards"],
-                  ] as const).map(([color, label]) => (
-                    <div key={label} className="flex items-center gap-1">
-                      <span
-                        className="inline-block h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: color }}
-                      />
-                      <span className="text-[10px] text-muted-foreground">{label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : graphStats && graphStats.typeCounts.size > 0 ? (
-              <div className="absolute bottom-4 left-4 z-10 rounded-xl border border-border bg-background/90 backdrop-blur-sm shadow-sm px-3 py-2.5 max-w-[200px]">
-                <p className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-2">Legend</p>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {Array.from(graphStats.typeCounts.entries())
-                    .filter(([t]) => t !== "cluster" && t !== "note")
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 8)
-                    .map(([type, count]) => (
-                      <div key={type} className="flex items-center gap-1">
-                        <span
-                          className="inline-block h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: TYPE_COLORS[type as EntityType] ?? DEFAULT_COLOR }}
-                        />
-                        <span className="text-[10px] text-muted-foreground">
-                          {type.toLowerCase().replace(/_/g, " ")} ({count})
-                        </span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ) : null}
+            <GraphLegend
+              showRetention={showRetention}
+              hasGraph={Boolean(filteredGraph && filteredGraph.order > 0)}
+              typeCounts={graphStats?.typeCounts ?? null}
+            />
 
             {/* Note node preview panel (S172) */}
             {selectedNoteId && (
@@ -1234,71 +1096,14 @@ export default function Viz() {
 
             {/* Node click popover */}
             {selectedNode && (
-              <div
-                className="fixed z-50 rounded-2xl border border-border bg-background/95 backdrop-blur-sm shadow-xl p-4 min-w-[200px] max-w-[280px]"
-                style={{ left: selectedNode.screenX + 12, top: selectedNode.screenY - 70 }}
-              >
-                <button
-                  onClick={() => setSelectedNode(null)}
-                  className="absolute top-2 right-2 rounded p-0.5 text-muted-foreground/40 hover:text-foreground transition-colors"
-                >
-                  <X size={12} />
-                </button>
-                <div className="flex items-center gap-2 mb-2">
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                    style={{
-                      backgroundColor: TYPE_COLORS[selectedNode.type as EntityType] ?? DEFAULT_COLOR,
-                    }}
-                  />
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">
-                    {selectedNode.type.replace(/_/g, " ")}
-                  </span>
-                </div>
-                <p className="text-sm font-bold text-foreground mb-1">
-                  {selectedNode.label}
-                </p>
-                {viewMode === "learning_path" && lpBreadcrumb.length > 1 ? (
-                  <div className="mb-3">
-                    <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Prerequisites</p>
-                    <p className="text-xs text-foreground leading-relaxed">
-                      {lpBreadcrumb.join(" -> ")}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground mb-3">
-                    {selectedNode.frequency} {selectedNode.frequency === 1 ? "mention" : "mentions"}
-                  </p>
-                )}
-                {/* Image thumbnail for diagram-derived nodes (S136) */}
-                {selectedNode.source_image_id && (
-                  <div className="mb-3">
-                    <img
-                      src={`${API_BASE}/images/${selectedNode.source_image_id}/raw`}
-                      alt="Source diagram"
-                      className="w-full rounded-lg border border-border object-contain max-h-40"
-                      onError={(e) => {
-                        ;(e.target as HTMLImageElement).style.display = "none"
-                      }}
-                    />
-                  </div>
-                )}
-                <button
-                  onClick={() => {
-                    const docId = activeDocumentId
-                    const entityLabel = selectedNode.label
-                    setSelectedNode(null)
-                    if (docId) {
-                      navigate(`/?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`)
-                    } else {
-                      navigate(`/?search=${encodeURIComponent(entityLabel)}`)
-                    }
-                  }}
-                  className="w-full rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors text-center"
-                >
-                  Find in document
-                </button>
-              </div>
+              <NodePopover
+                node={selectedNode}
+                viewMode={viewMode}
+                lpBreadcrumb={lpBreadcrumb}
+                activeDocumentId={activeDocumentId}
+                onClose={() => setSelectedNode(null)}
+                onNavigate={(p) => navigate(p)}
+              />
             )}
 
             {/* Edge hover tooltip */}
