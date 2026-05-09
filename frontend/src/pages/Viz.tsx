@@ -39,29 +39,19 @@ import {
 } from "@/lib/vizUtils"
 import type { EntityType, ClusterNodeDef } from "@/lib/vizUtils"
 
-// ---------------------------------------------------------------------------
-// Learning path types (S117)
-// ---------------------------------------------------------------------------
-
-interface LearningPathNode {
-  entity_id: string
-  name: string
-  entity_type: string
-  depth: number
-}
-
-interface LearningPathEdge {
-  from_entity: string
-  to_entity: string
-  confidence: number
-}
-
-interface LearningPathData {
-  start_entity: string
-  document_id: string
-  nodes: LearningPathNode[]
-  edges: LearningPathEdge[]
-}
+// Type interfaces moved to pages/Viz/types.ts.
+import type {
+  DocListItem,
+  GraphData,
+  GraphEdge,
+  GraphNode,
+  LearningPathData,
+  LearningPathNode,
+  MasteryConceptItem,
+  MasteryConceptsResponse,
+  SelectedNodeInfo,
+  TagGraphData,
+} from "./Viz/types"
 
 // ---------------------------------------------------------------------------
 // Error boundary
@@ -105,21 +95,14 @@ class VizErrorBoundary extends Component<{ children: ReactNode }, { error: strin
 
 import { API_BASE } from "@/lib/config"
 import TagGraph from "@/components/TagGraph"
-import type { TagNodeData, TagEdgeData } from "@/components/TagGraph"
 import NodeSquareProgram from "@/lib/sigma-square"
 import NotePreviewPanel from "@/components/NotePreviewPanel"
 import { NOTE_NODE_COLOR, noteNodeAttrs } from "@/lib/noteGraphUtils"
 // Sidebar width is set inline (260px) in the flex layout
 
 // ---------------------------------------------------------------------------
-// Tag graph types and fetcher (S167)
+// Tag graph fetcher (S167) -- TagGraphData type moved to ./Viz/types
 // ---------------------------------------------------------------------------
-
-interface TagGraphData {
-  nodes: TagNodeData[]
-  edges: TagEdgeData[]
-  generated_at: number
-}
 
 async function fetchTagGraph(): Promise<TagGraphData> {
   const res = await fetch(`${API_BASE}/tags/graph`)
@@ -128,22 +111,8 @@ async function fetchTagGraph(): Promise<TagGraphData> {
 }
 
 // ---------------------------------------------------------------------------
-// Mastery / retention overlay types and fetcher
+// Mastery / retention overlay fetcher -- types moved to ./Viz/types
 // ---------------------------------------------------------------------------
-
-interface MasteryConceptItem {
-  concept: string
-  mastery: number
-  card_count: number
-  due_soon: number
-  no_flashcards: boolean
-  document_ids: string[]
-}
-
-interface MasteryConceptsResponse {
-  document_ids: string[]
-  concepts: MasteryConceptItem[]
-}
 
 async function fetchMasteryConcepts(docIds: string[]): Promise<MasteryConceptsResponse> {
   const params = docIds.map((id) => `document_ids=${encodeURIComponent(id)}`).join("&")
@@ -190,49 +159,7 @@ const TYPE_COLORS: Record<EntityType, string> = {
 const DEFAULT_COLOR = "#94a3b8"
 const DIM_COLOR = "rgba(200,200,200,0.15)"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface GraphNode {
-  id: string
-  label: string
-  type: string
-  size: number
-  source_image_id?: string  // set for diagram-derived nodes (S136)
-  note_id?: string           // set for Note nodes (S172)
-  outgoing_link_count?: number  // set for Note nodes (S172)
-}
-
-interface GraphEdge {
-  source: string
-  target: string
-  weight: number
-  relation?: string  // e.g. "PREREQUISITE_OF", "CO_OCCURS", "IMPLEMENTS", "SAME_CONCEPT"
-  contradiction?: boolean  // true when SAME_CONCEPT edge has detected contradiction (S141)
-}
-
-interface GraphData {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-}
-
-interface SelectedNodeInfo {
-  id: string
-  label: string
-  type: string
-  frequency: number
-  screenX: number
-  screenY: number
-  source_image_id?: string  // set for diagram-derived nodes (S136)
-}
-
-interface DocListItem {
-  id: string
-  title: string
-  format?: string
-  stage: string
-}
+// Core graph + DocListItem types moved to ./Viz/types.
 
 // ---------------------------------------------------------------------------
 // API helpers
