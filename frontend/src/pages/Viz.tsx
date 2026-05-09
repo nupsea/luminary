@@ -2,10 +2,7 @@ import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-quer
 import { GitBranch, Network, Tag, Zap } from "lucide-react"
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
-import Sigma from "sigma"
-import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
 import { useNavigate } from "react-router-dom"
-import NodeHexagonProgram from "@/lib/sigma-hexagon"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
@@ -61,30 +58,7 @@ class VizErrorBoundary extends Component<{ children: ReactNode }, { error: strin
   }
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-import TagGraph from "@/components/TagGraph"
-import NodeSquareProgram from "@/lib/sigma-square"
-import NotePreviewPanel from "@/components/NotePreviewPanel"
-// Sidebar width is set inline (260px) in the flex layout
-
-// API fetchers moved to pages/Viz/api.ts.
-
-// masteryColor moved to ./Viz/utils. Constants moved to ./Viz/constants.
-import { masteryColor } from "./Viz/utils"
-import {
-  BLIND_SPOT_COLOR,
-  DIAGRAM_NODE_TYPES,
-  DIM_COLOR,
-  LP_EDGE_COLOR,
-} from "./Viz/constants"
-
-// Core graph + DocListItem types moved to ./Viz/types.
-
-// API helpers (fetchGraphData, fetchLearningPath, fetchDocList) moved
-// to pages/Viz/api.ts.
+import { DIAGRAM_NODE_TYPES } from "./Viz/constants"
 import {
   fetchDocList,
   fetchGraphData,
@@ -97,11 +71,9 @@ import {
   buildGraph,
   buildLearningPathGraph,
 } from "./Viz/graphBuilders"
-import { CameraControls } from "./Viz/CameraControls"
-import { CanvasOverlays } from "./Viz/CanvasOverlays"
-import { GraphLegend } from "./Viz/GraphLegend"
 import { HeaderBar } from "./Viz/HeaderBar"
-import { NodePopover } from "./Viz/NodePopover"
+import { useSigma } from "./Viz/useSigma"
+import { VizCanvas } from "./Viz/VizCanvas"
 import { VizSidebar } from "./Viz/VizSidebar"
 
 
@@ -121,10 +93,8 @@ export default function Viz() {
   const queryClient = useQueryClient()
   const mountTime = useRef(Date.now())
 
-  // Raw sigma instance — NOT stored in React state to avoid re-render loops
-  const sigmaRef = useRef<Sigma | null>(null)
-  // The div that sigma renders into
-  const canvasRef = useRef<HTMLDivElement>(null)
+  // Sigma instance + WebGL lifecycle + camera handlers live in the
+  // useSigma hook. canvasRef is what the host <div> spreads.
 
   // Entity type filter state from vizStore (persisted to localStorage) (S181)
   const { activeEntityTypes: activeTypes, toggleEntityType, selectAllEntityTypes, deselectAllEntityTypes } = useVizStore()
@@ -340,221 +310,25 @@ export default function Viz() {
     return buildGraph(visibleNodes, visibleEdges)
   }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook, showNotes, clusterViewEnabled, expandedClusters])
 
-  // ---------------------------------------------------------------------------
-  // Core effect: mount/update raw Sigma instance when filteredGraph changes
-  // ---------------------------------------------------------------------------
-
-  // Track whether we need to rebuild sigma after a WebGL context restore
-  const pendingRestoreRef = useRef(false)
-
-  useEffect(() => {
-    const el = canvasRef.current
-    if (!el) return
-
-    // Keep previous sigma alive during loading transitions (filteredGraph = null)
-    if (!filteredGraph) return
-    
-    // Destroy previous instance
-    if (sigmaRef.current) {
-      sigmaRef.current.kill()
-      sigmaRef.current = null
-    }
-
-    if (filteredGraph.order === 0) {
-      el.innerHTML = ""
-      return
-    }
-
-    // Delay initialization slightly to ensure WebGL context from killed instance is fully reclaimed
-    const timer = setTimeout(() => {
-      // Re-check el exists in timeout
-      const currentEl = canvasRef.current
-      if (!currentEl) return
-
-      // Clean container explicitly
-      currentEl.innerHTML = ""
-
-      const s = new Sigma(filteredGraph, currentEl, {
-        renderEdgeLabels: false,
-        defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
-        labelSize: 12,
-        labelWeight: "normal",
-        nodeProgramClasses: {
-          hexagon: NodeHexagonProgram as any,
-          square: NodeSquareProgram as any,
-        },
-        allowInvalidContainer: true,
-      })
-
-      // WebGL context lost/restored handlers
-      const canvases = currentEl.querySelectorAll("canvas")
-      const handleContextLost = (e: Event) => {
-        e.preventDefault()
-        logger.warn("[Viz] WebGL context lost -- will restore on recovery")
-        pendingRestoreRef.current = true
-      }
-      const handleContextRestored = () => {
-        logger.info("[Viz] WebGL context restored -- refreshing sigma")
-        pendingRestoreRef.current = false
-        try { s.refresh() } catch { logger.warn("[Viz] sigma refresh failed") }
-      }
-      canvases.forEach((c) => {
-        c.addEventListener("webglcontextlost", handleContextLost)
-        c.addEventListener("webglcontextrestored", handleContextRestored)
-      })
-
-      s.on("clickNode", (payload: SigmaNodeEventPayload) => {
-        const { node, event } = payload
-        const entityType = filteredGraph.getNodeAttribute(node, "entityType") as string
-
-        const isCluster = filteredGraph.getNodeAttribute(node, "isCluster") as boolean | undefined
-        if (isCluster) {
-          const clusterEntityType = filteredGraph.getNodeAttribute(node, "clusterEntityType") as string
-          setExpandedClusters((prev) => {
-            const next = new Set(prev)
-            if (next.has(clusterEntityType)) next.delete(clusterEntityType)
-            else next.add(clusterEntityType)
-            return next
-          })
-          event.preventSigmaDefault()
-          return
-        }
-
-        if (entityType === "note") {
-          const noteId = (filteredGraph.getNodeAttribute(node, "note_id") as string | undefined) ?? node
-          setSelectedNode(null)
-          setSelectedNoteId(noteId)
-          event.preventSigmaDefault()
-          return
-        }
-
-        const pos = s.graphToViewport({
-          x: filteredGraph.getNodeAttribute(node, "x") as number,
-          y: filteredGraph.getNodeAttribute(node, "y") as number,
-        })
-        const rect = currentEl.getBoundingClientRect()
-        setSelectedNoteId(null)
-        setSelectedNode({
-          id: node,
-          label: filteredGraph.getNodeAttribute(node, "label") as string,
-          type: entityType,
-          frequency: filteredGraph.getNodeAttribute(node, "frequency") as number,
-          screenX: rect.left + pos.x,
-          screenY: rect.top + pos.y,
-          source_image_id: (filteredGraph.getNodeAttribute(node, "source_image_id") as string | undefined) ?? "",
-        })
-        event.preventSigmaDefault()
-      })
-
-      s.on("enterEdge", (payload: SigmaEdgeEventPayload) => {
-        const edgeType = (filteredGraph.getEdgeAttribute(payload.edge, "type") as string | undefined) ?? "CO_OCCURS"
-        setEdgeTooltip(edgeType)
-      })
-      s.on("leaveEdge", () => setEdgeTooltip(null))
-
-      s.on("clickStage", () => {
-        setSelectedNode(null)
-        setSelectedNoteId(null)
-      })
-
-      sigmaRef.current = s
-    }, 100)
-
-    return () => {
-      clearTimeout(timer)
-      if (sigmaRef.current) {
-        sigmaRef.current.kill()
-        sigmaRef.current = null
-      }
-      if (el) el.innerHTML = ""
-    }
-  }, [filteredGraph])
-
-  // ---------------------------------------------------------------------------
-  // Combined search + retention overlay effect
-  // Both use sigma nodeReducer so they must be composed in a single effect.
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    const s = sigmaRef.current
-    if (!s) return
-
-    const q = search?.toLowerCase() ?? ""
-    const hasSearch = q.length > 0
-    const hasRetention = showRetention && masteryMap.size > 0
-
-    if (!hasSearch && !hasRetention) {
-      s.setSetting("nodeReducer", null)
-      s.setSetting("edgeReducer", null)
-      return
-    }
-
-    s.setSetting("nodeReducer", (_node: string, d: Record<string, unknown>) => {
-      const label = ((d.label as string) ?? "")
-      const labelLower = label.toLowerCase()
-
-      // Search dimming takes priority
-      if (hasSearch && !labelLower.includes(q)) {
-        return { ...d, color: DIM_COLOR, label: "" }
-      }
-
-      // Retention coloring (skip note/cluster nodes)
-      if (hasRetention) {
-        const entityType = d.entityType as string
-        if (entityType === "note" || entityType === "cluster") return d
-        const entry = masteryMap.get(labelLower)
-        if (!entry || entry.no_flashcards) {
-          return { ...d, color: BLIND_SPOT_COLOR }
-        }
-        return { ...d, color: masteryColor(entry.mastery) }
-      }
-
-      return d
-    })
-
-    s.setSetting("edgeReducer", hasSearch
-      ? (_edge: string, d: Record<string, unknown>) => ({ ...d, color: DIM_COLOR })
-      : null,
-    )
-
-    // Pan to first matching node on search
-    if (hasSearch) {
-      const graph = s.getGraph()
-      const firstMatch = graph.nodes().find((n) => {
-        const lbl = (graph.getNodeAttribute(n, "label") as string) ?? ""
-        return lbl.toLowerCase().includes(q)
-      })
-      if (firstMatch) {
-        s.getCamera().animate(
-          {
-            x: graph.getNodeAttribute(firstMatch, "x") as number,
-            y: graph.getNodeAttribute(firstMatch, "y") as number,
-            ratio: 0.5,
-          },
-          { duration: 500 },
-        )
-      }
-    }
-  }, [search, filteredGraph, showRetention, masteryMap]) // re-apply after sigma rebuilds
-
-  // ---------------------------------------------------------------------------
-  // Camera controls
-  // ---------------------------------------------------------------------------
-  const zoomIn = () => {
-    const s = sigmaRef.current
-    if (!s) return
-    s.getCamera().animate({ ratio: s.getCamera().ratio / 1.5 }, { duration: 300 })
-  }
-  const zoomOut = () => {
-    const s = sigmaRef.current
-    if (!s) return
-    s.getCamera().animate({ ratio: s.getCamera().ratio * 1.5 }, { duration: 300 })
-  }
-  const resetCamera = () => {
-    sigmaRef.current?.getCamera().animate(
-      { x: 0.5, y: 0.5, ratio: 1, angle: 0 },
-      { duration: 300 },
-    )
-  }
+  // Sigma instance lifecycle (rebuild on graph change, click/hover wiring,
+  // search + retention reducers, camera controls). See pages/Viz/useSigma.
+  const { canvasRef, zoomIn, zoomOut, resetCamera } = useSigma({
+    filteredGraph,
+    viewMode,
+    search,
+    showRetention,
+    masteryMap,
+    onSelectNode: setSelectedNode,
+    onSelectNoteId: setSelectedNoteId,
+    onEdgeHover: setEdgeTooltip,
+    onClusterToggle: (clusterEntityType) =>
+      setExpandedClusters((prev) => {
+        const next = new Set(prev)
+        if (next.has(clusterEntityType)) next.delete(clusterEntityType)
+        else next.add(clusterEntityType)
+        return next
+      }),
+  })
 
   // ---------------------------------------------------------------------------
   // Render helpers
@@ -682,119 +456,42 @@ export default function Viz() {
             setClusterViewEnabled={setClusterViewEnabled}
           />
 
-          {/* ---- Graph area ---- */}
-          <div className="flex-1 relative" style={{ minWidth: 0 }}>
-            {/* State overlays */}
-
-            {noDocSelected && viewMode !== "tags" && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center p-6">
-                <div className="rounded-2xl bg-muted/30 p-6">
-                  <Network size={48} className="text-muted-foreground/30" />
-                </div>
-                <p className="text-lg font-semibold text-foreground">No document selected</p>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  Switch to &ldquo;All docs&rdquo; to explore the full knowledge graph, or pick a document from the header.
-                </p>
-                <button
-                  onClick={() => setScope("all")}
-                  className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
-                >
-                  Show all documents
-                </button>
-              </div>
-            )}
-
-            {/* Learning path + knowledge graph state overlays */}
-            <CanvasOverlays
-              lpNoInput={lpNoInput}
-              lpShowLoading={lpShowLoading}
-              lpShowError={lpShowError}
-              lpShowEmpty={Boolean(lpShowEmpty)}
-              learningPathStart={learningPathStart}
-              onLpRetry={() => void lpRefetch()}
-              kgShowLoading={!noDocSelected && isLoading && viewMode !== "tags"}
-              kgShowError={!noDocSelected && !isLoading && isError && viewMode !== "tags"}
-              showEmpty={showEmpty}
-              showAllHidden={showAllHidden}
-              entityNodeCount={entityNodeCount}
-              onKgRetry={() => void refetch()}
-            />
-
-            {/* Tag co-occurrence graph (S167) */}
-            {viewMode === "tags" && (
-              <div className="absolute inset-0">
-                <TagGraph
-                  nodes={tagGraphData?.nodes ?? []}
-                  edges={tagGraphData?.edges ?? []}
-                  isLoading={tagGraphLoading}
-                  isError={tagGraphError}
-                  onRetry={() => void tagGraphRefetch()}
-                />
-              </div>
-            )}
-
-            {/* Sigma canvas */}
-            <div
-              ref={canvasRef}
-              style={{ width: "100%", height: "100%", display: viewMode === "tags" ? "none" : "block" }}
-            />
-
-            {/* Interaction hint overlay */}
-            {filteredGraph && filteredGraph.order > 0 && (
-              <div
-                className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-pulse"
-                style={{ animationIterationCount: 3, animationDuration: "1.5s" }}
-              >
-                <div className="rounded-full bg-foreground/80 px-4 py-1.5 text-[11px] font-medium text-background backdrop-blur-sm shadow-lg">
-                  Scroll to zoom  --  Click node to explore  --  Drag to pan
-                </div>
-              </div>
-            )}
-
-            {/* Camera controls (bottom-right) */}
-            <CameraControls
-              visible={
-                Boolean(filteredGraph && filteredGraph.order > 0) || viewMode === "tags"
-              }
-              onZoomIn={zoomIn}
-              onZoomOut={zoomOut}
-              onReset={resetCamera}
-            />
-
-            {/* Graph legend (bottom-left) -- switches between entity types and retention */}
-            <GraphLegend
-              showRetention={showRetention}
-              hasGraph={Boolean(filteredGraph && filteredGraph.order > 0)}
-              typeCounts={graphStats?.typeCounts ?? null}
-            />
-
-            {/* Note node preview panel (S172) */}
-            {selectedNoteId && (
-              <NotePreviewPanel
-                noteId={selectedNoteId}
-                onClose={() => setSelectedNoteId(null)}
-              />
-            )}
-
-            {/* Node click popover */}
-            {selectedNode && (
-              <NodePopover
-                node={selectedNode}
-                viewMode={viewMode}
-                lpBreadcrumb={lpBreadcrumb}
-                activeDocumentId={activeDocumentId}
-                onClose={() => setSelectedNode(null)}
-                onNavigate={(p) => navigate(p)}
-              />
-            )}
-
-            {/* Edge hover tooltip */}
-            {edgeTooltip && (
-              <div className="absolute bottom-14 right-4 rounded-lg bg-foreground/90 px-3 py-1.5 text-[11px] font-medium text-background z-10 backdrop-blur-sm shadow-sm">
-                {edgeTooltip.replace(/_/g, " ")}
-              </div>
-            )}
-          </div>
+          <VizCanvas
+            canvasRef={canvasRef}
+            filteredGraph={filteredGraph}
+            viewMode={viewMode}
+            tagGraphData={tagGraphData}
+            tagGraphLoading={tagGraphLoading}
+            tagGraphError={tagGraphError}
+            onTagGraphRetry={() => void tagGraphRefetch()}
+            noDocSelected={noDocSelected}
+            onShowAll={() => setScope("all")}
+            lpNoInput={lpNoInput}
+            lpShowLoading={lpShowLoading}
+            lpShowError={lpShowError}
+            lpShowEmpty={Boolean(lpShowEmpty)}
+            learningPathStart={learningPathStart}
+            onLpRetry={() => void lpRefetch()}
+            kgIsLoading={isLoading}
+            kgIsError={isError}
+            showEmpty={showEmpty}
+            showAllHidden={showAllHidden}
+            entityNodeCount={entityNodeCount}
+            onKgRetry={() => void refetch()}
+            zoomIn={zoomIn}
+            zoomOut={zoomOut}
+            resetCamera={resetCamera}
+            showRetention={showRetention}
+            graphStats={graphStats}
+            selectedNoteId={selectedNoteId}
+            onCloseNotePreview={() => setSelectedNoteId(null)}
+            selectedNode={selectedNode}
+            onCloseNode={() => setSelectedNode(null)}
+            lpBreadcrumb={lpBreadcrumb}
+            activeDocumentId={activeDocumentId}
+            onNavigate={(p) => navigate(p)}
+            edgeTooltip={edgeTooltip}
+          />
         </div>
       </div>
     </VizErrorBoundary>
