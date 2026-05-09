@@ -77,6 +77,7 @@ import {
   generateTechnicalFlashcards,
   updateFlashcard,
 } from "./Study/api"
+import { DocPicker } from "./Study/DocPicker"
 import { FlashcardCard } from "./Study/FlashcardCard"
 import { InsightsAccordion } from "./Study/InsightsAccordion"
 import { GenerateButton } from "./Study/GenerateButton"
@@ -93,35 +94,7 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 
 // SessionHistoryTab replaced by SessionManager component
 
-// ---------------------------------------------------------------------------
-// DocPicker
-// ---------------------------------------------------------------------------
-
-function DocPicker({ 
-  docs, 
-  activeId, 
-  onSelect 
-}: { 
-  docs: DocListItem[], 
-  activeId: string | null, 
-  onSelect: (id: string | null) => void 
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <BookOpen size={16} className="text-muted-foreground" />
-      <select
-        value={activeId || ""}
-        onChange={(e) => onSelect(e.target.value || null)}
-        className="h-9 min-w-[200px] rounded-full border border-border bg-card px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-foreground transition-all hover:border-primary/50 focus:border-primary focus:outline-none"
-      >
-        <option value="">- SELECT STANDALONE DOC -</option>
-        {docs.map((d) => (
-          <option key={d.id} value={d.id}>{d.title.toUpperCase()}</option>
-        ))}
-      </select>
-    </div>
-  )
-}
+// DocPicker now lives in pages/Study/DocPicker.tsx.
 
 // ---------------------------------------------------------------------------
 // FlashcardManager (Standalone view for document-centric study)
