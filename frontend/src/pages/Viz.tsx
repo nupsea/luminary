@@ -41,16 +41,12 @@ import type { EntityType, ClusterNodeDef } from "@/lib/vizUtils"
 
 // Type interfaces moved to pages/Viz/types.ts.
 import type {
-  DocListItem,
-  GraphData,
   GraphEdge,
   GraphNode,
   LearningPathData,
   LearningPathNode,
   MasteryConceptItem,
-  MasteryConceptsResponse,
   SelectedNodeInfo,
-  TagGraphData,
 } from "./Viz/types"
 
 // ---------------------------------------------------------------------------
@@ -100,26 +96,7 @@ import NotePreviewPanel from "@/components/NotePreviewPanel"
 import { NOTE_NODE_COLOR, noteNodeAttrs } from "@/lib/noteGraphUtils"
 // Sidebar width is set inline (260px) in the flex layout
 
-// ---------------------------------------------------------------------------
-// Tag graph fetcher (S167) -- TagGraphData type moved to ./Viz/types
-// ---------------------------------------------------------------------------
-
-async function fetchTagGraph(): Promise<TagGraphData> {
-  const res = await fetch(`${API_BASE}/tags/graph`)
-  if (!res.ok) throw new Error("Failed to fetch tag graph")
-  return res.json() as Promise<TagGraphData>
-}
-
-// ---------------------------------------------------------------------------
-// Mastery / retention overlay fetcher -- types moved to ./Viz/types
-// ---------------------------------------------------------------------------
-
-async function fetchMasteryConcepts(docIds: string[]): Promise<MasteryConceptsResponse> {
-  const params = docIds.map((id) => `document_ids=${encodeURIComponent(id)}`).join("&")
-  const res = await fetch(`${API_BASE}/mastery/concepts?${params}`)
-  if (!res.ok) return { document_ids: docIds, concepts: [] }
-  return res.json() as Promise<MasteryConceptsResponse>
-}
+// API fetchers moved to pages/Viz/api.ts.
 
 /** Map mastery score to a color for the retention overlay. */
 function masteryColor(mastery: number): string {
@@ -161,42 +138,15 @@ const DIM_COLOR = "rgba(200,200,200,0.15)"
 
 // Core graph + DocListItem types moved to ./Viz/types.
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
-async function fetchGraphData(
-  documentId: string | null,
-  scope: "document" | "all",
-  viewMode: "knowledge_graph" | "call_graph",
-  showCrossBook: boolean = false,
-  includeNotes: boolean = false,
-): Promise<GraphData> {
-  const url =
-    scope === "document" && documentId
-      ? `${API_BASE}/graph/${documentId}?type=${viewMode}&include_notes=${includeNotes}`
-      : `${API_BASE}/graph?doc_ids=&include_same_concept=${showCrossBook}&include_notes=${includeNotes}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("Failed to fetch graph data")
-  return res.json() as Promise<GraphData>
-}
-
-async function fetchLearningPath(
-  documentId: string,
-  startEntity: string,
-): Promise<LearningPathData> {
-  const url = `${API_BASE}/graph/learning-path?document_id=${encodeURIComponent(documentId)}&start_entity=${encodeURIComponent(startEntity)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("Failed to fetch learning path")
-  return res.json() as Promise<LearningPathData>
-}
-
-async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
-}
+// API helpers (fetchGraphData, fetchLearningPath, fetchDocList) moved
+// to pages/Viz/api.ts.
+import {
+  fetchDocList,
+  fetchGraphData,
+  fetchLearningPath,
+  fetchMasteryConcepts,
+  fetchTagGraph,
+} from "./Viz/api"
 
 // ---------------------------------------------------------------------------
 // Graph builder
