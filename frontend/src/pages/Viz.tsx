@@ -98,43 +98,21 @@ import { NOTE_NODE_COLOR, noteNodeAttrs } from "@/lib/noteGraphUtils"
 
 // API fetchers moved to pages/Viz/api.ts.
 
-/** Map mastery score to a color for the retention overlay. */
-function masteryColor(mastery: number): string {
-  if (mastery >= 0.7) return "#22c55e"   // green-500: strong
-  if (mastery >= 0.4) return "#84cc16"   // lime-500: good
-  if (mastery >= 0.15) return "#f97316"  // orange-500: weak
-  return "#ef4444"                        // red-500: critical
-}
-
-const BLIND_SPOT_COLOR = "#94a3b8" // slate-400: no flashcards
-
-// Diagram-derived node types that use the hexagon renderer (S136)
-const DIAGRAM_NODE_TYPES: ReadonlySet<string> = new Set(["COMPONENT", "ACTOR", "ENTITY_DM", "STEP"])
-
-const TYPE_COLORS: Record<EntityType, string> = {
-  PERSON: "#3b82f6",
-  ORGANIZATION: "#8b5cf6",
-  PLACE: "#10b981",
-  CONCEPT: "#f59e0b",
-  EVENT: "#ef4444",
-  TECHNOLOGY: "#06b6d4",
-  DATE: "#6b7280",
-  // Tech-specific types (S135)
-  LIBRARY: "#0ea5e9",
-  DESIGN_PATTERN: "#d946ef",
-  ALGORITHM: "#f97316",
-  DATA_STRUCTURE: "#84cc16",
-  PROTOCOL: "#a78bfa",
-  API_ENDPOINT: "#fb7185",
-  // Diagram-derived types (S136)
-  COMPONENT: "#14b8a6",   // teal-500
-  ACTOR: "#f43f5e",       // rose-500
-  ENTITY_DM: "#a3e635",   // lime-400
-  STEP: "#fbbf24",        // amber-400
-}
-
-const DEFAULT_COLOR = "#94a3b8"
-const DIM_COLOR = "rgba(200,200,200,0.15)"
+// masteryColor moved to ./Viz/utils. Constants moved to ./Viz/constants.
+import { masteryColor } from "./Viz/utils"
+import {
+  BLIND_SPOT_COLOR,
+  DEFAULT_COLOR,
+  DIAGRAM_NODE_TYPES,
+  DIM_COLOR,
+  LINKS_TO_EDGE_COLOR,
+  LP_EDGE_COLOR,
+  PREREQ_EDGE_COLOR,
+  SAME_CONCEPT_COLOR,
+  SAME_CONCEPT_CONTRADICTION_COLOR,
+  TYPE_COLORS,
+  WRITTEN_ABOUT_EDGE_COLOR,
+} from "./Viz/constants"
 
 // Core graph + DocListItem types moved to ./Viz/types.
 
@@ -149,22 +127,8 @@ import {
 } from "./Viz/api"
 
 // ---------------------------------------------------------------------------
-// Graph builder
+// Graph builder -- edge/node colour constants moved to ./Viz/constants.
 // ---------------------------------------------------------------------------
-
-// Purple color for PREREQUISITE_OF edges (S139)
-const PREREQ_EDGE_COLOR = "#a855f7"  // purple-500
-
-// SAME_CONCEPT edge colors (S141)
-// Sigma.js does not natively support dashed/dotted edges without a custom edge program.
-// We differentiate SAME_CONCEPT edges by color and low weight (0.5 vs 1.0 default).
-const SAME_CONCEPT_COLOR = "#94a3b8"         // slate-400 -- no contradiction
-const SAME_CONCEPT_CONTRADICTION_COLOR = "#ef4444"  // red-500 -- contradiction detected
-
-// Note node edge colors (S172)
-const WRITTEN_ABOUT_EDGE_COLOR = "#94a3b8"  // slate-400 -- thin grey lines
-const LINKS_TO_EDGE_COLOR = "#6366f1"       // indigo-500 -- note-to-note
-// NOTE_NODE_COLOR imported from noteGraphUtils
 
 function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   // Use mixed graph to support both undirected (CO_OCCURS) and directed (PREREQUISITE_OF) edges
@@ -288,7 +252,6 @@ function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
 // Builds a directed Graphology graph from learning-path API data.
 // ---------------------------------------------------------------------------
 
-const LP_EDGE_COLOR = "#f97316" // orange-500
 
 function buildLearningPathGraph(data: LearningPathData): Graph {
   // Use a directed graph so Sigma renders arrows
