@@ -53,6 +53,7 @@ from app.schemas.documents import (
     KindleIngestResponse,
     LearningObjectiveItem,
     LearningObjectivesResponse,
+    LearningObjectiveUpdate,
     PatchDocumentRequest,
     PatchTagsRequest,
     PDFMetaResponse,
@@ -1337,6 +1338,46 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
             for obj in objectives
         ],
     )
+
+
+@router.patch(
+    "/{document_id}/objectives/{objective_id}",
+    response_model=LearningObjectiveItem,
+)
+async def update_objective(
+    document_id: str,
+    objective_id: str,
+    payload: LearningObjectiveUpdate,
+) -> LearningObjectiveItem:
+    """Manually toggle a learning objective's covered flag.
+
+    Independent of the auto-tracker (objective_tracker.update_coverage),
+    which only flips covered to True when avg FSRS stability passes the
+    threshold. This route lets the learner mark an objective done by
+    judgment, e.g. after reading the section without reviewing cards yet,
+    or untoggle one that was auto-marked but they don't actually feel
+    confident on.
+
+    Returns the updated objective. 404 when document or objective is
+    missing, or when the objective belongs to a different document
+    (blocks cross-document tampering by id-guess).
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+        obj = await get_or_404(
+            session, LearningObjectiveModel, objective_id, name="Objective"
+        )
+        if obj.document_id != document_id:
+            raise HTTPException(status_code=404, detail="Objective not found in document")
+        obj.covered = payload.covered
+        await session.commit()
+        await session.refresh(obj)
+        return LearningObjectiveItem(
+            id=obj.id,
+            section_id=obj.section_id,
+            text=obj.text,
+            covered=obj.covered,
+        )
 
 
 # ---------------------------------------------------------------------------

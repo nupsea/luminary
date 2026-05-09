@@ -957,6 +957,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/objectives/{objective_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Objective
+         * @description Manually toggle a learning objective's covered flag.
+         *
+         *     Independent of the auto-tracker (objective_tracker.update_coverage),
+         *     which only flips covered to True when avg FSRS stability passes the
+         *     threshold. This route lets the learner mark an objective done by
+         *     judgment, e.g. after reading the section without reviewing cards yet,
+         *     or untoggle one that was auto-marked but they don't actually feel
+         *     confident on.
+         *
+         *     Returns the updated objective. 404 when document or objective is
+         *     missing, or when the objective belongs to a different document
+         *     (blocks cross-document tampering by id-guess).
+         */
+        patch: operations["update_objective_documents__document_id__objectives__objective_id__patch"];
+        trace?: never;
+    };
     "/documents/{document_id}/progress": {
         parameters: {
             query?: never;
@@ -6123,6 +6154,14 @@ export interface components {
             /** Covered */
             covered: boolean;
         };
+        /**
+         * LearningObjectiveUpdate
+         * @description Body for the manual covered-toggle PATCH (B).
+         */
+        LearningObjectiveUpdate: {
+            /** Covered */
+            covered: boolean;
+        };
         /** LearningObjectivesResponse */
         LearningObjectivesResponse: {
             /** Document Id */
@@ -9383,6 +9422,42 @@ export interface operations {
             };
         };
     };
+    update_objective_documents__document_id__objectives__objective_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                objective_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LearningObjectiveUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearningObjectiveItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_document_progress_documents__document_id__progress_get: {
         parameters: {
             query?: never;
@@ -10862,6 +10937,7 @@ export interface operations {
                 bloom_level_max?: number | null;
                 fsrs_state?: string | null;
                 flashcard_type?: string | null;
+                section_id?: string | null;
                 page?: number;
                 page_size?: number;
             };

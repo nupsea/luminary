@@ -140,6 +140,7 @@ async def search_flashcards(
     bloom_level_max: int | None = Query(default=None),
     fsrs_state: str | None = Query(default=None),
     flashcard_type: str | None = Query(default=None),
+    section_id: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_db),
@@ -159,6 +160,7 @@ async def search_flashcards(
         bloom_level_max=bloom_level_max,
         fsrs_state=fsrs_state,
         flashcard_type=flashcard_type,
+        section_id=section_id,
         page=page,
         page_size=page_size,
     )

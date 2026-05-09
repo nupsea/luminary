@@ -631,3 +631,76 @@ async def test_objectives_returns_populated_list(test_db):
     assert obj["section_id"] == section_id
     assert obj["text"] == "You will understand closures."
     assert obj["covered"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_objective_toggles_covered(test_db):
+    """PATCH /documents/{id}/objectives/{obj_id} flips covered both ways."""
+    from app.models import LearningObjectiveModel
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    section_id = str(uuid.uuid4())
+    obj_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="tech_book"))
+        session.add(
+            LearningObjectiveModel(
+                id=obj_id,
+                document_id=doc_id,
+                section_id=section_id,
+                text="You will understand monads.",
+                covered=False,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # False -> True
+        resp = await client.patch(
+            f"/documents/{doc_id}/objectives/{obj_id}",
+            json={"covered": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["covered"] is True
+
+        # True -> False (idempotent within a value)
+        resp = await client.patch(
+            f"/documents/{doc_id}/objectives/{obj_id}",
+            json={"covered": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["covered"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_objective_404_for_wrong_document(test_db):
+    """PATCH refuses an objective that exists but belongs to a different document."""
+    from app.models import LearningObjectiveModel
+
+    _, factory, _ = test_db
+    doc_a = str(uuid.uuid4())
+    doc_b = str(uuid.uuid4())
+    obj_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_a, content_type="tech_book"))
+        session.add(_make_doc(doc_b, content_type="tech_book"))
+        session.add(
+            LearningObjectiveModel(
+                id=obj_id,
+                document_id=doc_a,
+                section_id=str(uuid.uuid4()),
+                text="Doc A only.",
+                covered=False,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(
+            f"/documents/{doc_b}/objectives/{obj_id}",
+            json={"covered": True},
+        )
+        assert resp.status_code == 404

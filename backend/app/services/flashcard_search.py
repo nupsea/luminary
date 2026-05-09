@@ -84,6 +84,7 @@ class FlashcardSearchService:
         bloom_level_max: int | None = None,
         fsrs_state: str | None = None,
         flashcard_type: str | None = None,
+        section_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[FlashcardModel], int]:
@@ -154,6 +155,16 @@ class FlashcardSearchService:
 
         if flashcard_type:
             stmt = stmt.where(FlashcardModel.flashcard_type == flashcard_type)
+
+        if section_id:
+            # Filter by section via the chunk join. Cards lacking a chunk_id
+            # (note-sourced) are intentionally excluded -- objectives anchor on
+            # document sections, so a goal's "Study" link should only surface
+            # cards that came from that section's prose.
+            from app.models import ChunkModel  # noqa: PLC0415
+
+            chunk_sub = select(ChunkModel.id).where(ChunkModel.section_id == section_id)
+            stmt = stmt.where(FlashcardModel.chunk_id.in_(chunk_sub))
 
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await session.execute(count_stmt)).scalar_one()

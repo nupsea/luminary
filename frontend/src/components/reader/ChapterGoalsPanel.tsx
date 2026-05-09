@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { API_BASE } from "@/lib/config"
@@ -8,6 +9,20 @@ interface LearningObjective {
   section_id: string
   text: string
   covered: boolean
+}
+
+async function patchObjectiveCovered(
+  documentId: string,
+  objectiveId: string,
+  covered: boolean,
+): Promise<LearningObjective> {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/objectives/${objectiveId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ covered }),
+  })
+  if (!res.ok) throw new Error("Failed to update objective")
+  return res.json() as Promise<LearningObjective>
 }
 
 interface ChapterProgressRingProps {
@@ -41,6 +56,7 @@ interface ChapterGoalsPanelProps {
 }
 
 export function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: ChapterGoalsPanelProps) {
+  const qc = useQueryClient()
   const { data, isLoading, isError } = useQuery({
     queryKey: ["objectives", documentId],
     queryFn: async () => {
@@ -49,6 +65,37 @@ export function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: Chapt
       return res.json() as Promise<{ objectives: LearningObjective[] }>
     },
     staleTime: 300_000,
+  })
+
+  // Manual toggle (B) -- independent of the auto-tracker. Optimistic so
+  // the checkbox feels instant; on error we roll back and toast.
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, covered }: { id: string; covered: boolean }) =>
+      patchObjectiveCovered(documentId, id, covered),
+    onMutate: async ({ id, covered }) => {
+      await qc.cancelQueries({ queryKey: ["objectives", documentId] })
+      const prev = qc.getQueryData<{ objectives: LearningObjective[] }>([
+        "objectives",
+        documentId,
+      ])
+      if (prev) {
+        qc.setQueryData(["objectives", documentId], {
+          ...prev,
+          objectives: prev.objectives.map((o) => (o.id === id ? { ...o, covered } : o)),
+        })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["objectives", documentId], ctx.prev)
+      toast.error("Could not update goal")
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["objectives", documentId] })
+      // Progress ring on the section list reads from /progress, which
+      // counts covered objectives -- keep it in sync.
+      qc.invalidateQueries({ queryKey: ["document-progress", documentId] })
+    },
   })
 
   if (isLoading) {
@@ -89,10 +136,20 @@ export function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: Chapt
             <input
               type="checkbox"
               checked={obj.covered}
-              readOnly
-              className="mt-0.5 shrink-0 accent-primary"
+              disabled={toggleMutation.isPending}
+              onChange={(e) =>
+                toggleMutation.mutate({ id: obj.id, covered: e.target.checked })
+              }
+              title={
+                obj.covered
+                  ? "Marked covered. Uncheck to revert."
+                  : "Mark this goal covered manually."
+              }
+              className="mt-0.5 shrink-0 accent-primary cursor-pointer disabled:cursor-wait"
             />
-            <span className="flex-1">{obj.text}</span>
+            <span className={`flex-1 ${obj.covered ? "line-through text-muted-foreground" : ""}`}>
+              {obj.text}
+            </span>
             {!obj.covered && (
               <button
                 onClick={() => onStudyClick(obj.section_id)}

@@ -175,6 +175,12 @@ class LearningObjectivesResponse(BaseModel):
     objectives: list[LearningObjectiveItem]
 
 
+class LearningObjectiveUpdate(BaseModel):
+    """Body for the manual covered-toggle PATCH (B)."""
+
+    covered: bool
+
+
 class ChapterProgressItem(BaseModel):
     section_id: str
     heading: str

@@ -75,6 +75,9 @@ export interface FlashcardSearchFilters {
   bloom_level_max?: number
   fsrs_state?: string
   flashcard_type?: string
+  // S143: filter to a specific document section. Used by the Chapter
+  // Goals "Study" link to land on the deck filtered to one section.
+  section_id?: string
   page?: number
   page_size?: number
 }
@@ -129,6 +132,7 @@ export function buildSearchParams(filters: FlashcardSearchFilters): URLSearchPar
   if (filters.bloom_level_max != null) params.set("bloom_level_max", String(filters.bloom_level_max))
   if (filters.fsrs_state) params.set("fsrs_state", filters.fsrs_state)
   if (filters.flashcard_type) params.set("flashcard_type", filters.flashcard_type)
+  if (filters.section_id) params.set("section_id", filters.section_id)
   if (filters.page != null) params.set("page", String(filters.page))
   if (filters.page_size != null) params.set("page_size", String(filters.page_size))
   return params

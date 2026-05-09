@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import { ExplanationSheet } from "@/components/ExplanationSheet"
@@ -178,6 +179,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
+  const navigate = useNavigate()
   const setChatPreload = useAppStore((s) => s.setChatPreload)
 
   // Audio mini-player state (S120) — only active for audio documents
@@ -498,6 +500,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   function handleStudyClick(sid: string) {
     setActiveDocument(documentId)
     setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
+    void navigate("/study")
   }
 
   // Fetch FSRS fragility heatmap for section coloring (S116)

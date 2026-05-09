@@ -270,6 +270,24 @@ function FlashcardManager({
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState<null | "selected" | "all">(null)
+  // S143: When the user clicks "Study" on a Chapter Goal in the reader,
+  // DocumentReader sets `studySectionFilter` and navigates here. We consume
+  // it once on mount, copy to local state, and clear the store value so
+  // back-navigation away and back to /study doesn't silently re-apply it.
+  const studySectionFilter = useAppStore((s) => s.studySectionFilter)
+  const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
+  const [activeSectionFilter, setActiveSectionFilter] = useState<{
+    sectionId: string
+    bloomLevelMin: number
+  } | null>(null)
+  useEffect(() => {
+    if (studySectionFilter) {
+      setActiveSectionFilter(studySectionFilter)
+      setPage(1)
+      setStudySectionFilter(null)
+    }
+    // run only when the store value transitions to non-null
+  }, [studySectionFilter, setStudySectionFilter])
   const qc = useQueryClient()
   const { data: docList = [] } = useQuery<DocListItem[]>({
     queryKey: ["study-doc-list"],
@@ -283,8 +301,21 @@ function FlashcardManager({
   })
 
   const { data: searchResult, isLoading: cardsLoading } = useQuery<FlashcardSearchResponse>({
-    queryKey: ["flashcards-search", documentId, page],
-    queryFn: () => fetchFlashcardSearch({ document_id: documentId, page, page_size: 20 }),
+    queryKey: [
+      "flashcards-search",
+      documentId,
+      page,
+      activeSectionFilter?.sectionId ?? "",
+      activeSectionFilter?.bloomLevelMin ?? "",
+    ],
+    queryFn: () =>
+      fetchFlashcardSearch({
+        document_id: documentId,
+        section_id: activeSectionFilter?.sectionId,
+        bloom_level_min: activeSectionFilter?.bloomLevelMin,
+        page,
+        page_size: 20,
+      }),
   })
 
   const { data: docData } = useQuery<DocumentSections>({
@@ -292,6 +323,14 @@ function FlashcardManager({
     queryFn: () => fetchDocumentSections(documentId),
     enabled: !!documentId,
   })
+
+  // Heading for the active section filter banner; falls back to the id if
+  // the document's sections haven't loaded yet.
+  const activeSectionHeading =
+    activeSectionFilter && docData
+      ? docData.sections.find((s) => s.id === activeSectionFilter.sectionId)?.heading ??
+        activeSectionFilter.sectionId
+      : null
 
   const cards = searchResult?.items ?? []
   const totalCards = searchResult?.total ?? 0
@@ -453,6 +492,28 @@ function FlashcardManager({
 
   return (
     <div className="flex flex-col gap-8">
+      {/* S143: section filter banner -- visible when the user arrived here
+          via "Study" on a Chapter Goal. Dismissing clears the filter and
+          restores the unfiltered deck. */}
+      {activeSectionFilter && (
+        <div className="flex items-center gap-3 rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
+          <span className="text-foreground">
+            Showing cards from{" "}
+            <span className="font-semibold">{activeSectionHeading ?? "this section"}</span>
+            {" — Bloom level ≥ "}
+            {activeSectionFilter.bloomLevelMin}
+          </span>
+          <button
+            onClick={() => {
+              setActiveSectionFilter(null)
+              setPage(1)
+            }}
+            className="ml-auto rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
       {/* Ready to Study hero — always visible when we have stats or cards */}
       {showHero && (
          <Card className={`relative overflow-hidden border-none bg-gradient-to-br ${heroAccent} p-8 shadow-2xl transition-all`}>
