@@ -398,18 +398,27 @@ export function NoteReaderSheet({
   // Silence unused-var lint: adjustHeight retained for future use but no longer wired.
   void adjustHeight
 
-  // Ctrl+S / Cmd+S saves in edit mode
+  // Ctrl+S / Cmd+S saves in edit mode. Guard against rapid repeats via a ref:
+  // if a save is already in flight we drop the keystroke -- without this,
+  // three Cmd+S taps before onSuccess fires would each call mutate() with
+  // isNew still true, and the backend's 5-second hash dedup window can lose
+  // the race when its auto-tagging step takes longer than the inter-press
+  // gap. We use a ref instead of `[saveMut]` in deps because saveMut is
+  // declared further down (TDZ) and because we don't want to rebind the
+  // listener on every keystroke.
+  const saveInFlightRef = useRef(false)
   useEffect(() => {
     if (mode !== "edit") return
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault()
+        if (saveInFlightRef.current) return
         saveMut.mutate()
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [mode])
+  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Collections list
   const { data: collectionTree, isLoading: collectionsLoading } = useQuery({
@@ -422,24 +431,29 @@ export function NoteReaderSheet({
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      if (isNew) {
-        const saved = await createNote({
-          content: editContent,
-          tags: editTags,
-          document_id: selectedDocIds[0] || null,
-          source_document_ids: selectedDocIds,
-        })
-        // When opened from the reader panel, auto-add to the book's collection
-        if (lockedCollectionId) {
-          await addNoteToCollection(lockedCollectionId, saved.id)
+      saveInFlightRef.current = true
+      try {
+        if (isNew) {
+          const saved = await createNote({
+            content: editContent,
+            tags: editTags,
+            document_id: selectedDocIds[0] || null,
+            source_document_ids: selectedDocIds,
+          })
+          // When opened from the reader panel, auto-add to the book's collection
+          if (lockedCollectionId) {
+            await addNoteToCollection(lockedCollectionId, saved.id)
+          }
+          return saved
+        } else {
+          return patchNote(note!.id, {
+            content: editContent,
+            tags: editTags,
+            source_document_ids: selectedDocIds,
+          })
         }
-        return saved
-      } else {
-        return patchNote(note!.id, {
-          content: editContent,
-          tags: editTags,
-          source_document_ids: selectedDocIds,
-        })
+      } finally {
+        saveInFlightRef.current = false
       }
     },
     onSuccess: (savedNote) => {

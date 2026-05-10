@@ -165,9 +165,25 @@ async def create_note(
         except Exception:
             logger.warning("Auto-tagging failed for note creation", exc_info=True)
 
-    # Set created_at AFTER auto-tagger (which may load ML models and take
-    # seconds) so the 5-second dedup window is measured from commit time,
-    # not from before the slow auto-tag call.
+    # Re-check dedup AFTER auto-tagging. The first check at the top of this
+    # endpoint can be lost to a race when the client fires several POSTs in
+    # quick succession (e.g. Cmd+S held down): each request reads "no match"
+    # before any of them commits, and all three then create distinct rows.
+    # Auto-tagging widens that window because it can take seconds. Repeating
+    # the lookup here, with a freshly-evaluated cutoff, closes it: by this
+    # point any sibling request that arrived first will have committed, so
+    # we'll see its row and reuse it instead of inserting a fourth.
+    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=5)
+    existing = await repo.find_for_dedup(
+        document_id=req.document_id,
+        section_id=req.section_id,
+        content_hash=content_hash,
+        cutoff=dedup_cutoff,
+    )
+    if existing is not None:
+        logger.info("Dedup (post-tag): returning existing note %s", existing.id)
+        return _to_response(existing)
+
     now = datetime.now(UTC)
     note = NoteModel(
         id=str(uuid.uuid4()),
