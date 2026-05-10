@@ -468,12 +468,23 @@ starting a new extraction so we don't re-derive them per phase.
   3. **Network layer**: every `fetch(...)` (see #12) graduates to
      `frontend/src/lib/<page>Api.ts` with typed request/response.
 - **Plan, in priority order** (one PR per page):
-  - **Phase A -- `pages/Study.tsx`** (2,255 -> target < 400).
-    Biggest file in the entire frontend. Three sub-routes inside it:
-    "session", "review", "decks". Extract each to
-    `pages/Study/{SessionPanel,ReviewPanel,DecksPanel}.tsx`. Keep
-    the URL params parsing in the parent. Expect ~30 fetch sites to
-    drain into `lib/studyApi.ts` (already exists, partially used).
+  - **Phase A -- `pages/Study.tsx`** (DONE, 7 sub-phases).
+    Was 2,255 lines, now 436 (-81 %). The page is now route-shape:
+    lazy-load active doc + render <DocPicker> + <FlashcardManager>
+    + <CollectionStudyDashboard> + <SessionManager> + <GoalsList>
+    by tab. New `pages/Study/` package contains 12 modules:
+    types.ts (12 interfaces), utils.ts (3 tailwind helpers),
+    api.ts (13 fetch wrappers + GenerateError), DocPicker,
+    FlashcardCard, GenerateButton, FlashcardManager (the big one),
+    DeckHealthPanel, HealthReportPanel, WeakAreasPanel,
+    StrugglingPanel, InsightsAccordion. Each phase landed as one
+    focused commit; tsc clean and 347 vitest pass at every step
+    (the 11 failures are pre-existing pdfTocUtils/pdfHighlightOverlay
+    issues).
+    The S143 "Study" link from ChapterGoalsPanel was wired during
+    this work too (commit 04a01bf): backend gained a `section_id`
+    filter on /flashcards/search; FlashcardManager consumes
+    studySectionFilter on mount and shows a dismissable banner.
   - **Phase B -- `pages/Viz.tsx`** (1,757). Sigma graph rendering;
     extract `<GraphCanvas>`, `<ScopeSelector>`, `<NodeDrawer>` as
     siblings. Pure-render extracts are low-risk.
@@ -484,10 +495,17 @@ starting a new extraction so we don't re-derive them per phase.
   - **Phase D -- `pages/Monitoring.tsx`** (1,361). Dashboard tabs;
     one component per tab + a shared `useMonitoringPolling` hook for
     the live-data refresh.
-  - **Phase E -- `pages/Chat.tsx`** (1,301). Streaming SSE handler
-    is the gnarly part; it should live in
-    `lib/chatStreamClient.ts` (a class with start/cancel/onChunk),
-    not in the page.
+  - **Phase E -- `pages/Chat.tsx`** (DONE). Was 1,301 lines, now 633
+    (-51 %). New `pages/Chat/` package: types.ts (15 interfaces),
+    api.ts (7 fetchers + persistedToChatMessage), constants.ts
+    (badge/strategy maps), qaStream.ts (SSE parser with typed
+    onCard/onToken/onTransparency/onError/onDone callbacks),
+    SuggestionPills, TransparencyPanel, DocumentScopeCombobox,
+    MessageBubble (citations + web sources + transparency + image
+    thumbs), SessionPlanPanel. Page keeps the message-state plumbing
+    (sendMessage, hydrateSession, switchContextWithUndo) since it
+    threads through too many store setters to lift cleanly. tsc
+    clean, vitest 347 pass + 11 pre-existing failures.
 - **Acceptance criteria:** every page < 500 lines; every page has at
   most 3 imports of `fetch` (and ideally 0 -- see #12); each page has
   a vitest smoke test that mounts it with mocked api and asserts the
