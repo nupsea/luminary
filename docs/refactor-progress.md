@@ -414,16 +414,33 @@ starting a new extraction so we don't re-derive them per phase.
   services to also adopt the repo for consistency rather than keeping
   two paths.
 - **Plan for the remaining 192 ops** (priority order):
-  - **Phase 8 -- `StudyRepo`** (`backend/app/repos/study_repo.py`).
-    Highest count, hardest shape -- 56 ops, mostly multi-table joins
-    that drive the dashboard. Don't try to lift them all. Strategy:
-    (a) extract the 4-5 reusable read patterns that show up in 3+
-    routes (e.g. "list reviewed flashcards for date range",
-    "session-plan join"); (b) keep the genuinely-bespoke
-    cross-entity selects inline with a one-line comment explaining
-    why. Target: cut study.py session ops to < 15 (remaining are
-    documented bespoke). Will also unlock collapsing the 10
-    "fetch+check+404" sites that audit #8 punted.
+  - **Phase 8 -- `StudyRepo`** (DONE -- `backend/app/repos/study_repo.py`,
+    192 lines). Lifted the read patterns that recur in 3+ routes:
+    session lifecycle (`get_session_or_404`, `find_open_session`,
+    `create_session`, `commit_session`, `delete_session_cascade`),
+    per-session reads (`list_review_events`,
+    `list_teachback_results`), gap detection (`list_weak_flashcards`
+    with optional document scope), and chunk→section joins
+    (`chunk_section_headings`, `chunk_section_id_map`). Gap thresholds
+    (`GAP_STABILITY_THRESHOLD`, `GAP_MIN_REPS`) also moved here as
+    single source of truth.
+    Migrated endpoints: `GET /sessions/open`, `POST /sessions/start`,
+    `POST /sessions/{id}/end`, `POST /sessions/{id}/reopen`,
+    `DELETE /sessions/{id}`, `GET /gaps/{document_id}`,
+    `GET /session-plan` (gap-area + weak-card halves), `GET /due`
+    (chunk→section map only -- tag-filter logic stays inline).
+    Intentional inline (bespoke join shapes, per audit strategy):
+    `get_due_count` / `get_due_cards` tag-within-collection filter
+    cascade, the full `get_collection_study_dashboard` (collection
+    sub-tree + members + per-doc/note expansion -- ~17 ops),
+    `list_sessions` filter+count+joined doc/collection lookups,
+    `get_session_cards` / `get_session_remaining_cards` /
+    `get_session_teachback_results` (Flashcard joins),
+    `_finalize_session_tally_if_ready` and `_evaluate_teachback_bg`
+    (background helpers running off a session factory, not a request
+    session). Net: 6 endpoints fully repo-backed; 56 -> 47
+    `session.X` ops (the remaining 47 plus 15 `db.X` ops are the
+    documented-bespoke cluster). 26 study tests pass.
   - **Phase 9 -- extend `DocumentRepo`** to cover the 36 remaining
     documents.py ops. Most are `delete_document`'s 18-table cascade
     -- which we *should not* lift wholesale. Better approach: split

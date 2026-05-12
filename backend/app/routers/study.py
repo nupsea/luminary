@@ -22,7 +22,6 @@ from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, or_, select
-from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -40,6 +39,7 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
+from app.repos.study_repo import StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
 from app.schemas.study import (
     CardStabilityItem,
@@ -83,7 +83,6 @@ from app.schemas.study import (
 )
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
-from app.services.repo_helpers import get_or_404
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
@@ -113,8 +112,8 @@ router = APIRouter(prefix="/study", tags=["study"])
 # Constants
 # ---------------------------------------------------------------------------
 
-_GAP_STABILITY_THRESHOLD = 2.0
-_GAP_MIN_REPS = 1
+# Gap-detection thresholds now live in repos/study_repo.py; no callers
+# in this file or in tests still reference the old _GAP_* names.
 
 # Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
@@ -350,14 +349,10 @@ async def get_due_cards(
     cards = list(result.scalars().all())
 
     # Build chunk_id -> section_id map for S138 SourcePanel
-    chunk_ids = [c.chunk_id for c in cards if c.chunk_id]
-    chunk_to_section: dict[str, str | None] = {}
-    if chunk_ids:
-        chunk_result = await session.execute(
-            select(ChunkModel.id, ChunkModel.section_id).where(ChunkModel.id.in_(chunk_ids))
-        )
-        for cid, sid in chunk_result:
-            chunk_to_section[cid] = sid
+    repo = StudyRepo(session)
+    chunk_to_section = await repo.chunk_section_id_map(
+        [c.chunk_id for c in cards if c.chunk_id]
+    )
 
     return [_to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in cards]
 
@@ -366,6 +361,7 @@ async def get_due_cards(
 async def get_session_plan(
     minutes: int = Query(default=20, ge=5, le=120),
     session: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionPlanResponse:
     """Return a prioritized study agenda for the given time budget.
 
@@ -374,36 +370,28 @@ async def get_session_plan(
     """
     now = datetime.now(UTC)
 
-    # (a) Count all due flashcards (no document filter)
-    due_stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
-    due_result = await session.execute(due_stmt)
-    due_count = len(due_result.scalars().all())
-
-    # (b) Fetch gap area titles across all documents (max 2 distinct non-null headings)
-    weak_stmt = (
-        select(FlashcardModel)
-        .where(FlashcardModel.fsrs_stability < _GAP_STABILITY_THRESHOLD)
-        .where(FlashcardModel.reps > _GAP_MIN_REPS)
+    # (a) Count all due flashcards (no document filter). Inline because
+    # this is a single-purpose count -- no shared shape with /due-count.
+    due_stmt = select(func.count()).select_from(FlashcardModel).where(
+        FlashcardModel.due_date <= now
     )
-    weak_result = await session.execute(weak_stmt)
-    weak_cards = list(weak_result.scalars().all())
+    due_count = (await session.execute(due_stmt)).scalar_one()
 
+    # (b) Gap area titles across all documents (max 2 distinct non-null headings)
+    weak_cards = list(await repo.list_weak_flashcards())
     gap_area_titles: list[str] = []
     if weak_cards:
-        chunk_ids = [c.chunk_id for c in weak_cards]
-        chunk_stmt = (
-            select(ChunkModel, SectionModel.heading)
-            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
-            .where(ChunkModel.id.in_(chunk_ids))
+        chunk_to_section = await repo.chunk_section_headings(
+            [c.chunk_id for c in weak_cards if c.chunk_id]
         )
-        chunk_rows = await session.execute(chunk_stmt)
         seen: set[str] = set()
-        for _chunk, heading in chunk_rows:
+        for heading in chunk_to_section.values():
             if heading and heading not in seen and len(gap_area_titles) < 2:
                 seen.add(heading)
                 gap_area_titles.append(heading)
 
-    # (c) Fetch recently accessed complete documents
+    # (c) Fetch recently accessed complete documents. Inline -- this select
+    # shape isn't reused; no value in a repo method for one caller.
     docs_stmt = (
         select(DocumentModel)
         .where(DocumentModel.stage == "complete")
@@ -428,31 +416,15 @@ async def get_session_plan(
 @router.get("/gaps/{document_id}", response_model=list[GapResult])
 async def get_gaps(
     document_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> list[GapResult]:
     """Return sections with weak (seen but fragile) flashcards, ordered by avg stability."""
-    weak_stmt = (
-        select(FlashcardModel)
-        .where(FlashcardModel.document_id == document_id)
-        .where(FlashcardModel.fsrs_stability < _GAP_STABILITY_THRESHOLD)
-        .where(FlashcardModel.reps > _GAP_MIN_REPS)
-    )
-    weak_result = await session.execute(weak_stmt)
-    weak_cards = list(weak_result.scalars().all())
-
+    weak_cards = list(await repo.list_weak_flashcards(document_id=document_id))
     if not weak_cards:
         return []
-
-    chunk_ids = [c.chunk_id for c in weak_cards]
-    chunk_stmt = (
-        select(ChunkModel, SectionModel.heading)
-        .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
-        .where(ChunkModel.id.in_(chunk_ids))
+    chunk_to_section = await repo.chunk_section_headings(
+        [c.chunk_id for c in weak_cards if c.chunk_id]
     )
-    chunk_rows = await session.execute(chunk_stmt)
-
-    chunk_to_section: dict[str, str | None] = {chunk.id: heading for chunk, heading in chunk_rows}
-
     return _compute_gaps(weak_cards, chunk_to_section)
 
 
@@ -461,7 +433,7 @@ async def get_open_session(
     mode: str,
     document_id: str | None = None,
     collection_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionResponse:
     """Return the most recent still-open session matching this scope.
 
@@ -469,21 +441,11 @@ async def get_open_session(
     a duplicate when the user clicks Start. Scope match is exact: a null
     document_id only matches sessions with null document_id.
     """
-    stmt = select(StudySessionModel).where(
-        StudySessionModel.ended_at.is_(None),
-        StudySessionModel.mode == mode,
+    sess = await repo.find_open_session(
+        mode=mode,
+        document_id=document_id,
+        collection_id=collection_id,
     )
-    if document_id is not None:
-        stmt = stmt.where(StudySessionModel.document_id == document_id)
-    else:
-        stmt = stmt.where(StudySessionModel.document_id.is_(None))
-    if collection_id is not None:
-        stmt = stmt.where(StudySessionModel.collection_id == collection_id)
-    else:
-        stmt = stmt.where(StudySessionModel.collection_id.is_(None))
-    stmt = stmt.order_by(StudySessionModel.started_at.desc()).limit(1)
-    result = await db.execute(stmt)
-    sess = result.scalar_one_or_none()
     if sess is None:
         raise HTTPException(status_code=404, detail="No open session")
     return SessionResponse.model_validate(sess)
@@ -492,22 +454,15 @@ async def get_open_session(
 @router.post("/sessions/start", response_model=SessionResponse, status_code=201)
 async def start_session(
     req: StartSessionRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionResponse:
     """Create a new study session row and return its ID."""
-    sess = StudySessionModel(
-        id=str(uuid.uuid4()),
+    sess = await repo.create_session(
         document_id=req.document_id,
         collection_id=req.collection_id,
-        started_at=datetime.now(UTC),
-        cards_reviewed=0,
-        cards_correct=0,
         mode=req.mode,
-        planned_card_ids=req.planned_card_ids or None,
+        planned_card_ids=req.planned_card_ids,
     )
-    session.add(sess)
-    await session.commit()
-    await session.refresh(sess)
     logger.info(
         "Study session started",
         extra={
@@ -523,27 +478,18 @@ async def start_session(
 @router.post("/sessions/{session_id}/end", response_model=SessionSummary)
 async def end_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionSummary:
     """Close a study session, tally review events, and return the summary."""
-    sess = await get_or_404(db, StudySessionModel, session_id, name="Session")
-
-    events_result = await db.execute(
-        select(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
-    )
-    events = events_result.scalars().all()
+    sess = await repo.get_session_or_404(session_id)
+    events = await repo.list_review_events(session_id)
 
     # Pull all teach-back rows (pending + complete). Pending rows mean the
     # background evaluator has not yet scored the answer -- we still count them
     # toward cards_reviewed (the user did answer) but leave accuracy provisional
     # until the last evaluation lands. _evaluate_teachback_bg finalizes the
     # tally when the last pending row flips to "complete".
-    tb_all_result = await db.execute(
-        select(TeachbackResultModel).where(
-            TeachbackResultModel.session_id == session_id,
-        )
-    )
-    tb_rows = tb_all_result.scalars().all()
+    tb_rows = await repo.list_teachback_results(session_id)
     tb_complete = [tb for tb in tb_rows if tb.status == "complete"]
     tb_pending_count = sum(1 for tb in tb_rows if tb.status == "pending")
 
@@ -566,8 +512,7 @@ async def end_session(
     sess.cards_reviewed = cards_reviewed
     sess.cards_correct = cards_correct
     sess.accuracy_pct = accuracy_pct
-    await db.commit()
-    await db.refresh(sess)
+    await repo.commit_session(sess)
 
     logger.info(
         "Study session ended",
@@ -591,49 +536,28 @@ async def end_session(
 @router.post("/sessions/{session_id}/reopen", status_code=204)
 async def reopen_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> None:
     """Clear ended_at on a session so the user can Continue adding answers.
 
     Tallies are reset; _finalize_session_tally_if_ready recomputes them the
     next time the session is ended and all evaluations are complete.
     """
-    result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.id == session_id)
-    )
-    sess = result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    sess = await repo.get_session_or_404(session_id)
     sess.ended_at = None
     sess.cards_correct = 0
     sess.accuracy_pct = None
-    await db.commit()
+    await repo.commit_session(sess)
     logger.info("Study session reopened", extra={"session_id": session_id})
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> None:
     """Delete a study session and all associated review events and teachback results."""
-    result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.id == session_id)
-    )
-    sess = result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    await db.execute(
-        sa_delete(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
-    )
-    await db.execute(
-        sa_delete(TeachbackResultModel).where(
-            TeachbackResultModel.session_id == session_id
-        )
-    )
-    await db.delete(sess)
-    await db.commit()
+    await repo.delete_session_cascade(session_id)
     logger.info("Study session deleted", extra={"session_id": session_id})
 
 
