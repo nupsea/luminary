@@ -17,12 +17,18 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import get_db, get_session_factory
 from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel, TagAliasModel
 from app.repos.tag_repo import TagRepo, get_tag_repo
+from app.routers.notes import _sync_tag_index
+from app.services.naming import normalize_tag_slug
 from app.services.repo_helpers import get_or_404
+from app.services.tag_graph import build_tag_graph, invalidate_tag_graph_cache
+from app.services.tag_normalizer import get_tag_normalizer_service
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +160,6 @@ async def get_tag_graph_endpoint(
 
     Static path (/graph) registered before /{tag_id} to avoid route shadowing.
     """
-    from app.services.tag_graph import build_tag_graph  # noqa: PLC0415
 
     graph = await build_tag_graph(session)
     return TagGraphResponse(
@@ -178,7 +183,6 @@ async def autocomplete_tags(
     repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagAutocompleteResult]:
     """Return up to 10 canonical tags matching the prefix q, sorted by note_count DESC."""
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     normalized_q = normalize_tag_slug(q) if q else ""
     tags = await repo.autocomplete(normalized_q)
@@ -256,7 +260,6 @@ async def create_tag(
     repo: TagRepo = Depends(get_tag_repo),
 ) -> TagResponse:
     """Create a canonical tag. Returns 409 if the slug already exists."""
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     normalized_id = normalize_tag_slug(req.id)
     if await repo.find_by_id(normalized_id) is not None:
@@ -285,8 +288,6 @@ async def merge_tags(
     Then creates a TagAliasModel (source -> target) and deletes the source
     CanonicalTagModel. All changes roll back if any step fails.
     """
-    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     source_id = normalize_tag_slug(req.source_tag_id)
     target_id = normalize_tag_slug(req.target_tag_id)
@@ -331,7 +332,6 @@ async def merge_tags(
                 if new_tags != current_tags:
                     logger.debug("Updating note %s tags: %r -> %r", note.id, current_tags, new_tags)
                     note.tags = list(new_tags)
-                    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
 
                     flag_modified(note, "tags")
                     session.add(note)
@@ -402,7 +402,6 @@ async def scan_for_normalization(
     session closes after the response returns). Returns immediately with
     {queued: true}.
     """
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
 
@@ -423,7 +422,6 @@ async def get_normalization_suggestions(
     session: AsyncSession = Depends(get_db),
 ) -> list[TagMergeSuggestionResponse]:
     """Return pending tag merge suggestions with expanded tag info."""
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
     details = await service.get_pending_suggestions(session)
@@ -463,9 +461,6 @@ async def accept_normalization_suggestion(
     a router-layer helper and Services must not import from the API/Router layer
     (six-layer invariant).
     """
-    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-    from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
     try:
@@ -510,7 +505,6 @@ async def accept_normalization_suggestion(
                         seen.add(replacement)
                         new_tags.append(replacement)
                 note.tags = list(new_tags)
-                from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
 
                 flag_modified(note, "tags")
                 session.add(note)
@@ -553,7 +547,6 @@ async def reject_normalization_suggestion(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Reject a merge suggestion."""
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
     try:
@@ -573,9 +566,6 @@ async def migrate_tag_naming(
     For NoteModel.tags: normalizes the JSON tags array on each note.
     Merges duplicates that collapse to the same normalized form (keeps higher note_count).
     """
-    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
-    from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
 
     # Step 1: Load all canonical tags
     all_tags_result = await session.execute(select(CanonicalTagModel))
@@ -618,7 +608,6 @@ async def migrate_tag_naming(
                 segments = normalized_id.split("/")
                 new_display = segments[-1]
                 new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
-                from sqlalchemy import text as sa_text  # noqa: PLC0415
 
                 await session.execute(
                     sa_text(
@@ -650,7 +639,6 @@ async def migrate_tag_naming(
                                 seen.add(t)
                                 deduped.append(t)
                         note.tags = deduped
-                        from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
 
                         flag_modified(note, "tags")
                         session.add(note)
@@ -686,7 +674,6 @@ async def migrate_tag_naming(
             segments = normalized_id.split("/")
             new_display = segments[-1]
             new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
-            from sqlalchemy import text as sa_text  # noqa: PLC0415
 
             await session.execute(
                 sa_text(
@@ -717,7 +704,6 @@ async def migrate_tag_naming(
                             seen_tags.add(nt)
                             new_tags_list.append(nt)
                     note.tags = new_tags_list
-                    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
 
                     flag_modified(note, "tags")
                     session.add(note)

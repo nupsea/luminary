@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, get_session_factory
 from app.models import (
     CollectionMemberModel,
+    CollectionModel,
+    FlashcardModel,
     NoteModel,
     NoteSourceModel,
     NoteTagIndexModel,
@@ -52,6 +54,21 @@ from app.schemas.notes import (
     SuggestedTagsResponse,
     TagInfo,
 )
+
+# Promoted from inline lazy imports (audit #7 sweep). All of these
+# import cleanly without back-importing `app.routers.notes`; the
+# original noqa: PLC0415 markers were leftovers from earlier circular
+# cycles that have since been broken.
+from app.services.clustering_service import get_clustering_service
+from app.services.engagement_service import EngagementService
+from app.services.flashcard import get_flashcard_service
+from app.services.gap_detector import get_gap_detector
+from app.services.llm import LLMUnavailableError
+from app.services.naming import normalize_tag_slug
+from app.services.note_graph import get_note_graph_service
+from app.services.note_search import get_note_search_service
+from app.services.note_tagger import get_note_tagger
+from app.services.note_title_generator import get_title_generator
 from app.services.notes_service import (
     embed_and_store_note as _embed_and_store_note,
 )
@@ -76,6 +93,7 @@ from app.services.notes_service import (
 from app.services.notes_service import (
     upsert_note_graph as _upsert_note_graph,
 )
+from app.services.vector_store import get_lancedb_service
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +156,6 @@ async def create_note(
     repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteResponse:
     """Create a new note."""
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     # Dedup: if a note with identical (document_id, section_id, content_hash) was
     # created within the last 5 seconds, return the existing note instead.
@@ -157,7 +174,6 @@ async def create_note(
     # S208: Automatic tag saving for new notes if none provided
     tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
     if not tags and req.content.strip():
-        from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
 
         try:
             raw_tags = await get_note_tagger().suggest_tags(req.content)
@@ -218,8 +234,6 @@ async def create_note(
     # Fire-and-forget XP award for note creation.
     async def _award_note_xp() -> None:
         try:
-            from app.database import get_session_factory  # noqa: PLC0415
-            from app.services.engagement_service import EngagementService  # noqa: PLC0415
 
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)
@@ -242,7 +256,6 @@ async def search_notes(
     k: int = Query(default=10, ge=1, le=50),
 ) -> NoteSearchResponse:
     """Hybrid FTS + semantic search over notes. Returns 422 if q is empty."""
-    from app.services.note_search import get_note_search_service  # noqa: PLC0415
 
     results = await get_note_search_service().search(q, k=k)
     return NoteSearchResponse(
@@ -390,9 +403,7 @@ async def _apply_note_update(
     if req.content is not None:
         note.content = req.content
     if req.tags is not None:
-        from app.services.naming import normalize_tag_slug as _norm  # noqa: PLC0415
-
-        note.tags = [_norm(t) for t in req.tags if _norm(t)]
+        note.tags = [normalize_tag_slug(t) for t in req.tags if normalize_tag_slug(t)]
     if req.group_name is not None:
         note.group_name = req.group_name
     if req.section_id is not None:
@@ -419,7 +430,6 @@ async def _apply_note_update(
     )
     # Delete stale vector synchronously so hybrid search doesn't return the
     # old embedding while the background task re-embeds the new content.
-    from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
     get_lancedb_service().delete_note_vector(note.id)
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
@@ -475,11 +485,9 @@ async def delete_note(
     await _fts_delete(note_id, session)
     await _sync_tag_index(note_id, [], session)
     # Delete Note graph node synchronously before removing the SQL row
-    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     await get_note_graph_service().delete_note_node(note_id)
     await repo.delete_by_id(note_id)
-    from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
     get_lancedb_service().delete_note_vector(note_id)
     logger.info("Deleted note", extra={"note_id": note_id})
@@ -488,7 +496,6 @@ async def delete_note(
 @router.get("/{note_id}/entities", response_model=list[NoteEntityItem])
 async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
     """Return entities linked to a note via WRITTEN_ABOUT or TAG_IS_CONCEPT Kuzu edges."""
-    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     entities = await get_note_graph_service().get_entities_for_note(note_id)
     return [NoteEntityItem(**e) for e in entities]
@@ -500,14 +507,6 @@ async def preview_note_flashcard_generation(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return {total_notes, already_covered} for a collection without generating (S169)."""
-    from sqlalchemy import func as sa_func  # noqa: PLC0415
-
-    from app.models import (  # noqa: PLC0415
-        CollectionMemberModel,
-        CollectionModel,
-        FlashcardModel,
-    )
-
     coll_result = await session.execute(
         select(CollectionModel).where(CollectionModel.id == collection_id)
     )
@@ -516,7 +515,7 @@ async def preview_note_flashcard_generation(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     member_result = await session.execute(
-        select(sa_func.count())
+        select(func.count())
         .select_from(CollectionMemberModel)
         .where(
             CollectionMemberModel.collection_id == collection_id,
@@ -526,7 +525,7 @@ async def preview_note_flashcard_generation(
     total_notes = member_result.scalar_one()
 
     covered_result = await session.execute(
-        select(sa_func.count(FlashcardModel.source_content_hash.distinct())).where(
+        select(func.count(FlashcardModel.source_content_hash.distinct())).where(
             FlashcardModel.deck == collection.name,
             FlashcardModel.source == "note",
             FlashcardModel.source_content_hash.is_not(None),
@@ -543,8 +542,6 @@ async def generate_note_flashcards(
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteFlashcardItem] | NoteFlashcardGenerateResponse:
     """Generate flashcards from user notes scoped by tag, note IDs, or collection (S169)."""
-    from app.services.flashcard import get_flashcard_service  # noqa: PLC0415
-    from app.services.llm import LLMUnavailableError  # noqa: PLC0415
 
     # 422 guard: collection_id and note_ids are mutually exclusive
     if req.collection_id and req.note_ids:
@@ -594,7 +591,6 @@ async def list_note_flashcards(
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteFlashcardItem]:
     """Return all flashcards generated from notes (source='note'), newest first."""
-    from app.models import FlashcardModel  # noqa: PLC0415
 
     result = await session.execute(
         select(FlashcardModel)
@@ -620,14 +616,12 @@ async def trigger_cluster(
     Returns {queued: True, total_notes: int} or {cached: True, last_run: ISO str}
     if a pending suggestion was created within the last hour.
     """
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     svc = get_clustering_service()
 
     # Check rate-limit synchronously before spawning task
     last_run = await svc.get_pending_last_run(session)
     if last_run is not None:
-        from datetime import timedelta  # noqa: PLC0415
 
         now = datetime.now(UTC)
         age = now - (last_run.replace(tzinfo=UTC) if last_run.tzinfo is None else last_run)
@@ -658,7 +652,6 @@ async def list_cluster_suggestions(
     session: AsyncSession = Depends(get_db),
 ) -> list[ClusterSuggestionResponse]:
     """Return pending cluster suggestions sorted by confidence_score DESC with note previews."""
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     items = await get_clustering_service().get_pending_suggestions(session)
     return [
@@ -686,7 +679,6 @@ async def batch_accept_cluster_suggestions(
 
     Returns list of created collection IDs.
     """
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     items_dicts = [
         {
@@ -711,7 +703,6 @@ async def normalize_check(
     session: AsyncSession = Depends(get_db),
 ) -> list[NamingViolation]:
     """Return naming violation suggestions for tags and collections."""
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     violations = await get_clustering_service().detect_naming_violations(session)
     return [NamingViolation(**v) for v in violations]
@@ -723,7 +714,6 @@ async def normalize_apply(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Apply naming fixes transactionally."""
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     fixes_dicts = [f.model_dump() for f in req.fixes]
     result = await get_clustering_service().apply_naming_fixes(fixes_dicts, session)
@@ -736,7 +726,6 @@ async def accept_cluster_suggestion(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Accept a cluster suggestion: create Collection + member rows."""
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     collection_id = await get_clustering_service().accept_suggestion(suggestion_id, session)
     if collection_id is None:
@@ -750,7 +739,6 @@ async def reject_cluster_suggestion(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Reject a cluster suggestion."""
-    from app.services.clustering_service import get_clustering_service  # noqa: PLC0415
 
     found = await get_clustering_service().reject_suggestion(suggestion_id, session)
     if not found:
@@ -795,7 +783,6 @@ async def create_note_link(
     Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
     Returns 409 if the (source, target, link_type) triple already exists.
     """
-    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     # Validate source and target exist
     await repo.get_or_404(note_id, name="Source note")
@@ -839,7 +826,6 @@ async def delete_note_link(
 
     Fires an async Kuzu edge delete. Returns 404 if link not found.
     """
-    from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
     link = await repo.find_link(note_id, target_note_id, link_type)
     if link is None:
@@ -916,8 +902,6 @@ async def gap_detect(
     if not req.note_ids:
         raise HTTPException(status_code=422, detail="note_ids must be non-empty")
 
-    from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
-    from app.services.llm import LLMUnavailableError  # noqa: PLC0415
 
     try:
         report = await get_gap_detector().detect_gaps(
@@ -958,11 +942,9 @@ async def suggest_tags(
     # during a potentially slow LLM call.
     note_content = note.content
 
-    from app.services.naming import normalize_tag_slug as _norm_tag  # noqa: PLC0415
-    from app.services.note_tagger import get_note_tagger  # noqa: PLC0415
 
     raw_tags = await get_note_tagger().suggest_tags(note_content)
-    tags = [n for t in raw_tags if (n := _norm_tag(t))]
+    tags = [n for t in raw_tags if (n := normalize_tag_slug(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)
 
@@ -972,7 +954,6 @@ async def suggest_title(
     req: NoteTitleSuggestRequest,
 ) -> NoteTitleSuggestResponse:
     """Return LLM-suggested title for the provided note content."""
-    from app.services.note_title_generator import get_title_generator  # noqa: PLC0415
 
     title = await get_title_generator().suggest_title(req.content)
     return NoteTitleSuggestResponse(title=title)

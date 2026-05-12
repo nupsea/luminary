@@ -302,35 +302,54 @@ starting a new extraction so we don't re-derive them per phase.
   nodes/...}.py`. Costs: many test imports change. Defer until #6 is
   otherwise complete; bundle as one rename commit.
 
-### #7 -- 293 `noqa: PLC0415` inline imports (was 299)
+### #7 -- 231 `noqa: PLC0415` inline imports (was 299; -68 so far)
 - Signals circular deps and routers/services importing each other lazily.
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
-- **Top offenders** (counted now, not when audit was written):
-  `workflows/ingestion.py` (38), `routers/notes.py` (30),
-  `routers/tags.py` (20), `runtime/chat_graph.py` (17),
-  `services/image_enricher.py` (16), `routers/documents.py` (15),
-  `services/flashcard_generators.py` (12),
-  `services/clustering_service.py` (11), `app/main.py` (10),
-  `services/image_extractor.py` (10), `services/flashcard.py` (10).
-- **Plan -- categorise then drain in three passes:**
-  1. **Workflow lazy-imports** (ingestion.py 38, chat_graph.py 17,
-     flashcard_generators.py 12). Most are inside hot loops to avoid
-     import-time cost; a chunk are circular workarounds. Pass 1: grep
-     each `noqa: PLC0415`; for any whose target is now in a leaf
-     module (no back-import), promote to top of file. Audits #5 and
-     #6 phases above will retire ~30 of these mechanically.
-  2. **Router-side circulars** (notes.py 30, tags.py 20,
-     documents.py 15). These almost always trace back to
-     `from app.routers.X import Y` -- a router importing another
-     router for shared schemas. Fix path: lift the imported symbol to
-     `app/schemas/<entity>.py` (audit #2 already created the homes).
-  3. **Service-to-service late imports** (image_enricher 16,
+- **Router-side pass DONE** (-65):
+  - `routers/notes.py`: 30 -> 0. All eleven lazy imports
+    (`clustering_service`, `engagement_service`, `flashcard`,
+    `gap_detector`, `llm`, `naming`, `note_graph`, `note_search`,
+    `note_tagger`, `note_title_generator`, `vector_store`) promoted to
+    top-level. `_norm` / `_norm_tag` inline aliases replaced with the
+    canonical `normalize_tag_slug`; `FlashcardModel` / `CollectionModel`
+    added to the top-of-file `app.models` import; `sa_func` rebound to
+    the already-imported `func`. 38 notes tests pass.
+  - `routers/tags.py`: 20 -> 0. Five lazy modules (`naming`, `tag_graph`,
+    `tag_normalizer`, plus `sqlalchemy.text as sa_text` and
+    `sqlalchemy.orm.attributes.flag_modified`) promoted to top-level
+    along with the cross-router `_sync_tag_index` import from
+    `app.routers.notes`. 27 tag tests pass.
+  - `routers/documents.py`: 15 -> 0. Eight modules promoted directly
+    (`article_extractor`, `document_search`, `epub_service`,
+    `ingestion_jobs`, `naming`, `objective_tracker`, `summarizer`,
+    `youtube_downloader`) plus `STAGE_PROGRESS` / `ContentType` /
+    `run_ingestion` / `_background_tasks` from `app.workflows.ingestion`.
+    Two paths kept their module-level indirection
+    (`from app.services import graph as _graph_module`,
+    `from app.workflows import ingestion as _ingestion_module`) because
+    their factories (`get_graph_service`, `_run_pregenerate`) are
+    monkey-patched in tests via `patch("app.services.graph.get_graph_service")`
+    -- this is the Design-Principle-3 case ("indirect through the
+    original module for swappable singletons"). 33 documents tests
+    pass; we caught the patch-target issue exactly via the failing
+    `test_delete_document_calls_graph_service`.
+- **Remaining work, in priority order:**
+  1. **Workflow lazy-imports** (ingestion_nodes/entity_extract.py 14,
+     ingestion_nodes/chunk.py 12, ingestion_nodes/finalize.py 8,
+     services/flashcard_generators.py 12). Most are inside hot loops
+     to avoid import-time cost; a chunk are circular workarounds.
+     Same playbook as the router-side pass: grep each noqa, verify the
+     target imports cleanly and isn't a patched factory, then promote.
+  2. **Service-to-service late imports** (image_enricher 16,
      clustering 11, image_extractor 10, flashcard 10). Often
      `from app.services.A import get_a_service` inside a method to
      avoid a top-level cycle. Fix path: introduce a thin
      `app/services/_registry.py` that exposes `get_*` factories; both
      A and B import from `_registry`, never from each other.
+  3. **`app/main.py`** (10). FastAPI app-construction lazy imports;
+     low priority -- they only fire once at startup so the "hot
+     loop" concern doesn't apply. Promote when nothing else is left.
 - **Target by end of branch:** under 100 `noqa: PLC0415`. Past 100
   we declare an explicit allow-list in CLAUDE.md ("these are runtime
   optional imports and stay lazy") and re-enable PLC0415 globally.

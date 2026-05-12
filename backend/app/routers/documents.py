@@ -63,6 +63,9 @@ from app.schemas.documents import (
     UrlIngestRequest,
     YouTubeIngestRequest,
 )
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
+from app.services.article_extractor import get_article_extractor
+from app.services.document_search import get_document_search_service
 from app.services.documents_service import (
     delete_raw_file as _delete_raw_file,
 )
@@ -78,11 +81,32 @@ from app.services.documents_service import (
 from app.services.documents_service import (
     section_to_dict as _section_to_dict,
 )
+from app.services.epub_service import (
+    get_chapter_async,
+    get_epub_service,
+    get_toc_async,
+)
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.naming import normalize_tag_slug
+from app.services.objective_tracker import get_objective_tracker_service
 from app.services.parser import DocumentParser
 from app.services.repo_helpers import get_or_404
+from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
-from app.workflows.ingestion import STAGE_PROGRESS, ContentType, run_ingestion
+from app.services.youtube_downloader import (
+    check_ffmpeg_available,
+    check_ytdlp_available,
+    download_audio,
+    fetch_metadata,
+    is_youtube_url,
+)
+from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
+from app.workflows.ingestion import (
+    STAGE_PROGRESS,
+    ContentType,
+    _background_tasks,
+    run_ingestion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -382,9 +406,6 @@ async def ingest_document(
                 # But backfill any missing pre-generated summaries in the background
                 # (handles docs ingested before summarization was added, or where the
                 # background task was GC'd before completing all modes).
-                from app.services.summarizer import (  # noqa: PLC0415
-                    PREGENERATE_MODES,
-                )
 
                 async with get_session_factory()() as _s:
                     existing_modes = set(
@@ -399,12 +420,8 @@ async def ingest_document(
                     )
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
-                    from app.workflows.ingestion import (  # noqa: PLC0415
-                        _background_tasks,
-                        _run_pregenerate,
-                    )
 
-                    task = asyncio.create_task(_run_pregenerate(existing.id))
+                    task = asyncio.create_task(_ingestion_module._run_pregenerate(existing.id))
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
                     logger.info(
@@ -564,17 +581,9 @@ async def ingest_url(
     settings: Settings = Depends(get_settings),
 ):
     """Ingest a YouTube URL (yt-dlp) or a general web article (Trafilatura)."""
-    from app.services.youtube_downloader import (  # noqa: PLC0415
-        check_ffmpeg_available,
-        check_ytdlp_available,
-        download_audio,
-        fetch_metadata,
-        is_youtube_url,
-    )
 
     # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
     if not is_youtube_url(body.url):
-        from app.services.article_extractor import get_article_extractor  # noqa: PLC0415
 
         try:
             extractor = get_article_extractor()
@@ -873,7 +882,6 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     Returns 400 if the document is not an EPUB (format != 'epub').
     Returns 404 if the raw EPUB file is not found on disk.
     """
-    from app.services.epub_service import get_toc_async  # noqa: PLC0415
 
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
@@ -909,7 +917,6 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     Returns 400 if the document is not an EPUB.
     Returns 404 if chapter_index is out of range.
     """
-    from app.services.epub_service import get_chapter_async, get_epub_service  # noqa: PLC0415
 
     if chapter_index < 0:
         raise HTTPException(status_code=400, detail="chapter_index must be >= 0")
@@ -935,9 +942,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
 
     # Compute total chapters first (needed to slice sections)
     try:
-        from app.services.epub_service import get_toc_async as _get_toc  # noqa: PLC0415
-
-        toc = await _get_toc(str(fp))
+        toc = await get_toc_async(str(fp))
         total_chapters = len(toc)
     except Exception:
         total_chapters = max(1, len(all_section_ids))
@@ -1020,9 +1025,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
         except Exception:
             logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
         try:
-            from app.services.graph import get_graph_service  # noqa: PLC0415
 
-            get_graph_service().delete_document(document_id)
+            _graph_module.get_graph_service().delete_document(document_id)
         except Exception:
             logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
         # Remove extracted images directory
@@ -1044,7 +1048,6 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
-            from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
             doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         if body.content_type is not None:
@@ -1063,7 +1066,6 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
     async with get_session_factory()() as session:
         repo = DocumentRepo(session)
         doc = await repo.get_or_404(document_id)
-        from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
         normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         doc.tags = normalized
@@ -1138,9 +1140,8 @@ async def delete_document(document_id: str):
 
     # Remove graph nodes and edges from Kuzu
     try:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        get_graph_service().delete_document(document_id)
+        _graph_module.get_graph_service().delete_document(document_id)
     except Exception:
         logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
 
@@ -1203,9 +1204,8 @@ async def get_document_diagnostics(document_id: str):
 
     # Kuzu entity and edge counts (0 if graph unavailable)
     try:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        entity_count, edge_count = get_graph_service().count_for_document(document_id)
+        entity_count, edge_count = _graph_module.get_graph_service().count_for_document(document_id)
     except Exception:
         entity_count = 0
         edge_count = 0
@@ -1235,7 +1235,6 @@ async def search_document_sections(
     Returns [] for empty/whitespace-only query (not an error).
     Returns 404 if document does not exist.
     """
-    from app.services.document_search import get_document_search_service  # noqa: PLC0415
 
     if not q or not q.strip():
         return []
@@ -1392,7 +1391,6 @@ async def get_document_progress(document_id: str) -> DocumentProgressResponse:
     Returns zeros (not 404) when the document has no objectives.
     Returns 404 when the document does not exist.
     """
-    from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
@@ -1414,7 +1412,6 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
 
     Returns 404 when the document does not exist.
     """
-    from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
