@@ -612,11 +612,17 @@ starting a new extraction so we don't re-derive them per phase.
      `API_BASE`). Total since #12 started: 248 -> 8 raw fetches
      (-97 %). The lint rule (step 8 below) can now be wired with
      a tiny ignore list.
-  8. **Lint rule** (next): forbid `fetch(` outside
-     `frontend/src/lib/**` with per-line `eslint-disable` escapes on
-     the 8 intentional SSE / binary / asset sites enumerated in step
-     7. Can land as a hard error from day one given the count is
-     already zero in the migratable surface.
+  8. **Lint rule landed** (DONE). `eslint.config.js` adds a
+     `no-restricted-syntax` rule scoped to `src/**` (excluding
+     `src/lib/**`) that flags any `CallExpression` whose callee is
+     `fetch`. Three previously-missed files (`App.tsx` 4 sites,
+     `hooks/useReadyDocuments.ts` 1, `hooks/useReviewNotification.ts`
+     1) were migrated when the rule turned them up. The 8
+     intentional stays carry `// eslint-disable-next-line
+     no-restricted-syntax` with a short comment explaining the
+     exception (SSE stream / binary download / local asset). Rule
+     is a hard error from day one. `npx eslint src/` reports zero
+     `no-restricted-syntax` violations; tsc clean; 347 vitest pass.
 - **Acceptance criteria:** zero `fetch(` in `frontend/src/{pages,
   components}/**`; one error-mapping path; eslint enforces it.
 

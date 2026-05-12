@@ -173,6 +173,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     setPullLines([])
 
     try {
+      // SSE stream: progress lines arrive via res.body.getReader();
+      // apiClient's JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/settings/ollama/pull`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

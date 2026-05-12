@@ -41,6 +41,9 @@ export interface QaStreamHandlers {
 }
 
 export async function streamQa(req: QaStreamRequest, handlers: QaStreamHandlers): Promise<void> {
+  // SSE stream: we read res.body.getReader() token-by-token, so apiClient's
+  // JSON-decoding path doesn't apply.
+  // eslint-disable-next-line no-restricted-syntax
   const res = await fetch(`${API_BASE}/qa`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

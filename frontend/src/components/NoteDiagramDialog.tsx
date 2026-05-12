@@ -81,6 +81,9 @@ export function NoteDiagramDialog({ open, onOpenChange, scenePath, onSaved }: No
       }
 
       try {
+        // Local asset URL (resolveLuminaryAssetUrl), not an API endpoint --
+        // apiClient's API_BASE prefix would be wrong here.
+        // eslint-disable-next-line no-restricted-syntax
         const res = await fetch(resolveLuminaryAssetUrl(scenePath))
         if (!res.ok) throw new Error(`Could not load diagram scene: ${res.status}`)
         const data = (await res.json()) as ExcalidrawInitialDataState

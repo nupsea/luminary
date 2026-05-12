@@ -94,6 +94,9 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
     setStreaming((s) => ({ ...s, [mode]: true }))
     setSummaries((s) => ({ ...s, [mode]: "" }))
     try {
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/summarize/${documentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

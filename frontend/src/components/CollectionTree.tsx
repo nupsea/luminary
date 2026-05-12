@@ -143,6 +143,9 @@ function CollectionTreeItemRow({
     )
     try {
       const url = `${API_BASE}/collections/${item.id}/export?format=${format}`
+      // Binary download: we need res.blob() + res.headers.get("content-disposition")
+      // for the filename; apiClient's JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(url)
       if (!res.ok) throw new Error(`Export failed: ${res.status}`)
       const blob = await res.blob()

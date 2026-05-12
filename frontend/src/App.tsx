@@ -34,35 +34,20 @@ const Quality = lazy(() => import("./pages/Quality"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // Prefetch helpers
 // ---------------------------------------------------------------------------
 
-async function prefetchDocuments(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=20`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
+const prefetchDocuments = (): Promise<unknown> =>
+  apiGet("/documents", { sort: "newest", page: 1, page_size: 20 })
 
-async function prefetchLLMSettings(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
+const prefetchLLMSettings = (): Promise<unknown> => apiGet("/settings/llm")
 
-async function prefetchDueCards(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/study/due`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
+const prefetchDueCards = (): Promise<unknown> => apiGet("/study/due")
 
-async function prefetchProgressData(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/study/due-count`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
+const prefetchProgressData = (): Promise<unknown> => apiGet("/study/due-count")
 
 // ---------------------------------------------------------------------------
 // QueryClient

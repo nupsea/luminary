@@ -1,17 +1,17 @@
 import { useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { isDocumentReady } from "@/lib/documentReadiness"
 import type { DocumentListItem, DocumentListResponse } from "@/components/library/types"
 
 const READY_PAGE_SIZE = 200
 
 async function fetchAllDocuments(): Promise<DocumentListItem[]> {
-  const res = await fetch(
-    `${API_BASE}/documents?sort=last_accessed&page=1&page_size=${READY_PAGE_SIZE}`,
-  )
-  if (!res.ok) throw new Error("Failed to load documents")
-  const data = (await res.json()) as DocumentListResponse
+  const data = await apiGet<DocumentListResponse>("/documents", {
+    sort: "last_accessed",
+    page: 1,
+    page_size: READY_PAGE_SIZE,
+  })
   return data.items
 }
 

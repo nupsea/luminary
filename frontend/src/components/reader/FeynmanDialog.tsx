@@ -236,6 +236,9 @@ export function FeynmanDialog({
     setMessages((prev) => [...prev, { role: "tutor", content: "" }])
 
     try {
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -354,6 +357,9 @@ export function FeynmanDialog({
     setDiffSegments([])
 
     try {
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/model-explanation`, {
         method: "POST",
       })

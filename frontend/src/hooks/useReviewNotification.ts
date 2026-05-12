@@ -22,7 +22,7 @@ import { useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAppStore } from "@/store"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000
 const PERM_REQUESTED_KEY = "luminary:notifPermRequested"
 const LAST_NOTIF_KEY = "luminary:lastReviewNotif"
@@ -70,9 +70,7 @@ export function useReviewNotification(): void {
       localStorage.setItem(LAST_NOTIF_KEY, String(Date.now()))
 
       try {
-        const res = await fetch(`${API_BASE}/study/due-count`)
-        if (!res.ok) return
-        const data = (await res.json()) as { due_today: number }
+        const data = await apiGet<{ due_today: number }>("/study/due-count")
         if (data.due_today <= 0) return
 
         const count = data.due_today

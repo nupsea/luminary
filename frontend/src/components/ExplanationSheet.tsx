@@ -51,6 +51,9 @@ export function ExplanationSheet({
 
     void (async () => {
       try {
+        // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+        // JSON path doesn't apply.
+        // eslint-disable-next-line no-restricted-syntax
         const res = await fetch(`${API_BASE}/explain`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
