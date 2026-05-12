@@ -52,7 +52,8 @@ export function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps)
             if (s.id) markSuggestionAsked(s.id)
             onSuggest(s.text)
           }}
-          className="truncate max-w-[240px] rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
+          title={s.text}
+          className="max-w-full whitespace-normal break-words text-left rounded-2xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs leading-snug text-primary hover:bg-primary/10 transition-colors"
         >
           {s.text}
         </button>
