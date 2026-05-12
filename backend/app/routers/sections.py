@@ -3,10 +3,10 @@ import re
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import func, select
 
 from app.database import get_session_factory
-from app.models import ChunkModel, SectionModel
+from app.models import SectionModel
+from app.repos.document_repo import DocumentRepo
 
 logger = logging.getLogger(__name__)
 
@@ -37,26 +37,11 @@ class SectionResponse(BaseModel):
 async def get_sections(document_id: str) -> list[SectionResponse]:
     """Return sections for a document with accurate chunk_count per section."""
     async with get_session_factory()() as session:
-        sections_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        sections = sections_result.scalars().all()
-
+        repo = DocumentRepo(session)
+        sections = await repo.sections_for_document(document_id)
         if not sections:
             return []
-
-        # Batch chunk counts per section in a single query
-        chunk_counts_result = await session.execute(
-            select(ChunkModel.section_id, func.count(ChunkModel.id))
-            .where(
-                ChunkModel.document_id == document_id,
-                ChunkModel.section_id.isnot(None),
-            )
-            .group_by(ChunkModel.section_id)
-        )
-        chunk_counts: dict[str, int] = {row[0]: row[1] for row in chunk_counts_result.all()}
+        chunk_counts = await repo.chunk_counts_by_section(document_id)
 
     logger.debug("Sections fetched", extra={"document_id": document_id, "count": len(sections)})
     return [
@@ -80,22 +65,11 @@ async def get_sections(document_id: str) -> list[SectionResponse]:
 async def get_section_content(document_id: str) -> list[SectionContentItem]:
     """Return all sections with full text assembled from their chunks."""
     async with get_session_factory()() as session:
-        sections_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        sections = sections_result.scalars().all()
-
+        repo = DocumentRepo(session)
+        sections = await repo.sections_for_document(document_id)
         if not sections:
             return []
-
-        chunks_result = await session.execute(
-            select(ChunkModel)
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.section_id, ChunkModel.chunk_index)
-        )
-        chunks = chunks_result.scalars().all()
+        chunks = await repo.chunks_for_document(document_id, by_section=True)
 
     # Group chunks by section_id; orphan chunks (section_id=None) go into a separate list
     chunks_by_section: dict[str, list[str]] = {}

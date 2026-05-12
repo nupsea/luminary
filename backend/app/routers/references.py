@@ -14,10 +14,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi import Query
 from fastapi.routing import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, WebReferenceModel
+from app.repos.reference_repo import ReferenceRepo
 from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
@@ -109,19 +109,9 @@ async def get_document_references(
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-
-        query = (
-            select(WebReferenceModel)
-            .where(WebReferenceModel.document_id == document_id)
-            .order_by(WebReferenceModel.source_quality, WebReferenceModel.term)
+        rows = await ReferenceRepo(session).list_for_document(
+            document_id, include_invalid=include_invalid
         )
-        if not include_invalid:
-            # Exclude explicitly invalid refs; keep unchecked (None) and valid (True)
-            query = query.where(
-                (WebReferenceModel.is_valid.is_(None)) | (WebReferenceModel.is_valid == True)  # noqa: E712
-            )
-        refs_result = await session.execute(query)
-        rows = refs_result.scalars().all()
 
     return DocumentReferencesResponse(
         document_id=document_id,
@@ -163,25 +153,18 @@ async def refresh_document_references(document_id: str) -> dict:
 
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-
-        # Delete all existing refs for this document
-        existing = await session.execute(
-            select(WebReferenceModel).where(WebReferenceModel.document_id == document_id)
-        )
-        for row in existing.scalars().all():
-            await session.delete(row)
-        await session.commit()
+        await ReferenceRepo(session).delete_all_for_document(document_id)
 
     # Re-extract (enrich() internally validates URLs via _validate_urls)
     enricher = ReferenceEnricherService()
     count = await enricher.enrich(document_id)
 
-    # Count valid/invalid from the newly persisted refs
+    # Count valid/invalid from the newly persisted refs (include_invalid=True
+    # so the count reflects all rows).
     async with get_session_factory()() as session:
-        refs_result = await session.execute(
-            select(WebReferenceModel).where(WebReferenceModel.document_id == document_id)
+        rows = await ReferenceRepo(session).list_for_document(
+            document_id, include_invalid=True
         )
-        rows = refs_result.scalars().all()
 
     valid = sum(1 for r in rows if r.is_valid is True)
     invalid = sum(1 for r in rows if r.is_valid is False)
@@ -198,12 +181,7 @@ async def refresh_document_references(document_id: str) -> dict:
 async def get_section_references(section_id: str) -> SectionReferencesResponse:
     """Return web references for a single section, ordered by source_quality."""
     async with get_session_factory()() as session:
-        refs_result = await session.execute(
-            select(WebReferenceModel)
-            .where(WebReferenceModel.section_id == section_id)
-            .order_by(WebReferenceModel.source_quality, WebReferenceModel.term)
-        )
-        rows = refs_result.scalars().all()
+        rows = await ReferenceRepo(session).list_for_section(section_id)
 
     return SectionReferencesResponse(
         section_id=section_id,

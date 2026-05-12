@@ -456,10 +456,36 @@ starting a new extraction so we don't re-derive them per phase.
     and uses `TagRepo` + `NoteRepo` for the underlying ops.
   - **Phase 11 -- mechanical sweep** of the small-count routers
     (references 6, reading 6, sections 4, chat_meta 3, summarize 2,
-    search 2, images 2, code_executor 2, admin 1). Most should map
-    cleanly onto existing repos or motivate one new repo each
-    (e.g. `SectionRepo`). Target: zero session ops in any router
-    < 10 lines after this phase.
+    search 2, images 2, code_executor 2, admin 1).
+    Done so far:
+    - `routers/sections.py` (4 -> 0). `DocumentRepo.chunks_for_document`
+      grew a `by_section` flag and a new
+      `chunk_counts_by_section(document_id) -> dict[str, int]` method;
+      both endpoints now go through the repo.
+    - `routers/reading.py` (6 -> 0).
+      `DocumentRepo.upsert_reading_progress(document_id, section_id)`
+      owns the find-or-create + view_count increment.
+    - `routers/references.py` (6 -> 0). New
+      `app/repos/reference_repo.py` (66 lines) with
+      `list_for_document(include_invalid)`, `list_for_section`,
+      `delete_all_for_document`.
+    - `routers/admin.py` (1 -> 0). The lone `count(NoteModel)` call
+      now uses `NoteRepo.count_all()`.
+    Intentional inline (bespoke single-purpose queries; one or two
+    ops in a custom shape):
+    - `chat_meta.py` (3) -- exploration-suggestion DocumentModel
+      lookup + sections JOIN for the explorations feature.
+    - `summarize.py` (2) -- summary-aggregation rows for the
+      cached vs live response shapes.
+    - `search.py` (2) -- multi-table search with custom snippet
+      assembly.
+    - `images.py` (2) -- image association queries used by two
+      separate endpoints with different filter shapes.
+    - `code_executor.py` (2) -- single `session.add(event)` +
+      `commit()` for execution-event logging; one caller, no
+      reuse value in a repo.
+    Net Phase 11 reduction: 28 -> 11 small-router ops; 4 routers
+    fully zeroed. 28 tests pass; ruff clean.
 - **Acceptance criteria:** total router-side session ops < 50; every
   remaining inline op has a one-line comment explaining why it's
   inline (transactional, custom join shape, etc.); a regression test

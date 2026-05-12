@@ -5,15 +5,14 @@ surfaced to the user. The frontend swallows network errors silently.
 """
 
 import logging
-import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models import DocumentModel, ReadingProgressModel
+from app.models import DocumentModel
+from app.repos.document_repo import DocumentRepo
 from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
@@ -42,37 +41,11 @@ async def upsert_reading_progress(body: ReadingProgressRequest) -> ReadingProgre
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, body.document_id, name="Document")
-
-        now = datetime.now(UTC)
-
-        existing = (
-            await session.execute(
-                select(ReadingProgressModel).where(
-                    ReadingProgressModel.document_id == body.document_id,
-                    ReadingProgressModel.section_id == body.section_id,
-                )
-            )
-        ).scalar_one_or_none()
-
-        if existing is None:
-            row = ReadingProgressModel(
-                id=str(uuid.uuid4()),
-                document_id=body.document_id,
-                section_id=body.section_id,
-                first_seen_at=now,
-                last_seen_at=now,
-                view_count=1,
-            )
-            session.add(row)
-            await session.commit()
-            await session.refresh(row)
-            result = row
-        else:
-            existing.last_seen_at = now
-            existing.view_count += 1
-            await session.commit()
-            await session.refresh(existing)
-            result = existing
+        repo = DocumentRepo(session)
+        result = await repo.upsert_reading_progress(
+            document_id=body.document_id,
+            section_id=body.section_id,
+        )
 
     logger.info(
         "Reading progress upsert",
