@@ -19,9 +19,20 @@ import logging
 import uuid
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy import select
+from sqlalchemy import update as _update
 
 from app.database import get_session_factory
-from app.models import ChunkModel, CodeSnippetModel, SectionModel
+from app.models import ChunkModel, CodeSnippetModel, DocumentModel, SectionModel
+from app.services.code_parser import get_code_parser
+from app.services.conversation_chunker import ConversationChunker
+from app.services.learning_objective_extractor import LearningObjectiveExtractorService
+from app.services.tech_book_chunker import chunk_mixed_content
+from app.services.tech_section_parser import (
+    assign_parent_headings_dicts,
+    detect_admonition,
+    is_objective_candidate,
+)
 from app.telemetry import trace_ingestion_node
 from app.workflows.ingestion_nodes._shared import (
     CHUNK_CONFIGS,
@@ -38,9 +49,6 @@ async def _run_objective_extraction(doc_id: str, sections: list[tuple[str, str, 
     sections is a list of (section_id, section_heading, section_text) tuples.
     Non-fatal: failure is logged and does not interrupt ingestion.
     """
-    from app.services.learning_objective_extractor import (  # noqa: PLC0415
-        LearningObjectiveExtractorService,
-    )
 
     extractor = LearningObjectiveExtractorService()
     # Accumulate all extracted objectives first, then store in a single transaction
@@ -64,7 +72,6 @@ def _chunk_code_file(raw_text: str, file_path: str, doc_id: str) -> tuple[list[d
     Returns (chunks_for_db, definitions_with_metadata) where definitions include
     function_name, start_line, end_line for call-graph extraction.
     """
-    from app.services.code_parser import get_code_parser  # noqa: PLC0415
 
     parser = get_code_parser()
     lang = parser.detect_language(file_path) or "python"
@@ -116,11 +123,6 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
     2. Context Injection: Prepend [Book Title > Chapter] to every chunk text.
     3. Cross-Boundary Protection: No chunk crosses a section (chapter) boundary.
     """
-    from sqlalchemy import select  # noqa: PLC0415
-    from sqlalchemy import update as _update
-
-    from app.models import DocumentModel  # noqa: PLC0415
-
     cfg = CHUNK_CONFIGS["book"]
     # Smart splitting: try paragraphs, then sentences, then words.
     splitter = RecursiveCharacterTextSplitter(
@@ -267,16 +269,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
     3. Split surrounding prose with RecursiveCharacterTextSplitter.
     4. Store extracted code blocks in CodeSnippetModel with language and AST signature.
     """
-    from sqlalchemy import select  # noqa: PLC0415
-    from sqlalchemy import update as _update  # noqa: PLC0415
 
-    from app.models import DocumentModel  # noqa: PLC0415
-    from app.services.tech_book_chunker import chunk_mixed_content  # noqa: PLC0415
-    from app.services.tech_section_parser import (  # noqa: PLC0415
-        assign_parent_headings_dicts,
-        detect_admonition,
-        is_objective_candidate,
-    )
 
     content_type = state.get("content_type") or "tech_book"
     cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["tech_book"])
@@ -443,10 +436,7 @@ async def _chunk_conversation(
 
     Creates SectionModel rows so the Read view can display conversation content.
     """
-    from sqlalchemy import update as _update  # noqa: PLC0415
 
-    from app.models import DocumentModel  # noqa: PLC0415
-    from app.services.conversation_chunker import ConversationChunker  # noqa: PLC0415
 
     raw_text = (pd["raw_text"] if pd else "") or ""
     raw_sections = pd["sections"] if pd else []

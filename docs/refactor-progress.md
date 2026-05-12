@@ -302,7 +302,7 @@ starting a new extraction so we don't re-derive them per phase.
   nodes/...}.py`. Costs: many test imports change. Defer until #6 is
   otherwise complete; bundle as one rename commit.
 
-### #7 -- 231 `noqa: PLC0415` inline imports (was 299; -68 so far)
+### #7 -- 197 `noqa: PLC0415` inline imports (was 299; -98 so far)
 - Signals circular deps and routers/services importing each other lazily.
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
@@ -334,19 +334,44 @@ starting a new extraction so we don't re-derive them per phase.
     original module for swappable singletons"). 33 documents tests
     pass; we caught the patch-target issue exactly via the failing
     `test_delete_document_calls_graph_service`.
+- **Workflow-node pass DONE** (-30 more):
+  - `ingestion_nodes/chunk.py`: 12 -> 0. Lifted
+    `learning_objective_extractor`, `code_parser`, `tech_book_chunker`,
+    `tech_section_parser`, `conversation_chunker`, plus sqlalchemy
+    `select` + `update as _update` and `DocumentModel`. 50 ingestion
+    tests pass.
+  - `ingestion_nodes/entity_extract.py`: 14 -> 0. Lifted
+    `code_parser`, `entity_disambiguator`, `prerequisite_detector`,
+    `tech_relation_extractor`, `itertools.combinations`,
+    `asyncio as _asyncio`. `_uuid` alias replaced with the existing
+    `uuid` import. Kept `from app.services import graph as
+    _graph_module` and `from app.services import ner as _ner_module`
+    indirections because `get_graph_service` and `get_entity_extractor`
+    are monkey-patched in tests (same Design-Principle-3 pattern as
+    documents.py).
+  - `ingestion_nodes/finalize.py`: 8 -> 0. Lifted
+    `summarizer.get_summarization_service`,
+    `section_summarizer.get_section_summarizer_service`,
+    `enrichment_worker.get_enrichment_worker` (none are patched in
+    finalize-chain tests), plus `DocumentModel`, `EnrichmentJobModel`,
+    `update as _update`, `uuid`.
 - **Remaining work, in priority order:**
-  1. **Workflow lazy-imports** (ingestion_nodes/entity_extract.py 14,
-     ingestion_nodes/chunk.py 12, ingestion_nodes/finalize.py 8,
-     services/flashcard_generators.py 12). Most are inside hot loops
-     to avoid import-time cost; a chunk are circular workarounds.
-     Same playbook as the router-side pass: grep each noqa, verify the
-     target imports cleanly and isn't a patched factory, then promote.
+  1. **`services/flashcard_generators.py`** (12). The author already
+     uses module-level indirection for the patched factory at line 68
+     (`from app.services import flashcard as _flashcard`), so most
+     remaining noqas are intentional design choices: circular helpers
+     within `app.services.flashcard` (`_build_text`, `_fetch_chunks`,
+     `_CHUNK_CHAR_LIMIT`), heavy ML imports (`numpy as np`), and
+     patched factories (`get_retriever`, `get_graph_service`).
+     Estimated win after careful review: 3-5 noqas, not worth a pass.
   2. **Service-to-service late imports** (image_enricher 16,
-     clustering 11, image_extractor 10, flashcard 10). Often
+     clustering 11, image_extractor 10, flashcard 10,
+     retriever 8, note_graph 7, code_parser 6). Often
      `from app.services.A import get_a_service` inside a method to
      avoid a top-level cycle. Fix path: introduce a thin
      `app/services/_registry.py` that exposes `get_*` factories; both
      A and B import from `_registry`, never from each other.
+     This is a structural change -- defer until a dedicated session.
   3. **`app/main.py`** (10). FastAPI app-construction lazy imports;
      low priority -- they only fire once at startup so the "hot
      loop" concern doesn't apply. Promote when nothing else is left.

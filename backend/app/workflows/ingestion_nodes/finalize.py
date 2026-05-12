@@ -15,8 +15,15 @@ These five small nodes complete the ingestion pipeline:
 
 import asyncio
 import logging
+import uuid
+
+from sqlalchemy import update as _update
 
 from app.database import get_session_factory
+from app.models import DocumentModel, EnrichmentJobModel
+from app.services.enrichment_worker import get_enrichment_worker
+from app.services.section_summarizer import get_section_summarizer_service
+from app.services.summarizer import get_summarization_service
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _background_tasks,
@@ -28,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 async def _run_pregenerate(doc_id: str) -> None:
     """Background task: pre-generate summaries and invalidate library cache."""
-    from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
     svc = get_summarization_service()
     try:
@@ -54,7 +60,6 @@ async def section_summarize_node(state: IngestionState) -> IngestionState:
     doc_id = state["document_id"]
     logger.debug("node_start", extra={"node": "section_summarize", "doc_id": doc_id})
     try:
-        from app.services.section_summarizer import get_section_summarizer_service  # noqa: PLC0415
 
         svc = get_section_summarizer_service()
         count = await svc.generate(doc_id)
@@ -89,9 +94,7 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
     Persists the human-readable error detail to DocumentModel.error_message so
     GET /documents/{id}/status can surface it to the UI (e.g. 'ffmpeg not found').
     """
-    from sqlalchemy import update as _update  # noqa: PLC0415
 
-    from app.models import DocumentModel  # noqa: PLC0415
 
     doc_id = state["document_id"]
     error_detail = state.get("error")
@@ -114,12 +117,8 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
 
     Non-fatal: enrichment failure does not prevent document from being usable.
     """
-    import uuid as _uuid  # noqa: PLC0415
 
-    from sqlalchemy import update as _update  # noqa: PLC0415
 
-    from app.models import DocumentModel, EnrichmentJobModel  # noqa: PLC0415
-    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
 
     doc_id = state["document_id"]
     fmt = state.get("format", "").lower()
@@ -128,7 +127,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # Image extraction: PDF, EPUB, and MD (web articles)
     if fmt in _IMAGE_FORMATS:
         try:
-            job_id = str(_uuid.uuid4())
+            job_id = str(uuid.uuid4())
             async with get_session_factory()() as session:
                 session.add(
                     EnrichmentJobModel(
@@ -170,7 +169,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
 
     # Concept linking: always enqueue for cross-document concept comparison (S141)
     try:
-        cl_job_id = str(_uuid.uuid4())
+        cl_job_id = str(uuid.uuid4())
         async with get_session_factory()() as session:
             session.add(
                 EnrichmentJobModel(

@@ -16,10 +16,26 @@ GLiNER is the dominant memory hog; if GLINER_ENABLED is false the
 node degrades gracefully and the document still ingests.
 """
 
+import asyncio as _asyncio
 import logging
 import uuid
+from itertools import combinations
 
+from sqlalchemy import select
+from sqlalchemy import update as _update
+
+from app.config import get_settings as _get_settings
 from app.database import get_session_factory
+from app.models import ChunkModel, DocumentModel
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
+from app.services.code_parser import CodeParser
+from app.services.entity_disambiguator import (
+    _extract_version_qualifier,
+    canonicalize_batch,
+)
+from app.services.prerequisite_detector import detect_prerequisites
+from app.services.tech_relation_extractor import extract_tech_relations
 from app.telemetry import trace_ingestion_node
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
@@ -32,7 +48,6 @@ logger = logging.getLogger(__name__)
 
 def _build_call_graph(chunks: list[dict], graph, doc_id: str) -> None:
     """Build call graph for code document: create function Entity nodes and CALLS edges."""
-    from app.services.code_parser import CodeParser  # noqa: PLC0415
 
     # Collect function chunks (have function_name metadata)
     fn_chunks = [c for c in chunks if c.get("function_name")]
@@ -79,7 +94,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("entity_extract", state):
         entity_count = 0
         try:
-            from app.config import get_settings as _get_settings  # noqa: PLC0415
 
             if not _get_settings().GLINER_ENABLED:
                 logger.info(
@@ -89,20 +103,13 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 await _update_stage(doc_id, "complete")
                 return {**state, "status": "complete"}
 
-            from itertools import combinations  # noqa: PLC0415
 
-            from sqlalchemy import select  # noqa: PLC0415
 
-            from app.models import DocumentModel  # noqa: PLC0415
-            from app.services.graph import get_graph_service  # noqa: PLC0415
-            from app.services.ner import get_entity_extractor  # noqa: PLC0415
 
-            extractor = get_entity_extractor()
+            extractor = _ner_module.get_entity_extractor()
             # Cap NER at 500 chunks — sufficient for graph coverage, avoids multi-hour
             # runs on large documents (e.g. 2000+ chunk books).
             # Sample evenly across the document to get representative entities.
-            import asyncio as _asyncio
-
             NER_CHUNK_LIMIT = 5000
             if len(chunks) > NER_CHUNK_LIMIT:
                 step = len(chunks) // NER_CHUNK_LIMIT
@@ -121,7 +128,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             entities = await loop.run_in_executor(None, extractor.extract, ner_chunks, content_type)
             entity_count = len(entities)
 
-            graph = get_graph_service()
+            graph = _graph_module.get_graph_service()
 
             # Upsert the document node in Kuzu
             async with get_session_factory()() as session:
@@ -136,7 +143,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
 
             # Disambiguate: collapse surface-form variants to canonical names
             # before writing to Kuzu (e.g. "Mr. Holmes" -> "sherlock holmes").
-            from app.services.entity_disambiguator import canonicalize_batch  # noqa: PLC0415
 
             entity_tuples = [(ent["name"], ent["type"]) for ent in entities]
             existing_by_type = graph.get_entities_by_type_for_document(doc_id)
@@ -158,9 +164,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # FTS5 indexed text and the embedding input. Idempotent: every reindex
             # overwrites entities_text rather than appending.
             if chunk_to_entities:
-                from sqlalchemy import update as _update  # noqa: PLC0415
 
-                from app.models import ChunkModel  # noqa: PLC0415
 
                 async with get_session_factory()() as update_session:
                     for chunk in chunks:
@@ -200,7 +204,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # Prerequisite detection: scan chunk texts for marker phrases.
             # Only creates edges between entities already confirmed by GLiNER.
             try:
-                from app.services.prerequisite_detector import detect_prerequisites  # noqa: PLC0415
 
                 canonical_name_to_id: dict[str, str] = {
                     ent["name"]: ent["id"] for ent in canonical_entities
@@ -231,9 +234,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             content_type_for_tech = state.get("content_type") or ""
             if content_type_for_tech in ("code", "tech_book", "tech_article"):
                 try:
-                    from app.services.tech_relation_extractor import (
-                        extract_tech_relations,  # noqa: PLC0415
-                    )
 
                     canonical_name_to_id_tech: dict[str, str] = {
                         ent["name"]: ent["id"] for ent in canonical_entities
@@ -258,9 +258,6 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
 
                     # Version-of edges: for LIBRARY entities with version qualifiers,
                     # link the versioned entity to its major-version base entity.
-                    from app.services.entity_disambiguator import (
-                        _extract_version_qualifier,  # noqa: PLC0415
-                    )
 
                     version_base_count = 0
                     for ent in canonical_entities:
@@ -271,9 +268,8 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                         if version_str is None or base_name == name:
                             continue
                         # Create or find the base entity node
-                        import uuid as _uuid  # noqa: PLC0415
 
-                        base_id = str(_uuid.uuid5(_uuid.NAMESPACE_DNS, f"{doc_id}:{base_name}"))
+                        base_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{base_name}"))
                         # Upsert base entity if it doesn't exist yet
                         graph.upsert_entity(base_id, base_name, "LIBRARY")
                         graph.add_mention(base_id, doc_id)
