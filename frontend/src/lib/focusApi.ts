@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
-// focusApi -- thin fetch wrappers for /pomodoro/* endpoints (S208) used by the
-// global FocusTimerPill (S209). All methods return parsed JSON or null on 204.
+// focusApi -- wrappers for /pomodoro/* endpoints (S208) used by the global
+// FocusTimerPill (S209). Uses the shared apiClient (#12 standardisation).
 // ---------------------------------------------------------------------------
 
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost, ApiError, request } from "@/lib/apiClient"
 import type { Surface } from "@/lib/focusUtils"
 
 export interface PomodoroSession {
@@ -42,60 +42,44 @@ export interface ActiveSessionConflict {
   existing_session_id: string
 }
 
-async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
-  }
-  return (await res.json()) as T
-}
-
-export async function startSession(args: StartArgs): Promise<PomodoroSession | ActiveSessionConflict> {
-  const res = await fetch(`${API_BASE}/pomodoro/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  })
-  if (res.status === 409) {
-    const body = (await res.json().catch(() => ({}))) as {
-      detail?: { existing_session_id?: string }
+export async function startSession(
+  args: StartArgs,
+): Promise<PomodoroSession | ActiveSessionConflict> {
+  try {
+    return await apiPost<PomodoroSession>("/pomodoro/start", args)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      let existingId = ""
+      try {
+        const parsed = JSON.parse(err.body) as {
+          detail?: { existing_session_id?: string }
+        }
+        existingId = parsed.detail?.existing_session_id ?? ""
+      } catch {
+        // body wasn't JSON; leave existingId empty
+      }
+      return { status: 409, existing_session_id: existingId }
     }
-    return {
-      status: 409,
-      existing_session_id: body.detail?.existing_session_id ?? "",
-    }
+    throw err
   }
-  return asJson<PomodoroSession>(res)
 }
 
-export async function pauseSession(id: string): Promise<PomodoroSession> {
-  const res = await fetch(`${API_BASE}/pomodoro/${id}/pause`, { method: "POST" })
-  return asJson<PomodoroSession>(res)
-}
+export const pauseSession = (id: string): Promise<PomodoroSession> =>
+  apiPost<PomodoroSession>(`/pomodoro/${id}/pause`)
 
-export async function resumeSession(id: string): Promise<PomodoroSession> {
-  const res = await fetch(`${API_BASE}/pomodoro/${id}/resume`, { method: "POST" })
-  return asJson<PomodoroSession>(res)
-}
+export const resumeSession = (id: string): Promise<PomodoroSession> =>
+  apiPost<PomodoroSession>(`/pomodoro/${id}/resume`)
 
-export async function completeSession(id: string): Promise<PomodoroSession> {
-  const res = await fetch(`${API_BASE}/pomodoro/${id}/complete`, { method: "POST" })
-  return asJson<PomodoroSession>(res)
-}
+export const completeSession = (id: string): Promise<PomodoroSession> =>
+  apiPost<PomodoroSession>(`/pomodoro/${id}/complete`)
 
-export async function abandonSession(id: string): Promise<PomodoroSession> {
-  const res = await fetch(`${API_BASE}/pomodoro/${id}/abandon`, { method: "POST" })
-  return asJson<PomodoroSession>(res)
-}
+export const abandonSession = (id: string): Promise<PomodoroSession> =>
+  apiPost<PomodoroSession>(`/pomodoro/${id}/abandon`)
 
-// Returns null on 204 (no active or paused session).
-export async function getActiveSession(): Promise<PomodoroSession | null> {
-  const res = await fetch(`${API_BASE}/pomodoro/active`)
-  if (res.status === 204) return null
-  return asJson<PomodoroSession>(res)
-}
+// Returns null on 204 (no active or paused session). request<T> already
+// surfaces 204 as `null`, so we ride on that.
+export const getActiveSession = (): Promise<PomodoroSession | null> =>
+  request<PomodoroSession | null>("/pomodoro/active")
 
-export async function getStats(): Promise<PomodoroStats> {
-  const res = await fetch(`${API_BASE}/pomodoro/stats`)
-  return asJson<PomodoroStats>(res)
-}
+export const getStats = (): Promise<PomodoroStats> =>
+  apiGet<PomodoroStats>("/pomodoro/stats")

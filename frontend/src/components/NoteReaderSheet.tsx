@@ -16,7 +16,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiGet, apiPatch, apiPost, request } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { stripMarkdown } from "@/lib/utils"
@@ -72,65 +72,45 @@ async function createNote(payload: {
   document_id: string | null
   source_document_ids?: string[]
 }): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
-  return res.json() as Promise<Note>
+  return apiPost<Note>("/notes", payload)
 }
 
-async function patchNote(
+const patchNote = (
   id: string,
   data: { content?: string; tags?: string[]; source_document_ids?: string[] },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
+): Promise<Note> => apiPatch<Note>(`/notes/${id}`, data)
 
-async function deleteNote(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
-}
+const deleteNote = (id: string): Promise<void> => apiDelete(`/notes/${id}`)
 
 async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) return []
-  return res.json() as Promise<CollectionTreeItem[]>
+  try {
+    return await apiGet<CollectionTreeItem[]>("/collections/tree")
+  } catch {
+    return []
+  }
 }
 
-async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
+const addNoteToCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiPost(`/collections/${collectionId}/members`, {
+    member_ids: [noteId],
+    member_type: "note",
   })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
-}
 
-async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
-    method: "DELETE",
-  })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
-}
+const removeNoteFromCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiDelete(`/collections/${collectionId}/members/${noteId}`)
 
 async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, {
+    const data = await request<{ tags: string[] }>(`/notes/${id}/suggest-tags`, {
       method: "POST",
       signal,
     })
-    if (!res.ok) return []
-    const data = (await res.json()) as { tags: string[] }
     return data.tags ?? []
   } catch {
     return []
@@ -308,13 +288,8 @@ export function NoteReaderSheet({
     } else if (note && note.content) {
       if (note.content.trim().length > 20) {
         setIsGeneratingTitle(true)
-        fetch(`${API_BASE}/notes/suggest-title`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: note.content }),
-        })
-          .then((res) => res.json())
-          .then((data: { title: string }) => {
+        apiPost<{ title: string }>("/notes/suggest-title", { content: note.content })
+          .then((data) => {
             setGeneratedTitle(data.title)
             setIsGeneratingTitle(false)
           })
@@ -465,13 +440,10 @@ export function NoteReaderSheet({
       
       if (savedNote.content.trim().length > 20) {
         setIsGeneratingTitle(true)
-        fetch(`${API_BASE}/notes/suggest-title`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: savedNote.content }),
+        apiPost<{ title: string }>("/notes/suggest-title", {
+          content: savedNote.content,
         })
-          .then((res) => res.json())
-          .then((data: { title: string }) => {
+          .then((data) => {
             setGeneratedTitle(data.title)
             setIsGeneratingTitle(false)
           })

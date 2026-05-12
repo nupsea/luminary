@@ -8,40 +8,26 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Check, ChevronDown, ChevronUp, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { DeckHealthReport } from "./types"
 
-async function fetchDeckHealth(documentId: string): Promise<DeckHealthReport> {
-  const res = await fetch(`${API_BASE}/flashcards/health/${documentId}`)
-  if (!res.ok) throw new Error("Failed to load deck health report")
-  return res.json() as Promise<DeckHealthReport>
-}
+const fetchDeckHealth = (documentId: string): Promise<DeckHealthReport> =>
+  apiGet<DeckHealthReport>(`/flashcards/health/${documentId}`)
 
-async function archiveMastered(documentId: string): Promise<{ archived: number }> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/health/${documentId}/archive-mastered`,
-    { method: "POST" },
+const archiveMastered = (documentId: string): Promise<{ archived: number }> =>
+  apiPost<{ archived: number }>(
+    `/flashcards/health/${documentId}/archive-mastered`,
   )
-  if (!res.ok) throw new Error("Failed to archive mastered cards")
-  return res.json() as Promise<{ archived: number }>
-}
 
-async function fillUncovered(
+const fillUncovered = (
   documentId: string,
   sectionIds: string[],
-): Promise<{ queued: number }> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/health/${documentId}/fill-uncovered`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section_ids: sectionIds }),
-    },
+): Promise<{ queued: number }> =>
+  apiPost<{ queued: number }>(
+    `/flashcards/health/${documentId}/fill-uncovered`,
+    { section_ids: sectionIds },
   )
-  if (!res.ok) throw new Error("Failed to queue uncovered section fill")
-  return res.json() as Promise<{ queued: number }>
-}
 
 interface HealthReportPanelProps {
   documentId: string

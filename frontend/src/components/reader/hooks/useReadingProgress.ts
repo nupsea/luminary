@@ -1,14 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
-import { API_BASE } from "@/lib/config"
+import { apiPost } from "@/lib/apiClient"
 
 async function postReadingProgress(documentId: string, sectionId: string): Promise<void> {
   try {
-    await fetch(`${API_BASE}/reading/progress`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document_id: documentId, section_id: sectionId }),
+    await apiPost("/reading/progress", {
+      document_id: documentId,
+      section_id: sectionId,
     })
   } catch {
     // Best-effort: network errors must never interrupt reading

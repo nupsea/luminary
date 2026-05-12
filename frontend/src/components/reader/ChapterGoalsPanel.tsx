@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPatch } from "@/lib/apiClient"
 
 interface LearningObjective {
   id: string
@@ -11,19 +11,15 @@ interface LearningObjective {
   covered: boolean
 }
 
-async function patchObjectiveCovered(
+const patchObjectiveCovered = (
   documentId: string,
   objectiveId: string,
   covered: boolean,
-): Promise<LearningObjective> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/objectives/${objectiveId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ covered }),
-  })
-  if (!res.ok) throw new Error("Failed to update objective")
-  return res.json() as Promise<LearningObjective>
-}
+): Promise<LearningObjective> =>
+  apiPatch<LearningObjective>(
+    `/documents/${documentId}/objectives/${objectiveId}`,
+    { covered },
+  )
 
 interface ChapterProgressRingProps {
   pct: number
@@ -59,11 +55,10 @@ export function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: Chapt
   const qc = useQueryClient()
   const { data, isLoading, isError } = useQuery({
     queryKey: ["objectives", documentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/documents/${documentId}/objectives`)
-      if (!res.ok) throw new Error("Failed to fetch objectives")
-      return res.json() as Promise<{ objectives: LearningObjective[] }>
-    },
+    queryFn: () =>
+      apiGet<{ objectives: LearningObjective[] }>(
+        `/documents/${documentId}/objectives`,
+      ),
     staleTime: 300_000,
   })
 

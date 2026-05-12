@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -61,34 +61,29 @@ interface FocusStats {
 // ---------------------------------------------------------------------------
 
 async function fetchXPHistory(): Promise<XPHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/engagement/xp/history?days=30`)
-  if (!res.ok) return []
-  return res.json()
+  try {
+    return await apiGet<XPHistoryItem[]>("/engagement/xp/history", { days: 30 })
+  } catch {
+    return []
+  }
 }
 
-async function fetchXPSummary(): Promise<XPSummary> {
-  const res = await fetch(`${API_BASE}/engagement/xp`)
-  if (!res.ok) throw new Error("xp fetch failed")
-  return res.json()
-}
+const fetchXPSummary = (): Promise<XPSummary> =>
+  apiGet<XPSummary>("/engagement/xp")
 
-async function fetchStreak(): Promise<StreakData> {
-  const res = await fetch(`${API_BASE}/engagement/streak`)
-  if (!res.ok) throw new Error("streak fetch failed")
-  return res.json()
-}
+const fetchStreak = (): Promise<StreakData> =>
+  apiGet<StreakData>("/engagement/streak")
 
 async function fetchAchievements(): Promise<Achievement[]> {
-  const res = await fetch(`${API_BASE}/engagement/achievements`)
-  if (!res.ok) return []
-  return res.json()
+  try {
+    return await apiGet<Achievement[]>("/engagement/achievements")
+  } catch {
+    return []
+  }
 }
 
-async function fetchFocusStats(): Promise<FocusStats> {
-  const res = await fetch(`${API_BASE}/engagement/focus/stats?days=7`)
-  if (!res.ok) throw new Error("focus stats failed")
-  return res.json()
-}
+const fetchFocusStats = (): Promise<FocusStats> =>
+  apiGet<FocusStats>("/engagement/focus/stats", { days: 7 })
 
 // ---------------------------------------------------------------------------
 // Icon map for achievements

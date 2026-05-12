@@ -25,7 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { StudyHabitsSection } from "@/components/StudyHabitsSection"
 import { logger } from "@/lib/logger"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { GoalsList } from "@/components/goals/GoalsList"
 import type { DocListItem } from "./Study"
 
@@ -74,42 +74,33 @@ interface SessionListResponse {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchStudyHistory(days: number): Promise<DailyHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/study/history?days=${days}`)
-  if (!res.ok) throw new Error("study/history failed")
-  return res.json() as Promise<DailyHistoryItem[]>
-}
+const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
+  apiGet<DailyHistoryItem[]>("/study/history", { days })
 
-async function fetchDueCount(): Promise<DueCountResponse> {
-  const res = await fetch(`${API_BASE}/study/due-count`)
-  if (!res.ok) throw new Error("study/due-count failed")
-  return res.json() as Promise<DueCountResponse>
-}
+const fetchDueCount = (): Promise<DueCountResponse> =>
+  apiGet<DueCountResponse>("/study/due-count")
 
-async function fetchOverview(): Promise<MonitoringOverview> {
-  const res = await fetch(`${API_BASE}/monitoring/overview`)
-  if (!res.ok) throw new Error("monitoring/overview failed")
-  return res.json() as Promise<MonitoringOverview>
-}
+const fetchOverview = (): Promise<MonitoringOverview> =>
+  apiGet<MonitoringOverview>("/monitoring/overview")
 
 async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+      sort: "newest",
+      page: 1,
+      page_size: 100,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
-async function fetchRecentNotes(): Promise<NoteListResponse> {
-  const res = await fetch(`${API_BASE}/notes?page=1&page_size=100`)
-  if (!res.ok) throw new Error("notes failed")
-  return res.json() as Promise<NoteListResponse>
-}
+const fetchRecentNotes = (): Promise<NoteListResponse> =>
+  apiGet<NoteListResponse>("/notes", { page: 1, page_size: 100 })
 
-async function fetchSessions(): Promise<SessionListResponse> {
-  const res = await fetch(`${API_BASE}/study/sessions?page=1&page_size=50`)
-  if (!res.ok) throw new Error("study/sessions failed")
-  return res.json() as Promise<SessionListResponse>
-}
+const fetchSessions = (): Promise<SessionListResponse> =>
+  apiGet<SessionListResponse>("/study/sessions", { page: 1, page_size: 50 })
 
 // ---------------------------------------------------------------------------
 // Helper: build notes-over-time chart data (group by month)
@@ -231,8 +222,9 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
       setSections([])
       return
     }
-    fetch(`${API_BASE}/documents/${selectedDoc}`)
-      .then(r => r.json())
+    apiGet<{ sections?: { id: string; heading: string }[] }>(
+      `/documents/${selectedDoc}`,
+    )
       .then(d => {
         setSections(d.sections || [])
         if (d.sections && d.sections.length > 0) {
@@ -247,17 +239,11 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
     setAnalyzing(true)
     setGaps(null)
     try {
-      const res = await fetch(`${API_BASE}/notes/gap-detect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_id: selectedDoc, section_id: selectedSec })
+      const data = await apiPost<{ gaps: string[] }>("/notes/gap-detect", {
+        document_id: selectedDoc,
+        section_id: selectedSec,
       })
-      if (res.ok) {
-        const data = await res.json()
-        setGaps(data.gaps)
-      } else {
-        setGaps([])
-      }
+      setGaps(data.gaps)
     } catch {
       setGaps([])
     } finally {

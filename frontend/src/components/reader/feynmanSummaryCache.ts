@@ -7,7 +7,7 @@
  * (required by the react-refresh / fast-refresh rule).
  */
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 export const summaryCache = new Map<string, string>()
 export const summaryInflight = new Map<string, Promise<string | null>>()
@@ -21,25 +21,19 @@ export async function fetchSummary(
   sectionId: string,
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-    if (res.ok) {
-      const data = (await res.json()) as {
-        summaries: Record<string, { id: string; content: string }>
-      }
-      if (data.summaries["executive"]) return data.summaries["executive"].content
-    }
+    const data = await apiGet<{
+      summaries: Record<string, { id: string; content: string }>
+    }>(`/summarize/${documentId}/cached`)
+    if (data.summaries["executive"]) return data.summaries["executive"].content
   } catch {
     // fall through
   }
   try {
-    const res2 = await fetch(`${API_BASE}/documents/${documentId}`)
-    if (res2.ok) {
-      const doc = (await res2.json()) as {
-        sections: Array<{ id: string; preview: string }>
-      }
-      const section = doc.sections.find((s) => s.id === sectionId)
-      if (section?.preview) return section.preview
-    }
+    const doc = await apiGet<{
+      sections: Array<{ id: string; preview: string }>
+    }>(`/documents/${documentId}`)
+    const section = doc.sections.find((s) => s.id === sectionId)
+    if (section?.preview) return section.preview
   } catch {
     // ignore
   }

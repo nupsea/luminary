@@ -3,7 +3,7 @@ import { useCallback, useState } from "react"
 import { toast } from "sonner"
 
 import type { Note } from "@/components/NoteEditorDialog"
-import { API_BASE } from "@/lib/config"
+import { apiPost } from "@/lib/apiClient"
 
 import type { SourceRef } from "../SelectionActionBar"
 import type { AnnotationItem, SectionItem } from "../types"
@@ -62,18 +62,13 @@ export function useSelectionWorkflow({
     color: AnnotationItem["color"],
   ) => {
     try {
-      const res = await fetch(`${API_BASE}/annotations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sourceRef.sectionId,
-          selected_text: text,
-          color,
-          page_number: sourceRef.pageNumber,
-        }),
+      await apiPost("/annotations", {
+        document_id: documentId,
+        section_id: sourceRef.sectionId,
+        selected_text: text,
+        color,
+        page_number: sourceRef.pageNumber,
       })
-      if (!res.ok) throw new Error("Failed to save highlight")
       void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
       toast.success("Highlight saved")
     } catch {
@@ -83,17 +78,12 @@ export function useSelectionWorkflow({
 
   const handleClip = useCallback(async (text: string, sourceRef: SourceRef) => {
     try {
-      const res = await fetch(`${API_BASE}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sourceRef.sectionId,
-          content: `> ${text}`,
-          tags: ["clipped"],
-        }),
+      await apiPost("/notes", {
+        document_id: documentId,
+        section_id: sourceRef.sectionId,
+        content: `> ${text}`,
+        tags: ["clipped"],
       })
-      if (!res.ok) throw new Error("Failed to clip")
       void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
       toast.success("Clipped to notes")
     } catch {

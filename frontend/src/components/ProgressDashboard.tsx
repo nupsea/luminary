@@ -25,7 +25,7 @@ import {
 } from "recharts"
 import { Loader2 } from "lucide-react"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,17 +64,22 @@ interface HistoryItem {
 // ---------------------------------------------------------------------------
 
 async function fetchStats(documentId: string): Promise<StudyStats | null> {
-  const res = await fetch(`${API_BASE}/study/stats/${documentId}`)
-  if (!res.ok) return null
-  return res.json() as Promise<StudyStats>
+  try {
+    return await apiGet<StudyStats>(`/study/stats/${documentId}`)
+  } catch {
+    return null
+  }
 }
 
 async function fetchHistory(documentId: string): Promise<HistoryItem[]> {
-  const res = await fetch(
-    `${API_BASE}/study/history?document_id=${documentId}&days=90`,
-  )
-  if (!res.ok) return []
-  return res.json() as Promise<HistoryItem[]>
+  try {
+    return await apiGet<HistoryItem[]>("/study/history", {
+      document_id: documentId,
+      days: 90,
+    })
+  } catch {
+    return []
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@
 
 import { useState } from "react"
 import { CheckCircle2, Loader2 } from "lucide-react"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiPost } from "@/lib/apiClient"
 
 export interface RubricDimension {
   score: number
@@ -53,24 +53,26 @@ function MissedPointRow({ point, documentId }: MissedPointRowProps) {
     setState("loading")
     setErrorMsg("")
     try {
-      const res = await fetch(`${API_BASE}/flashcards/create-trace`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: `Explain: ${point}`,
-          answer: "",
-          source_excerpt: point,
-          document_id: documentId,
-        }),
+      await apiPost("/flashcards/create-trace", {
+        question: `Explain: ${point}`,
+        answer: "",
+        source_excerpt: point,
+        document_id: documentId,
       })
-      if (!res.ok) {
-        const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
+      setState("done")
+    } catch (err) {
+      if (err instanceof ApiError) {
+        let detail = `HTTP ${err.status}`
+        try {
+          const parsed = JSON.parse(err.body) as { detail?: string }
+          if (parsed.detail) detail = parsed.detail
+        } catch {
+          // body wasn't JSON
+        }
         setErrorMsg(detail)
         setState("error")
         return
       }
-      setState("done")
-    } catch {
       setErrorMsg("Request failed. Please try again.")
       setState("error")
     }

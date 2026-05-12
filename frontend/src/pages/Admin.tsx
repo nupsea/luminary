@@ -31,7 +31,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,44 +103,27 @@ function initSection<T>(data: T): SectionState<T> {
 // API — throw on non-ok so catch handlers set error: true
 // ---------------------------------------------------------------------------
 
-async function fetchOverview(): Promise<MonitoringOverview> {
-  const res = await fetch(`${API_BASE}/monitoring/overview`)
-  if (!res.ok) throw new Error("overview failed")
-  return res.json() as Promise<MonitoringOverview>
-}
+const fetchOverview = (): Promise<MonitoringOverview> =>
+  apiGet<MonitoringOverview>("/monitoring/overview")
 
-async function fetchTraces(): Promise<TracesResponse> {
-  const res = await fetch(`${API_BASE}/monitoring/traces`)
-  if (!res.ok) throw new Error("traces failed")
-  return res.json() as Promise<TracesResponse>
-}
+const fetchTraces = (): Promise<TracesResponse> =>
+  apiGet<TracesResponse>("/monitoring/traces")
 
-async function fetchModelUsage(): Promise<ModelUsageItem[]> {
-  const res = await fetch(`${API_BASE}/monitoring/model-usage`)
-  if (!res.ok) throw new Error("model-usage failed")
-  return res.json() as Promise<ModelUsageItem[]>
-}
+const fetchModelUsage = (): Promise<ModelUsageItem[]> =>
+  apiGet<ModelUsageItem[]>("/monitoring/model-usage")
 
-async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("llm-settings failed")
-  return res.json() as Promise<LLMSettings>
-}
+const fetchLLMSettings = (): Promise<LLMSettings> =>
+  apiGet<LLMSettings>("/settings/llm")
 
 async function fetchDocuments(): Promise<Document[]> {
-  const res = await fetch(`${API_BASE}/documents`)
-  if (!res.ok) throw new Error("documents failed")
-  const data = (await res.json()) as { items?: Document[] } | Document[]
+  const data = await apiGet<{ items?: Document[] } | Document[]>("/documents")
   // handle both paginated and legacy list responses
   if (Array.isArray(data)) return data
   return (data as { items?: Document[] }).items ?? []
 }
 
-async function fetchPhoenixUrl(): Promise<PhoenixUrl> {
-  const res = await fetch(`${API_BASE}/monitoring/phoenix-url`)
-  if (!res.ok) throw new Error("phoenix-url failed")
-  return res.json() as Promise<PhoenixUrl>
-}
+const fetchPhoenixUrl = (): Promise<PhoenixUrl> =>
+  apiGet<PhoenixUrl>("/monitoring/phoenix-url")
 
 // ---------------------------------------------------------------------------
 // Helper components
@@ -414,19 +397,20 @@ interface MasteryHeatmapResponse {
   cells: HeatmapCellItem[]
 }
 
-async function fetchMasteryConcepts(documentIds: string[]): Promise<MasteryConceptsResponse> {
-  const params = new URLSearchParams()
-  documentIds.forEach((id) => params.append("document_ids", id))
-  const res = await fetch(`${API_BASE}/mastery/concepts?${params.toString()}`)
-  if (!res.ok) throw new Error("mastery/concepts failed")
-  return res.json() as Promise<MasteryConceptsResponse>
+function fetchMasteryConcepts(
+  documentIds: string[],
+): Promise<MasteryConceptsResponse> {
+  const url = new URL("https://placeholder/mastery/concepts")
+  documentIds.forEach((id) => url.searchParams.append("document_ids", id))
+  return apiGet<MasteryConceptsResponse>(
+    `/mastery/concepts?${url.searchParams.toString()}`,
+  )
 }
 
-async function fetchMasteryHeatmap(documentId: string): Promise<MasteryHeatmapResponse> {
-  const res = await fetch(`${API_BASE}/mastery/heatmap?document_id=${encodeURIComponent(documentId)}`)
-  if (!res.ok) throw new Error("mastery/heatmap failed")
-  return res.json() as Promise<MasteryHeatmapResponse>
-}
+const fetchMasteryHeatmap = (
+  documentId: string,
+): Promise<MasteryHeatmapResponse> =>
+  apiGet<MasteryHeatmapResponse>("/mastery/heatmap", { document_id: documentId })
 
 function masteryColor(mastery: number | null): string {
   if (mastery === null) return "bg-gray-100 dark:bg-gray-800"

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiGet, apiPatch, apiPost, request } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { detectLinkTrigger, insertLinkAtTrigger } from "@/lib/noteLinkUtils"
@@ -66,34 +66,34 @@ interface NoteLinksResponse {
 // API
 // ---------------------------------------------------------------------------
 
-async function patchNote(
+const patchNote = (
   id: string,
-  data: { content?: string; tags?: string[]; group_name?: string; source_document_ids?: string[] },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
+  data: {
+    content?: string
+    tags?: string[]
+    group_name?: string
+    source_document_ids?: string[]
+  },
+): Promise<Note> => apiPatch<Note>(`/notes/${id}`, data)
 
 async function fetchDocuments(): Promise<DocumentItem[]> {
-  const res = await fetch(`${API_BASE}/documents`)
-  if (!res.ok) return []
-  const docs = (await res.json()) as DocumentItem[]
-  return docs.filter((d) => d.status === "ready")
+  try {
+    const docs = await apiGet<DocumentItem[]>("/documents")
+    return docs.filter((d) => d.status === "ready")
+  } catch {
+    return []
+  }
 }
 
-async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
+async function fetchSuggestedTags(
+  id: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, {
-      method: "POST",
-      signal,
-    })
-    if (!res.ok) return []
-    const data = (await res.json()) as { tags: string[] }
+    const data = await request<{ tags: string[] }>(
+      `/notes/${id}/suggest-tags`,
+      { method: "POST", signal },
+    )
     return data.tags ?? []
   } catch {
     return []
@@ -101,60 +101,54 @@ async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<str
 }
 
 async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) return []
-  return res.json() as Promise<CollectionTreeItem[]>
+  try {
+    return await apiGet<CollectionTreeItem[]>("/collections/tree")
+  } catch {
+    return []
+  }
 }
 
-async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
+const addNoteToCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiPost(`/collections/${collectionId}/members`, {
+    member_ids: [noteId],
+    member_type: "note",
   })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
-}
 
-async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
-    method: "DELETE",
-  })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
-}
+const removeNoteFromCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiDelete(`/collections/${collectionId}/members/${noteId}`)
 
 async function fetchNoteLinks(noteId: string): Promise<NoteLinksResponse> {
-  const res = await fetch(`${API_BASE}/notes/${noteId}/links`)
-  if (!res.ok) return { outgoing: [], incoming: [] }
-  return res.json() as Promise<NoteLinksResponse>
+  try {
+    return await apiGet<NoteLinksResponse>(`/notes/${noteId}/links`)
+  } catch {
+    return { outgoing: [], incoming: [] }
+  }
 }
 
-async function createNoteLink(
+const createNoteLink = (
   noteId: string,
   targetNoteId: string,
   linkType: string,
-): Promise<NoteLinkItem> {
-  const res = await fetch(`${API_BASE}/notes/${noteId}/links`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ target_note_id: targetNoteId, link_type: linkType }),
+): Promise<NoteLinkItem> =>
+  apiPost<NoteLinkItem>(`/notes/${noteId}/links`, {
+    target_note_id: targetNoteId,
+    link_type: linkType,
   })
-  if (!res.ok) throw new Error(`POST /notes/${noteId}/links failed: ${res.status}`)
-  return res.json() as Promise<NoteLinkItem>
-}
 
-async function deleteNoteLink(
+const deleteNoteLink = (
   noteId: string,
   targetNoteId: string,
   linkType: string,
-): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
-    { method: "DELETE" },
+): Promise<void> =>
+  apiDelete(
+    `/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
   )
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /notes/${noteId}/links/${targetNoteId} failed`)
-}
 
 // ---------------------------------------------------------------------------
 // Component

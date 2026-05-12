@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
-// goalsApi (S211) -- typed fetch wrappers for the S210 typed-goals backend.
+// goalsApi (S211) -- typed wrappers for the S210 typed-goals backend.
+// Uses the shared apiClient (#12 standardisation).
 // ---------------------------------------------------------------------------
 
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 
 export type GoalType = "studying" | "read" | "recall" | "write" | "explore"
 export type TargetUnit = "minutes" | "pages" | "cards" | "notes" | "turns"
@@ -73,79 +74,32 @@ export interface UpdateGoalArgs {
   target_unit?: TargetUnit | null
 }
 
-async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
-  }
-  return (await res.json()) as T
-}
+export const listGoals = (status?: GoalStatus): Promise<Goal[]> =>
+  apiGet<Goal[]>("/goals", { status })
 
-export async function listGoals(status?: GoalStatus): Promise<Goal[]> {
-  const url = new URL(`${API_BASE}/goals`)
-  if (status) url.searchParams.set("status", status)
-  const res = await fetch(url.toString())
-  return asJson<Goal[]>(res)
-}
+export const getGoal = (id: string): Promise<Goal> =>
+  apiGet<Goal>(`/goals/${encodeURIComponent(id)}`)
 
-export async function getGoal(id: string): Promise<Goal> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(id)}`)
-  return asJson<Goal>(res)
-}
+export const createGoal = (args: CreateGoalArgs): Promise<Goal> =>
+  apiPost<Goal>("/goals", args)
 
-export async function createGoal(args: CreateGoalArgs): Promise<Goal> {
-  const res = await fetch(`${API_BASE}/goals`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  })
-  return asJson<Goal>(res)
-}
+export const updateGoal = (id: string, args: UpdateGoalArgs): Promise<Goal> =>
+  apiPatch<Goal>(`/goals/${encodeURIComponent(id)}`, args)
 
-export async function updateGoal(id: string, args: UpdateGoalArgs): Promise<Goal> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  })
-  return asJson<Goal>(res)
-}
+export const archiveGoal = (id: string): Promise<Goal> =>
+  apiPost<Goal>(`/goals/${encodeURIComponent(id)}/archive`)
 
-export async function archiveGoal(id: string): Promise<Goal> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(id)}/archive`, {
-    method: "POST",
-  })
-  return asJson<Goal>(res)
-}
+export const completeGoal = (id: string): Promise<Goal> =>
+  apiPost<Goal>(`/goals/${encodeURIComponent(id)}/complete`)
 
-export async function completeGoal(id: string): Promise<Goal> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(id)}/complete`, {
-    method: "POST",
-  })
-  return asJson<Goal>(res)
-}
+export const deleteGoal = (id: string): Promise<void> =>
+  apiDelete(`/goals/${encodeURIComponent(id)}`)
 
-export async function deleteGoal(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  })
-  if (!res.ok && res.status !== 204) {
-    const body = await res.text().catch(() => "")
-    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
-  }
-}
+export const getGoalProgress = (id: string): Promise<GoalProgress> =>
+  apiGet<GoalProgress>(`/goals/${encodeURIComponent(id)}/progress`)
 
-export async function getGoalProgress(id: string): Promise<GoalProgress> {
-  const res = await fetch(`${API_BASE}/goals/${encodeURIComponent(id)}/progress`)
-  return asJson<GoalProgress>(res)
-}
-
-export async function getLinkedSessions(
+export const getLinkedSessions = (
   id: string,
   limit = 20,
-): Promise<LinkedSession[]> {
-  const url = new URL(`${API_BASE}/goals/${encodeURIComponent(id)}/sessions`)
-  url.searchParams.set("limit", String(limit))
-  const res = await fetch(url.toString())
-  return asJson<LinkedSession[]>(res)
-}
+): Promise<LinkedSession[]> =>
+  apiGet<LinkedSession[]>(`/goals/${encodeURIComponent(id)}/sessions`, { limit })

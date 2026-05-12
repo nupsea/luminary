@@ -2,7 +2,7 @@ import { Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 interface GlossaryTerm {
@@ -43,11 +43,10 @@ export function GlossaryPanel({ documentId, onScrollToSection }: GlossaryPanelPr
     let cancelled = false
     async function fetchCached() {
       try {
-        const res = await fetch(`${API_BASE}/explain/glossary/${documentId}/cached`)
-        if (res.ok) {
-          const data = (await res.json()) as GlossaryTerm[]
-          if (!cancelled) setTerms(data.length > 0 ? data : null)
-        }
+        const data = await apiGet<GlossaryTerm[]>(
+          `/explain/glossary/${documentId}/cached`,
+        )
+        if (!cancelled) setTerms(data.length > 0 ? data : null)
       } catch {
         // ignore fetch error on initial load
       } finally {
@@ -62,22 +61,27 @@ export function GlossaryPanel({ documentId, onScrollToSection }: GlossaryPanelPr
     setLoading(true)
     setError("")
     try {
-      const res = await fetch(`${API_BASE}/explain/glossary/${documentId}`, { method: "POST" })
-      if (res.ok) {
-        const data = (await res.json()) as GlossaryTerm[]
-        setTerms(data)
-      } else {
-        const body = await res.json().catch(() => ({ detail: "Unknown error" })) as { detail?: string }
-        if (res.status === 503) {
-          setError("Ollama unavailable -- start it to generate glossary")
-        } else if (res.status === 422) {
-          setError(body.detail ?? "Glossary generation failed -- try again")
-        } else {
-          setError(body.detail ?? `Error ${res.status}`)
+      const data = await apiPost<GlossaryTerm[]>(`/explain/glossary/${documentId}`)
+      setTerms(data)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        let detail = `Error ${err.status}`
+        try {
+          const body = JSON.parse(err.body) as { detail?: string }
+          if (body.detail) detail = body.detail
+        } catch {
+          // body wasn't JSON
         }
+        if (err.status === 503) {
+          setError("Ollama unavailable -- start it to generate glossary")
+        } else if (err.status === 422) {
+          setError(detail !== `Error ${err.status}` ? detail : "Glossary generation failed -- try again")
+        } else {
+          setError(detail)
+        }
+      } else {
+        setError("Network error -- check your connection")
       }
-    } catch {
-      setError("Network error -- check your connection")
     } finally {
       setLoading(false)
     }
@@ -85,10 +89,8 @@ export function GlossaryPanel({ documentId, onScrollToSection }: GlossaryPanelPr
 
   async function deleteTerm(termId: string) {
     try {
-      const res = await fetch(`${API_BASE}/explain/glossary/${documentId}/terms/${termId}`, { method: "DELETE" })
-      if (res.ok || res.status === 204) {
-        setTerms((prev) => prev ? prev.filter((t) => t.id !== termId) : prev)
-      }
+      await apiDelete(`/explain/glossary/${documentId}/terms/${termId}`)
+      setTerms((prev) => prev ? prev.filter((t) => t.id !== termId) : prev)
     } catch {
       // ignore
     }

@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,17 +39,17 @@ interface EpubChapter {
 // ---------------------------------------------------------------------------
 
 async function fetchToc(documentId: string): Promise<EpubTocItem[]> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/epub/toc`)
-  if (!res.ok) throw new Error(`Failed to fetch TOC: HTTP ${res.status}`)
-  const data = (await res.json()) as { chapters: EpubTocItem[] }
+  const data = await apiGet<{ chapters: EpubTocItem[] }>(
+    `/documents/${documentId}/epub/toc`,
+  )
   return data.chapters
 }
 
-async function fetchChapter(documentId: string, chapterIndex: number): Promise<EpubChapter> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/epub/chapter/${chapterIndex}`)
-  if (!res.ok) throw new Error(`Failed to fetch chapter ${chapterIndex}: HTTP ${res.status}`)
-  return res.json() as Promise<EpubChapter>
-}
+const fetchChapter = (
+  documentId: string,
+  chapterIndex: number,
+): Promise<EpubChapter> =>
+  apiGet<EpubChapter>(`/documents/${documentId}/epub/chapter/${chapterIndex}`)
 
 // ---------------------------------------------------------------------------
 // EPUBViewer

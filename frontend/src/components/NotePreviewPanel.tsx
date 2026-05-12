@@ -12,7 +12,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { X } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { navigateToNote } from "@/lib/noteGraphUtils"
 
 interface NoteDetail {
@@ -28,11 +28,8 @@ interface NotePreviewPanelProps {
   onClose: () => void
 }
 
-async function fetchNote(noteId: string): Promise<NoteDetail> {
-  const res = await fetch(`${API_BASE}/notes/${noteId}`)
-  if (!res.ok) throw new Error("Failed to fetch note")
-  return res.json() as Promise<NoteDetail>
-}
+const fetchNote = (noteId: string): Promise<NoteDetail> =>
+  apiGet<NoteDetail>(`/notes/${noteId}`)
 
 export default function NotePreviewPanel({ noteId, onClose }: NotePreviewPanelProps) {
   const { data, isLoading, isError } = useQuery({

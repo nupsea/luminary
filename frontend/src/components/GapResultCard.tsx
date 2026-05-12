@@ -2,7 +2,7 @@ import { CheckCircle2, Loader2, StickyNote, XCircle } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router-dom"
 
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiPost } from "@/lib/apiClient"
 
 export interface GapCardData {
   type: "gap_result"
@@ -52,27 +52,29 @@ export function GapResultCard({ data, documentId }: GapResultCardProps) {
     setBtnState("loading")
     setErrorMsg("")
     try {
-      const res = await fetch(`${API_BASE}/flashcards/from-gaps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gaps: data.gaps, document_id: effectiveDocId }),
+      const body = await apiPost<{ created: number }>("/flashcards/from-gaps", {
+        gaps: data.gaps,
+        document_id: effectiveDocId,
       })
-      if (res.status === 503) {
-        setErrorMsg("Ollama is unavailable. Start it with: ollama serve")
-        setBtnState("error")
-        return
-      }
-      if (!res.ok) {
-        const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
-        setErrorMsg(detail)
-        setBtnState("error")
-        return
-      }
-      const body = (await res.json()) as { created: number }
       setCreatedCount(body.created)
       setBtnState("done")
-    } catch {
-      setErrorMsg("Request failed. Please try again.")
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 503) {
+          setErrorMsg("Ollama is unavailable. Start it with: ollama serve")
+        } else {
+          let detail = `HTTP ${err.status}`
+          try {
+            const parsed = JSON.parse(err.body) as { detail?: string }
+            if (parsed.detail) detail = parsed.detail
+          } catch {
+            // body wasn't JSON
+          }
+          setErrorMsg(detail)
+        }
+      } else {
+        setErrorMsg("Request failed. Please try again.")
+      }
       setBtnState("error")
     }
   }

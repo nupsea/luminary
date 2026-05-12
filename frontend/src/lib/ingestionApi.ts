@@ -1,4 +1,4 @@
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 
 export type ContentTypeValue =
   | "book"
@@ -22,43 +22,57 @@ export interface KindleIngestResult {
   book_count: number
 }
 
-export async function submitFile(file: File, contentType: ContentTypeValue): Promise<string> {
+function detailFromError(err: unknown, fallback: string): Error {
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.body) as { detail?: string }
+      if (parsed.detail) return new Error(parsed.detail)
+    } catch {
+      // body wasn't JSON
+    }
+    return new Error(fallback)
+  }
+  return err instanceof Error ? err : new Error(fallback)
+}
+
+export async function submitFile(
+  file: File,
+  contentType: ContentTypeValue,
+): Promise<string> {
   const form = new FormData()
   form.append("file", file)
   form.append("content_type", contentType)
-  const res = await fetch(`${API_BASE}/documents/ingest`, { method: "POST", body: form })
-  if (!res.ok) throw new Error("Upload failed")
-  const data = (await res.json()) as { document_id: string }
-  return data.document_id
+  try {
+    const data = await apiPost<{ document_id: string }>(
+      "/documents/ingest",
+      form,
+    )
+    return data.document_id
+  } catch (err) {
+    throw detailFromError(err, "Upload failed")
+  }
 }
 
 export async function submitKindleFile(file: File): Promise<KindleIngestResult> {
   const form = new FormData()
   form.append("file", file)
-  const res = await fetch(`${API_BASE}/documents/ingest-kindle`, { method: "POST", body: form })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { detail?: string }
-    throw new Error(data.detail ?? "Kindle import failed")
+  try {
+    return await apiPost<KindleIngestResult>("/documents/ingest-kindle", form)
+  } catch (err) {
+    throw detailFromError(err, "Kindle import failed")
   }
-  return (await res.json()) as KindleIngestResult
 }
 
 export async function submitUrl(url: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/documents/ingest-url`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { detail?: string }
-    throw new Error(data.detail ?? "Ingestion failed")
+  try {
+    const data = await apiPost<{ document_id: string }>("/documents/ingest-url", {
+      url,
+    })
+    return data.document_id
+  } catch (err) {
+    throw detailFromError(err, "Ingestion failed")
   }
-  const data = (await res.json()) as { document_id: string }
-  return data.document_id
 }
 
-export async function fetchIngestionStatus(docId: string): Promise<IngestionStatus> {
-  const res = await fetch(`${API_BASE}/documents/${docId}/status`)
-  if (!res.ok) throw new Error(`Status fetch failed (${res.status})`)
-  return (await res.json()) as IngestionStatus
-}
+export const fetchIngestionStatus = (docId: string): Promise<IngestionStatus> =>
+  apiGet<IngestionStatus>(`/documents/${docId}/status`)

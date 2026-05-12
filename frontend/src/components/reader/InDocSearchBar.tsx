@@ -2,7 +2,7 @@ import { ChevronDown, ChevronUp, Loader2, Search, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { useDebounce } from "@/hooks/useDebounce"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 export interface DocumentSectionSearchResult {
   section_id: string
@@ -50,16 +50,11 @@ export function InDocSearchBar({
     setError(null)
     void (async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/documents/${encodeURIComponent(documentId)}/search?q=${encodeURIComponent(debouncedQuery)}`,
+        const data = await apiGet<DocumentSectionSearchResult[]>(
+          `/documents/${encodeURIComponent(documentId)}/search`,
+          { q: debouncedQuery },
         )
-        if (!res.ok) {
-          setError("Search failed")
-          onResults([])
-        } else {
-          const data = (await res.json()) as DocumentSectionSearchResult[]
-          onResults(data)
-        }
+        onResults(data)
       } catch {
         setError("Search failed")
         onResults([])

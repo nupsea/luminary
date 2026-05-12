@@ -5,7 +5,13 @@
 //
 // New helpers should land here, not back in pages/Study.tsx.
 
-import { API_BASE } from "@/lib/config"
+import {
+  ApiError,
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiPut,
+} from "@/lib/apiClient"
 import { buildSearchParams } from "@/lib/studyUtils"
 import type { FlashcardSearchFilters } from "@/lib/studyUtils"
 
@@ -17,10 +23,16 @@ import type {
 } from "./types"
 
 export async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+      sort: "newest",
+      page: 1,
+      page_size: 100,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
 export async function fetchFlashcardSearch(
@@ -28,23 +40,34 @@ export async function fetchFlashcardSearch(
 ): Promise<FlashcardSearchResponse> {
   const params = buildSearchParams(filters)
   const query = params.toString()
-  const res = await fetch(`${API_BASE}/flashcards/search${query ? `?${query}` : ""}`)
-  if (!res.ok) return { items: [], total: 0, page: 1, page_size: 20 }
-  return res.json() as Promise<FlashcardSearchResponse>
+  try {
+    return await apiGet<FlashcardSearchResponse>(
+      `/flashcards/search${query ? `?${query}` : ""}`,
+    )
+  } catch {
+    return { items: [], total: 0, page: 1, page_size: 20 }
+  }
 }
 
-export async function fetchDocumentSections(documentId: string): Promise<DocumentSections> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}`)
-  if (!res.ok) return { sections: [] }
-  return res.json() as Promise<DocumentSections>
+export async function fetchDocumentSections(
+  documentId: string,
+): Promise<DocumentSections> {
+  try {
+    return await apiGet<DocumentSections>(`/documents/${documentId}`)
+  } catch {
+    return { sections: [] }
+  }
 }
 
 // `any` matches the original inline shape; tightening to a proper Stats
 // type is a separate concern (the response is large + evolving).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fetchStudyStats(documentId: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/study/stats/${documentId}`)
-  if (!res.ok) throw new Error("Failed to load study stats")
-  return res.json()
+  try {
+    return await apiGet(`/study/stats/${documentId}`)
+  } catch {
+    throw new Error("Failed to load study stats")
+  }
 }
 
 /** Throws on POST /generate failure so the caller can read `.status`
@@ -58,6 +81,11 @@ export class GenerateError extends Error {
   }
 }
 
+function asGenerateError(err: unknown, message: string): never {
+  if (err instanceof ApiError) throw new GenerateError(err.status, message)
+  throw new GenerateError(0, message)
+}
+
 export async function generateFlashcards(req: {
   document_id: string
   scope: "full" | "section"
@@ -65,13 +93,11 @@ export async function generateFlashcards(req: {
   count: number
   difficulty: "easy" | "medium" | "hard"
 }): Promise<Flashcard[]> {
-  const res = await fetch(`${API_BASE}/flashcards/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  })
-  if (!res.ok) throw new GenerateError(res.status, "Failed to generate flashcards")
-  return res.json() as Promise<Flashcard[]>
+  try {
+    return await apiPost<Flashcard[]>("/flashcards/generate", req)
+  } catch (err) {
+    asGenerateError(err, "Failed to generate flashcards")
+  }
 }
 
 export async function generateTechnicalFlashcards(req: {
@@ -80,72 +106,75 @@ export async function generateTechnicalFlashcards(req: {
   section_heading: string | null
   count: number
 }): Promise<Flashcard[]> {
-  const res = await fetch(`${API_BASE}/flashcards/generate-technical`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  })
-  if (!res.ok) throw new GenerateError(res.status, "Failed to generate technical flashcards")
-  return res.json() as Promise<Flashcard[]>
+  try {
+    return await apiPost<Flashcard[]>("/flashcards/generate-technical", req)
+  } catch (err) {
+    asGenerateError(err, "Failed to generate technical flashcards")
+  }
 }
 
 export async function updateFlashcard(
   id: string,
   data: { question?: string; answer?: string },
 ): Promise<Flashcard> {
-  const res = await fetch(`${API_BASE}/flashcards/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error("Failed to update flashcard")
-  return res.json() as Promise<Flashcard>
+  try {
+    return await apiPut<Flashcard>(`/flashcards/${id}`, data)
+  } catch {
+    throw new Error("Failed to update flashcard")
+  }
 }
 
 export async function deleteFlashcard(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/flashcards/${id}`, { method: "DELETE" })
-  if (!res.ok) throw new Error("Failed to delete flashcard")
+  try {
+    await apiDelete(`/flashcards/${id}`)
+  } catch {
+    throw new Error("Failed to delete flashcard")
+  }
 }
 
-export async function bulkDeleteFlashcards(ids: string[]): Promise<{ deleted: number }> {
-  const res = await fetch(`${API_BASE}/flashcards/bulk-delete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  })
-  if (!res.ok) throw new Error("Failed to delete selected flashcards")
-  return res.json() as Promise<{ deleted: number }>
+export async function bulkDeleteFlashcards(
+  ids: string[],
+): Promise<{ deleted: number }> {
+  try {
+    return await apiPost<{ deleted: number }>("/flashcards/bulk-delete", { ids })
+  } catch {
+    throw new Error("Failed to delete selected flashcards")
+  }
 }
 
-export async function deleteAllFlashcardsForDocument(documentId: string): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/document/${encodeURIComponent(documentId)}`,
-    { method: "DELETE" },
-  )
-  if (!res.ok) throw new Error("Failed to delete all flashcards")
+export async function deleteAllFlashcardsForDocument(
+  documentId: string,
+): Promise<void> {
+  try {
+    await apiDelete(`/flashcards/document/${encodeURIComponent(documentId)}`)
+  } catch {
+    throw new Error("Failed to delete all flashcards")
+  }
 }
 
 export async function generateFlashcardsFromGraph(
   documentId: string,
   k: number,
 ): Promise<Flashcard[]> {
-  const res = await fetch(`${API_BASE}/flashcards/generate-from-graph`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ document_id: documentId, k }),
-  })
-  if (!res.ok) throw new GenerateError(res.status, "Failed to generate graph flashcards")
-  return res.json() as Promise<Flashcard[]>
+  try {
+    return await apiPost<Flashcard[]>("/flashcards/generate-from-graph", {
+      document_id: documentId,
+      k,
+    })
+  } catch (err) {
+    asGenerateError(err, "Failed to generate graph flashcards")
+  }
 }
 
 export async function generateClozeFlashcards(
   sectionId: string,
   count: number,
 ): Promise<Flashcard[]> {
-  const res = await fetch(
-    `${API_BASE}/flashcards/cloze/${encodeURIComponent(sectionId)}?count=${count}`,
-    { method: "POST" },
-  )
-  if (!res.ok) throw new GenerateError(res.status, "Failed to generate cloze flashcards")
-  return res.json() as Promise<Flashcard[]>
+  try {
+    return await apiPost<Flashcard[]>(
+      `/flashcards/cloze/${encodeURIComponent(sectionId)}?count=${count}`,
+    )
+  } catch (err) {
+    asGenerateError(err, "Failed to generate cloze flashcards")
+  }
 }

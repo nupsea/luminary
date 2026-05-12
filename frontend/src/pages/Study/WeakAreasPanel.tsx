@@ -4,15 +4,17 @@
 
 import { useQuery } from "@tanstack/react-query"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 import type { GapResult } from "./types"
 import { fragileBarColor } from "./utils"
 
 async function fetchGaps(documentId: string): Promise<GapResult[]> {
-  const res = await fetch(`${API_BASE}/study/gaps/${documentId}`)
-  if (!res.ok) return []
-  return res.json() as Promise<GapResult[]>
+  try {
+    return await apiGet<GapResult[]>(`/study/gaps/${documentId}`)
+  } catch {
+    return []
+  }
 }
 
 interface WeakAreasPanelProps {

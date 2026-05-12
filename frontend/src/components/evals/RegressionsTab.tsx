@@ -1,13 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import type { EvalRegressionItem } from "./types"
 
-async function fetchRegressions(): Promise<EvalRegressionItem[]> {
-  const res = await fetch(`${API_BASE}/monitoring/evals/regressions`)
-  if (!res.ok) throw new Error("Failed to fetch regressions")
-  return res.json() as Promise<EvalRegressionItem[]>
-}
+const fetchRegressions = (): Promise<EvalRegressionItem[]> =>
+  apiGet<EvalRegressionItem[]>("/monitoring/evals/regressions")
 
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`

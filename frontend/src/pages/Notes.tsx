@@ -11,7 +11,7 @@ import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 import { useDebounce } from "@/hooks/useDebounce"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 
 import { NotesPanel } from "./Notes/NotesPanel"
@@ -95,10 +95,7 @@ export default function NotesPage() {
 
   const { data: tree } = useQuery({
     queryKey: ["collections-tree"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/collections/tree`)
-      return (await res.json()) as CollectionTreeNode[]
-    },
+    queryFn: () => apiGet<CollectionTreeNode[]>("/collections/tree"),
     staleTime: 30_000,
   })
 
@@ -359,10 +356,9 @@ export default function NotesPage() {
           
           if (isCreating && activeCollectionId) {
             // If we're inside a collection, add the new note to it immediately
-            void fetch(`${API_BASE}/collections/${activeCollectionId}/members`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ member_ids: [savedNote.id], member_type: "note" }),
+            void apiPost(`/collections/${activeCollectionId}/members`, {
+              member_ids: [savedNote.id],
+              member_type: "note",
             }).then(() => {
               void qc.invalidateQueries({ queryKey: ["notes"] })
               void qc.invalidateQueries({ queryKey: ["notes-groups"] })

@@ -521,19 +521,102 @@ starting a new extraction so we don't re-derive them per phase.
   building) and promote its conventions to a shared
   `frontend/src/lib/apiClient.ts`.
 - **Plan:**
-  1. **Define `apiClient.ts`** (~80 lines): a single `request<T>(
-     path, init)` that handles base URL, JSON encoding, error
-     mapping (-> custom `ApiError` with `status` + `code` + `body`),
-     and timeout. Add a `useApi()` hook for components that want
-     loading/error state (or just stick with raw try/catch -- pick
-     one).
-  2. **Migrate by surface area**, top-traffic first: all reader
-     components (DocumentReader, ReadView, EPUBViewer, PDFViewer,
-     SectionListItem) -> `lib/readerApi.ts`. Then all dialogs ->
-     existing per-feature api modules. Then the long tail.
-  3. **Lint rule** (`.eslintrc` overrides): forbid `fetch(` outside
-     `frontend/src/lib/**`. Ratchet -- start as a warning, flip to
-     error once the count hits 0.
+  1. **Define `apiClient.ts`** (DONE -- 97 lines at
+     `frontend/src/lib/apiClient.ts`). Exposes `request<T>(path,
+     opts)` plus `apiGet / apiPost / apiPatch / apiPut / apiDelete`
+     verb helpers. Handles base URL prefixing, JSON encoding,
+     query-param serialisation, 204 -> null, and error mapping to a
+     custom `ApiError` (with `status` + `body`). Plain bodies
+     (FormData, Blob, ArrayBuffer, URLSearchParams, string) pass
+     through unencoded. No timeout / no `useApi()` hook yet --
+     deferred until a caller actually needs them.
+  2. **Lib-module migrations** (DONE for all five existing
+     `*Api.ts`): `goalsApi.ts` (151 -> 105), `focusApi.ts` (101 -> 85),
+     `chatSessionsApi.ts` (104 -> 69), `ingestionApi.ts` (64 -> 78,
+     up slightly due to `detailFromError` helper that preserves the
+     server `detail` -> exception mapping), `studyApi.ts` (387 ->
+     406, up slightly because endpoints that silently returned `[] /
+     null` on non-OK now use a `tryOr` wrapper to preserve that
+     semantics). `focusApi.startSession` catches `ApiError` with
+     `err.status === 409` for the conflict branch; the
+     `generateDocumentFlashcards` 503 -> Ollama-error mapping
+     survives the same way. tsc clean; 347 vitest pass at every
+     boundary (11 pre-existing pdf failures unchanged).
+  3. **Per-page `api.ts` migrations** (DONE -- all five): the
+     self-contained per-page modules now route through `apiClient`.
+     Line deltas: `Monitoring/api.ts` 112 -> 72, `Notes/api.ts`
+     123 -> 88, `Chat/api.ts` 83 -> 75, `Viz/api.ts` 61 -> 70 (slight
+     uptick: `fetchMasteryConcepts` and `fetchDocList` need a
+     URL-builder for repeated `document_ids` keys / silent fallback),
+     `Study/api.ts` 151 -> 180 (uptick: try/catch boilerplate
+     preserves the `GenerateError(status, message)` distinction the
+     callers rely on -- the 5 generator endpoints all funnel through
+     a small `asGenerateError(err, message)` helper that re-wraps
+     `ApiError` with its `.status`). Total per-page surface 530 ->
+     485 lines (-9 %). tsc clean; 347 vitest pass at every boundary.
+  4. **Reader components migrated in-place** (DONE -- 16 files).
+     Instead of a dedicated `lib/readerApi.ts`, swap raw `fetch` for
+     direct `apiClient` calls in each component (the calls were
+     mostly one-offs; the abstraction wouldn't have paid off).
+     Migrated: `DocumentReader.tsx` (9 sites), `FeynmanDialog.tsx`
+     (4 of 6 -- 2 SSE streams stay raw), `NotesReaderPanel.tsx` (5),
+     `ReferencesPanel.tsx` (4), `SummaryPanel.tsx` (2 of 3 -- the
+     summarize stream stays raw), `NoteCreationDialog.tsx` (3),
+     `GlossaryPanel.tsx` (3), `EPUBViewer.tsx` (2), `PredictPanel.tsx`
+     (2; `request<T>` retains `AbortController.signal`),
+     `ChapterGoalsPanel.tsx` (2), `feynmanSummaryCache.ts` (2),
+     `useSelectionWorkflow.ts` (2), `useReadingProgress.ts` (1),
+     `ReadView.tsx` (1), `AnnotationPopover.tsx` (1),
+     `HighlightsPanel.tsx` (1), `InDocSearchBar.tsx` (1),
+     `SectionListItem.tsx` (1), `DocumentFlashcardDialog.tsx` (1),
+     `YouTubeTranscriptView.tsx` (1). Three SSE streams stay raw
+     `fetch` (FeynmanDialog `/message` + `/model-explanation`,
+     SummaryPanel `/summarize/{id}`) -- can't use `apiClient`'s JSON
+     path since they read response bodies token-by-token. tsc clean;
+     347 vitest pass. Total non-lib fetch sites: 248 -> 146.
+  5. **Long-tail pages + biggest components migrated** (DONE -- 7
+     files, ~62 sites). Page-level: `Learning.tsx` (13 -> 0 real
+     fetches), `Quality.tsx` (12 -> 0), `Progress.tsx` (8 -> 0),
+     `Evals.tsx` (8 -> 0), `Admin.tsx` (8 -> 0), `Notes.tsx` (2 -> 0).
+     Component-level: `NoteReaderSheet.tsx` (9 -> 0) and
+     `NoteEditorDialog.tsx` (9 -> 0) -- both used `request<T>` for
+     `/suggest-tags` to retain the `AbortSignal`. tsc clean; 347
+     vitest pass. Non-lib fetch sites: 146 -> 82 (-44 %); total
+     since #12 started: 248 -> 82 (-67 %).
+  6. **Long-tail components migrated** (DONE -- ~30 files).
+     `CollectionTree.tsx`, `StudyHabitsSection.tsx`,
+     `SettingsDrawer.tsx`, `GenerateFlashcardsDialog.tsx`,
+     `GapDetectDialog.tsx`, the four Study sub-panels
+     (Health/Deck/Struggling/WeakAreas), `Study.tsx`,
+     `TagManagementPanel.tsx`, `NormalizationDrawer.tsx`,
+     `OrganizationPlanDialog.tsx`, `GoalCreateDialog.tsx`,
+     all five `evals/*Tab.tsx` files, `TagTree.tsx`,
+     `StreakXPWidget.tsx`, `ProgressDashboard.tsx`,
+     `CollectionHealthPanel.tsx`, `CreateCollectionDialog.tsx`,
+     `CollectionStudyDashboard.tsx`, `TagAutocomplete.tsx` (uses
+     `request<T>` to preserve AbortSignal), `LinkAutocomplete.tsx`,
+     `IngestionHealthPanel.tsx`, `IngestingPlaceholder.tsx`,
+     `DocumentCard.tsx`, `NotePreviewPanel.tsx`, `SearchDialog.tsx`,
+     `EvalTrendsPanel.tsx`, `StudySession.tsx`,
+     `GapResultCard.tsx`, `TeachBackResultCard.tsx`,
+     `RubricCard.tsx`. Files containing 503-conditional error
+     mapping (Generate/GapDetect/GapResult/TeachBack) catch
+     `ApiError` and re-derive `.status` + body `.detail`.
+  7. **Final state** (DONE): only 8 raw `fetch(` calls remain in
+     `src/pages`+`src/components`, all intentional --
+     `qaStream.ts` (SSE), `SummaryPanel.tsx` (SSE),
+     `FeynmanDialog.tsx` (2 SSE streams), `ExplanationSheet.tsx`
+     (SSE), `SettingsDrawer.tsx` (Ollama pull SSE),
+     `CollectionTree.tsx` (binary export -- needs `res.headers` +
+     `res.blob()`), `NoteDiagramDialog.tsx` (local asset URL, not
+     `API_BASE`). Total since #12 started: 248 -> 8 raw fetches
+     (-97 %). The lint rule (step 8 below) can now be wired with
+     a tiny ignore list.
+  8. **Lint rule** (next): forbid `fetch(` outside
+     `frontend/src/lib/**` with per-line `eslint-disable` escapes on
+     the 8 intentional SSE / binary / asset sites enumerated in step
+     7. Can land as a hard error from day one given the count is
+     already zero in the migratable surface.
 - **Acceptance criteria:** zero `fetch(` in `frontend/src/{pages,
   components}/**`; one error-mapping path; eslint enforces it.
 

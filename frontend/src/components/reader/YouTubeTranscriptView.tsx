@@ -1,15 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { ExternalLink, Loader2, Search, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
 
-async function fetchChunks(documentId: string): Promise<ChunkItem[]> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/chunks`)
-  if (!res.ok) throw new Error("Failed to fetch transcript chunks")
-  return res.json() as Promise<ChunkItem[]>
-}
+const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
+  apiGet<ChunkItem[]>(`/documents/${documentId}/chunks`)
 
 function formatDuration(seconds: number | null): string | null {
   if (seconds == null) return null

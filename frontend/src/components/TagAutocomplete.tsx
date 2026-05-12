@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Tag, X } from "lucide-react"
 import { useDebounce } from "@/hooks/useDebounce"
-import { API_BASE } from "@/lib/config"
+import { request } from "@/lib/apiClient"
 import { normalizeTagSlug } from "@/lib/tagUtils"
 
 // ---------------------------------------------------------------------------
@@ -33,9 +33,14 @@ interface AutocompleteResult {
 // ---------------------------------------------------------------------------
 
 async function fetchAutocomplete(q: string, signal?: AbortSignal): Promise<AutocompleteResult[]> {
-  const res = await fetch(`${API_BASE}/tags/autocomplete?q=${encodeURIComponent(q)}`, { signal })
-  if (!res.ok) return []
-  return res.json() as Promise<AutocompleteResult[]>
+  try {
+    return await request<AutocompleteResult[]>("/tags/autocomplete", {
+      params: { q },
+      signal,
+    })
+  } catch {
+    return []
+  }
 }
 
 // ---------------------------------------------------------------------------

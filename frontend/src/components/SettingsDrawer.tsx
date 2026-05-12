@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
+import { apiGet, apiPatch } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 
 // ---------------------------------------------------------------------------
@@ -44,38 +45,27 @@ interface StorageInfo {
 // API functions
 // ---------------------------------------------------------------------------
 
-async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("Failed to fetch LLM settings")
-  return res.json() as Promise<LLMSettings>
-}
+const fetchLLMSettings = (): Promise<LLMSettings> =>
+  apiGet<LLMSettings>("/settings/llm")
 
-async function patchLLMSettings(updates: {
+const patchLLMSettings = (updates: {
   mode?: string
   provider?: string
   model?: string
   openai_api_key?: string | null
   anthropic_api_key?: string | null
   google_api_key?: string | null
-}): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/llm`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  })
-  if (!res.ok) throw new Error("Failed to save settings")
-}
+}): Promise<void> => apiPatch("/settings/llm", updates)
 
-async function fetchStorage(): Promise<StorageInfo> {
-  const res = await fetch(`${API_BASE}/settings/storage`)
-  if (!res.ok) throw new Error("Failed to fetch storage info")
-  return res.json() as Promise<StorageInfo>
-}
+const fetchStorage = (): Promise<StorageInfo> =>
+  apiGet<StorageInfo>("/settings/storage")
 
 async function fetchModels(provider: string): Promise<ModelOption[]> {
-  const res = await fetch(`${API_BASE}/settings/llm/models?provider=${provider}`)
-  if (!res.ok) return []
-  return res.json() as Promise<ModelOption[]>
+  try {
+    return await apiGet<ModelOption[]>("/settings/llm/models", { provider })
+  } catch {
+    return []
+  }
 }
 
 function formatModelOption(m: ModelOption): string {

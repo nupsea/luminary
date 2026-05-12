@@ -20,7 +20,7 @@ import {
   createGoal,
 } from "@/lib/goalsApi"
 import { defaultTargetUnitForGoalType, GOAL_TYPE_LABEL } from "./goalTypeMeta"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 interface DocItem {
   id: string
@@ -38,18 +38,22 @@ interface CollectionOption {
 }
 
 async function fetchDocs(): Promise<DocItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=200`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocItem[] }>("/documents", {
+      sort: "newest",
+      page: 1,
+      page_size: 200,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
 async function fetchDecks(): Promise<DeckOption[]> {
   // Decks come from /flashcards/decks; the deck name doubles as its id.
   try {
-    const res = await fetch(`${API_BASE}/flashcards/decks`)
-    if (!res.ok) return []
-    const data = (await res.json()) as Array<{ deck: string }>
+    const data = await apiGet<Array<{ deck: string }>>("/flashcards/decks")
     const seen = new Set<string>()
     const out: DeckOption[] = []
     for (const d of data) {
@@ -65,13 +69,11 @@ async function fetchDecks(): Promise<DeckOption[]> {
 
 async function fetchCollections(): Promise<CollectionOption[]> {
   try {
-    const res = await fetch(`${API_BASE}/collections/tree`)
-    if (!res.ok) return []
-    const tree = (await res.json()) as Array<{
+    const tree = await apiGet<Array<{
       id: string
       name: string
       children?: unknown[]
-    }>
+    }>>("/collections/tree")
     const out: CollectionOption[] = []
     const walk = (items: typeof tree) => {
       for (const it of items) {

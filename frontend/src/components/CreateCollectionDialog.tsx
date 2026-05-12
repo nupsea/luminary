@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { normalizeCollectionName } from "@/lib/tagUtils"
 
@@ -41,24 +41,19 @@ export const COLLECTION_COLORS = [
 // ---------------------------------------------------------------------------
 
 async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) return []
-  return res.json() as Promise<CollectionTreeItem[]>
+  try {
+    return await apiGet<CollectionTreeItem[]>("/collections/tree")
+  } catch {
+    return []
+  }
 }
 
-async function createCollection(payload: {
+const createCollection = (payload: {
   name: string
   description: string | null
   color: string
   parent_collection_id: string | null
-}): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`POST /collections failed: ${res.status}`)
-}
+}): Promise<void> => apiPost("/collections", payload)
 
 // ---------------------------------------------------------------------------
 // Component

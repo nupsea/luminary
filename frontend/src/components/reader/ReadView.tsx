@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionContentItem } from "./types"
@@ -109,11 +109,8 @@ const LazySection = memo(({ section, annotations, highlightsVisible }: LazySecti
 })
 LazySection.displayName = "LazySection"
 
-async function fetchSectionContent(documentId: string): Promise<SectionContentItem[]> {
-  const res = await fetch(`${API_BASE}/sections/${documentId}/content`)
-  if (!res.ok) throw new Error("Failed to fetch section content")
-  return res.json() as Promise<SectionContentItem[]>
-}
+const fetchSectionContent = (documentId: string): Promise<SectionContentItem[]> =>
+  apiGet<SectionContentItem[]>(`/sections/${documentId}/content`)
 
 /** Normalize whitespace for fuzzy matching: collapse runs to single space, trim. */
 function normalizeWs(s: string): string {

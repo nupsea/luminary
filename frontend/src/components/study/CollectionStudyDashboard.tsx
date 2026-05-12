@@ -16,7 +16,7 @@ import {
 import { useState } from "react"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
@@ -63,11 +63,8 @@ interface CollectionStudyDashboardProps {
   onNavigateToCollection: (id: string) => void
 }
 
-async function fetchDashboard(id: string): Promise<DashboardData> {
-  const res = await fetch(`${API_BASE}/study/collections/${id}/dashboard`)
-  if (!res.ok) throw new Error("Failed to load dashboard")
-  return res.json()
-}
+const fetchDashboard = (id: string): Promise<DashboardData> =>
+  apiGet<DashboardData>(`/study/collections/${id}/dashboard`)
 
 export function CollectionStudyDashboard({
   collectionId,

@@ -14,7 +14,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { ExternalLink, RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,9 +119,8 @@ function ReferenceRow({
   async function handleRefresh() {
     if (!item.section_id) return
     try {
-      await fetch(
-        `${API_BASE}/references/sections/${item.section_id}/refresh?document_id=${documentId}`,
-        { method: "POST" },
+      await apiPost(
+        `/references/sections/${item.section_id}/refresh?document_id=${documentId}`,
       )
       void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
     } catch {
@@ -190,27 +189,18 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
   // Fetch all refs including invalid
   const { data, isLoading, isError } = useQuery<DocumentReferencesResponse>({
     queryKey: ["doc-references", documentId],
-    queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/references/documents/${documentId}?include_invalid=true`,
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json() as Promise<DocumentReferencesResponse>
-    },
+    queryFn: () =>
+      apiGet<DocumentReferencesResponse>(
+        `/references/documents/${documentId}?include_invalid=true`,
+      ),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   })
 
   // Validation mutation
   const validateMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/references/documents/${documentId}/validate`,
-        { method: "POST" },
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json()
-    },
+    mutationFn: () =>
+      apiPost(`/references/documents/${documentId}/validate`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
     },
@@ -218,14 +208,8 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
 
   // Refresh mutation (re-extract + validate)
   const refreshMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/references/documents/${documentId}/refresh`,
-        { method: "POST" },
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json()
-    },
+    mutationFn: () =>
+      apiPost(`/references/documents/${documentId}/refresh`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
     },

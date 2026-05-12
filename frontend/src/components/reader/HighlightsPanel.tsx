@@ -1,7 +1,7 @@
 import { Trash2 } from "lucide-react"
 import { useState } from "react"
 
-import { API_BASE } from "@/lib/config"
+import { apiDelete } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 import type { AnnotationItem } from "./types"
@@ -95,7 +95,7 @@ export function HighlightsPanel({ annotations, loading, error, onDelete }: Highl
   async function handleConfirmDelete(id: string) {
     setDeleting(true)
     try {
-      await fetch(`${API_BASE}/annotations/${id}`, { method: "DELETE" })
+      await apiDelete(`/annotations/${id}`)
       onDelete(id)
       setConfirmDelete(null)
     } catch {

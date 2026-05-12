@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NormalizationDrawer } from "@/components/NormalizationDrawer"
 import { TagManagementPanel } from "@/components/TagManagementPanel"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 import { filterTagTree, highlightMatch } from "@/lib/tagUtils"
 import type { FilteredTagTreeItem } from "@/lib/tagUtils"
@@ -38,11 +38,8 @@ export interface TagTreeItem {
 // API helper
 // ---------------------------------------------------------------------------
 
-async function fetchTagTree(): Promise<TagTreeItem[]> {
-  const res = await fetch(`${API_BASE}/tags/tree`)
-  if (!res.ok) throw new Error(`GET /tags/tree failed: ${res.status}`)
-  return res.json() as Promise<TagTreeItem[]>
-}
+const fetchTagTree = (): Promise<TagTreeItem[]> =>
+  apiGet<TagTreeItem[]>("/tags/tree")
 
 // ---------------------------------------------------------------------------
 // Single tag row
@@ -271,7 +268,9 @@ export function TagTree() {
   async function handleNormalize() {
     setScanInFlight(true)
     try {
-      await fetch(`${API_BASE}/tags/normalization/scan`, { method: "POST" })
+      await apiPost("/tags/normalization/scan")
+    } catch {
+      // best effort
     } finally {
       setScanInFlight(false)
       setNormOpen(true)

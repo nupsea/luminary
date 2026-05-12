@@ -21,7 +21,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 
 // ---------------------------------------------------------------------------
@@ -59,19 +59,11 @@ interface CollectionHealthReport {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchCollectionHealth(id: string): Promise<CollectionHealthReport> {
-  const res = await fetch(`${API_BASE}/collections/${id}/health`)
-  if (!res.ok) throw new Error(`GET /collections/${id}/health failed: ${res.status}`)
-  return res.json() as Promise<CollectionHealthReport>
-}
+const fetchCollectionHealth = (id: string): Promise<CollectionHealthReport> =>
+  apiGet<CollectionHealthReport>(`/collections/${id}/health`)
 
-async function archiveStaleNotes(id: string): Promise<{ archived: number }> {
-  const res = await fetch(`${API_BASE}/collections/${id}/health/archive-stale`, {
-    method: "POST",
-  })
-  if (!res.ok) throw new Error(`POST /collections/${id}/health/archive-stale failed: ${res.status}`)
-  return res.json() as Promise<{ archived: number }>
-}
+const archiveStaleNotes = (id: string): Promise<{ archived: number }> =>
+  apiPost<{ archived: number }>(`/collections/${id}/health/archive-stale`)
 
 // ---------------------------------------------------------------------------
 // Cohesion pill

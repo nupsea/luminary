@@ -6,18 +6,13 @@ import { useQuery } from "@tanstack/react-query"
 import { AlertCircle, BookOpen } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 
 import type { StrugglingCard } from "./types"
 
-async function fetchStrugglingCards(documentId: string): Promise<StrugglingCard[]> {
-  const res = await fetch(
-    `${API_BASE}/study/struggling?document_id=${encodeURIComponent(documentId)}`,
-  )
-  if (!res.ok) throw new Error("Failed to load struggling cards")
-  return res.json() as Promise<StrugglingCard[]>
-}
+const fetchStrugglingCards = (documentId: string): Promise<StrugglingCard[]> =>
+  apiGet<StrugglingCard[]>("/study/struggling", { document_id: documentId })
 
 interface StrugglingPanelProps {
   documentId: string

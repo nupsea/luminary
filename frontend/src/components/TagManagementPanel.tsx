@@ -22,48 +22,49 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import type { TagTreeItem } from "@/components/TagTree"
 
 // ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function renameTag(id: string, displayName: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/tags/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ display_name: displayName }),
-  })
-  if (!res.ok) throw new Error(`PUT /tags/${id} failed: ${res.status}`)
-}
+const renameTag = (id: string, displayName: string): Promise<void> =>
+  apiPut(`/tags/${encodeURIComponent(id)}`, { display_name: displayName })
 
-async function reparentTag(id: string, parentTag: string | null): Promise<void> {
-  const res = await fetch(`${API_BASE}/tags/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ parent_tag: parentTag }),
-  })
-  if (!res.ok) throw new Error(`PUT /tags/${id} failed: ${res.status}`)
-}
+const reparentTag = (id: string, parentTag: string | null): Promise<void> =>
+  apiPut(`/tags/${encodeURIComponent(id)}`, { parent_tag: parentTag })
 
-async function mergeTags(sourceTagId: string, targetTagId: string): Promise<{ affected_notes: number }> {
-  const res = await fetch(`${API_BASE}/tags/merge`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source_tag_id: sourceTagId, target_tag_id: targetTagId }),
-  })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { detail?: string }
-    throw new Error(data.detail ?? `POST /tags/merge failed: ${res.status}`)
+async function mergeTags(
+  sourceTagId: string,
+  targetTagId: string,
+): Promise<{ affected_notes: number }> {
+  try {
+    return await apiPost<{ affected_notes: number }>("/tags/merge", {
+      source_tag_id: sourceTagId,
+      target_tag_id: targetTagId,
+    })
+  } catch (err) {
+    if (err instanceof ApiError) {
+      try {
+        const body = JSON.parse(err.body) as { detail?: string }
+        if (body.detail) throw new Error(body.detail)
+      } catch (parseErr) {
+        if (parseErr instanceof Error && !parseErr.message.startsWith("Unexpected"))
+          throw parseErr
+      }
+      throw new Error(`POST /tags/merge failed: ${err.status}`)
+    }
+    throw err
   }
-  return res.json() as Promise<{ affected_notes: number }>
 }
 
 async function fetchFlatTags(): Promise<{ id: string; display_name: string }[]> {
-  const res = await fetch(`${API_BASE}/tags`)
-  if (!res.ok) return []
-  return res.json() as Promise<{ id: string; display_name: string }[]>
+  try {
+    return await apiGet<{ id: string; display_name: string }[]>("/tags")
+  } catch {
+    return []
+  }
 }
 
 // ---------------------------------------------------------------------------

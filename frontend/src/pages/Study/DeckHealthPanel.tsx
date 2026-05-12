@@ -11,24 +11,16 @@ import { AlertCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react"
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { CoverageReport } from "./types"
 import { bloomBarFill, coverageBadgeClass } from "./utils"
 
-async function fetchAudit(documentId: string): Promise<CoverageReport> {
-  const res = await fetch(`${API_BASE}/flashcards/audit/${documentId}`)
-  if (!res.ok) throw new Error("Failed to load deck health")
-  return res.json() as Promise<CoverageReport>
-}
+const fetchAudit = (documentId: string): Promise<CoverageReport> =>
+  apiGet<CoverageReport>(`/flashcards/audit/${documentId}`)
 
-async function fillAuditGaps(documentId: string): Promise<{ created: number }> {
-  const res = await fetch(`${API_BASE}/flashcards/audit/${documentId}/fill`, {
-    method: "POST",
-  })
-  if (!res.ok) throw new Error("Failed to fill Bloom gaps")
-  return res.json() as Promise<{ created: number }>
-}
+const fillAuditGaps = (documentId: string): Promise<{ created: number }> =>
+  apiPost<{ created: number }>(`/flashcards/audit/${documentId}/fill`)
 
 interface DeckHealthPanelProps {
   documentId: string

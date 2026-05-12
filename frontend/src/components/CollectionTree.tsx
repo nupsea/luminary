@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { useAppStore } from "@/store"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
@@ -41,35 +42,23 @@ export { flattenCollectionTree }
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) throw new Error(`GET /collections/tree failed: ${res.status}`)
-  return res.json() as Promise<CollectionTreeItem[]>
-}
+const fetchCollectionTree = (): Promise<CollectionTreeItem[]> =>
+  apiGet<CollectionTreeItem[]>("/collections/tree")
 
-async function renameCollection(id: string, name: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+const renameCollection = (id: string, name: string): Promise<void> =>
+  apiPut(`/collections/${id}`, { name })
+
+const deleteCollection = (id: string): Promise<void> =>
+  apiDelete(`/collections/${id}`)
+
+const addNoteToCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiPost(`/collections/${collectionId}/members`, {
+    member_ids: [noteId],
+    member_type: "note",
   })
-  if (!res.ok) throw new Error(`PUT /collections/${id} failed: ${res.status}`)
-}
-
-async function deleteCollection(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${id} failed: ${res.status}`)
-}
-
-async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
-  })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed: ${res.status}`)
-}
 
 // ---------------------------------------------------------------------------
 // Single tree item row

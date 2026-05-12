@@ -10,14 +10,11 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import type { EvalRunFull } from "./types"
 
-async function fetchAblationRuns(): Promise<EvalRunFull[]> {
-  const res = await fetch(`${API_BASE}/evals/runs?eval_kind=ablation&limit=200`)
-  if (!res.ok) throw new Error("Failed to fetch ablation runs")
-  return res.json() as Promise<EvalRunFull[]>
-}
+const fetchAblationRuns = (): Promise<EvalRunFull[]> =>
+  apiGet<EvalRunFull[]>("/evals/runs", { eval_kind: "ablation", limit: 200 })
 
 const STRATEGIES = ["vector", "fts", "graph", "rrf"] as const
 

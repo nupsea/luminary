@@ -1,7 +1,7 @@
 import { BookOpen, Brain, Check, ChevronDown, ChevronRight, StickyNote, X } from "lucide-react"
 import { memo, useState } from "react"
 
-import { API_BASE } from "@/lib/config"
+import { apiPost } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 import { ChapterProgressRing } from "./ChapterGoalsPanel"
@@ -115,18 +115,13 @@ function NoteEditor({ documentId, sectionId, onSaved, onCancel }: NoteEditorProp
     setSaving(true)
     setSaveError(null)
     try {
-      const res = await fetch(`${API_BASE}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sectionId,
-          content,
-          tags,
-          group_name: null,
-        }),
+      await apiPost("/notes", {
+        document_id: documentId,
+        section_id: sectionId,
+        content,
+        tags,
+        group_name: null,
       })
-      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
       onSaved()
     } catch {
       setSaveError("Failed to save note. Please try again.")

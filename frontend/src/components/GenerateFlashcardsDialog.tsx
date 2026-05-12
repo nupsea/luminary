@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import { useQuery } from "@tanstack/react-query"
 
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 
@@ -56,9 +56,7 @@ interface GenerateFlashcardsDialogProps {
 
 async function fetchNoteStubs(): Promise<NoteStub[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes`)
-    if (!res.ok) return []
-    const notes = (await res.json()) as { id: string; content: string }[]
+    const notes = await apiGet<{ id: string; content: string }[]>("/notes")
     return notes.map((n) => ({ id: n.id, content: n.content.slice(0, 150) }))
   } catch {
     return []
@@ -66,17 +64,40 @@ async function fetchNoteStubs(): Promise<NoteStub[]> {
 }
 
 async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) throw new Error("Failed to load collections")
-  return res.json() as Promise<CollectionTreeItem[]>
+  try {
+    return await apiGet<CollectionTreeItem[]>("/collections/tree")
+  } catch {
+    throw new Error("Failed to load collections")
+  }
 }
 
-async function fetchCollectionPreview(collectionId: string): Promise<{ total_notes: number; already_covered: number }> {
-  const res = await fetch(
-    `${API_BASE}/notes/flashcards/generate/preview?collection_id=${encodeURIComponent(collectionId)}`
-  )
-  if (!res.ok) throw new Error("Preview failed")
-  return res.json() as Promise<{ total_notes: number; already_covered: number }>
+async function fetchCollectionPreview(
+  collectionId: string,
+): Promise<{ total_notes: number; already_covered: number }> {
+  try {
+    return await apiGet<{ total_notes: number; already_covered: number }>(
+      "/notes/flashcards/generate/preview",
+      { collection_id: collectionId },
+    )
+  } catch {
+    throw new Error("Preview failed")
+  }
+}
+
+function asGenerationError(err: unknown, fallback: string): never {
+  if (err instanceof ApiError) {
+    if (err.status === 503) {
+      throw new Error("Ollama is unavailable. Start it with: ollama serve")
+    }
+    try {
+      const body = JSON.parse(err.body) as { detail?: string }
+      if (body.detail) throw new Error(body.detail)
+    } catch (e) {
+      if (e instanceof Error && e.message !== "Unexpected token") throw e
+    }
+    throw new Error(`HTTP ${err.status}`)
+  }
+  throw err instanceof Error ? err : new Error(fallback)
 }
 
 async function generateNoteFlashcards(
@@ -85,24 +106,16 @@ async function generateNoteFlashcards(
   count: number,
   difficulty: "easy" | "medium" | "hard",
 ): Promise<NoteFlashcardItem[]> {
-  const res = await fetch(`${API_BASE}/notes/flashcards/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  try {
+    return await apiPost<NoteFlashcardItem[]>("/notes/flashcards/generate", {
       tag: tag || null,
       note_ids: noteIds?.length ? noteIds : null,
       count,
       difficulty,
-    }),
-  })
-  if (res.status === 503) {
-    throw new Error("Ollama is unavailable. Start it with: ollama serve")
+    })
+  } catch (err) {
+    asGenerationError(err, "Failed to generate flashcards")
   }
-  if (!res.ok) {
-    const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
-    throw new Error(detail)
-  }
-  return res.json() as Promise<NoteFlashcardItem[]>
 }
 
 async function generateCollectionFlashcards(
@@ -111,24 +124,19 @@ async function generateCollectionFlashcards(
   difficulty: "easy" | "medium" | "hard",
   forceRegenerate: boolean,
 ): Promise<CollectionGenerateResponse> {
-  const res = await fetch(`${API_BASE}/notes/flashcards/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      collection_id: collectionId,
-      count,
-      difficulty,
-      force_regenerate: forceRegenerate,
-    }),
-  })
-  if (res.status === 503) {
-    throw new Error("Ollama is unavailable. Start it with: ollama serve")
+  try {
+    return await apiPost<CollectionGenerateResponse>(
+      "/notes/flashcards/generate",
+      {
+        collection_id: collectionId,
+        count,
+        difficulty,
+        force_regenerate: forceRegenerate,
+      },
+    )
+  } catch (err) {
+    asGenerationError(err, "Failed to generate collection flashcards")
   }
-  if (!res.ok) {
-    const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
-    throw new Error(detail)
-  }
-  return res.json() as Promise<CollectionGenerateResponse>
 }
 
 export function GenerateFlashcardsDialog({

@@ -49,7 +49,7 @@ import {
 // Document list for the in-tab picker
 // ---------------------------------------------------------------------------
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 import type { DocListItem } from "./Study/types"
 import { fetchDocList } from "./Study/api"
@@ -106,9 +106,12 @@ export default function Study() {
   const { data: collections = [], isLoading: loadingCollections } = useQuery({
     queryKey: ["collections-list"],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/collections/tree`)
-      if (!res.ok) return []
-      return res.json() as Promise<any[]>
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return await apiGet<any[]>("/collections/tree")
+      } catch {
+        return []
+      }
     },
   })
 

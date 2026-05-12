@@ -2,6 +2,7 @@ import { Loader2, RefreshCw } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
@@ -54,11 +55,9 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
     let cancelled = false
     async function loadCached() {
       try {
-        const res = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-        if (!res.ok || cancelled) return
-        const data = (await res.json()) as {
+        const data = await apiGet<{
           summaries: Record<string, { id: string; content: string }>
-        }
+        }>(`/summarize/${documentId}/cached`)
         if (cancelled) return
         const loaded: SummaryMap = {}
         for (const [mode, s] of Object.entries(data.summaries)) {
@@ -80,15 +79,12 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
 
     if (!forceRefresh) {
       try {
-        const cacheRes = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-        if (cacheRes.ok) {
-          const cacheData = (await cacheRes.json()) as {
-            summaries: Record<string, { id: string; content: string }>
-          }
-          if (cacheData.summaries[mode]) {
-            setSummaries((s) => ({ ...s, [mode]: cacheData.summaries[mode].content }))
-            return
-          }
+        const cacheData = await apiGet<{
+          summaries: Record<string, { id: string; content: string }>
+        }>(`/summarize/${documentId}/cached`)
+        if (cacheData.summaries[mode]) {
+          setSummaries((s) => ({ ...s, [mode]: cacheData.summaries[mode].content }))
+          return
         }
       } catch {
         // cache check failed -- fall through to streaming

@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query"
 import { AlertTriangle, ArrowLeft, Loader2, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
+import { apiDelete } from "@/lib/apiClient"
 import { fetchIngestionStatus, type IngestionStatus } from "@/lib/ingestionApi"
 import { Progress } from "@/components/ui/progress"
 
@@ -27,10 +27,8 @@ interface IngestingPlaceholderProps {
   onBack: () => void
 }
 
-async function deleteDocument(documentId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}`, { method: "DELETE" })
-  if (!res.ok) throw new Error("Delete failed")
-}
+const deleteDocument = (documentId: string): Promise<void> =>
+  apiDelete(`/documents/${documentId}`)
 
 /**
  * Stand-in for DocumentReader while a document is mid-ingestion or has errored.

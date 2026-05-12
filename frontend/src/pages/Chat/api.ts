@@ -1,7 +1,7 @@
 // HTTP fetchers and message conversion helpers for the Chat page.
 
+import { apiGet, apiPost } from "@/lib/apiClient"
 import type { PersistedMessage } from "@/lib/chatSessionsApi"
-import { API_BASE } from "@/lib/config"
 
 import type {
   ChatMessage,
@@ -18,52 +18,44 @@ import type {
 import type { SourceCitation } from "@/components/SourceCitationChips"
 
 export async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+      sort: "last_accessed",
+      page: 1,
+      page_size: 100,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
-export async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("Failed to fetch LLM settings")
-  return res.json() as Promise<LLMSettings>
-}
+export const fetchLLMSettings = (): Promise<LLMSettings> =>
+  apiGet<LLMSettings>("/settings/llm")
 
-export async function fetchWebSearchSettings(): Promise<WebSearchSettings> {
-  const res = await fetch(`${API_BASE}/settings/web-search`)
-  if (!res.ok) throw new Error("Failed to fetch web search settings")
-  return res.json() as Promise<WebSearchSettings>
-}
+export const fetchWebSearchSettings = (): Promise<WebSearchSettings> =>
+  apiGet<WebSearchSettings>("/settings/web-search")
 
-export async function fetchSessionPlan(): Promise<SessionPlanResponse> {
-  const res = await fetch(`${API_BASE}/study/session-plan?minutes=20`)
-  if (!res.ok) throw new Error("Failed to fetch session plan")
-  return res.json() as Promise<SessionPlanResponse>
-}
+export const fetchSessionPlan = (): Promise<SessionPlanResponse> =>
+  apiGet<SessionPlanResponse>("/study/session-plan", { minutes: 20 })
 
-export async function fetchCachedSuggestions(documentId: string | null): Promise<SuggestionsResponse> {
-  const url = documentId
-    ? `${API_BASE}/chat/suggestions/cached?document_id=${encodeURIComponent(documentId)}`
-    : `${API_BASE}/chat/suggestions/cached`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("Failed to fetch cached suggestions")
-  return res.json() as Promise<SuggestionsResponse>
-}
+export const fetchCachedSuggestions = (
+  documentId: string | null,
+): Promise<SuggestionsResponse> =>
+  apiGet<SuggestionsResponse>("/chat/suggestions/cached", {
+    document_id: documentId ?? undefined,
+  })
 
-export async function fetchSuggestions(documentId: string | null): Promise<SuggestionsResponse> {
-  const url = documentId
-    ? `${API_BASE}/chat/suggestions?document_id=${encodeURIComponent(documentId)}`
-    : `${API_BASE}/chat/suggestions`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("Failed to fetch suggestions")
-  return res.json() as Promise<SuggestionsResponse>
-}
+export const fetchSuggestions = (
+  documentId: string | null,
+): Promise<SuggestionsResponse> =>
+  apiGet<SuggestionsResponse>("/chat/suggestions", {
+    document_id: documentId ?? undefined,
+  })
 
 export function markSuggestionAsked(id: string): void {
-  fetch(`${API_BASE}/chat/suggestions/${id}/asked`, { method: "POST" }).catch(() => {
-    /* fire-and-forget */
-  })
+  // fire-and-forget
+  apiPost(`/chat/suggestions/${id}/asked`).catch(() => {})
 }
 
 export function persistedToChatMessage(p: PersistedMessage): ChatMessage {

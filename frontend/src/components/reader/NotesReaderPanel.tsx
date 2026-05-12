@@ -10,7 +10,7 @@ import { useEffect, useState, useCallback } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { Loader2, Plus, Pencil, Trash2, BookOpen } from "lucide-react"
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiDelete, apiGet } from "@/lib/apiClient"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 
@@ -64,38 +64,39 @@ interface NotesReaderPanelProps {
 async function fetchAutoCollection(
   documentId: string,
 ): Promise<AutoCollection | null> {
-  const res = await fetch(
-    `${API_BASE}/collections/by-document/${documentId}`,
-  )
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error("Failed to fetch auto-collection")
-  return res.json() as Promise<AutoCollection>
-}
-
-async function fetchNotes(collectionId: string): Promise<NoteItem[]> {
-  const res = await fetch(
-    `${API_BASE}/notes?collection_id=${collectionId}`,
-  )
-  if (!res.ok) throw new Error("Failed to fetch notes")
-  return res.json() as Promise<NoteItem[]>
-}
-
-async function fetchSections(
-  documentId: string,
-): Promise<SectionInfo[]> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}`)
-  if (!res.ok) return []
-  const doc = (await res.json()) as {
-    sections: SectionInfo[]
+  try {
+    return await apiGet<AutoCollection>(
+      `/collections/by-document/${documentId}`,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
   }
-  return doc.sections ?? []
+}
+
+const fetchNotes = (collectionId: string): Promise<NoteItem[]> =>
+  apiGet<NoteItem[]>("/notes", { collection_id: collectionId })
+
+async function fetchSections(documentId: string): Promise<SectionInfo[]> {
+  try {
+    const doc = await apiGet<{ sections: SectionInfo[] }>(
+      `/documents/${documentId}`,
+    )
+    return doc.sections ?? []
+  } catch {
+    return []
+  }
 }
 
 async function fetchDocuments(): Promise<DocumentItem[]> {
-  const res = await fetch(`${API_BASE}/documents?page_size=200`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocumentItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocumentItem[] }>("/documents", {
+      page_size: 200,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -194,12 +195,7 @@ export function NotesReaderPanel({
 
   // Delete note mutation
   const deleteMut = useMutation({
-    mutationFn: async (noteId: string) => {
-      const res = await fetch(`${API_BASE}/notes/${noteId}`, {
-        method: "DELETE",
-      })
-      if (!res.ok) throw new Error("Failed to delete note")
-    },
+    mutationFn: (noteId: string) => apiDelete(`/notes/${noteId}`),
     onSuccess: () => {
       setDeleteConfirmId(null)
       void qc.invalidateQueries({

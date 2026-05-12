@@ -2,7 +2,7 @@
 // returns the parsed body (or throws); useQuery in Viz.tsx wires them
 // up.
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 import type {
   DocListItem,
@@ -12,50 +12,59 @@ import type {
   TagGraphData,
 } from "./types"
 
-export async function fetchTagGraph(): Promise<TagGraphData> {
-  const res = await fetch(`${API_BASE}/tags/graph`)
-  if (!res.ok) throw new Error("Failed to fetch tag graph")
-  return res.json() as Promise<TagGraphData>
-}
+export const fetchTagGraph = (): Promise<TagGraphData> =>
+  apiGet<TagGraphData>("/tags/graph")
 
 export async function fetchMasteryConcepts(
   docIds: string[],
 ): Promise<MasteryConceptsResponse> {
-  const params = docIds.map((id) => `document_ids=${encodeURIComponent(id)}`).join("&")
-  const res = await fetch(`${API_BASE}/mastery/concepts?${params}`)
-  if (!res.ok) return { document_ids: docIds, concepts: [] }
-  return res.json() as Promise<MasteryConceptsResponse>
+  const url = new URL("https://placeholder/mastery/concepts")
+  docIds.forEach((id) => url.searchParams.append("document_ids", id))
+  try {
+    return await apiGet<MasteryConceptsResponse>(
+      `/mastery/concepts?${url.searchParams.toString()}`,
+    )
+  } catch {
+    return { document_ids: docIds, concepts: [] }
+  }
 }
 
-export async function fetchGraphData(
+export const fetchGraphData = (
   documentId: string | null,
   scope: "document" | "all",
   viewMode: "knowledge_graph" | "call_graph",
   showCrossBook: boolean = false,
   includeNotes: boolean = false,
-): Promise<GraphData> {
-  const url =
-    scope === "document" && documentId
-      ? `${API_BASE}/graph/${documentId}?type=${viewMode}&include_notes=${includeNotes}`
-      : `${API_BASE}/graph?doc_ids=&include_same_concept=${showCrossBook}&include_notes=${includeNotes}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("Failed to fetch graph data")
-  return res.json() as Promise<GraphData>
-}
+): Promise<GraphData> =>
+  scope === "document" && documentId
+    ? apiGet<GraphData>(`/graph/${documentId}`, {
+        type: viewMode,
+        include_notes: includeNotes,
+      })
+    : apiGet<GraphData>("/graph", {
+        doc_ids: "",
+        include_same_concept: showCrossBook,
+        include_notes: includeNotes,
+      })
 
-export async function fetchLearningPath(
+export const fetchLearningPath = (
   documentId: string,
   startEntity: string,
-): Promise<LearningPathData> {
-  const url = `${API_BASE}/graph/learning-path?document_id=${encodeURIComponent(documentId)}&start_entity=${encodeURIComponent(startEntity)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("Failed to fetch learning path")
-  return res.json() as Promise<LearningPathData>
-}
+): Promise<LearningPathData> =>
+  apiGet<LearningPathData>("/graph/learning-path", {
+    document_id: documentId,
+    start_entity: startEntity,
+  })
 
 export async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+      sort: "newest",
+      page: 1,
+      page_size: 100,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }

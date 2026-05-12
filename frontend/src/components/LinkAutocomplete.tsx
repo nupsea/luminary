@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 const LINK_TYPES = ["elaborates", "contradicts", "see-also", "supports", "questions"] as const
 type LinkType = typeof LINK_TYPES[number]
@@ -34,11 +34,7 @@ interface LinkAutocompleteProps {
 
 async function fetchAutocomplete(q: string): Promise<AutocompleteItem[]> {
   try {
-    const res = await fetch(
-      `${API_BASE}/notes/autocomplete?q=${encodeURIComponent(q)}`
-    )
-    if (!res.ok) return []
-    return res.json() as Promise<AutocompleteItem[]>
+    return await apiGet<AutocompleteItem[]>("/notes/autocomplete", { q })
   } catch {
     return []
   }

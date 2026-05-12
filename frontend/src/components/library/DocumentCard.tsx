@@ -37,7 +37,7 @@ import {
   relativeDate,
 } from "./utils"
 
-import { API_BASE } from "@/lib/config"
+import { apiPatch } from "@/lib/apiClient"
 
 function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   const r = (size - 4) / 2
@@ -208,11 +208,7 @@ export function DocumentCard({
     setTypePopoverOpen(false)
     if (newType === doc.content_type) return
     try {
-      await fetch(`${API_BASE}/documents/${doc.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content_type: newType }),
-      })
+      await apiPatch(`/documents/${doc.id}`, { content_type: newType })
       onContentTypeChange?.(doc.id, newType)
     } catch {
       // Non-fatal — UI will revert on next query invalidation

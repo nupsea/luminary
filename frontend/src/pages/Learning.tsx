@@ -47,7 +47,7 @@ import { buildStatPillNavigateDetail, computeAvgMastery, STAT_PILL_LABELS } from
 import { buildDocActionDetail } from "@/lib/docActionUtils"
 import type { DocAction } from "@/lib/docActionUtils"
 
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 const PAGE_SIZE = 20
 
 interface SearchMatch {
@@ -69,59 +69,53 @@ interface DocumentGroup {
 }
 
 async function fetchSearch(q: string, contentTypes: string): Promise<DocumentGroup[]> {
-  const params = new URLSearchParams({ q, limit: "30" })
-  if (contentTypes) params.set("content_types", contentTypes)
-  const res = await fetch(`${API_BASE}/search?${params.toString()}`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { results: DocumentGroup[] }
-  return data.results
+  try {
+    const data = await apiGet<{ results: DocumentGroup[] }>("/search", {
+      q,
+      limit: 30,
+      content_types: contentTypes || undefined,
+    })
+    return data.results
+  } catch {
+    return []
+  }
 }
 
-async function fetchDocuments(params: {
+const fetchDocuments = (params: {
   content_type?: string
   tag?: string
   sort: SortOption
   page: number
   page_size: number
-}): Promise<DocumentListResponse> {
-  const p = new URLSearchParams({
+}): Promise<DocumentListResponse> =>
+  apiGet<DocumentListResponse>("/documents", {
     sort: params.sort,
-    page: String(params.page),
-    page_size: String(params.page_size),
+    page: params.page,
+    page_size: params.page_size,
+    content_type: params.content_type,
+    tag: params.tag,
   })
-  if (params.content_type) p.set("content_type", params.content_type)
-  if (params.tag) p.set("tag", params.tag)
-  const res = await fetch(`${API_BASE}/documents?${p.toString()}`)
-  if (!res.ok) throw new Error("Failed to fetch documents")
-  return res.json() as Promise<DocumentListResponse>
-}
 
 async function fetchRecentlyAccessed(): Promise<DocumentListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page_size=5`)
-  if (!res.ok) return []
-  const data = (await res.json()) as DocumentListResponse
-  return data.items
+  try {
+    const data = await apiGet<DocumentListResponse>("/documents", {
+      sort: "last_accessed",
+      page_size: 5,
+    })
+    return data.items
+  } catch {
+    return []
+  }
 }
 
-async function patchTags(id: string, tags: string[]): Promise<void> {
-  await fetch(`${API_BASE}/documents/${id}/tags`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tags }),
-  })
-}
+const patchTags = (id: string, tags: string[]): Promise<void> =>
+  apiPatch(`/documents/${id}/tags`, { tags })
 
-async function bulkDelete(ids: string[]): Promise<void> {
-  await fetch(`${API_BASE}/documents/bulk-delete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  })
-}
+const bulkDelete = (ids: string[]): Promise<void> =>
+  apiPost("/documents/bulk-delete", { ids })
 
-async function deleteDocument(id: string): Promise<void> {
-  await fetch(`${API_BASE}/documents/${id}`, { method: "DELETE" })
-}
+const deleteDocument = (id: string): Promise<void> =>
+  apiDelete(`/documents/${id}`)
 
 // ---------------------------------------------------------------------------
 // LibraryStatsBar — compact single-row stats pills (S183)
@@ -141,23 +135,19 @@ interface SessionListResponse {
   total: number
 }
 
-async function fetchDueCount(): Promise<DueCountResponse> {
-  const res = await fetch(`${API_BASE}/study/due-count`)
-  if (!res.ok) throw new Error("Failed to fetch due count")
-  return res.json() as Promise<DueCountResponse>
-}
+const fetchDueCount = (): Promise<DueCountResponse> =>
+  apiGet<DueCountResponse>("/study/due-count")
 
-async function fetchRecentSessions(): Promise<SessionListResponse> {
-  const res = await fetch(`${API_BASE}/study/sessions?page_size=20`)
-  if (!res.ok) throw new Error("Failed to fetch sessions")
-  return res.json() as Promise<SessionListResponse>
-}
+const fetchRecentSessions = (): Promise<SessionListResponse> =>
+  apiGet<SessionListResponse>("/study/sessions", { page_size: 20 })
 
 async function fetchNotesCount(): Promise<number> {
-  const res = await fetch(`${API_BASE}/notes`)
-  if (!res.ok) return 0
-  const data = (await res.json()) as unknown[]
-  return data.length
+  try {
+    const data = await apiGet<unknown[]>("/notes")
+    return data.length
+  } catch {
+    return 0
+  }
 }
 
 interface LibraryStatsBarProps {
@@ -552,13 +542,8 @@ interface StartConceptsData {
   concepts: StartConceptItem[]
 }
 
-async function fetchStartConcepts(documentId: string): Promise<StartConceptsData> {
-  const res = await fetch(
-    `${API_BASE}/study/start?document_id=${encodeURIComponent(documentId)}`
-  )
-  if (!res.ok) throw new Error("Failed to fetch start concepts")
-  return res.json() as Promise<StartConceptsData>
-}
+const fetchStartConcepts = (documentId: string): Promise<StartConceptsData> =>
+  apiGet<StartConceptsData>("/study/start", { document_id: documentId })
 
 function WhereToStartPanel({
   documentId,

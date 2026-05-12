@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiPost } from "@/lib/apiClient"
 
 interface FlashcardResult {
   id: string
@@ -51,27 +51,28 @@ export function DocumentFlashcardDialog({
     setError(null)
     setGenerated([])
     try {
-      const res = await fetch(`${API_BASE}/flashcards/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          scope: sectionHeading ? "section" : "full",
-          section_heading: sectionHeading ?? null,
-          count,
-          difficulty: "medium",
-          context: context || null,
-        }),
+      const cards = await apiPost<FlashcardResult[]>("/flashcards/generate", {
+        document_id: documentId,
+        scope: sectionHeading ? "section" : "full",
+        section_heading: sectionHeading ?? null,
+        count,
+        difficulty: "medium",
+        context: context || null,
       })
-      if (!res.ok) {
-        const body = (await res.json()) as { detail?: string }
-        setError(body.detail ?? `Generation failed (HTTP ${res.status})`)
-        return
-      }
-      const cards = (await res.json()) as FlashcardResult[]
       setGenerated(cards)
-    } catch {
-      setError("Generation failed. Is Ollama running?")
+    } catch (err) {
+      if (err instanceof ApiError) {
+        let detail = `Generation failed (HTTP ${err.status})`
+        try {
+          const body = JSON.parse(err.body) as { detail?: string }
+          if (body.detail) detail = body.detail
+        } catch {
+          // body wasn't JSON
+        }
+        setError(detail)
+      } else {
+        setError("Generation failed. Is Ollama running?")
+      }
     } finally {
       setGenerating(false)
     }

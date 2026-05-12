@@ -10,6 +10,7 @@ import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { NoteEditorDialog, type Note } from "@/components/NoteEditorDialog"
+import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
@@ -84,11 +85,8 @@ class DocumentReaderErrorBoundary extends React.Component<
   }
 }
 
-async function fetchDocument(id: string): Promise<DocumentDetail> {
-  const res = await fetch(`${API_BASE}/documents/${id}`)
-  if (!res.ok) throw new Error("Failed to fetch document")
-  return res.json() as Promise<DocumentDetail>
-}
+const fetchDocument = (id: string): Promise<DocumentDetail> =>
+  apiGet<DocumentDetail>(`/documents/${id}`)
 
 // Minimal note shape used for the section indicator (section_id only)
 interface NoteEntry {
@@ -402,11 +400,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Fetch notes for this document so dot indicators persist across reloads (S106)
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
     queryKey: ["notes-for-doc", documentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/notes?document_id=${encodeURIComponent(documentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch notes")
-      return res.json() as Promise<NoteEntry[]>
-    },
+    queryFn: () => apiGet<NoteEntry[]>("/notes", { document_id: documentId }),
     staleTime: 30_000,
   })
 
@@ -415,11 +409,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     data: docAnnotations,
   } = useQuery<AnnotationItem[]>({
     queryKey: ["annotations-for-doc", documentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/annotations?document_id=${encodeURIComponent(documentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch annotations")
-      return res.json() as Promise<AnnotationItem[]>
-    },
+    queryFn: () =>
+      apiGet<AnnotationItem[]>("/annotations", { document_id: documentId }),
     staleTime: 30_000,
   })
 
@@ -429,9 +420,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }>({
     queryKey: ["doc-progress", documentId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/documents/${documentId}/progress`)
-      if (!res.ok) return { by_chapter: [] }
-      return res.json() as Promise<{ by_chapter: { section_id: string; progress_pct: number }[] }>
+      try {
+        return await apiGet<{
+          by_chapter: { section_id: string; progress_pct: number }[]
+        }>(`/documents/${documentId}/progress`)
+      } catch {
+        return { by_chapter: [] }
+      }
     },
     staleTime: 60_000,
   })
@@ -507,12 +502,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const { data: heatmapData } = useQuery<Record<string, SectionHeatmapItem>>({
     queryKey: ["section-heatmap", documentId],
     queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/study/section-heatmap?document_id=${encodeURIComponent(documentId)}`
-      )
-      if (!res.ok) return {}
-      const data = (await res.json()) as { heatmap: Record<string, SectionHeatmapItem> }
-      return data.heatmap
+      try {
+        const data = await apiGet<{
+          heatmap: Record<string, SectionHeatmapItem>
+        }>("/study/section-heatmap", { document_id: documentId })
+        return data.heatmap
+      } catch {
+        return {}
+      }
     },
     staleTime: 60_000,
   })
@@ -522,18 +519,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const { data: lastPracticedBySection } = useQuery<Map<string, string>>({
     queryKey: ["feynman-sessions-by-section", documentId],
     queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/feynman/sessions?document_id=${encodeURIComponent(documentId)}`
-      )
-      if (!res.ok) return new Map()
-      const sessions = (await res.json()) as Array<{ section_id: string | null; created_at: string }>
-      const byId = new Map<string, string>()
-      // Sessions are returned in created_at desc; first hit per section wins.
-      for (const s of sessions) {
-        if (!s.section_id) continue
-        if (!byId.has(s.section_id)) byId.set(s.section_id, s.created_at)
+      try {
+        const sessions = await apiGet<
+          Array<{ section_id: string | null; created_at: string }>
+        >("/feynman/sessions", { document_id: documentId })
+        const byId = new Map<string, string>()
+        // Sessions are returned in created_at desc; first hit per section wins.
+        for (const s of sessions) {
+          if (!s.section_id) continue
+          if (!byId.has(s.section_id)) byId.set(s.section_id, s.created_at)
+        }
+        return byId
+      } catch {
+        return new Map<string, string>()
       }
-      return byId
     },
     staleTime: 30_000,
   })
@@ -552,16 +551,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (!doc) return
     const dismissedKey = `resume-dismissed-${documentId}`
     if (sessionStorage.getItem(dismissedKey)) return
-    void fetch(`${API_BASE}/documents/${documentId}/position`)
-      .then((r) => {
-        if (r.status === 404) return null
-        if (!r.ok) return null
-        return r.json() as Promise<ReadingPosition>
-      })
+    void apiGet<ReadingPosition>(`/documents/${documentId}/position`)
       .then((pos) => {
         if (pos?.last_section_id) setResumePosition(pos)
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) return
         // banner failure is silent
       })
   }, [documentId, doc])
@@ -579,15 +574,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
       positionThrottleRef.current = setTimeout(() => {
         const section = doc!.sections.find((s) => s.id === sectionId)
-        void fetch(`${API_BASE}/documents/${documentId}/position`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            last_section_id: sectionId,
-            last_section_heading: section?.heading ?? null,
-            last_pdf_page: null,
-            last_epub_chapter_index: null,
-          }),
+        void apiPost(`/documents/${documentId}/position`, {
+          last_section_id: sectionId,
+          last_section_heading: section?.heading ?? null,
+          last_pdf_page: null,
+          last_epub_chapter_index: null,
         }).catch(() => {})
         lastPostedSectionRef.current = sectionId
       }, 10_000)
@@ -677,11 +668,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const handleDeleteHighlight = useCallback(async (id: string) => {
     if (!confirm("Remove this highlight?")) return
     try {
-      const res = await fetch(`${API_BASE}/annotations/${id}`, { method: "DELETE" })
-      if (!res.ok) throw new Error("Delete failed")
+      await apiDelete(`/annotations/${id}`)
       void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
       toast.success("Highlight removed")
-    } catch (err) {
+    } catch {
       toast.error("Could not remove highlight")
     }
   }, [documentId, qc])

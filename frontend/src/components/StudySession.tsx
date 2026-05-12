@@ -35,7 +35,7 @@ import {
   submitReview,
   fetchSourceContext,
 } from "@/lib/studyApi"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // S155: SourceContextPanel
@@ -153,11 +153,11 @@ function SourcePanel({ card }: { card: Flashcard }) {
 
   const { data, isLoading, isError } = useQuery<SectionReferencesResponse>({
     queryKey: ["section-references", card.section_id],
-    queryFn: async () => {
-      if (!card.section_id) return { section_id: "", references: [] }
-      const res = await fetch(`${API_BASE}/references/sections/${card.section_id}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json() as Promise<SectionReferencesResponse>
+    queryFn: () => {
+      if (!card.section_id) return Promise.resolve({ section_id: "", references: [] })
+      return apiGet<SectionReferencesResponse>(
+        `/references/sections/${card.section_id}`,
+      )
     },
     enabled: !!card.section_id,
     staleTime: 5 * 60 * 1000,

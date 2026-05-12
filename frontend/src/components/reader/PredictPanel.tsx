@@ -1,7 +1,7 @@
 import { Check, Loader2, Terminal, X } from "lucide-react"
 import { useRef, useState } from "react"
 
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiPost, request } from "@/lib/apiClient"
 
 interface CodeExecuteResult {
   stdout: string
@@ -54,26 +54,30 @@ export function PredictPanel({ sectionId: _sectionId, documentId, preview }: Pre
     abortRef.current = controller
 
     try {
-      const resp = await fetch(`${API_BASE}/code/execute`, {
+      const data = await request<CodeExecuteResult>("/code/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({
+        body: {
           code,
           language: "python",
           expected_output: expectedOutput.trim() !== "" ? expectedOutput : undefined,
           document_id: documentId,
-        }),
+        },
       })
-      if (!resp.ok) {
-        const body = (await resp.json()) as { detail?: string }
-        setRunError(body.detail ?? `Execution failed (HTTP ${resp.status})`)
-        return
-      }
-      const data = (await resp.json()) as CodeExecuteResult
       setRunResult(data)
     } catch (err) {
-      if ((err as { name?: string }).name !== "AbortError") {
+      if ((err as { name?: string }).name === "AbortError") {
+        // user-cancelled
+      } else if (err instanceof ApiError) {
+        let detail = `Execution failed (HTTP ${err.status})`
+        try {
+          const body = JSON.parse(err.body) as { detail?: string }
+          if (body.detail) detail = body.detail
+        } catch {
+          // body wasn't JSON
+        }
+        setRunError(detail)
+      } else {
         setRunError("Execution failed. Check your connection.")
       }
     } finally {
@@ -94,17 +98,12 @@ export function PredictPanel({ sectionId: _sectionId, documentId, preview }: Pre
     const question = `What does this code output?\n\n\`\`\`python\n${code.slice(0, 500)}\n\`\`\``
     const answer = `Correct output:\n${runResult.stdout}${runResult.prediction_diff ? `\n\nDiff:\n${runResult.prediction_diff}` : ""}`
     try {
-      const resp = await fetch(`${API_BASE}/flashcards/create-trace`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          answer,
-          source_excerpt: code.slice(0, 500),
-          document_id: documentId,
-        }),
+      await apiPost("/flashcards/create-trace", {
+        question,
+        answer,
+        source_excerpt: code.slice(0, 500),
+        document_id: documentId,
       })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       setCreateSuccess(true)
       setCreateCardOpen(false)
     } catch {

@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 
 interface DocumentItem {
   id: string
@@ -50,9 +50,10 @@ interface AutoCollection {
 
 async function fetchDocuments(): Promise<DocumentItem[]> {
   try {
-    const res = await fetch(`${API_BASE}/documents?page_size=100`)
-    if (!res.ok) return []
-    const data = (await res.json()) as { items?: DocumentItem[] } | DocumentItem[]
+    const data = await apiGet<{ items?: DocumentItem[] } | DocumentItem[]>(
+      "/documents",
+      { page_size: 100 },
+    )
     return Array.isArray(data) ? data : (data.items ?? [])
   } catch {
     return []
@@ -61,9 +62,7 @@ async function fetchDocuments(): Promise<DocumentItem[]> {
 
 async function fetchNoteStubs(): Promise<NoteStub[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes`)
-    if (!res.ok) return []
-    const notes = (await res.json()) as { id: string; content: string }[]
+    const notes = await apiGet<{ id: string; content: string }[]>("/notes")
     return notes.map((n) => ({ id: n.id, content: n.content.slice(0, 150) }))
   } catch {
     return []
@@ -72,9 +71,7 @@ async function fetchNoteStubs(): Promise<NoteStub[]> {
 
 async function fetchAutoCollection(docId: string): Promise<AutoCollection | null> {
   try {
-    const res = await fetch(`${API_BASE}/collections/by-document/${docId}`)
-    if (!res.ok) return null
-    return (await res.json()) as AutoCollection
+    return await apiGet<AutoCollection>(`/collections/by-document/${docId}`)
   } catch {
     return null
   }
@@ -82,9 +79,9 @@ async function fetchAutoCollection(docId: string): Promise<AutoCollection | null
 
 async function fetchCollectionNotes(collectionId: string): Promise<NoteStub[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes?collection_id=${collectionId}`)
-    if (!res.ok) return []
-    const notes = (await res.json()) as { id: string; content: string }[]
+    const notes = await apiGet<{ id: string; content: string }[]>("/notes", {
+      collection_id: collectionId,
+    })
     return notes.map((n) => ({ id: n.id, content: n.content.slice(0, 150) }))
   } catch {
     return []
@@ -95,19 +92,30 @@ async function runGapDetect(
   noteIds: string[],
   documentId: string,
 ): Promise<GapDetectResult> {
-  const res = await fetch(`${API_BASE}/notes/gap-detect`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note_ids: noteIds, document_id: documentId }),
-  })
-  if (res.status === 503) {
-    throw new Error("Ollama is unavailable. Start it with: ollama serve")
+  try {
+    return await apiPost<GapDetectResult>("/notes/gap-detect", {
+      note_ids: noteIds,
+      document_id: documentId,
+    })
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.status === 503) {
+        throw new Error("Ollama is unavailable. Start it with: ollama serve")
+      }
+      try {
+        const body = JSON.parse(err.body) as { detail?: string }
+        if (body.detail) throw new Error(body.detail)
+      } catch (parseErr) {
+        if (parseErr instanceof Error && parseErr.message.startsWith("Unexpected")) {
+          // body wasn't JSON
+        } else if (parseErr instanceof Error) {
+          throw parseErr
+        }
+      }
+      throw new Error(`HTTP ${err.status}`)
+    }
+    throw err
   }
-  if (!res.ok) {
-    const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
-    throw new Error(detail)
-  }
-  return res.json() as Promise<GapDetectResult>
 }
 
 interface GapDetectDialogProps {
