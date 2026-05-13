@@ -19,6 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session_factory
 from app.models import NoteModel, NoteSourceModel, NoteTagIndexModel
 from app.schemas.notes import NoteResponse
+from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
+from app.services import (
+    note_graph as _note_graph_module,  # indirect: get_note_graph_service is patched
+)
+from app.services import (
+    vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
+)
+from app.services.naming import normalize_tag_slug
+from app.services.tag_graph import invalidate_tag_graph_cache
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +90,6 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
     Handles create (empty -> new tags), update (old -> new tags), and delete
     (call with tags=[] to remove all rows for this note).
     """
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     tags = [normalize_tag_slug(t) for t in tags if normalize_tag_slug(t)]
 
@@ -149,7 +157,6 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
 
     # Invalidate tag graph cache when tag index changes (S167)
     if removed or added:
-        from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
 
         invalidate_tag_graph_cache()
 
@@ -193,9 +200,8 @@ async def upsert_note_graph(
 ) -> None:
     """Fire-and-forget: upsert Note node and edges in Kuzu graph."""
     try:
-        from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
-        await get_note_graph_service().upsert_note_node(
+        await _note_graph_module.get_note_graph_service().upsert_note_node(
             note_id, content, document_id, tags, source_document_ids or []
         )
         logger.debug("Note graph upserted note_id=%s", note_id)
@@ -210,11 +216,9 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
     newer embedding with a stale one (race between create and rapid update).
     """
     try:
-        from app.services.embedder import get_embedding_service  # noqa: PLC0415
-        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
         loop = asyncio.get_event_loop()
-        embedder = get_embedding_service()
+        embedder = _embedder_module.get_embedding_service()
         vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])
 
         async with get_session_factory()() as session:
@@ -228,7 +232,8 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
             logger.debug("Note %s content changed, skipping stale embedding", note_id)
             return
 
-        get_lancedb_service().upsert_note_vector(note_id, document_id, content, vector)
+        lancedb = _vector_store_module.get_lancedb_service()
+        lancedb.upsert_note_vector(note_id, document_id, content, vector)
         logger.debug("Note vector stored note_id=%s", note_id)
     except Exception as exc:
         logger.warning("embed_and_store_note failed (non-fatal): %s", exc)

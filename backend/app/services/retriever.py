@@ -7,7 +7,16 @@ from typing import Any, Literal
 
 from sqlalchemy import text
 
+from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
+from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services import llm as _llm_module  # indirect: get_llm_service is patched
+from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
+from app.services import (
+    vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
+)
+from app.services.entity_disambiguator import find_canonical
 from app.telemetry import trace_retrieval
 from app.types import ScoredChunk
 
@@ -273,9 +282,8 @@ class _CrossEncoderReranker:
             return
         from sentence_transformers import CrossEncoder  # noqa: PLC0415
 
-        from app.config import get_settings  # noqa: PLC0415
 
-        settings = get_settings()
+        settings = _config_module.get_settings()
         cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "ms-marco-minilm"
         cache_dir.mkdir(parents=True, exist_ok=True)
         self._model = CrossEncoder(_RERANK_MODEL, cache_folder=str(cache_dir), device="cpu")
@@ -351,9 +359,8 @@ async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
     still gets standard hybrid retrieval.
     """
     try:
-        from app.services.llm import get_llm_service  # noqa: PLC0415
 
-        llm = get_llm_service()
+        llm = _llm_module.get_llm_service()
         result = await llm.generate(
             prompt=f"Question: {query}\n\nAnswer:",
             system=_HYDE_SYSTEM,
@@ -382,11 +389,8 @@ async def _graph_expand(query: str) -> str:
     """
     try:
         # I-5: lazy imports to avoid retriever <-> services circular chains.
-        from app.services.entity_disambiguator import find_canonical  # noqa: PLC0415
-        from app.services.graph import get_graph_service  # noqa: PLC0415
-        from app.services.ner import get_entity_extractor  # noqa: PLC0415
 
-        extractor = get_entity_extractor()
+        extractor = _ner_module.get_entity_extractor()
         # Direct sync call -- single short query, GLiNER inference takes ~30ms
         # warm. Wrapping in asyncio.to_thread here causes ThreadPoolExecutor /
         # LanceDB BackgroundLoop contention in pytest that surfaces as an
@@ -413,7 +417,7 @@ async def _graph_expand(query: str) -> str:
             logger.debug("graph_expand: no entities detected; passthrough")
             return query
 
-        graph = get_graph_service()
+        graph = _graph_module.get_graph_service()
         existing_query_tokens = {t.lower() for t in query.split()}
         expansion_tokens: list[str] = []
 
@@ -488,10 +492,8 @@ class HybridRetriever:
         hybrid retrieval can fall back to keyword-only results gracefully.
         """
         try:
-            from app.services.embedder import get_embedding_service
-            from app.services.vector_store import get_lancedb_service
 
-            svc = get_lancedb_service()
+            svc = _vector_store_module.get_lancedb_service()
             # Check if any vectors exist before running a search.
             if svc.count_for_document(document_ids[0] if document_ids else "") == 0:
                 # Table may be empty or doc not yet indexed; check total row count.
@@ -504,7 +506,7 @@ class HybridRetriever:
                     logger.debug("vector_search: LanceDB table empty, returning []")
                     return []
 
-            vector = get_embedding_service().encode([query])[0]
+            vector = _embedder_module.get_embedding_service().encode([query])[0]
             table = svc._get_table()
             search = table.search(vector).metric("cosine").limit(k)
             if document_ids:
@@ -789,9 +791,8 @@ class HybridRetriever:
     ) -> list[str]:
         """Search image_vectors_v1 by embedding similarity; return matching image_ids."""
         try:
-            from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
-            rows = get_lancedb_service().search_image_vectors(
+            rows = _vector_store_module.get_lancedb_service().search_image_vectors(
                 query_vector, document_ids, k=k, threshold=threshold
             )
             return [row["image_id"] for row in rows if row.get("image_id")]
@@ -841,10 +842,9 @@ class HybridRetriever:
         Returns (chunks, deduplicated_image_ids).
         """
         try:
-            from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
             chunks = await self.retrieve(query, document_ids, k)
-            query_vector = get_embedding_service().encode([query])[0]
+            query_vector = _embedder_module.get_embedding_service().encode([query])[0]
             image_ids_vec = self._image_vector_search(
                 query_vector, document_ids, k=5, threshold=0.5
             )

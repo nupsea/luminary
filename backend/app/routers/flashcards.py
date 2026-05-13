@@ -30,10 +30,10 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     CollectionModel,
@@ -67,7 +67,9 @@ from app.schemas.flashcards import (
     SourceContextResponse,
     TraceFlashcardRequest,
 )
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.deck_health import DeckHealthService, get_deck_health_service
+from app.services.engagement_service import EngagementService
 from app.services.flashcard import (
     FlashcardService,
     _delete_flashcard_fts,
@@ -83,6 +85,7 @@ from app.services.flashcards_router_service import (
 )
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 from app.services.llm import LLMUnavailableError
+from app.services.objective_tracker import get_objective_tracker_service
 
 logger = logging.getLogger(__name__)
 
@@ -243,9 +246,8 @@ async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
     Uses RELATED_TO edges ordered by confidence descending; falls back to CO_OCCURS
     when no RELATED_TO edges exist.
     """
-    from app.services.graph import get_graph_service  # noqa: PLC0415
 
-    graph = get_graph_service()
+    graph = _graph_module.get_graph_service()
     raw_pairs = graph.get_related_entity_pairs_for_document(document_id, limit=10)
 
     if not raw_pairs:
@@ -497,9 +499,8 @@ async def fill_uncovered_sections(
     """
 
     async def _run() -> None:
-        from app.database import get_db as _get_db  # noqa: PLC0415
 
-        async for db in _get_db():
+        async for db in get_db():
             await health_service.generate_for_uncovered(document_id, req.section_ids, db)
             break
 
@@ -527,15 +528,14 @@ async def list_flashcard_decks(
     - "document" when document_id is non-null (source='document')
     - "note" otherwise (tag-scoped or note_ids-scoped)
     """
-    from sqlalchemy import func as sa_func  # noqa: PLC0415
 
     rows = (
         await session.execute(
             select(
                 FlashcardModel.deck,
                 FlashcardModel.source,
-                sa_func.count().label("card_count"),
-                sa_func.max(FlashcardModel.document_id).label("document_id"),
+                func.count().label("card_count"),
+                func.max(FlashcardModel.document_id).label("document_id"),
             ).group_by(FlashcardModel.deck)
         )
     ).all()
@@ -711,7 +711,6 @@ async def review_flashcard(
 
     # Fire-and-forget coverage update -- does not block the review response.
     if card.document_id:
-        from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
         _tracker = get_objective_tracker_service()
         _task = asyncio.create_task(_tracker.update_coverage(card.document_id))
@@ -721,8 +720,6 @@ async def review_flashcard(
     # Fire-and-forget XP award for the review.
     async def _award_review_xp() -> None:
         try:
-            from app.database import get_session_factory  # noqa: PLC0415
-            from app.services.engagement_service import EngagementService  # noqa: PLC0415
 
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)

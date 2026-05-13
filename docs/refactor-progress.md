@@ -302,7 +302,7 @@ starting a new extraction so we don't re-derive them per phase.
   nodes/...}.py`. Costs: many test imports change. Defer until #6 is
   otherwise complete; bundle as one rename commit.
 
-### #7 -- 168 `noqa: PLC0415` inline imports (was 299; -127 so far)
+### #7 -- 108 `noqa: PLC0415` inline imports (was 299; -187 so far, target met)
 - Signals circular deps and routers/services importing each other lazily.
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
@@ -376,14 +376,22 @@ starting a new extraction so we don't re-derive them per phase.
      `_CHUNK_CHAR_LIMIT`), heavy ML imports (`numpy as np`), and
      patched factories (`get_retriever`, `get_graph_service`).
      Estimated win after careful review: 3-5 noqas, not worth a pass.
-  2. **Service-to-service late imports** (image_enricher 16,
-     clustering 11, image_extractor 10, flashcard 10,
-     retriever 8, note_graph 7, code_parser 6). Often
-     `from app.services.A import get_a_service` inside a method to
-     avoid a top-level cycle. Fix path: introduce a thin
-     `app/services/_registry.py` that exposes `get_*` factories; both
-     A and B import from `_registry`, never from each other.
-     This is a structural change -- defer until a dedicated session.
+  2. **Service-to-service late imports DONE** (-65 more, no `_registry.py`
+     needed): the module-level indirection pattern from audit #5/#6
+     turned out to handle all the patched-factory cases cleanly:
+     - `image_enricher.py` 16 -> 0
+     - `clustering_service.py` 11 -> 2 (sklearn.HDBSCAN +
+       cosine_similarity kept lazy: sklearn is heavy and tests patch
+       `sklearn.cluster.HDBSCAN` directly)
+     - `image_extractor.py` 10 -> 0
+     - `note_graph.py` 7 -> 0 (six `get_graph_service` lazy imports
+       collapsed into one `_graph_module` indirection)
+     - `retriever.py` 8 -> 1 (sentence_transformers.CrossEncoder
+       kept lazy)
+     - `notes_service.py` 5 -> 0
+     - `routers/flashcards.py` 6 -> 0
+     The `_registry.py` plan is dropped -- module-level indirections
+     are simpler and don't require restructuring service ownership.
   3. **`app/main.py`** (DONE, 10 -> 0). FastAPI lifespan handlers
      lifted: the seven enrichment handlers (`concept_link`,
      `diagram_extract`, `image_analyze`, `image_extract`,
