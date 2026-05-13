@@ -22,12 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import get_db, get_session_factory
-from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel, TagAliasModel
+from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel
 from app.repos.tag_repo import TagRepo, get_tag_repo
 from app.routers.notes import _sync_tag_index
 from app.services.naming import normalize_tag_slug
 from app.services.repo_helpers import get_or_404
 from app.services.tag_graph import build_tag_graph, invalidate_tag_graph_cache
+from app.services.tag_merge_service import get_tag_merge_service
 from app.services.tag_normalizer import get_tag_normalizer_service
 
 logger = logging.getLogger(__name__)
@@ -299,63 +300,22 @@ async def merge_tags(
     await get_or_404(session, CanonicalTagModel, source_id, name=f"Source tag '{source_id}'")
     await get_or_404(session, CanonicalTagModel, target_id, name=f"Target tag '{target_id}'")
 
-    # Find all notes with the source tag via NoteTagIndexModel
-    note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.tag_full == source_id).distinct()
-    )
-    note_ids = [row[0] for row in note_ids_result.all()]
-
     try:
-        if note_ids:
-            # Ensure we are not using stale objects
-            session.expire_all()
-            # Load notes
-            notes_result = await session.execute(
-                select(NoteModel).where(NoteModel.id.in_(note_ids))
-            )
-            notes = list(notes_result.scalars().all())
-            logger.info(
-                "Merging tag %r -> %r in %d notes: %r", source_id, target_id, len(notes), note_ids
-            )
-
-            for note in notes:
-                current_tags: list[str] = note.tags or []
-                # Replace source with target, deduplicate, preserve order
-                new_tags: list[str] = []
-                seen: set[str] = set()
-                for tag in current_tags:
-                    replacement = target_id if tag == source_id else tag
-                    if replacement not in seen:
-                        seen.add(replacement)
-                        new_tags.append(replacement)
-
-                if new_tags != current_tags:
-                    logger.debug("Updating note %s tags: %r -> %r", note.id, current_tags, new_tags)
-                    note.tags = list(new_tags)
-
-                    flag_modified(note, "tags")
-                    session.add(note)
-                    await session.flush()
-
-                # Always sync index even if tags didn't change (idempotent)
-                await _sync_tag_index(note.id, new_tags, session)
-
-        # Create alias: source -> target
-        alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
-        session.add(alias)
-
-        # Delete source canonical tag
-        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
-
-        await session.commit()
-        session.expire_all()
-        logger.info("Successfully merged tag %r -> %r", source_id, target_id)
+        result = await get_tag_merge_service().merge_tag(
+            session, source_id=source_id, target_id=target_id
+        )
+        logger.info(
+            "Successfully merged tag %r -> %r (affected_notes=%d)",
+            source_id,
+            target_id,
+            result.affected_notes,
+        )
     except Exception as exc:
         logger.exception("Merge failed for tag %r -> %r", source_id, target_id)
         await session.rollback()
-        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
 
-    return TagMergeResponse(affected_notes=len(note_ids))
+    return TagMergeResponse(affected_notes=result.affected_notes)
 
 
 # ---------------------------------------------------------------------------
@@ -457,9 +417,10 @@ async def accept_normalization_suggestion(
 ) -> NormalizationAcceptResponse:
     """Accept a merge suggestion: merge source tag into the suggested canonical.
 
-    Merge logic lives here (not in the service layer) because _sync_tag_index is
-    a router-layer helper and Services must not import from the API/Router layer
-    (six-layer invariant).
+    Wraps TagMergeService.merge_tag() so the same cascade also runs
+    behind `POST /tags/merge`. The endpoint additionally flips the
+    suggestion's status (accepted vs rejected if a tag was deleted in
+    the meantime) inside the same transaction.
     """
 
     service = get_tag_normalizer_service()
@@ -484,51 +445,20 @@ async def accept_normalization_suggestion(
         await session.commit()
         return NormalizationAcceptResponse(affected_notes=0)
 
-    # Find and update notes with the source tag (same logic as POST /tags/merge)
-    note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.tag_full == source_id).distinct()
-    )
-    note_ids = [row[0] for row in note_ids_result.all()]
-
-    affected_notes = 0
-    if note_ids:
-        notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-        notes = list(notes_result.scalars().all())
-        try:
-            for note in notes:
-                current_tags: list[str] = note.tags or []
-                new_tags: list[str] = []
-                seen: set[str] = set()
-                for tag in current_tags:
-                    replacement = target_id if tag == source_id else tag
-                    if replacement not in seen:
-                        seen.add(replacement)
-                        new_tags.append(replacement)
-                note.tags = list(new_tags)
-
-                flag_modified(note, "tags")
-                session.add(note)
-                await _sync_tag_index(note.id, new_tags, session)
-            affected_notes = len(notes)
-        except Exception:
-            await session.rollback()
-            raise HTTPException(
-                status_code=500, detail="Merge failed during note updates -- rolled back"
-            )
-
     try:
-        alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
-        session.add(alias)
-        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
+        # commit=False so the suggestion.status update lands in the same tx.
+        result = await get_tag_merge_service().merge_tag(
+            session, source_id=source_id, target_id=target_id, commit=False
+        )
         suggestion.status = "accepted"
         session.add(suggestion)
         await session.commit()
         session.expire_all()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
         raise HTTPException(
-            status_code=500, detail="Merge failed during alias/cleanup -- rolled back"
-        )
+            status_code=500, detail="Merge failed -- rolled back"
+        ) from exc
 
     invalidate_tag_graph_cache()
     logger.info(
@@ -536,9 +466,9 @@ async def accept_normalization_suggestion(
         suggestion_id,
         source_id,
         target_id,
-        affected_notes,
+        result.affected_notes,
     )
-    return NormalizationAcceptResponse(affected_notes=affected_notes)
+    return NormalizationAcceptResponse(affected_notes=result.affected_notes)
 
 
 @router.post("/normalization/suggestions/{suggestion_id}/reject", status_code=204)

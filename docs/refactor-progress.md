@@ -529,12 +529,19 @@ starting a new extraction so we don't re-derive them per phase.
     list_documents's 10+ correlated subqueries (intentional --
     bespoke shape, documented in the audit strategy) plus a handful
     of small endpoints.
-  - **Phase 10 -- extend `TagRepo`** to cover the 32 remaining
-    tags.py ops. The skipped routes are `merge_tags`,
-    `accept_normalization_suggestion`, `migrate-naming` -- all
-    multi-entity transactions. Same pattern as Phase 9: introduce a
-    `TagMergeService` that orchestrates the bespoke rollback logic
-    and uses `TagRepo` + `NoteRepo` for the underlying ops.
+  - **Phase 10 -- `TagMergeService`** (DONE,
+    `backend/app/services/tag_merge_service.py`, 135 lines).
+    Extracted the five-step merge cascade
+    (`_update_notes` -> `_add_alias` -> `_delete_source_tag`)
+    that `POST /tags/merge` and
+    `POST /tags/normalization/suggestions/{id}/accept` both performed
+    inline as ~70 lines of duplicated logic each. The service offers
+    a `commit` flag so the suggestion-accept path can run the merge
+    inside its own transaction with the `suggestion.status` update.
+    Net: tags.py 32 -> 20 session ops; ~90 lines of duplicated
+    cascade logic deleted. `migrate-naming` stays inline (one-shot
+    bulk migration with bespoke per-tag rename / merge / alias logic
+    that isn't reused). 16 tag tests pass; ruff clean.
   - **Phase 11 -- mechanical sweep** of the small-count routers
     (references 6, reading 6, sections 4, chat_meta 3, summarize 2,
     search 2, images 2, code_executor 2, admin 1).
