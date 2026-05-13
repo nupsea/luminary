@@ -645,6 +645,30 @@ starting a new extraction so we don't re-derive them per phase.
     keeps the orchestration logic + LoadingSkeleton + EmptyState +
     the per-document detail switch (DocumentReader / IngestingPlaceholder).
     tsc clean; 347 vitest pass.
+  - **Phase G -- `components/TeachbackSession.tsx`** (DONE). Was 1020
+    lines, now 245 (-76 %). New `components/Teachback/` package:
+    speechRecognition.ts (Web Speech API type shims + the
+    SpeechRecognitionAPI feature-detect const), useTeachbackPolling.ts
+    (tanstack-query polling that resolves async evaluations + computes
+    aggregate stats), ProgressBar, InlineTeachbackFeedback (per-card
+    rubric block, reused in TeachbackPanel and ExpandableResultRow),
+    TeachbackPanel (the big one -- speech recognition lifecycle,
+    submit/evaluating/result/error UI states), ExpandableResultRow,
+    TeachbackResultsPanel, SessionComplete. The orchestrator keeps
+    the queue / pendingTeachbacks state + the live-poll query that
+    drives the current card's evaluation banner. tsc clean; 347
+    vitest pass.
+  - **`components/reader/DocumentReader.tsx`** stays. Per the audit's
+    design principle 6 ("Don't fight tightly-coupled orchestrators"):
+    DocumentReader weaves together five queries, three pieces of
+    audio/video state, in-doc search, highlights, reading position,
+    selection workflow, and citation deep-link plumbing. A split
+    would either (a) move state up through useless prop drilling or
+    (b) introduce ref-passing layers that obscure rather than clarify
+    the data flow. Leaving it at 1283 lines is the right call here.
+  - **`components/NoteReaderSheet.tsx`** -- same orchestrator pattern
+    as DocumentReader (1025 lines: note list + reader + graph mini-pane
+    + dialog plumbing). Defer.
 - **Acceptance criteria:** every page < 500 lines; every page has at
   most 3 imports of `fetch` (and ideally 0 -- see #12); each page has
   a vitest smoke test that mounts it with mocked api and asserts the
