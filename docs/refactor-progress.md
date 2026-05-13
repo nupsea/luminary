@@ -637,6 +637,14 @@ starting a new extraction so we don't re-derive them per phase.
     (sendMessage, hydrateSession, switchContextWithUndo) since it
     threads through too many store setters to lift cleanly. tsc
     clean, vitest 347 pass + 11 pre-existing failures.
+  - **Phase F -- `pages/Learning.tsx`** (DONE). Was 1119 lines, now
+    572 (-49 %). New `pages/Learning/` package: types.ts (8 interfaces
+    -- search/group/session/start-concept shapes), api.ts (9 fetchers
+    via apiClient + bulk/single delete + tag patch), LibraryStatsBar,
+    LibraryTable, SearchPanel, WhereToStartPanel. The page itself
+    keeps the orchestration logic + LoadingSkeleton + EmptyState +
+    the per-document detail switch (DocumentReader / IngestingPlaceholder).
+    tsc clean; 347 vitest pass.
 - **Acceptance criteria:** every page < 500 lines; every page has at
   most 3 imports of `fetch` (and ideally 0 -- see #12); each page has
   a vitest smoke test that mounts it with mocked api and asserts the
