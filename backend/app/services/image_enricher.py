@@ -16,10 +16,22 @@ import asyncio
 import base64
 import json
 import logging
+import uuid
+from datetime import UTC
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+from PIL import Image as _PILImage
+from sqlalchemy import func, select
 
+from app import config as _config_module  # indirect: get_settings is patched
+from app import database as _database_module  # indirect: get_session_factory is patched
+from app.models import EnrichmentJobModel, ImageModel
+from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
+from app.services import (
+    vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
+)
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -71,9 +83,7 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
         models_to_try.append(default_model)
 
     # Resize large images to reduce inference time and avoid timeouts.
-    from io import BytesIO  # noqa: PLC0415
 
-    from PIL import Image as _PILImage  # noqa: PLC0415
 
     img = _PILImage.open(image_path)
     if max(img.size) > 1024:
@@ -152,23 +162,17 @@ class ImageEnricherService:
 
         Returns the count of images successfully analyzed (decorative or LLM-described).
         """
-        from sqlalchemy import select as _select  # noqa: PLC0415
         from sqlalchemy import text as _text
         from sqlalchemy import update as _update
 
-        from app.config import get_settings as _get_settings  # noqa: PLC0415
-        from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import ImageModel  # noqa: PLC0415
-        from app.services.embedder import get_embedding_service  # noqa: PLC0415
-        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
-        settings = _get_settings()
+        settings = _config_module.get_settings()
         data_dir = Path(settings.DATA_DIR).expanduser()
 
         # Load all ImageModel rows with description=null for this document
-        async with get_session_factory()() as session:
+        async with _database_module.get_session_factory()() as session:
             result = await session.execute(
-                _select(ImageModel).where(
+                select(ImageModel).where(
                     ImageModel.document_id == document_id,
                     ImageModel.description.is_(None),
                 )
@@ -182,8 +186,8 @@ class ImageEnricherService:
         logger.info("image_enricher: processing %d images for doc=%s", len(images), document_id)
 
         processed = 0
-        embedder = get_embedding_service()
-        lancedb_svc = get_lancedb_service()
+        embedder = _embedder_module.get_embedding_service()
+        lancedb_svc = _vector_store_module.get_lancedb_service()
 
         for img in images:
             abs_path = data_dir / img.path
@@ -195,7 +199,6 @@ class ImageEnricherService:
 
             async with _ENRICH_SEM:
                 try:
-                    from PIL import Image as _PILImage  # noqa: PLC0415
 
                     pil_img = _PILImage.open(str(abs_path))
 
@@ -216,7 +219,7 @@ class ImageEnricherService:
                     # in a single session/transaction so both succeed or both roll back.
                     # If this commit fails, description stays null and the image will
                     # be retried on the next image_analyze job.
-                    async with get_session_factory()() as session:
+                    async with _database_module.get_session_factory()() as session:
                         await session.execute(
                             _update(ImageModel)
                             .where(ImageModel.id == img.id)
@@ -287,25 +290,18 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
         "flowchart",
     ]
     try:
-        import uuid as _uuid  # noqa: PLC0415
-        from datetime import UTC  # noqa: PLC0415
         from datetime import datetime as _dt
 
-        from sqlalchemy import func as _func  # noqa: PLC0415
-        from sqlalchemy import select as _select  # noqa: PLC0415
 
-        from app.database import get_session_factory as _get_sf  # noqa: PLC0415
-        from app.models import EnrichmentJobModel as _EJM  # noqa: PLC0415
-        from app.models import ImageModel as _ImageModel  # noqa: PLC0415
 
-        async with _get_sf()() as session:
+        async with _database_module.get_session_factory()() as session:
             # Check if any qualifying diagram images exist for this document
             has_diagrams_result = await session.execute(
-                _select(_ImageModel.id)
+                select(ImageModel.id)
                 .where(
-                    _ImageModel.document_id == document_id,
-                    _ImageModel.image_type.in_(_QUALIFYING_DIAGRAM_TYPES),
-                    _ImageModel.description.is_not(None),
+                    ImageModel.document_id == document_id,
+                    ImageModel.image_type.in_(_QUALIFYING_DIAGRAM_TYPES),
+                    ImageModel.description.is_not(None),
                 )
                 .limit(1)
             )
@@ -319,13 +315,13 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
             )
             return
 
-        async with _get_sf()() as session:
+        async with _database_module.get_session_factory()() as session:
             # Deduplication: skip if a pending/running diagram_extract job already exists
             dup_result = await session.execute(
-                _select(_func.count(_EJM.id)).where(
-                    _EJM.document_id == document_id,
-                    _EJM.job_type == "diagram_extract",
-                    _EJM.status.in_(["pending", "running"]),
+                select(func.count(EnrichmentJobModel.id)).where(
+                    EnrichmentJobModel.document_id == document_id,
+                    EnrichmentJobModel.job_type == "diagram_extract",
+                    EnrichmentJobModel.status.in_(["pending", "running"]),
                 )
             )
             dup_count = dup_result.scalar_one_or_none() or 0
@@ -336,9 +332,9 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
             )
             return
 
-        async with _get_sf()() as session:
-            job = _EJM(
-                id=str(_uuid.uuid4()),
+        async with _database_module.get_session_factory()() as session:
+            job = EnrichmentJobModel(
+                id=str(uuid.uuid4()),
                 document_id=document_id,
                 job_type="diagram_extract",
                 status="pending",

@@ -15,13 +15,20 @@ from datetime import UTC, datetime
 from functools import lru_cache
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select, update
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    CanonicalTagModel,
     ClusterSuggestionModel,
     CollectionModel,
     NoteModel,
+    NoteTagIndexModel,
+    TagAliasModel,
+)
+from app.services import (
+    vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
 from app.services.llm import get_llm_service
 from app.services.naming import normalize_collection_name, normalize_tag_slug
@@ -59,9 +66,8 @@ class ClusteringService:
             return -1
 
         # Fetch all note vectors from LanceDB
-        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
 
-        svc = get_lancedb_service()
+        svc = _vector_store_module.get_lancedb_service()
         df = await asyncio.to_thread(lambda: svc._get_or_create_note_table().to_pandas())
 
         if len(df) < 3:
@@ -72,9 +78,11 @@ class ClusteringService:
         vectors = df["vector"].tolist()
         matrix = np.array(vectors, dtype=np.float32)
 
-        # Run HDBSCAN in thread (CPU-bound sync work)
+        # Run HDBSCAN in thread (CPU-bound sync work). sklearn imports stay
+        # lazy: they're heavy, and tests patch `sklearn.cluster.HDBSCAN`
+        # directly, which only works when this module looks the name up at
+        # call time rather than caching a top-level binding.
         from sklearn.cluster import HDBSCAN  # noqa: PLC0415
-        from sklearn.metrics.pairwise import cosine_similarity  # noqa: PLC0415
 
         labels = await asyncio.to_thread(
             lambda: HDBSCAN(min_cluster_size=3, min_samples=2, metric="cosine").fit_predict(matrix)
@@ -104,6 +112,8 @@ class ClusteringService:
 
             # Confidence score: mean pairwise cosine similarity for cluster members
             if len(member_matrix) >= 2:
+                from sklearn.metrics.pairwise import cosine_similarity  # noqa: PLC0415
+
                 sim_matrix = cosine_similarity(member_matrix)
                 n = len(member_matrix)
                 upper_triangle = [sim_matrix[i, j] for i in range(n) for j in range(i + 1, n)]
@@ -251,7 +261,6 @@ class ClusteringService:
         await db.flush()
 
         # Insert member rows using INSERT OR IGNORE (same pattern as collections router)
-        from sqlalchemy import text as sa_text  # noqa: PLC0415
 
         for note_id in suggestion.note_ids or []:
             await db.execute(
@@ -312,7 +321,6 @@ class ClusteringService:
             it["suggestion_id"]: it["note_ids"] for it in items if it.get("note_ids") is not None
         }
 
-        from sqlalchemy import text as sa_text  # noqa: PLC0415
 
         created_ids: list[str] = []
 
@@ -383,7 +391,6 @@ class ClusteringService:
            "suggested_name": str, "action": "rename"|"merge",
            "merge_target_id": str | None}
         """
-        from app.models import CanonicalTagModel  # noqa: PLC0415
 
         violations: list[dict] = []
 
@@ -477,9 +484,7 @@ class ClusteringService:
 
         Returns {"tags_renamed": int, "collections_renamed": int, "tags_merged": int}
         """
-        from sqlalchemy import update  # noqa: PLC0415
 
-        from app.models import CanonicalTagModel, NoteTagIndexModel  # noqa: PLC0415
 
         tags_renamed = 0
         tags_merged = 0
@@ -521,7 +526,6 @@ class ClusteringService:
                             select(CanonicalTagModel).where(CanonicalTagModel.id == new_slug)
                         )
                     ).scalar_one_or_none()
-                    from sqlalchemy import func  # noqa: PLC0415
 
                     note_count = (
                         await db.execute(
@@ -544,7 +548,6 @@ class ClusteringService:
                         )
 
                     # Create tag alias
-                    from app.models import TagAliasModel  # noqa: PLC0415
 
                     existing_alias = (
                         await db.execute(
@@ -594,7 +597,6 @@ class ClusteringService:
                     )
 
                     # Create tag alias
-                    from app.models import TagAliasModel  # noqa: PLC0415
 
                     existing_alias = (
                         await db.execute(

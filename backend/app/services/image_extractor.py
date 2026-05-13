@@ -10,8 +10,16 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 
+import ebooklib
 import fitz  # PyMuPDF
+from ebooklib import epub
 from PIL import Image as PILImage
+from sqlalchemy import select
+from sqlalchemy import update as _update
+
+from app import config as _config_module  # indirect: get_settings is patched
+from app import database as _database_module  # indirect: get_session_factory is patched
+from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +150,6 @@ def extract_images_epub(
     Uses ebooklib to iterate EpubImage items.
     Same size/dedup rules as PDF extraction.
     """
-    import ebooklib  # noqa: PLC0415
-    from ebooklib import epub  # noqa: PLC0415
 
     out_dir = images_dir / doc_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -263,41 +269,35 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     Extracts images from the document file, stores ImageModel rows.
     Non-fatal: failures are caught by the worker and set job status='failed'.
     """
-    from pathlib import Path as _Path  # noqa: PLC0415
 
-    from sqlalchemy import select as _select  # noqa: PLC0415
-    from sqlalchemy import update as _update  # noqa: PLC0415
 
-    from app.config import get_settings  # noqa: PLC0415
-    from app.database import get_session_factory  # noqa: PLC0415
-    from app.models import ChunkModel, DocumentModel, ImageModel  # noqa: PLC0415
 
-    settings = get_settings()
-    images_dir = _Path(settings.DATA_DIR).expanduser() / "images"
+    settings = _config_module.get_settings()
+    images_dir = Path(settings.DATA_DIR).expanduser() / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    async with get_session_factory()() as session:
+    async with _database_module.get_session_factory()() as session:
         doc_result = await session.execute(
-            _select(DocumentModel).where(DocumentModel.id == document_id)
+            select(DocumentModel).where(DocumentModel.id == document_id)
         )
         doc = doc_result.scalar_one_or_none()
         if doc is None:
             raise ValueError(f"Document not found: {document_id}")
 
         existing_hashes_result = await session.execute(
-            _select(ImageModel.content_hash).where(ImageModel.document_id == document_id)
+            select(ImageModel.content_hash).where(ImageModel.document_id == document_id)
         )
         existing_hashes: set[str] = {row[0] for row in existing_hashes_result.all()}
 
         chunks_result = await session.execute(
-            _select(ChunkModel.id, ChunkModel.page_number)
+            select(ChunkModel.id, ChunkModel.page_number)
             .where(ChunkModel.document_id == document_id)
             .order_by(ChunkModel.page_number, ChunkModel.chunk_index)
         )
         chunks = chunks_result.all()
 
     fmt = doc.format.lower()
-    file_path = _Path(doc.file_path)
+    file_path = Path(doc.file_path)
 
     if fmt == "pdf":
         extracted = extract_images_pdf(file_path, images_dir, document_id)
@@ -338,17 +338,15 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
         )
 
     if new_images:
-        async with get_session_factory()() as session:
+        async with _database_module.get_session_factory()() as session:
             session.add_all(new_images)
             await session.commit()
 
         # Enqueue image_analyze job for vision LLM analysis (S134)
-        import uuid as _uuid  # noqa: PLC0415
 
-        from app.models import EnrichmentJobModel  # noqa: PLC0415
 
-        analyze_job_id = str(_uuid.uuid4())
-        async with get_session_factory()() as session:
+        analyze_job_id = str(uuid.uuid4())
+        async with _database_module.get_session_factory()() as session:
             session.add(
                 EnrichmentJobModel(
                     id=analyze_job_id,
@@ -364,7 +362,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
             document_id,
         )
 
-    async with get_session_factory()() as session:
+    async with _database_module.get_session_factory()() as session:
         await session.execute(
             _update(DocumentModel)
             .where(
