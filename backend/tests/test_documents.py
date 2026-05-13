@@ -340,7 +340,7 @@ async def test_delete_document_removes_doc_from_sqlite(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.delete(f"/documents/{doc_id}")
     assert resp.status_code == 204
@@ -375,7 +375,7 @@ async def test_delete_document_removes_child_rows(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             await client.delete(f"/documents/{doc_id}")
 
@@ -402,7 +402,7 @@ async def test_delete_document_calls_lancedb(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.delete(f"/documents/{doc_id}")
 
@@ -421,7 +421,7 @@ async def test_delete_document_calls_graph_service(test_db):
     mock_lancedb = MagicMock()
     mock_graph = MagicMock()
     with (
-        patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb),
+        patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
         patch("app.services.graph.get_graph_service", return_value=mock_graph),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -453,7 +453,7 @@ async def test_bulk_delete_removes_docs(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post("/documents/bulk-delete", json={"ids": [id1, id2]})
 
@@ -478,7 +478,7 @@ async def test_bulk_delete_skips_missing(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/bulk-delete", json={"ids": [real_id, "nonexistent-id"]}

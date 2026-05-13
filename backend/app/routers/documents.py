@@ -10,30 +10,22 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import case, delete, func, select, text
+from sqlalchemy import case, func, select, text
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
 from app.models import (
-    AnnotationModel,
     ChunkModel,
-    ClipModel,
     CodeSnippetModel,
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
-    ImageModel,
-    LearningGoalModel,
     LearningObjectiveModel,
-    MisconceptionModel,
-    NoteModel,
-    QAHistoryModel,
     ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
     StudySessionModel,
     SummaryModel,
-    WebReferenceModel,
 )
 from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
@@ -65,6 +57,7 @@ from app.schemas.documents import (
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
 from app.services.article_extractor import get_article_extractor
+from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
 from app.services.documents_service import (
     delete_raw_file as _delete_raw_file,
@@ -974,6 +967,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
 @router.post("/bulk-delete", status_code=200)
 async def bulk_delete_documents(body: BulkDeleteRequest):
     """Delete multiple documents and their derived data by ID list."""
+    svc = get_document_deletion_service()
     deleted = []
     for document_id in body.ids:
         async with get_session_factory()() as session:
@@ -983,58 +977,11 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
             doc = result.scalar_one_or_none()
             if doc is None:
                 continue
-            await session.execute(
-                text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
-                {"doc_id": document_id},
-            )
-            await session.execute(
-                text("DELETE FROM images_fts WHERE document_id = :doc_id"),
-                {"doc_id": document_id},
-            )
-            for model in (
-                EnrichmentJobModel,
-                ImageModel,
-                LearningObjectiveModel,
-                CodeSnippetModel,
-                WebReferenceModel,
-                ChunkModel,
-                SectionModel,
-                SummaryModel,
-                FlashcardModel,
-                MisconceptionModel,
-                NoteModel,
-                QAHistoryModel,
-                ReadingProgressModel,
-                AnnotationModel,
-                LearningGoalModel,
-                ClipModel,
-            ):
-                await session.execute(
-                    delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
-                )
-            await session.execute(
-                delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-            )
-            await session.execute(
-                delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
-            )
-            await session.delete(doc)
+            await svc.delete_sqlite_cascade(session, doc)
             await session.commit()
-        try:
-            get_lancedb_service().delete_document(document_id)
-        except Exception:
-            logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
-        try:
-
-            _graph_module.get_graph_service().delete_document(document_id)
-        except Exception:
-            logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
-        # Remove extracted images directory
-        settings = get_settings()
-        images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
-        if images_dir.exists():
-            shutil.rmtree(images_dir, ignore_errors=True)
-        _delete_raw_file(document_id)
+        svc.delete_lancedb_vectors(document_id)
+        svc.delete_kuzu_nodes(document_id)
+        svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
     return {"deleted": deleted, "count": len(deleted)}
@@ -1090,68 +1037,15 @@ async def delete_document(document_id: str):
             extra={"document_id": document_id},
         )
 
+    svc = get_document_deletion_service()
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
-
-        # Delete child rows from all related tables (no FK CASCADE in SQLite without FK pragma)
-        await session.execute(
-            text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
-        await session.execute(
-            text("DELETE FROM images_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
-        for model in (
-            EnrichmentJobModel,
-            ImageModel,
-            LearningObjectiveModel,
-            CodeSnippetModel,
-            WebReferenceModel,
-            ChunkModel,
-            SectionModel,
-            SummaryModel,
-            FlashcardModel,
-            MisconceptionModel,
-            NoteModel,
-            QAHistoryModel,
-            ReadingProgressModel,
-            AnnotationModel,
-            LearningGoalModel,
-            ClipModel,
-        ):
-            await session.execute(
-                delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
-            )
-        await session.execute(
-            delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        await session.execute(
-            delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
-        )
-        await session.delete(doc)
+        await svc.delete_sqlite_cascade(session, doc)
         await session.commit()
 
-    # Remove vectors from LanceDB
-    try:
-        get_lancedb_service().delete_document(document_id)
-    except Exception:
-        logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
-
-    # Remove graph nodes and edges from Kuzu
-    try:
-
-        _graph_module.get_graph_service().delete_document(document_id)
-    except Exception:
-        logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
-
-    # Remove extracted images directory
-    settings = get_settings()
-    images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
-    if images_dir.exists():
-        shutil.rmtree(images_dir, ignore_errors=True)
-
-    _delete_raw_file(document_id)
+    svc.delete_lancedb_vectors(document_id)
+    svc.delete_kuzu_nodes(document_id)
+    svc.delete_filesystem_assets(document_id)
     logger.info("Deleted document %s", document_id)
 
 

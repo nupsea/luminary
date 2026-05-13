@@ -511,13 +511,24 @@ starting a new extraction so we don't re-derive them per phase.
     session). Net: 6 endpoints fully repo-backed; 56 -> 47
     `session.X` ops (the remaining 47 plus 15 `db.X` ops are the
     documented-bespoke cluster). 26 study tests pass.
-  - **Phase 9 -- extend `DocumentRepo`** to cover the 36 remaining
-    documents.py ops. Most are `delete_document`'s 18-table cascade
-    -- which we *should not* lift wholesale. Better approach: split
-    that endpoint into `DocumentDeletionService` (a service, not a
-    repo) that orchestrates 7-8 named steps; the service uses the
-    repos. Net effect: documents.py drops to ~15 ops (the genuinely
-    transactional ones).
+  - **Phase 9 -- `DocumentDeletionService`** (DONE,
+    `backend/app/services/document_deletion_service.py`, 138 lines).
+    The 18-table cascade that was duplicated between `delete_document`
+    and `bulk_delete_documents` is now a single
+    `delete_sqlite_cascade(session, doc)` method plus three
+    side-effect helpers (`delete_lancedb_vectors`, `delete_kuzu_nodes`,
+    `delete_filesystem_assets`). Tested via the existing 33
+    test_documents tests; the test-patch targets moved from
+    `app.routers.documents.get_lancedb_service` to the canonical
+    `app.services.vector_store.get_lancedb_service` (now that the
+    call site is in the service rather than the router). The service
+    uses module-level indirections for both `_vector_store_module`
+    and `_graph_module` so future test patches keep working without
+    new churn. Net: documents.py 36 -> 26 session ops; ~80 lines of
+    duplicated cascade logic deleted. Inline ops remaining are
+    list_documents's 10+ correlated subqueries (intentional --
+    bespoke shape, documented in the audit strategy) plus a handful
+    of small endpoints.
   - **Phase 10 -- extend `TagRepo`** to cover the 32 remaining
     tags.py ops. The skipped routes are `merge_tags`,
     `accept_normalization_suggestion`, `migrate-naming` -- all
