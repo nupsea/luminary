@@ -302,7 +302,7 @@ starting a new extraction so we don't re-derive them per phase.
   nodes/...}.py`. Costs: many test imports change. Defer until #6 is
   otherwise complete; bundle as one rename commit.
 
-### #7 -- 178 `noqa: PLC0415` inline imports (was 299; -117 so far)
+### #7 -- 168 `noqa: PLC0415` inline imports (was 299; -127 so far)
 - Signals circular deps and routers/services importing each other lazily.
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
@@ -384,9 +384,15 @@ starting a new extraction so we don't re-derive them per phase.
      `app/services/_registry.py` that exposes `get_*` factories; both
      A and B import from `_registry`, never from each other.
      This is a structural change -- defer until a dedicated session.
-  3. **`app/main.py`** (10). FastAPI app-construction lazy imports;
-     low priority -- they only fire once at startup so the "hot
-     loop" concern doesn't apply. Promote when nothing else is left.
+  3. **`app/main.py`** (DONE, 10 -> 0). FastAPI lifespan handlers
+     lifted: the seven enrichment handlers (`concept_link`,
+     `diagram_extract`, `image_analyze`, `image_extract`,
+     `prereq_extract`, `web_refs`), `get_enrichment_worker`, and
+     `settings_service` `_cache` / `load_llm_settings`. Only
+     `app.services.settings_service.get_litellm_kwargs` is patched
+     in tests, but main.py doesn't import that symbol -- safe to
+     promote. The shutdown line's `_get_worker` alias now uses the
+     existing `get_enrichment_worker` import directly.
 - **Target by end of branch:** under 100 `noqa: PLC0415`. Past 100
   we declare an explicit allow-list in CLAUDE.md ("these are runtime
   optional imports and stay lazy") and re-enable PLC0415 globally.

@@ -50,6 +50,15 @@ from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+from app.services.concept_linker import concept_link_handler
+from app.services.diagram_extractor import diagram_extract_handler
+from app.services.enrichment_worker import get_enrichment_worker
+from app.services.image_enricher import image_analyze_handler
+from app.services.image_extractor import image_extract_handler
+from app.services.prereq_extractor import prereq_extract_handler
+from app.services.reference_enricher import web_refs_handler
+from app.services.settings_service import _cache as _llm_cache
+from app.services.settings_service import load_llm_settings
 from app.telemetry import setup_tracing
 
 
@@ -126,7 +135,6 @@ async def lifespan(app: FastAPI):
             if resp.status_code == 200:
                 logger.info("Ollama reachable at %s", settings.OLLAMA_URL)
     except Exception:
-        from app.services.settings_service import _cache as _llm_cache  # noqa: PLC0415
 
         _mode = _llm_cache.get("llm_mode", "private")
         if _mode in ("private", "hybrid"):
@@ -151,13 +159,6 @@ async def lifespan(app: FastAPI):
 
     # Register enrichment handlers and start the background worker (S141)
     # Must be done before yielding so jobs enqueued during first request are dispatched.
-    from app.services.concept_linker import concept_link_handler  # noqa: PLC0415
-    from app.services.diagram_extractor import diagram_extract_handler  # noqa: PLC0415
-    from app.services.enrichment_worker import get_enrichment_worker  # noqa: PLC0415
-    from app.services.image_enricher import image_analyze_handler  # noqa: PLC0415
-    from app.services.image_extractor import image_extract_handler  # noqa: PLC0415
-    from app.services.prereq_extractor import prereq_extract_handler  # noqa: PLC0415
-    from app.services.reference_enricher import web_refs_handler  # noqa: PLC0415
 
     _worker = get_enrichment_worker()
     _worker.register("image_extract", image_extract_handler)
@@ -171,7 +172,6 @@ async def lifespan(app: FastAPI):
     # Load persisted LLM settings into cache so cloud mode is active from first request,
     # not only after the frontend hits GET /settings/llm.
     try:
-        from app.services.settings_service import load_llm_settings  # noqa: PLC0415
 
         async with get_session_factory()() as _settings_db:
             await load_llm_settings(_settings_db)
@@ -182,9 +182,8 @@ async def lifespan(app: FastAPI):
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
-    from app.services.enrichment_worker import get_enrichment_worker as _get_worker  # noqa: PLC0415
 
-    await _get_worker().stop()
+    await get_enrichment_worker().stop()
 
 
 app = FastAPI(title="Luminary", lifespan=lifespan)
