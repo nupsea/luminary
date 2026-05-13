@@ -18,7 +18,10 @@ from sqlalchemy import select
 from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel
 from app.runtime.chat_nodes._shared import _get_system_prompt
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services.context_packer import pack_context
 from app.services.qa import _should_use_summary
+from app.services.summarizer import get_summarization_service
 from app.types import ChatState, TransparencyInfo
 
 logger = logging.getLogger(__name__)
@@ -66,10 +69,9 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
     Returns empty string if no contradictions exist or on any error.
     Caps output at 3 contradictions to avoid prompt bloat.
     """
-    from app.services.graph import get_graph_service  # noqa: PLC0415
 
     try:
-        svc = get_graph_service()
+        svc = _graph_module.get_graph_service()
         all_edges = svc.get_same_concept_edges()
         relevant = [
             e
@@ -149,7 +151,6 @@ async def synthesize_node(state: ChatState) -> dict:
         "yes" if section_context else "no",
     )
 
-    from app.services.context_packer import pack_context  # noqa: PLC0415
 
     # Assemble chunk context using the pure context packer (dedup + section grouping)
     chunks_context = pack_context(chunks_dicts, token_budget=3000) if chunks_dicts else ""
@@ -176,9 +177,6 @@ async def synthesize_node(state: ChatState) -> dict:
         and _should_use_summary(question)
     ):
         try:
-            from app.services.summarizer import (  # noqa: PLC0415
-                get_summarization_service,
-            )
 
             exec_summary = await get_summarization_service()._fetch_cached(
                 state["doc_ids"][0], "executive"

@@ -9,6 +9,7 @@ Kuzu failure or 0 results.
 import logging
 import re
 
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.retriever import get_retriever
 from app.types import ChatState, ScoredChunk
 
@@ -96,9 +97,7 @@ async def graph_node(state: ChatState) -> dict:
     graph_lines: list[str] = []
 
     try:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
-
-        conn = get_graph_service()._conn
+        conn = _graph_module.get_graph_service()._conn
         for name in entity_names[:5]:  # cap at 5 entities
             graph_lines.extend(_query_kuzu_for_entity(conn, name))
     except Exception:

@@ -23,6 +23,13 @@ from app.runtime.chat_nodes.graph import (
     _extract_entities_from_question,
     _query_kuzu_for_entity,
 )
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services import (
+    note_search as _note_search_module,  # indirect: get_note_search_service is patched
+)
+from app.services import (
+    web_searcher as _web_searcher_module,  # indirect: get_web_searcher is patched
+)
 from app.services.retriever import get_retriever
 from app.types import ChatState
 
@@ -95,9 +102,8 @@ async def augment_node(state: ChatState) -> dict:
             # Complementary: Kuzu entity graph relationships
             entity_names = _extract_entities_from_question(question)
             try:
-                from app.services.graph import get_graph_service  # noqa: PLC0415
 
-                conn = get_graph_service()._conn
+                conn = _graph_module.get_graph_service()._conn
                 for name in entity_names[:5]:
                     new_section_lines.extend(_query_kuzu_for_entity(conn, name))
             except Exception:
@@ -123,10 +129,10 @@ async def augment_node(state: ChatState) -> dict:
 
         elif primary == "notes_node":
             # Complementary: broader note search k=10
-            from app.services.note_search import get_note_search_service  # noqa: PLC0415
 
             try:
-                extra_results = await get_note_search_service().search(question, k=10)
+                ns_svc = _note_search_module.get_note_search_service()
+                extra_results = await ns_svc.search(question, k=10)
                 for r in extra_results:
                     new_section_lines.append("[From your notes] " + r.content)
             except Exception:
@@ -195,11 +201,10 @@ async def web_augment_node(state: ChatState) -> dict:
     question = state.get("rewritten_question") or state["question"]
     logger.info("web_augment_node: fetching web snippets for query=%r", question[:60])
 
-    from app.services.web_searcher import get_web_searcher  # noqa: PLC0415
 
     snippets: list[dict] = []
     try:
-        results = await get_web_searcher().search(question, k=3)
+        results = await _web_searcher_module.get_web_searcher().search(question, k=3)
         snippets = [dict(s) for s in results]
     except Exception:
         logger.warning("web_augment_node: web search failed", exc_info=True)

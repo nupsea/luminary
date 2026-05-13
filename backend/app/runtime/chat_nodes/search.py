@@ -9,10 +9,11 @@ caps at 2 chunks per document so no single doc dominates context.
 import asyncio
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from app.database import get_session_factory
 from app.models import ChunkModel, SectionSummaryModel
+from app.services.context_packer import _cap_per_document
 from app.services.retriever import get_retriever
 from app.types import ChatState, ScoredChunk
 
@@ -30,7 +31,6 @@ async def _fetch_section_summaries(
         return {}
     async with get_session_factory()() as session:
         # Build OR conditions for all (doc_id, heading) pairs
-        from sqlalchemy import and_, or_  # noqa: PLC0415
 
         conditions = [
             and_(
@@ -139,7 +139,6 @@ async def search_node(state: ChatState) -> dict:
 
     # For scope='all': cap at 2 chunks per document so no single doc dominates context
     if scope == "all" and chunks_dicts:
-        from app.services.context_packer import _cap_per_document  # noqa: PLC0415
 
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 

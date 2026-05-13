@@ -11,11 +11,12 @@ import asyncio
 import json
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_session_factory
 from app.models import DocumentModel
 from app.runtime.chat_nodes._shared import _chunk_to_dict, _round_robin
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
 from app.types import ChatState
@@ -85,9 +86,8 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
 
     # Kuzu entity → document lookup
     try:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        conn = get_graph_service()._conn
+        conn = _graph_module.get_graph_service()._conn
         r = conn.execute(
             "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
             " WHERE lower(e.name) = lower($name)"
@@ -114,7 +114,6 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
 
     # Document title search — catches cases where the side name appears in a title
     try:
-        from sqlalchemy import func  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             rows = await session.execute(

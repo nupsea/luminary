@@ -9,7 +9,7 @@ the cached LibrarySummaryModel directly with confidence='high'.
 import asyncio
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_session_factory
 from app.models import (
@@ -18,6 +18,7 @@ from app.models import (
     SummaryModel,
 )
 from app.runtime.chat_nodes._shared import _background_tasks
+from app.services.summarizer import get_summarization_service
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,6 @@ async def _fetch_all_doc_executive_summaries() -> list[tuple[str, str]]:
     Returns an empty list if none exist.
     """
     async with get_session_factory()() as session:
-        from sqlalchemy import func  # noqa: PLC0415
 
         # Latest created_at per document_id
         latest_subq = (
@@ -84,7 +84,6 @@ async def _fetch_library_executive_summary() -> str | None:
 
 async def _generate_library_summary_task() -> None:
     """Background coroutine: trigger executive library summary generation and storage."""
-    from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
     svc = get_summarization_service()
     try:

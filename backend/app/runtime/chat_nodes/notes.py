@@ -13,6 +13,19 @@ Bypasses synthesize/confidence nodes.
 import json
 import logging
 
+from sqlalchemy import select
+
+from app.database import get_session_factory
+from app.models import CollectionMemberModel, CollectionModel
+from app.services import (
+    gap_detector as _gap_detector_module,  # indirect: get_gap_detector is patched
+)
+from app.services import (
+    note_graph as _note_graph_module,  # indirect: get_note_graph_service is patched
+)
+from app.services import (
+    note_search as _note_search_module,  # indirect: get_note_search_service is patched
+)
 from app.services.llm import LLMUnavailableError
 from app.types import ChatState
 
@@ -24,10 +37,9 @@ async def notes_node(state: ChatState) -> dict:
     q = state.get("rewritten_question") or state["question"]
     logger.info("notes_node: query=%r", q[:80])
 
-    from app.services.note_search import get_note_search_service  # noqa: PLC0415
 
     try:
-        results = await get_note_search_service().search(q, k=5)
+        results = await _note_search_module.get_note_search_service().search(q, k=5)
     except Exception:
         logger.warning("notes_node: search failed", exc_info=True)
         results = []
@@ -42,9 +54,9 @@ async def notes_node(state: ChatState) -> dict:
         line = "[From your notes] " + r.content
         if i < 3:
             try:
-                from app.services.note_graph import get_note_graph_service  # noqa: PLC0415
 
-                entities = await get_note_graph_service().get_entities_for_note(r.note_id)
+                ng_svc = _note_graph_module.get_note_graph_service()
+                entities = await ng_svc.get_entities_for_note(r.note_id)
                 if entities:
                     entity_names = ", ".join(e["name"] for e in entities[:5])
                     line += f" [Entities: {entity_names}]"
@@ -90,10 +102,7 @@ async def notes_gap_node(state: ChatState) -> dict:
     # S197: auto-fetch notes from the document's auto-collection
     auto_collection_id: str | None = None
     try:
-        from sqlalchemy import select  # noqa: PLC0415
 
-        from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import CollectionMemberModel, CollectionModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             # Step 1: find auto-collection for this document
@@ -159,9 +168,8 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     try:
-        from app.services.gap_detector import get_gap_detector  # noqa: PLC0415
 
-        report = await get_gap_detector().detect_gaps(note_ids, document_id)
+        report = await _gap_detector_module.get_gap_detector().detect_gaps(note_ids, document_id)
         card: dict = {
             "type": "gap_result",
             "gaps": report["gaps"],

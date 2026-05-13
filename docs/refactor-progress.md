@@ -302,7 +302,7 @@ starting a new extraction so we don't re-derive them per phase.
   nodes/...}.py`. Costs: many test imports change. Defer until #6 is
   otherwise complete; bundle as one rename commit.
 
-### #7 -- 197 `noqa: PLC0415` inline imports (was 299; -98 so far)
+### #7 -- 178 `noqa: PLC0415` inline imports (was 299; -117 so far)
 - Signals circular deps and routers/services importing each other lazily.
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.
@@ -355,6 +355,18 @@ starting a new extraction so we don't re-derive them per phase.
     `enrichment_worker.get_enrichment_worker` (none are patched in
     finalize-chain tests), plus `DocumentModel`, `EnrichmentJobModel`,
     `update as _update`, `uuid`.
+- **chat_nodes pass DONE** (-19 more):
+  - `notes.py` 6 -> 0, `comparative.py` 2 -> 0, `confidence.py` 3 -> 0,
+    `graph.py` 1 -> 0, `search.py` 2 -> 0, `summary.py` 2 -> 0,
+    `synthesize.py` 3 -> 0.
+  - Patched factories (`get_graph_service`, `get_note_search_service`,
+    `get_note_graph_service`, `get_gap_detector`, `get_web_searcher`)
+    are all reached via module-level indirections
+    (`from app.services import graph as _graph_module`, etc.), so
+    `patch("app.services.graph.get_graph_service")` still affects
+    chat_nodes call paths. Non-patched targets (sqlalchemy primitives,
+    models, `context_packer`, `summarizer.get_summarization_service`)
+    became direct top-level imports. 72 chat tests pass.
 - **Remaining work, in priority order:**
   1. **`services/flashcard_generators.py`** (12). The author already
      uses module-level indirection for the patched factory at line 68
