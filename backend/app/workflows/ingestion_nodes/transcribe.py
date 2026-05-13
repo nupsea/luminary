@@ -17,7 +17,13 @@ import shutil
 import uuid as _uuid
 from pathlib import Path
 
+from sqlalchemy import update as _update
+
 from app.database import get_session_factory
+from app.models import DocumentModel
+from app.services import (
+    audio_transcriber as _audio_transcriber_module,  # indirect: get_audio_transcriber is patched
+)
 from app.workflows.ingestion_nodes._shared import IngestionState, _update_stage
 
 logger = logging.getLogger(__name__)
@@ -86,10 +92,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
     logger.info("transcribe_node: start", extra={"doc_id": doc_id, "content_type": content_type})
 
     try:
-        from sqlalchemy import update as _update  # noqa: PLC0415
 
-        from app.models import DocumentModel  # noqa: PLC0415
-        from app.services.audio_transcriber import get_audio_transcriber  # noqa: PLC0415
 
         fp = Path(state["file_path"])
 
@@ -139,7 +142,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         else:
             transcribe_fp = fp
 
-        transcriber = get_audio_transcriber()
+        transcriber = _audio_transcriber_module.get_audio_transcriber()
         loop = asyncio.get_running_loop()
         # CPU-bound -- run in thread pool to keep event loop free for status polls
         segments, duration = await loop.run_in_executor(None, transcriber.transcribe, transcribe_fp)

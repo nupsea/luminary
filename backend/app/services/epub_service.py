@@ -12,7 +12,9 @@ import math
 from functools import lru_cache
 
 import bleach
+import ebooklib
 from bs4 import BeautifulSoup
+from ebooklib import epub
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +131,6 @@ class EpubService:
         Returns a list of dicts: {chapter_index, title, word_count}.
         Navigation/TOC documents (EpubNav) and near-empty items are skipped.
         """
-        import ebooklib  # noqa: PLC0415
-        from ebooklib import epub  # noqa: PLC0415
 
         book = epub.read_epub(file_path, options={"ignore_ncx": False})
         chapters: list[dict] = []
@@ -179,8 +179,6 @@ class EpubService:
         Returns a dict: {html, chapter_title, word_count, section_ids}.
         Raises IndexError if chapter_index is out of range.
         """
-        import ebooklib  # noqa: PLC0415
-        from ebooklib import epub  # noqa: PLC0415
 
         book = epub.read_epub(file_path, options={"ignore_ncx": False})
 

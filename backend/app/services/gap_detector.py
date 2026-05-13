@@ -16,8 +16,11 @@ from functools import lru_cache
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import database as _database_module  # indirect: get_session_factory is patched
 from app.models import NoteModel
+from app.services import retriever as _retriever_module  # indirect: get_retriever is patched
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.mastery_service import get_mastery_service
 from app.types import GapReport
 
 logger = logging.getLogger(__name__)
@@ -72,9 +75,8 @@ class GapDetectorService:
             LLMUnavailableError: if the LLM is unreachable
         """
         if session is None:
-            from app.database import get_session_factory  # noqa: PLC0415
 
-            async with get_session_factory()() as s:
+            async with _database_module.get_session_factory()() as s:
                 return await self.detect_gaps(note_ids, document_id, k=k, session=s)
 
         result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
@@ -85,9 +87,8 @@ class GapDetectorService:
         notes_text = "\n\n".join(n.content for n in notes)[:_NOTES_CAP]
         query_used = notes_text[:200]
 
-        from app.services.retriever import get_retriever  # noqa: PLC0415
 
-        chunks = await get_retriever().retrieve(query_used, [document_id], k=k)
+        chunks = await _retriever_module.get_retriever().retrieve(query_used, [document_id], k=k)
         book_context = "\n\n".join(c.text for c in chunks)[:_BOOK_CAP]
 
         user_msg = f"NOTES:\n{notes_text}\n\nBOOK PASSAGES:\n{book_context}"
@@ -128,7 +129,6 @@ class GapDetectorService:
         # S145: identify weak concepts (in notes but mastery < 0.3)
         weak: list[str] = []
         try:
-            from app.services.mastery_service import get_mastery_service  # noqa: PLC0415
 
             mastery_svc = get_mastery_service()
             for concept in covered:

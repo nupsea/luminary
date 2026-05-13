@@ -24,6 +24,11 @@ import asyncio
 import json
 import logging
 
+from sqlalchemy import select
+
+from app.database import get_session_factory
+from app.models import ImageModel
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -125,14 +130,11 @@ class DiagramExtractorService:
         Idempotent: DiagramNode id = f"{image_id}:{node_name.lower()}" so re-runs
         do not create duplicate nodes.
         """
-        from sqlalchemy import select as _select  # noqa: PLC0415
 
-        from app.database import get_session_factory  # noqa: PLC0415
-        from app.models import ImageModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             result = await session.execute(
-                _select(ImageModel).where(
+                select(ImageModel).where(
                     ImageModel.document_id == document_id,
                     ImageModel.image_type.in_(list(_QUALIFYING_TYPES)),
                     ImageModel.description.is_not(None),
@@ -244,9 +246,8 @@ class DiagramExtractorService:
         Runs name-match linkage after writing nodes (DEPICTS edges to Entity).
         Pure Kuzu calls; no SQLite or LanceDB I/O.
         """
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        graph = get_graph_service()
+        graph = _graph_module.get_graph_service()
 
         # Build node_id map: name -> kuzu_id (for edge lookup)
         name_to_id: dict[str, str] = {}

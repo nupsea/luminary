@@ -11,10 +11,10 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_session_factory
-from app.models import SectionModel, SectionSummaryModel
+from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,9 @@ class SectionSummarizerService:
         """
         # Invalidate the _section_reduce cache so pregenerate() recomputes the
         # document summary using the freshly generated section summaries.
+
+        # Circular: app.services.summarizer imports _is_metadata_section from
+        # this module, so this lookup has to stay lazy.
         from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
@@ -183,17 +186,14 @@ class SectionSummarizerService:
         Non-fatal: exceptions are logged and swallowed.
         """
         try:
-            from sqlalchemy import func as _func  # noqa: PLC0415
-            from sqlalchemy import select as _select  # noqa: PLC0415
 
-            from app.models import EnrichmentJobModel as _EJM  # noqa: PLC0415
 
             async with get_session_factory()() as session:
                 dup_result = await session.execute(
-                    _select(_func.count(_EJM.id)).where(
-                        _EJM.document_id == document_id,
-                        _EJM.job_type == "web_refs",
-                        _EJM.status.in_(["pending", "running"]),
+                    select(func.count(EnrichmentJobModel.id)).where(
+                        EnrichmentJobModel.document_id == document_id,
+                        EnrichmentJobModel.job_type == "web_refs",
+                        EnrichmentJobModel.status.in_(["pending", "running"]),
                     )
                 )
                 if dup_result.scalar_one() > 0:
@@ -203,7 +203,7 @@ class SectionSummarizerService:
                     )
                     return
 
-                job = _EJM(
+                job = EnrichmentJobModel(
                     id=str(uuid.uuid4()),
                     document_id=document_id,
                     job_type="web_refs",

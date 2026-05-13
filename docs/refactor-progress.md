@@ -302,7 +302,7 @@ starting a new extraction so we don't re-derive them per phase.
   nodes/...}.py`. Costs: many test imports change. Defer until #6 is
   otherwise complete; bundle as one rename commit.
 
-### #7 -- 108 `noqa: PLC0415` inline imports (was 299; -187 so far, target met)
+### #7 -- 88 `noqa: PLC0415` inline imports (was 299; -207, target comfortably met)
 - Signals circular deps and routers/services importing each other lazily.
   Real fix: thinner services, dependency-injected via `Depends()`, no
   service-to-service backreferences. Will partly fall out of #1 + #2.

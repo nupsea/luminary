@@ -9,7 +9,12 @@ import logging
 import re
 import uuid
 
+from sqlalchemy import delete
+
 from app.database import get_session_factory
+from app.models import LearningObjectiveModel
+from app.services import llm as _llm_module  # indirect: get_llm_service is patched
+from app.services.llm import LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +34,6 @@ class LearningObjectiveExtractorService:
         Returns a list of objective strings (possibly empty).
         Never raises — returns [] on any failure.
         """
-        from app.services.llm import LLMUnavailableError, get_llm_service  # noqa: PLC0415
 
         prompt = (
             "Extract learning objectives from the following chapter introduction.\n"
@@ -38,7 +42,7 @@ class LearningObjectiveExtractorService:
             f"Text:\n{text[:600]}"
         )
         try:
-            raw = await get_llm_service().complete(
+            raw = await _llm_module.get_llm_service().complete(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 background=True,
@@ -74,9 +78,7 @@ class LearningObjectiveExtractorService:
         if not section_objectives:
             return
 
-        from sqlalchemy import delete  # noqa: PLC0415
 
-        from app.models import LearningObjectiveModel  # noqa: PLC0415
 
         async with get_session_factory()() as session:
             await session.execute(
