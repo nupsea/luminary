@@ -32,18 +32,7 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-interface Note {
-  id: string
-  document_id: string | null
-  chunk_id: string | null
-  content: string
-  tags: string[]
-  group_name: string | null
-  collection_ids: string[]
-  source_document_ids: string[]
-  created_at: string
-  updated_at: string
-}
+import type { Note } from "@/pages/Notes/types"
 
 interface DocumentItem {
   id: string
