@@ -1,64 +1,22 @@
-export interface SectionItem {
-  id: string
-  heading: string
-  level: number
-  page_start: number
-  page_end: number
-  section_order: number
-  preview: string
-  admonition_type: string | null
-  parent_section_id: string | null
-}
+// API shapes sourced from generated `src/types/api.ts` (audit #15).
+// AnnotationItem's `color` is intersected to keep the strict literal
+// union the highlight-color UI uses (the generated schema has it as
+// plain `string`).
 
-export interface DocumentDetail {
-  id: string
-  title: string
-  format: string
-  content_type: string
-  word_count: number
-  page_count: number
-  stage: string
-  tags: string[]
-  created_at: string
-  last_accessed_at: string
-  sections: SectionItem[]
-  reading_progress_pct: number  // 0.0 to 1.0
-  audio_duration_seconds: number | null
-  source_url: string | null
-  video_title: string | null
-  channel_name: string | null
-  youtube_url: string | null
-}
+import type { components } from "@/types/api"
 
-export interface ChunkItem {
-  id: string
-  chunk_index: number
-  text: string
-  section_id: string | null
-  speaker: string | null
-  start_time: number | null
-}
+export type SectionItem = components["schemas"]["SectionItem"]
+export type DocumentDetail = components["schemas"]["DocumentDetail"]
+export type ChunkItem = components["schemas"]["ChunkItem"]
+export type SectionContentItem = components["schemas"]["SectionContentItem"]
 
-export interface AnnotationItem {
-  id: string
-  document_id: string
-  section_id: string
-  chunk_id: string | null
-  selected_text: string
-  start_offset: number
-  end_offset: number
-  color: "yellow" | "green" | "blue" | "pink"
-  note_text: string | null
-  page_number: number | null
-  created_at: string
-}
+export type AnnotationColor = "yellow" | "green" | "blue" | "pink"
 
-export interface SectionContentItem {
-  section_id: string
-  heading: string
-  level: number
-  section_order: number
-  content: string
+export type AnnotationItem = Omit<
+  components["schemas"]["AnnotationResponse"],
+  "color"
+> & {
+  color: AnnotationColor
 }
 
 export type SummaryMode = "one_sentence" | "executive" | "detailed" | "conversation"

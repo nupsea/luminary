@@ -130,7 +130,7 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
     setSearchQuery("")
   }, [])
 
-  const duration = formatDuration(doc.audio_duration_seconds)
+  const duration = formatDuration(doc.audio_duration_seconds ?? null)
   const videoUrl = doc.youtube_url ?? doc.source_url
 
   const matchingChunkIds = searchQuery.trim()
