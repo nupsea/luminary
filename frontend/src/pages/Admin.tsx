@@ -32,52 +32,28 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 
 import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
 // ---------------------------------------------------------------------------
 
-interface TraceItem {
-  span_id: string
-  trace_id: string
-  operation_name: string
-  start_time: string
-  duration_ms: number
-  status: string
-  attributes: Record<string, unknown>
-}
+type TraceItem = components["schemas"]["TraceItem"]
+type TracesResponse = components["schemas"]["TracesResponse"]
+type MonitoringOverview = components["schemas"]["MonitoringOverview"]
+type ModelUsageItem = components["schemas"]["ModelUsageItem"]
+type PhoenixUrl = components["schemas"]["PhoenixUrlResponse"]
 
-interface TracesResponse {
-  traces: TraceItem[]
-  message?: string | null
-}
-
-interface MonitoringOverview {
-  llm_status: string
-  phoenix_running: boolean
-  langfuse_configured: boolean
-  total_documents: number
-  total_chunks: number
-  qa_calls_today: number
-  avg_latency_ms: number | null
-}
-
-interface ModelUsageItem {
-  model: string
-  call_count: number
-  avg_latency_ms: number | null
-}
-
+// Local-only shape: the GET /settings/llm endpoint returns a different
+// shape from `LLMSettingsResponse` in api.ts (this one is the legacy
+// processing_mode/active_model view used by the Admin page).
 interface LLMSettings {
   processing_mode: string
   active_model: string
 }
 
-interface PhoenixUrl {
-  url: string
-  enabled: boolean
-}
-
+// Local-only subset of the documents list row used by Admin's
+// document-status mini-table; api.ts has the full DocumentListItem.
 interface Document {
   id: string
   title: string
@@ -369,33 +345,8 @@ function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
 // Mastery types and API (S145)
 // ---------------------------------------------------------------------------
 
-interface ConceptMasteryItem {
-  concept: string
-  mastery: number
-  card_count: number
-  due_soon: number
-  no_flashcards: boolean
-  document_ids: string[]
-}
-
-interface HeatmapCellItem {
-  chapter: string
-  concept: string
-  mastery: number | null
-  card_count: number
-}
-
-interface MasteryConceptsResponse {
-  document_ids: string[]
-  concepts: ConceptMasteryItem[]
-}
-
-interface MasteryHeatmapResponse {
-  document_id: string
-  chapters: string[]
-  concepts: string[]
-  cells: HeatmapCellItem[]
-}
+type MasteryConceptsResponse = components["schemas"]["MasteryConceptsOut"]
+type MasteryHeatmapResponse = components["schemas"]["MasteryHeatmapOut"]
 
 function fetchMasteryConcepts(
   documentIds: string[],
