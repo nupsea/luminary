@@ -1,3 +1,12 @@
+// API shapes: most evals types stay inline because the backend exposes
+// status / size / source / last_run as plain strings / dicts, whereas
+// this UI relies on the narrower DatasetStatus / DatasetSize unions
+// and a typed EvalRunSummary for the "last run" inline preview.
+// EvalRegressionItem aliases the generated schema since its shape is
+// already concrete (no narrowing lost). (audit #15)
+
+import type { components } from "@/types/api"
+
 export type DatasetStatus = "pending" | "generating" | "complete" | "failed"
 export type DatasetSize = "small" | "medium" | "large"
 
@@ -78,11 +87,4 @@ export interface FileQuestion {
   source_file: string | null
 }
 
-export interface EvalRegressionItem {
-  dataset: string
-  metric: string
-  current_value: number
-  baseline_value: number
-  drop_pct: number
-  eval_kind: string | null
-}
+export type EvalRegressionItem = components["schemas"]["EvalRegressionResponse"]

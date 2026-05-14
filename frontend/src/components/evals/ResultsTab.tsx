@@ -17,29 +17,11 @@ import { Play } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 import { RunEvalDialog } from "./RunEvalDialog"
 
-interface EvalResultItem {
-  dataset: string
-  run_at: string
-  hit_rate_5: number | null
-  mrr: number | null
-  faithfulness: number | null
-  context_precision: number | null
-  context_recall: number | null
-  answer_relevancy: number | null
-  passed_thresholds: boolean | null
-}
-
-interface EvalHistoryItem {
-  timestamp: string
-  dataset: string
-  model: string
-  hr5: number | null
-  mrr: number | null
-  faithfulness: number | null
-  passed: boolean
-}
+type EvalResultItem = components["schemas"]["EvalResultItem"]
+type EvalHistoryItem = components["schemas"]["EvalHistoryItem"]
 
 const EVAL_THRESHOLDS: Record<string, number> = {
   hit_rate_5: 0.6,

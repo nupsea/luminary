@@ -11,23 +11,10 @@ import {
   YAxis,
 } from "recharts"
 import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
-interface EvalHistoryItem {
-  dataset: string
-  timestamp: string
-  hr5: number | null
-  mrr: number | null
-  faithfulness: number | null
-}
-
-interface EvalRegression {
-  dataset: string
-  metric: string
-  current_value: number
-  baseline_value: number
-  drop_pct: number
-  eval_kind: string | null
-}
+type EvalHistoryItem = components["schemas"]["EvalHistoryItem"]
+type EvalRegression = components["schemas"]["EvalRegressionResponse"]
 
 export function EvalTrendsPanel({ history }: { history: EvalHistoryItem[] }) {
   const [dataset, setDataset] = useState("")
