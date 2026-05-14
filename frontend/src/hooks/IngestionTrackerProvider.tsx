@@ -103,25 +103,27 @@ export function IngestionTrackerProvider({ children }: { children: ReactNode }) 
 
   const track = useCallback(
     (docId: string, filename: string) => {
+      const newJob: IngestionJob = {
+        docId,
+        filename,
+        stage: "parsing",
+        progressPct: 5,
+        status: "processing",
+        errorMessage: null,
+        startedAt: Date.now(),
+      }
       setJobs((prev) => {
         if (prev[docId] && prev[docId].status === "processing") return prev
-        return {
-          ...prev,
-          [docId]: {
-            docId,
-            filename,
-            stage: "parsing",
-            progressPct: 5,
-            status: "processing",
-            errorMessage: null,
-            startedAt: Date.now(),
-          },
-        }
+        return { ...prev, [docId]: newJob }
       })
-      toast.loading(`${filename}: processing...`, { id: docId })
+      // Eagerly update the ref so pollOnce (which reads jobsRef) can see
+      // the new job immediately, before React commits the state update.
+      jobsRef.current = { ...jobsRef.current, [docId]: newJob }
+      toast.info(`${filename}: ingestion started`, { id: docId, duration: 3000 })
       ensurePolling()
-      // Kick an immediate poll so the UI doesn't wait a full interval for the first stage update.
-      void pollOnce()
+      // Defer the first poll to the next microtask so the interval created
+      // by ensurePolling() isn't killed by a premature stopPolling() call.
+      setTimeout(() => void pollOnce(), 0)
     },
     [ensurePolling, pollOnce],
   )

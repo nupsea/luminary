@@ -80,7 +80,7 @@ _MAX_MAP_BATCHES = 8
 
 # Per-call timeout (seconds) for map-reduce batch LLM calls.
 # Keeps a stuck Ollama call from blocking pregenerate for 10 minutes.
-_MAP_CALL_TIMEOUT = 90.0
+_MAP_CALL_TIMEOUT = 300.0
 
 # Modes pre-generated at ingestion time
 PREGENERATE_MODES = ("one_sentence", "executive", "detailed")

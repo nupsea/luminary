@@ -114,6 +114,7 @@ class LLMService:
         kwargs: dict = {"model": model, "messages": messages}
         if timeout is not None:
             kwargs["request_timeout"] = timeout
+            kwargs["timeout"] = timeout
         if override_key is not None:
             kwargs["api_key"] = override_key
         elif model.startswith("ollama/"):

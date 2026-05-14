@@ -45,6 +45,7 @@ class LearningObjectiveExtractorService:
             raw = await _llm_module.get_llm_service().complete(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
+                timeout=300.0,
                 background=True,
             )
             return _parse_objectives(raw)

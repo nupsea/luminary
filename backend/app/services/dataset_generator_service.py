@@ -253,7 +253,7 @@ async def _generate_questions_for_chunk(
     content = await get_llm_service().complete(
         messages=[{"role": "user", "content": rules}],
         model=model,
-        timeout=120,
+        timeout=300,
         api_base=api_base,
     )
     parsed = _extract_json_object(content)

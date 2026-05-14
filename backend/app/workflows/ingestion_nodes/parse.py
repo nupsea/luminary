@@ -18,12 +18,13 @@ from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _classify,
     _parser,
+    _update_stage,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def parse_node(state: IngestionState) -> IngestionState:
+async def parse_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "parse", "doc_id": state["document_id"]})
     # Audio/video files: DocumentParser cannot handle them; transcribe_node takes over.
     # EPUB and other text-based formats are handled by DocumentParser below.
@@ -31,6 +32,7 @@ def parse_node(state: IngestionState) -> IngestionState:
         return {**state, "parsed_document": None, "status": "classifying"}
     with trace_ingestion_node("parse", state):
         try:
+            await _update_stage(state["document_id"], "parsing")
             fp = Path(state["file_path"])
             parsed = _parser.parse(fp, state["format"])
             sections = [
@@ -72,6 +74,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
         return {**state, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
+            await _update_stage(state["document_id"], "classifying")
             pd = state["parsed_document"]
             if pd is None:
                 return {**state, "content_type": "notes", "status": "chunking"}

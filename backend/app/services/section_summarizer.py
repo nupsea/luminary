@@ -59,7 +59,7 @@ def _is_metadata_section(heading: str, text: str) -> bool:
 
 
 class SectionSummarizerService:
-    async def generate(self, document_id: str, concurrency: int = 10) -> int:
+    async def generate(self, document_id: str, concurrency: int = 3) -> int:
         """Generate section summaries for the given document.
 
         Returns the number of SectionSummaryModel rows inserted.
@@ -128,7 +128,7 @@ class SectionSummarizerService:
                             {"role": "user", "content": unit["text"][:TEXT_HARD_CAP]},
                         ],
                         temperature=0.0,
-                        timeout=90.0,
+                        timeout=300.0,
                         background=True,
                     )
                 except LLMUnavailableError:

@@ -193,7 +193,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId })
       track(docId, title)
       setTrackedDocId(docId)
-      setMode("tracking")
+      // Close the dialog immediately — progress is shown via the
+      // IngestionProgressPills widget in the bottom-left corner.
+      reset()
+      onClose()
     } catch {
       const errMsg = "Upload failed. Please try again."
       logger.error("[Upload] failed", { stage: "upload", error_message: errMsg, filename: file.name })
@@ -273,7 +276,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       const docId = await submitUrl(urlValue)
       track(docId, urlValue)
       setTrackedDocId(docId)
-      setMode("tracking")
+      // Close the dialog immediately — progress is shown via the
+      // IngestionProgressPills widget in the bottom-left corner.
+      reset()
+      onClose()
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Ingestion failed."
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })

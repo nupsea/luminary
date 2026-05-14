@@ -38,6 +38,7 @@ from app.workflows.ingestion_nodes._shared import (
     CHUNK_CONFIGS,
     IngestionState,
     _background_tasks,
+    _update_stage,
 )
 
 logger = logging.getLogger(__name__)
@@ -556,6 +557,7 @@ async def _chunk_conversation(
 
 async def chunk_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "chunk", "doc_id": state["document_id"]})
+    await _update_stage(state["document_id"], "chunking")
     with trace_ingestion_node("chunk", state):
         try:
             pd = state["parsed_document"]
