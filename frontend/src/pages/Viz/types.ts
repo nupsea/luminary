@@ -1,21 +1,15 @@
 // Type interfaces consumed by Viz.tsx and its sub-modules.
-//
-// These mirror the FastAPI response shapes for the graph / learning
-// path / tag graph / mastery overlay endpoints. As the audit-#15
-// codegen migration spreads, prefer
-//   `import type { components } from "@/types/api"`
-//   `type GraphNode = components["schemas"]["GraphNode"]`
-// over the handwritten interfaces below.
+// API shapes prefer generated `src/types/api.ts` (audit #15); types
+// without OpenAPI coverage or with a different UI shape stay inline.
 
+import type { components } from "@/types/api"
 import type { TagEdgeData, TagNodeData } from "@/components/TagGraph"
 
-// Learning path types (S117)
-export interface LearningPathNode {
-  entity_id: string
-  name: string
-  entity_type: string
-  depth: number
-}
+// Learning path types (S117). The generated LearningPathResponse types
+// `edges` as `{[k: string]: unknown}[]` (loose dict) -- locally we keep
+// the typed LearningPathEdge / LearningPathData so callers retain
+// field-level type safety. Only LearningPathNode aliases cleanly.
+export type LearningPathNode = components["schemas"]["LearningPathNode"]
 
 export interface LearningPathEdge {
   from_entity: string
@@ -30,7 +24,9 @@ export interface LearningPathData {
   edges: LearningPathEdge[]
 }
 
-// Tag graph types (S167)
+// Tag graph types (S167). Generated TagGraphResponse uses TagNodeItem /
+// TagEdgeItem; the Viz page renders via TagGraph component types which
+// have a different shape, so keep local.
 export interface TagGraphData {
   nodes: TagNodeData[]
   edges: TagEdgeData[]
@@ -38,19 +34,8 @@ export interface TagGraphData {
 }
 
 // Mastery / retention overlay types
-export interface MasteryConceptItem {
-  concept: string
-  mastery: number
-  card_count: number
-  due_soon: number
-  no_flashcards: boolean
-  document_ids: string[]
-}
-
-export interface MasteryConceptsResponse {
-  document_ids: string[]
-  concepts: MasteryConceptItem[]
-}
+export type MasteryConceptItem = components["schemas"]["ConceptMasteryOut"]
+export type MasteryConceptsResponse = components["schemas"]["MasteryConceptsOut"]
 
 // Core graph types
 export interface GraphNode {
