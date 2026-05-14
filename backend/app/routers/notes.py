@@ -55,6 +55,9 @@ from app.schemas.notes import (
     TagInfo,
 )
 
+# indirect: tests patch `app.services.note_tagger.get_note_tagger`
+from app.services import note_tagger as _note_tagger_module
+
 # Promoted from inline lazy imports (audit #7 sweep). All of these
 # import cleanly without back-importing `app.routers.notes`; the
 # original noqa: PLC0415 markers were leftovers from earlier circular
@@ -67,7 +70,6 @@ from app.services.llm import LLMUnavailableError
 from app.services.naming import normalize_tag_slug
 from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
-from app.services.note_tagger import get_note_tagger
 from app.services.note_title_generator import get_title_generator
 from app.services.notes_service import (
     embed_and_store_note as _embed_and_store_note,
@@ -176,7 +178,7 @@ async def create_note(
     if not tags and req.content.strip():
 
         try:
-            raw_tags = await get_note_tagger().suggest_tags(req.content)
+            raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(req.content)
             tags = [_nt for t in raw_tags if (_nt := normalize_tag_slug(t))]
         except Exception:
             logger.warning("Auto-tagging failed for note creation", exc_info=True)
@@ -943,7 +945,7 @@ async def suggest_tags(
     note_content = note.content
 
 
-    raw_tags = await get_note_tagger().suggest_tags(note_content)
+    raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(note_content)
     tags = [n for t in raw_tags if (n := normalize_tag_slug(t))]
     logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
     return SuggestedTagsResponse(tags=tags)

@@ -305,19 +305,27 @@ class KuzuService:
         source_image_id: str | None = None,
     ) -> None:
         return self._tech.upsert_diagram_node(
-            node_id, name, node_type, document_id, source_image_id
+            node_id=node_id,
+            name=name,
+            node_type=node_type,
+            source_image_id=source_image_id or "",
+            document_id=document_id,
         )
 
     def add_diagram_edge(
         self,
-        from_node_id: str,
-        to_node_id: str,
+        from_id: str,
+        to_id: str,
         edge_type: str,
         document_id: str,
-        label: str | None = None,
+        **properties: str,
     ) -> None:
         return self._tech.add_diagram_edge(
-            from_node_id, to_node_id, edge_type, document_id, label
+            from_id=from_id,
+            to_id=to_id,
+            edge_type=edge_type,
+            document_id=document_id,
+            **properties,
         )
 
     def add_depicts_edge(self, diagram_node_id: str, entity_id: str, document_id: str) -> None:

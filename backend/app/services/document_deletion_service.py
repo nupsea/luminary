@@ -47,7 +47,9 @@ from app.models import (
     WebReferenceModel,
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
-from app.services import vector_store as _vector_store_module  # indirect: get_lancedb_service is patched
+
+# indirect: get_lancedb_service is patched in tests
+from app.services import vector_store as _vector_store_module
 from app.services.documents_service import delete_raw_file
 
 logger = logging.getLogger(__name__)

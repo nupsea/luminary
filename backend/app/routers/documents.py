@@ -56,6 +56,10 @@ from app.schemas.documents import (
     YouTubeIngestRequest,
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
+
+# indirect: tests patch `app.services.youtube_downloader.{check_ytdlp_available,
+# check_ffmpeg_available, fetch_metadata, download_audio}`.
+from app.services import youtube_downloader as _yt_module
 from app.services.article_extractor import get_article_extractor
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
@@ -86,13 +90,7 @@ from app.services.parser import DocumentParser
 from app.services.repo_helpers import get_or_404
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
-from app.services.youtube_downloader import (
-    check_ffmpeg_available,
-    check_ytdlp_available,
-    download_audio,
-    fetch_metadata,
-    is_youtube_url,
-)
+from app.services.youtube_downloader import is_youtube_url
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
     STAGE_PROGRESS,
@@ -641,7 +639,7 @@ async def ingest_url(
         return {"document_id": doc_id, "status": "processing"}
 
     # 2. YouTube: Existing logic
-    if not check_ytdlp_available():
+    if not _yt_module.check_ytdlp_available():
         raise HTTPException(
             status_code=503,
             detail=(
@@ -650,7 +648,7 @@ async def ingest_url(
             ),
         )
 
-    if not check_ffmpeg_available():
+    if not _yt_module.check_ffmpeg_available():
         raise HTTPException(
             status_code=503,
             detail=(
@@ -660,7 +658,7 @@ async def ingest_url(
         )
 
     try:
-        meta = await fetch_metadata(body.url)
+        meta = await _yt_module.fetch_metadata(body.url)
     except RuntimeError as exc:
         logger.warning("yt-dlp metadata fetch failed: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -675,7 +673,7 @@ async def ingest_url(
     dest_stem = raw_dir / doc_id  # yt-dlp appends .wav
 
     try:
-        await download_audio(body.url, dest_stem)
+        await _yt_module.download_audio(body.url, dest_stem)
     except RuntimeError as exc:
         logger.error("yt-dlp download failed: %s", exc)
         raise HTTPException(

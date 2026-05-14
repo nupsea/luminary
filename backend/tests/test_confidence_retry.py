@@ -147,7 +147,8 @@ async def test_augment_non_fatal():
     """augment_node catches all exceptions and returns {retry_attempted: True}."""
     state = _make_state(primary_strategy="graph_node")
 
-    with patch("app.runtime.chat_nodes.confidence.get_retriever", side_effect=Exception("retriever down")):
+    patch_target = "app.runtime.chat_nodes.confidence.get_retriever"
+    with patch(patch_target, side_effect=Exception("retriever down")):
         result = await augment_node(state)
 
     assert result.get("retry_attempted") is True

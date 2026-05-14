@@ -113,7 +113,7 @@ async def test_ingest_url_success_creates_document(test_db, monkeypatch):
     """POST /documents/ingest-url with valid YouTube URL creates a document row."""
     engine, factory, tmp_path = test_db
 
-    async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None):
+    async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None, **_kwargs):
         pass
 
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)
@@ -330,7 +330,7 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
     """POST /documents/ingest-url stores channel_name from yt-dlp metadata."""
     engine, factory, tmp_path = test_db
 
-    async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None):
+    async def _mock_run_ingestion(document_id, file_path, fmt, content_type=None, **_kwargs):
         pass
 
     monkeypatch.setattr("app.routers.documents.run_ingestion", _mock_run_ingestion)

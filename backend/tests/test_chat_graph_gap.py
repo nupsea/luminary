@@ -139,7 +139,7 @@ async def test_notes_gap_returns_gap_result_card():
         [("note-1",), ("note-2",), ("note-3",)],  # member query: 3 notes
     ]
     with (
-        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
     ):
         result = await notes_gap_node(state)
@@ -184,7 +184,7 @@ async def test_notes_gap_no_notes_returns_error_card():
     state = _make_minimal_state(doc_ids=["doc-abc"], question="gaps in my notes")
     # No auto-collection found (first() returns None)
     rows = [[]]  # empty first result -> first() returns None -> note_ids = []
-    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+    with patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     answer = result["answer"]
     assert answer.startswith("__card__")
@@ -214,7 +214,7 @@ async def test_notes_gap_ollama_offline_returns_error_card():
         )
     )
     with (
-        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
     ):
         result = await notes_gap_node(state)
@@ -249,7 +249,7 @@ async def test_notes_gap_auto_fetches_from_auto_collection():
         [("n1",), ("n2",), ("n3",), ("n4",)],  # 4 members
     ]
     with (
-        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
     ):
         result = await notes_gap_node(state)
@@ -272,7 +272,7 @@ async def test_notes_gap_no_auto_collection_returns_card():
     state = _make_minimal_state(doc_ids=["doc-xyz"], question="compare my notes")
     # No auto-collection: first() returns None
     rows = [[]]
-    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+    with patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     card = json.loads(result["answer"][8:])
     assert card["type"] == "gap_result"
@@ -293,7 +293,7 @@ async def test_notes_gap_fewer_than_3_notes_returns_card():
         [("coll-1",)],  # auto-collection found
         [("n1",), ("n2",)],  # only 2 members
     ]
-    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+    with patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     card = json.loads(result["answer"][8:])
     assert card["type"] == "gap_result"
