@@ -15,6 +15,7 @@ from sqlalchemy import case, or_, select, update
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel
+from app.services.llm import LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,30 @@ class EnrichmentQueueWorker:
                 )
                 await session.commit()
             logger.info("EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id)
+        except LLMUnavailableError as exc:
+            # Ollama offline / timeout / rate-limited -- expected failure mode
+            # for local-first deployments; record the failure but skip the
+            # noisy traceback.
+            logger.info(
+                "EnrichmentQueueWorker: job skipped (LLM unavailable) "
+                "job_id=%s doc=%s job_type=%s: %s",
+                job_id,
+                document_id,
+                job_type,
+                exc.__class__.__name__,
+            )
+            async with get_session_factory()() as session:
+                await session.execute(
+                    update(EnrichmentJobModel)
+                    .where(EnrichmentJobModel.id == job_id)
+                    .values(
+                        status="failed",
+                        completed_at=datetime.now(UTC),
+                        error_message=f"LLM unavailable: {exc.__class__.__name__}",
+                    )
+                )
+                await session.commit()
+            return
         except Exception as exc:
             logger.warning(
                 "EnrichmentQueueWorker: job failed job_id=%s doc=%s: %s",

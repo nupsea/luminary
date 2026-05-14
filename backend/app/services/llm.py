@@ -25,6 +25,7 @@ LLMAPIConnectionError = litellm.APIConnectionError
 LLMNotFoundError = litellm.NotFoundError
 LLMRateLimitError = litellm.RateLimitError
 LLMAuthenticationError = litellm.AuthenticationError
+LLMTimeoutError = litellm.Timeout
 
 LLMUnavailableError: tuple[type[BaseException], ...] = (
     LLMServiceUnavailableError,
@@ -32,6 +33,7 @@ LLMUnavailableError: tuple[type[BaseException], ...] = (
     LLMNotFoundError,
     LLMRateLimitError,
     LLMAuthenticationError,
+    LLMTimeoutError,
     ConnectionRefusedError,
 )
 
