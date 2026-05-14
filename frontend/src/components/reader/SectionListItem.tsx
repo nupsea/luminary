@@ -8,14 +8,10 @@ import { ChapterProgressRing } from "./ChapterGoalsPanel"
 import { SectionPreviewWithHighlights } from "./HighlightsPanel"
 import { formatMmSs, parseAudioStartTime } from "./mediaUtils"
 import { PredictPanel, hasCodeFence } from "./PredictPanel"
+import type { components } from "@/types/api"
 import type { AnnotationItem, SectionItem } from "./types"
 
-export interface SectionHeatmapItem {
-  section_id: string
-  fragility_score: number | null
-  due_card_count: number
-  avg_retention_pct: number | null
-}
+export type SectionHeatmapItem = components["schemas"]["SectionHeatmapItem"]
 
 export function fragilityBorderClass(score: number | null): string {
   if (score === null) return ""

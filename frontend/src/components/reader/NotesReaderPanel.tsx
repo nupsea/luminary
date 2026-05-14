@@ -24,19 +24,9 @@ interface AutoCollection {
   auto_document_id: string | null
 }
 
-interface NoteItem {
-  id: string
-  document_id: string | null
-  section_id: string | null
-  content: string
-  tags: string[]
-  collection_ids: string[]
-  source_document_ids: string[]
-  chunk_id: string | null
-  group_name: string | null
-  created_at: string
-  updated_at: string
-}
+import type { components } from "@/types/api"
+
+type NoteItem = components["schemas"]["NoteResponse"]
 
 interface SectionInfo {
   id: string
@@ -44,6 +34,7 @@ interface SectionInfo {
   section_order: number
 }
 
+// Local-only: minimal 2-field doc picker subset.
 interface DocumentItem {
   id: string
   title: string

@@ -20,6 +20,13 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 // Types
 // ---------------------------------------------------------------------------
 
+// Local types: the generated WebReferenceItem types `source_quality`
+// as plain `string` (loosened from the backend's literal), and
+// `is_valid` / `last_checked_at` as `?: T | null | undefined` rather
+// than `: T | null`. Both differences cascade into the UI's typed
+// badge map and panel state, so we keep the narrower local shape.
+// (audit #15: kept-local entry.)
+
 type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
 
 interface WebReferenceItem {

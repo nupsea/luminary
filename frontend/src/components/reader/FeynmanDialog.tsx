@@ -38,13 +38,9 @@ interface ChatMessage {
   gaps?: string[]
 }
 
-interface SessionHistoryItem {
-  id: string
-  concept: string
-  status: string
-  gap_count: number
-  created_at: string
-}
+import type { components } from "@/types/api"
+
+type SessionHistoryItem = components["schemas"]["FeynmanSessionListItem"]
 
 interface FeynmanDialogProps {
   documentId: string

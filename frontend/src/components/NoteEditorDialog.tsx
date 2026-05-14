@@ -27,39 +27,20 @@ import {
 } from "@/lib/noteDiagrams"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
+// DocumentItem stays local as a 3-field subset of DocumentListItem.
 // ---------------------------------------------------------------------------
 
-export interface Note {
-  id: string
-  document_id: string | null
-  chunk_id: string | null
-  content: string
-  tags: string[]
-  group_name: string | null
-  collection_ids: string[]
-  source_document_ids: string[]
-  created_at: string
-  updated_at: string
-}
+import type { components } from "@/types/api"
+
+export type Note = components["schemas"]["NoteResponse"]
+type NoteLinkItem = components["schemas"]["NoteLinkItem"]
+type NoteLinksResponse = components["schemas"]["NoteLinksResponse"]
 
 interface DocumentItem {
   id: string
   title: string
   status: string
-}
-
-interface NoteLinkItem {
-  id: string
-  note_id: string
-  preview: string
-  link_type: string
-  created_at: string
-}
-
-interface NoteLinksResponse {
-  outgoing: NoteLinkItem[]
-  incoming: NoteLinkItem[]
 }
 
 // ---------------------------------------------------------------------------
