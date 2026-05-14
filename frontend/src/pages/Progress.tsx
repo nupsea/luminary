@@ -58,7 +58,10 @@ interface NoteListResponse {
 // ---------------------------------------------------------------------------
 
 const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
-  apiGet<DailyHistoryItem[]>("/study/history", { days })
+  apiGet<DailyHistoryItem[]>("/study/history", {
+    days,
+    tz_offset_minutes: new Date().getTimezoneOffset(),
+  })
 
 const fetchDueCount = (): Promise<DueCountResponse> =>
   apiGet<DueCountResponse>("/study/due-count")
@@ -598,6 +601,17 @@ export default function Progress() {
 // Pure helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Format a Date as a local-time YYYY-MM-DD key (not UTC). Matches the
+ * backend's `/study/history` bucketing when called with tz_offset_minutes.
+ */
+function localDateKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
 function computeStreak(history: DailyHistoryItem[]): number {
   if (history.length === 0) return 0
   const today = new Date()
@@ -606,8 +620,7 @@ function computeStreak(history: DailyHistoryItem[]): number {
   const cursor = new Date(today)
   const histSet = new Set(history.filter((h) => h.cards_reviewed > 0).map((h) => h.date))
   while (true) {
-    const key = cursor.toISOString().slice(0, 10)
-    if (!histSet.has(key)) break
+    if (!histSet.has(localDateKey(cursor))) break
     streak++
     cursor.setDate(cursor.getDate() - 1)
   }
@@ -625,7 +638,7 @@ function buildActivityData(
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(cursor)
     d.setDate(d.getDate() - i)
-    const key = d.toISOString().slice(0, 10)
+    const key = localDateKey(d)
     result.push({ date: key.slice(5), cards_reviewed: map.get(key) ?? 0 })
   }
   return result

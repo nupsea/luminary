@@ -1725,9 +1725,18 @@ async def get_study_stats(
 async def get_study_history(
     document_id: str | None = None,
     days: int = 90,
+    tz_offset_minutes: int = Query(
+        default=0,
+        description=(
+            "Client's timezone offset from UTC in minutes, matching JS "
+            "`Date.getTimezoneOffset()` (positive west of UTC; PDT=420). "
+            "Sessions are bucketed by the user's local date so a study "
+            "session at 11pm local doesn't appear on the next day."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[DailyHistoryItem]:
-    """Return daily study activity for the last N days."""
+    """Return daily study activity for the last N days, bucketed in local time."""
     cutoff = datetime.now(UTC) - timedelta(days=days)
     stmt = select(StudySessionModel).where(
         StudySessionModel.started_at >= cutoff,
@@ -1738,12 +1747,13 @@ async def get_study_history(
     result = await db.execute(stmt)
     sessions = result.scalars().all()
 
-    # Group by date
+    # Group by local date: shift UTC -> client-local before taking .date()
+    local_shift = timedelta(minutes=-tz_offset_minutes)
     daily: dict[date, dict] = {}
     for s in sessions:
         if not s.ended_at:
             continue
-        d = s.started_at.date()
+        d = (s.started_at + local_shift).date()
         if d not in daily:
             daily[d] = {"cards_reviewed": 0, "study_time_minutes": 0.0}
         daily[d]["cards_reviewed"] += s.cards_reviewed
