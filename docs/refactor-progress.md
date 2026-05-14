@@ -59,9 +59,13 @@ before starting any extraction.
    update `mock.patch("old.X")` -> `mock.patch("new.X")` or the patch
    silently no-ops.
 3. **Indirect through the original module for swappable singletons.**
-   `get_llm_service`, `get_retriever`, `get_graph_service` etc. should
-   be called via `from app.services.X import get_Y` and invoked at call
-   time -- never bind the result at import time.
+   `get_llm_service`, `get_retriever`, `get_graph_service`, etc. should
+   be reached via `from app.services import X as _X_module` and called
+   as `_X_module.get_Y()` at call time -- never `from app.services.X
+   import get_Y` (that binds the symbol locally and silently breaks
+   `patch("app.services.X.get_Y")`). The PLC0415 sweep (audit #7) hit
+   this several times; if you promote a lazy import to top-level and
+   tests patch its source module, switch to the module-indirect form.
 4. **Schemas + helpers + body, in that order.** God-router playbook:
    (a) lift Pydantic schemas to `app/schemas/<entity>.py`;
    (b) lift pure helpers to `app/services/<entity>_service.py`;
@@ -78,6 +82,14 @@ before starting any extraction.
 8. **Audit `# noqa: PLC0415` after each extraction.** Lazy imports
    were circular-dep workarounds; promote and delete the noqa when the
    cycle is broken. Count is a primary health metric.
+9. **When you build a facade, pass-through with kwargs.** Audit #5
+   left two facade methods (`KuzuService.upsert_diagram_node`,
+   `add_diagram_edge`) passing args positionally to the underlying
+   repo where the parameter order had diverged. The mismatch was
+   masked by a `try/except` in the caller -- silent data corruption.
+   For thin delegations, prefer `return self._repo.method(**kwargs)`
+   so any signature drift surfaces as a TypeError at test time, not
+   as wrong data.
 
 ## Pre-existing test failures (do not chase unless asked)
 

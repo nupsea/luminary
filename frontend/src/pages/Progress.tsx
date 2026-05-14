@@ -28,20 +28,15 @@ import { logger } from "@/lib/logger"
 import { apiGet, apiPost } from "@/lib/apiClient"
 import { GoalsList } from "@/components/goals/GoalsList"
 import type { DocListItem } from "./Study"
+import type { components } from "@/types/api"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
 // ---------------------------------------------------------------------------
 
-interface DailyHistoryItem {
-  date: string
-  cards_reviewed: number
-  study_time_minutes: number
-}
-
-interface DueCountResponse {
-  due_today: number
-}
+type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
+type DueCountResponse = components["schemas"]["DueCountResponse"]
+type SessionListResponse = components["schemas"]["SessionListResponse"]
 
 interface MonitoringOverview {
   total_documents: number
@@ -55,18 +50,6 @@ interface Note {
 
 interface NoteListResponse {
   items: Note[]
-  total: number
-}
-
-interface SessionListItem {
-  id: string
-  accuracy_pct: number | null
-  cards_reviewed: number
-  cards_correct: number
-}
-
-interface SessionListResponse {
-  items: SessionListItem[]
   total: number
 }
 
