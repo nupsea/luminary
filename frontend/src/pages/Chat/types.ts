@@ -1,23 +1,25 @@
 // Shared types for the Chat page and its sub-modules.
+// API shapes prefer generated `src/types/api.ts` (audit #15); only
+// types not covered by REST schemas (SSE event payloads, UI-only
+// state) remain inline below.
 
+import type { components } from "@/types/api"
 import type { GapCardData } from "@/components/GapResultCard"
 import type { SourceCitation } from "@/components/SourceCitationChips"
 import type { TeachBackCardData } from "@/components/TeachBackResultCard"
 
+// Local-only: minimal subset reused across pages (Study/Chat). The
+// generated DocumentListItem is fine but carries many more fields.
 export interface DocListItem {
   id: string
   title: string
 }
 
-export interface SuggestionItem {
-  id: string
-  text: string
-}
+export type SuggestionItem = components["schemas"]["SuggestionItem"]
+export type SuggestionsResponse = components["schemas"]["SuggestionResponse"]
+export type WebSearchSettings = components["schemas"]["WebSearchSettingsResponse"]
 
-export interface SuggestionsResponse {
-  suggestions: SuggestionItem[]
-}
-
+// Local-only: emitted by the QA SSE stream, not the REST schema.
 export interface Citation {
   document_title: string | null
   section_heading: string
@@ -26,17 +28,13 @@ export interface Citation {
   version_mismatch?: boolean
 }
 
+// Local-only: SSE stream payload (web_augment_node), not in OpenAPI.
 export interface WebSource {
   url: string
   title: string
   content: string
   domain: string
   version_info: string
-}
-
-export interface WebSearchSettings {
-  provider: string
-  enabled: boolean
 }
 
 // S158: retrieval transparency metadata emitted by backend as 'transparency' SSE event
@@ -76,18 +74,8 @@ export interface ChatMessage {
   transparency?: TransparencyInfo
 }
 
-export interface SessionPlanItem {
-  type: "review" | "gap" | "read"
-  title: string
-  minutes: number
-  action_label: string
-  action_target: string
-}
-
-export interface SessionPlanResponse {
-  total_minutes: number
-  items: SessionPlanItem[]
-}
+export type SessionPlanItem = components["schemas"]["SessionPlanItem"]
+export type SessionPlanResponse = components["schemas"]["SessionPlanResponse"]
 
 export interface CloudProvider {
   name: string
