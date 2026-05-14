@@ -60,19 +60,27 @@ interface FocusStats {
 // Fetchers
 // ---------------------------------------------------------------------------
 
+// Browser tz offset in minutes (positive west of UTC). Re-read per call so
+// fixtures / DST transitions get the current value rather than a stale one
+// captured at module load.
+const tzOffset = (): number => new Date().getTimezoneOffset()
+
 async function fetchXPHistory(): Promise<XPHistoryItem[]> {
   try {
-    return await apiGet<XPHistoryItem[]>("/engagement/xp/history", { days: 30 })
+    return await apiGet<XPHistoryItem[]>("/engagement/xp/history", {
+      days: 30,
+      tz_offset_minutes: tzOffset(),
+    })
   } catch {
     return []
   }
 }
 
 const fetchXPSummary = (): Promise<XPSummary> =>
-  apiGet<XPSummary>("/engagement/xp")
+  apiGet<XPSummary>("/engagement/xp", { tz_offset_minutes: tzOffset() })
 
 const fetchStreak = (): Promise<StreakData> =>
-  apiGet<StreakData>("/engagement/streak")
+  apiGet<StreakData>("/engagement/streak", { tz_offset_minutes: tzOffset() })
 
 async function fetchAchievements(): Promise<Achievement[]> {
   try {
@@ -83,7 +91,10 @@ async function fetchAchievements(): Promise<Achievement[]> {
 }
 
 const fetchFocusStats = (): Promise<FocusStats> =>
-  apiGet<FocusStats>("/engagement/focus/stats", { days: 7 })
+  apiGet<FocusStats>("/engagement/focus/stats", {
+    days: 7,
+    tz_offset_minutes: tzOffset(),
+  })
 
 // ---------------------------------------------------------------------------
 // Icon map for achievements

@@ -17,10 +17,15 @@ interface XPData {
   today_xp: number
 }
 
-const fetchStreak = (): Promise<StreakData> =>
-  apiGet<StreakData>("/engagement/streak")
+// Browser tz offset (minutes, positive west of UTC). Backend buckets
+// "today_xp" / "studied_today" by the user's local calendar date.
+const tzOffset = (): number => new Date().getTimezoneOffset()
 
-const fetchXP = (): Promise<XPData> => apiGet<XPData>("/engagement/xp")
+const fetchStreak = (): Promise<StreakData> =>
+  apiGet<StreakData>("/engagement/streak", { tz_offset_minutes: tzOffset() })
+
+const fetchXP = (): Promise<XPData> =>
+  apiGet<XPData>("/engagement/xp", { tz_offset_minutes: tzOffset() })
 
 export function StreakXPWidget() {
   const { data: streak } = useQuery({
