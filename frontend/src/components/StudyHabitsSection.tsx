@@ -17,6 +17,11 @@ import { cn } from "@/lib/utils"
 // Types
 // ---------------------------------------------------------------------------
 
+// These shapes stay inline (audit #15): the /engagement/* endpoints
+// declare `-> dict` in the router so there is no generated schema to
+// alias against. Match the runtime payload by eye until those
+// endpoints adopt typed response models.
+
 interface XPHistoryItem {
   date: string
   xp: number

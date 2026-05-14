@@ -38,20 +38,14 @@ type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
 type DueCountResponse = components["schemas"]["DueCountResponse"]
 type SessionListResponse = components["schemas"]["SessionListResponse"]
 
+// Local-only: minimal subset of /monitoring/overview consumed by the
+// summary stats bar; the full MonitoringOverview has many more fields.
 interface MonitoringOverview {
   total_documents: number
   total_chunks: number
 }
 
-interface Note {
-  id: string
-  created_at: string
-}
-
-interface NoteListResponse {
-  items: Note[]
-  total: number
-}
+type Note = components["schemas"]["NoteResponse"]
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -82,8 +76,8 @@ async function fetchDocList(): Promise<DocListItem[]> {
   }
 }
 
-const fetchRecentNotes = (): Promise<NoteListResponse> =>
-  apiGet<NoteListResponse>("/notes", { page: 1, page_size: 100 })
+const fetchRecentNotes = (): Promise<Note[]> =>
+  apiGet<Note[]>("/notes", { page: 1, page_size: 100 })
 
 const fetchSessions = (): Promise<SessionListResponse> =>
   apiGet<SessionListResponse>("/study/sessions", { page: 1, page_size: 50 })
@@ -394,7 +388,7 @@ export default function Progress() {
     fetchRecentNotes()
       .then((d) => {
         if (!cancelled) {
-          setNotes(d.items ?? [])
+          setNotes(d ?? [])
           setNotesLoading(false)
         }
       })

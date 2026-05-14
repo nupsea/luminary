@@ -28,36 +28,14 @@ import { Loader2 } from "lucide-react"
 import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
 // ---------------------------------------------------------------------------
 
-interface CardStabilityItem {
-  card_id: string
-  stability: number
-  due_date: string | null
-}
+import type { components } from "@/types/api"
 
-interface SectionStabilityItem {
-  section_heading: string | null
-  avg_stability: number
-  card_count: number
-}
-
-interface StudyStats {
-  total_cards: number
-  cards_mastered: number
-  avg_retention: number
-  current_streak: number
-  total_study_time_minutes: number
-  per_section_stability: SectionStabilityItem[]
-  all_card_stabilities: CardStabilityItem[]
-}
-
-interface HistoryItem {
-  date: string
-  cards_reviewed: number
-  study_time_minutes: number
-}
+type CardStabilityItem = components["schemas"]["CardStabilityItem"]
+type StudyStats = components["schemas"]["StudyStatsResponse"]
+type HistoryItem = components["schemas"]["DailyHistoryItem"]
 
 // ---------------------------------------------------------------------------
 // API
