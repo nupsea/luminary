@@ -1,6 +1,6 @@
 /**
  * Admin (Dev Tools) route -- developer-centric metrics dashboard.
- * Moved from Monitoring tab in S177. Accessible at /admin (not in main nav).
+ * Moved from Monitoring tab in . Accessible at /admin (not in main nav).
  *
  * Sections:
  *   1. System Status -- Ollama, Phoenix, Langfuse, Active Model
@@ -556,7 +556,7 @@ function MasteryPanel({ documents }: { documents: Document[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Admin (Dev Tools) page -- dev-centric panels moved from Progress tab in S177
+// Admin (Dev Tools) page -- dev-centric panels moved from Progress tab in 
 // ---------------------------------------------------------------------------
 
 export default function Admin() {

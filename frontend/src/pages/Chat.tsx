@@ -581,7 +581,7 @@ export default function Chat() {
           )}
         </div>
 
-        {/* S187/S196: contextual suggestion pills (also shown after a scope-change divider).
+        {/* /contextual suggestion pills (also shown after a scope-change divider).
             Renders in scope="all" too -- the backend produces cross-document
             onboarding/exploration suggestions when document_id is null. */}
         {(messages.length === 0 || messages[messages.length - 1]?.type === "divider") && (

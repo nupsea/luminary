@@ -91,7 +91,7 @@ class KuzuPrereqRepo:
         """Create a PREREQUISITE_OF edge with source_section_id; fallback for old DBs.
 
         Idempotent: if the edge already exists, it is left unchanged.
-        Falls back to 2-property form for databases created before S139 (no source_section_id).
+        Falls back to 2-property form for databases created before  (no source_section_id).
         """
         result = self._conn.execute(
             "MATCH (a:Entity {id: $dep})-[r:PREREQUISITE_OF]->(b:Entity {id: $pre})"

@@ -1,6 +1,5 @@
 /**
- * useReviewNotification -- S118
- *
+ * useReviewNotification *
  * Behaviour:
  * 1. On first mount: calls Notification.requestPermission() once per browser
  *    profile (guarded by localStorage key "luminary:notifPermRequested").

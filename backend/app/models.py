@@ -77,7 +77,7 @@ class SectionModel(Base):
     # Tech section detection fields (set by tech_book/tech_article content type)
     admonition_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parent_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Prerequisite chain depth (number of hops from root to this section's concepts; S139)
+    # Prerequisite chain depth (number of hops from root to this section's concepts)
     difficulty_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
@@ -374,7 +374,7 @@ class ReadingProgressModel(Base):
 
 
 class LearningGoalModel(Base):
-    """S210: typed learning goal (studying|read|recall|write|explore).
+    """typed learning goal (studying|read|recall|write|explore).
 
     Replaces the older document-centric goal/FSRS-readiness schema. Sessions in
     pomodoro_sessions can attribute progress via the nullable goal_id column;
@@ -522,12 +522,12 @@ class EnrichmentJobModel(Base):
     """Async enrichment job queue entry.
 
     job_type values registered so far:
-      image_extract    -- S133: PDF/EPUB image extraction
-      image_analyze    -- S134: vision LLM image description
-      diagram_extract  -- S136: diagram-type routing and COMPONENT node extraction
-      prerequisites    -- S139: prerequisite graph extraction
-      web_refs         -- S138: web reference resolution
-      concept_link     -- S141: cross-document concept linking
+      image_extract    -- PDF/EPUB image extraction
+      image_analyze    -- vision LLM image description
+      diagram_extract  -- diagram-type routing and COMPONENT node extraction
+      prerequisites    -- prerequisite graph extraction
+      web_refs         -- web reference resolution
+      concept_link     -- cross-document concept linking
 
     status values:
       pending  -- queued, not yet started
@@ -556,7 +556,7 @@ class ImageModel(Base):
 
     chunk_id is the nearest preceding prose chunk by page/index (set during
     extraction; null if no prose chunk precedes the image on the same page).
-    image_type and description are null until S134 (vision analysis) runs.
+    image_type and description are null until  (vision analysis) runs.
 
     Note: any new delete path in documents.py must also delete these rows.
     """
@@ -572,9 +572,9 @@ class ImageModel(Base):
     width: Mapped[int] = mapped_column(Integer, nullable=False)
     height: Mapped[int] = mapped_column(Integer, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
-    # null until S134 vision analysis populates it
+    # null until vision analysis populates it
     image_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    # null until S134 vision analysis populates it
+    # null until vision analysis populates it
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -973,10 +973,10 @@ class FocusSessionModel(Base):
 
 
 class PomodoroSessionModel(Base):
-    """S208: a Pomodoro focus interval owned by the global header timer.
+    """a Pomodoro focus interval owned by the global header timer.
 
     Status state machine: active -> paused -> active -> completed | abandoned.
-    goal_id is a free-form string until S210 adds the learning_goals FK.
+    goal_id is a free-form string until adds the learning_goals FK.
     """
 
     __tablename__ = "pomodoro_sessions"

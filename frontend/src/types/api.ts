@@ -423,7 +423,7 @@ export interface paths {
          * Get Suggestions
          * @description Return 4 contextual suggestion items using LLM with Bloom progression.
          *
-         *     Falls back to S187 template logic when LLM is unavailable.
+         *     Falls back to template logic when LLM is unavailable.
          */
         get: operations["get_suggestions_chat_suggestions_get"];
         put?: never;
@@ -3319,13 +3319,13 @@ export interface paths {
          *
          *     When ``graph_expand`` is true (default), entities detected in the query
          *     are resolved to canonical labels via Kuzu's alias graph and appended to
-         *     the query. Deterministic and local-first per I-16; pairs with S224
+         *     the query. Deterministic and local-first per I-16; pairs with 
          *     index-time entity injection.
          *
          *     When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
          *     cross-encoder and the top-N returned. Adds ~100-300ms per query (CPU)
          *     but recovers answer chunks whose vocabulary diverges from the
-         *     question's surface form -- the remaining S212 failure mode after
+         *     question's surface form -- the remaining failure mode after
          *     HyDE. Local-first per I-16. Fails soft on any reranker error.
          */
         get: operations["search_search_get"];

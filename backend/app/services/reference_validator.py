@@ -1,4 +1,4 @@
-"""Reference validator service for S194: URL validation and dead link pruning.
+"""Reference validator service for URL validation and dead link pruning.
 
 Performs async HEAD requests to verify web reference URLs.
 Concurrency limited via asyncio.Semaphore, max 20 URLs per run.

@@ -1,4 +1,4 @@
-"""Reference enricher service for S138: web reference grounding.
+"""Reference enricher service for web reference grounding.
 
 Generates LLM-suggested canonical web references per technical term
 extracted from section summaries. Stored in WebReferenceModel table.

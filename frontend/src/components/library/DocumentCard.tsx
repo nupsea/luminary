@@ -266,7 +266,7 @@ export function DocumentCard({
               {STATUS_LABELS[doc.learning_status]}
             </Badge>
           )}
-          {/* S191: Document action menu */}
+          {/* Document action menu */}
           {onAction && !selectMode && (
             <div className="relative" ref={actionMenuRef}>
               <button

@@ -553,7 +553,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
 
       <ProgressBar done={reviewed} total={total} />
 
-      {/* S154: dispatch to ClozeCard for cloze flashcard_type */}
+      {/* dispatch to ClozeCard for cloze flashcard_type */}
       {currentCard.flashcard_type === "cloze" &&
       currentCard.cloze_text !== null &&
       /\{\{.+?\}\}/.test(currentCard.cloze_text) ? (
@@ -610,7 +610,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
             </div>
           ) : null}
 
-          {/* S155: Source context panel */}
+          {/* Source context panel */}
           {(lastRating === "again" || lastRating === "hard") && sourceContextLoading && (
             <div className="w-full max-w-2xl rounded-lg border border-border bg-muted/30 p-4">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">

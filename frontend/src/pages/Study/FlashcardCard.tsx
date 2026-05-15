@@ -75,7 +75,7 @@ export function FlashcardCard({
           Select for bulk delete
         </label>
       )}
-      {/* S188: Section heading label */}
+      {/* Section heading label */}
       {card.section_heading && !editing && (
         <p className="text-xs text-muted-foreground">{card.section_heading}</p>
       )}

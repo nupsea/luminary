@@ -559,7 +559,7 @@ export function FeynmanDialog({
                     </p>
                   )}
 
-                  {/* S159: See model explanation button (only when concept + sectionId present) */}
+                  {/* See model explanation button (only when concept + sectionId present) */}
                   {concept && sectionId && !showModelExplanation && (
                     <button
                       onClick={() => void handleFetchModelExplanation()}
@@ -569,7 +569,7 @@ export function FeynmanDialog({
                     </button>
                   )}
 
-                  {/* S159: Model explanation panel */}
+                  {/* Model explanation panel */}
                   {showModelExplanation && (
                     <div className="mt-3 rounded-md border border-border p-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

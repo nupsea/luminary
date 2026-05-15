@@ -1,5 +1,5 @@
 /**
- * NotesReaderPanel -- S192: collection-scoped active reading sidebar.
+ * NotesReaderPanel -- collection-scoped active reading sidebar.
  *
  * Shows notes from the document's auto-collection in the right panel of DocumentReader.
  * Clicking edit / double-click opens the full NoteReaderSheet (same as Notes tab).

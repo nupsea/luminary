@@ -1,4 +1,4 @@
-"""S224: reindex chunk entity tails (entities_text column) for a document or
+"""reindex chunk entity tails (entities_text column) for a document or
 all documents.
 
 Re-runs GLiNER + EntityDisambiguator over a document's existing chunks, rebuilds
@@ -233,7 +233,7 @@ async def _run(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="app.scripts.reindex_entities",
-        description="S224: rebuild entities_text + LanceDB + FTS5 for a document.",
+        description="rebuild entities_text + LanceDB + FTS5 for a document.",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--document-id", dest="document_id", help="Reindex a single document by id")

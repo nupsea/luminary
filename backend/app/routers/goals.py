@@ -1,4 +1,4 @@
-"""S210: typed learning goals router.
+"""typed learning goals router.
 
 Endpoints (literal paths registered before parametric per FastAPI ordering rule):
 - GET /goals?status=...    list goals optionally filtered by status

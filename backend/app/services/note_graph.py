@@ -166,7 +166,7 @@ class NoteGraphService:
                         {"nid": note_id, "did": document_id},
                     )
 
-        # 2b. S175: DERIVED_FROM edges for each NoteSourceModel row
+        # 2b. DERIVED_FROM edges for each NoteSourceModel row
         for src_doc_id in source_document_ids or []:
             # Skip if same as legacy document_id (already handled above to avoid duplicate)
             if src_doc_id == document_id:

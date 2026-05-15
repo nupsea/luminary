@@ -67,7 +67,7 @@ ENTITY_TAIL_MAX = 12
 def build_entity_tail(canonical_names: set[str] | list[str] | tuple[str, ...]) -> str:
     """Build the deterministic entity tail '[Entities: A, B, C]' for a chunk.
 
-    Rules per S224 AC: dedupe (case-insensitive on the canonical key), sort
+    Rules per AC: dedupe (case-insensitive on the canonical key), sort
     alphabetically (case-insensitive), capitalize each label, cap at
     ENTITY_TAIL_MAX entries. Returns '' for empty input so callers can store
     NULL when there are no entities.

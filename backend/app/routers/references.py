@@ -1,4 +1,4 @@
-"""Web reference endpoints for S138 + S194.
+"""Web reference endpoints for .
 
 Routes:
   GET  /references/documents/{document_id}              -- refs for a document

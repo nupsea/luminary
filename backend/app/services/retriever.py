@@ -42,7 +42,7 @@ def _rerank_candidates(
     The cross-encoder reads each (query, chunk_text) pair jointly, unlike
     bi-encoder retrieval which embeds them independently. This catches
     chunks whose vocabulary diverges from the question's surface form but
-    semantically answer it -- the dominant S212 failure mode.
+    semantically answer it -- the dominant failure mode.
 
     Fails soft: any model load or inference error logs a warning and falls
     back to ``candidates[:k]`` so retrieval is never harder than the no-rerank
@@ -285,7 +285,7 @@ class HybridRetriever:
         cross-encoder and the top-k of that re-ranking is returned. The
         cross-encoder reads (query, chunk) pairs jointly, so it catches
         answer chunks whose vocabulary diverges from the question's surface
-        form -- the dominant remaining S212 failure mode. Diversification
+        form -- the dominant remaining failure mode. Diversification
         is skipped when reranking (the cross-encoder already optimises for
         relevance, and section breadth would dilute the rerank signal).
         Fails soft: any reranker error returns the RRF order unchanged.

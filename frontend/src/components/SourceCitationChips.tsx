@@ -1,5 +1,5 @@
 /**
- * SourceCitationChips — S157
+ * SourceCitationChips — 
  *
  * Renders clickable citation chips for chat answers.  Each chip links to the
  * exact section/page in DocumentReader.  Chips fade in after the 'sources'

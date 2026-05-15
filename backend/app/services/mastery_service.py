@@ -13,7 +13,7 @@ Mastery formula for concept C across document_ids:
      penalty = min(error_count * 0.05, 0.20)
   6. mastery = max(0.0, weighted_mean - penalty)
 
-Cross-book: SAME_CONCEPT clusters from S141 unify mastery across documents.
+Cross-book: SAME_CONCEPT clusters from unify mastery across documents.
 
 Performance guard: concept list capped at _MAX_CONCEPTS (100) per document call;
 LIKE scan on ChunkModel.text is full-table -- acceptable for single-user local app.

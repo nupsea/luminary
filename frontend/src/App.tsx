@@ -398,7 +398,7 @@ function AppShell() {
             </button>
           </div>
         )}
-        {/* S209: global focus timer pill -- visible on every tab */}
+        {/* global focus timer pill -- visible on every tab */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3">
           <FocusTimerPill />
         </div>

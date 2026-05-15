@@ -6,7 +6,7 @@
  *   onClose  — called to close
  *
  * Flow:
- *   Quick mode (default, S197): auto-populates notes from document's auto-collection.
+ *   Quick mode (default): auto-populates notes from document's auto-collection.
  *   Advanced mode: user manually searches and selects notes.
  *
  * States: loading (skeleton), error (amber), empty (placeholder).

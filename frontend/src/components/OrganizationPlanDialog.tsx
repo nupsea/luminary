@@ -8,7 +8,7 @@
  * - Native drag-and-drop to move notes between groups
  * - "Apply Plan" -> POST /notes/cluster/suggestions/batch-accept
  * - "Dismiss" -> reject all suggestions individually
- * - S207: "Naming Fixes" section with per-row accept/reject for tag/collection renames
+ * - "Naming Fixes" section with per-row accept/reject for tag/collection renames
  */
 
 import { useState, useCallback, useEffect } from "react"

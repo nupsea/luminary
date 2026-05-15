@@ -179,7 +179,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 # Drop the old table
                 await conn.execute(text("DROP TABLE note_collection_members"))
         except Exception as e:
-            logger.warning("Migration S208 failed (non-critical): %s", e)
+            logger.warning("Migration failed (non-critical): %s", e)
 
         for ddl in [
             "ALTER TABLE documents ADD COLUMN file_hash TEXT",

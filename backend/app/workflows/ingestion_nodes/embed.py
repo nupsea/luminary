@@ -1,13 +1,13 @@
 """embed_node + keyword_index_node.
 
 embed_node encodes each chunk's `text` (concatenated with the entity
-tail when present, S224) via the embedder service and upserts the
-vectors into LanceDB in 1000-row batches. CPU-bound encoding runs in
-a thread pool so the event loop stays free for status polling.
+tail when present) via the embedder service and upserts the vectors
+into LanceDB in 1000-row batches. CPU-bound encoding runs in a thread
+pool so the event loop stays free for status polling.
 
 keyword_index_node populates the SQLite FTS5 mirror table from the
-just-written ChunkModel rows. Same S224 trick: text || entities_text
-so BM25 matches canonical entity names.
+just-written ChunkModel rows. text || entities_text so BM25 matches
+canonical entity names.
 """
 
 import asyncio

@@ -48,7 +48,7 @@ interface GenerateFlashcardsDialogProps {
   open: boolean
   onClose: () => void
   availableTags: string[]
-  /** S173: when provided, pre-selects these note IDs and switches to 'notes' mode on open */
+  /** when provided, pre-selects these note IDs and switches to 'notes' mode on open */
   initialNoteIds?: string[]
 }
 

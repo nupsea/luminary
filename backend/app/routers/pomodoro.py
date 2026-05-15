@@ -1,4 +1,4 @@
-"""S208: /pomodoro/* endpoints for the global focus timer.
+"""/pomodoro/* endpoints for the global focus timer.
 
 Thin layer over PomodoroService -- validation in pydantic, transitions in service.
 """

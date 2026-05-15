@@ -1,4 +1,4 @@
-"""S208: Pomodoro session service.
+"""Pomodoro session service.
 
 State machine: active <-> paused -> completed | abandoned.
 At most one row may exist with status in (active, paused) at any time.
@@ -9,7 +9,7 @@ Stats:
 - total_completed: lifetime completed count.
 
 Goalless sessions (goal_id NULL) still count toward stats; the goal_id column is a
-free-form string in this story and gets a real FK in S210.
+free-form string in this story and gets a real FK in .
 """
 
 from __future__ import annotations

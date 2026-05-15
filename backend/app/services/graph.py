@@ -2,30 +2,19 @@
 
 Schema:
   Nodes: Entity(id, name, type, frequency, aliases), Document(id, title, content_type)
-         DiagramNode(id, name, node_type, source_image_id, document_id, frequency) -- S136
-         Note(id, note_id, preview, created_at) -- S163
+         DiagramNode(id, name, node_type, source_image_id, document_id, frequency)
+         Note(id, note_id, preview, created_at)
   Edges: MENTIONED_IN(Entity->Document, count),
          CO_OCCURS(Entity->Entity, weight, document_id),
          RELATED_TO(Entity->Entity, relation_label, confidence),
          CALLS(Entity->Entity, document_id)  -- function call graph for code documents
-         PREREQUISITE_OF(Entity->Entity, document_id, confidence)  -- S117
-         IMPLEMENTS(Entity->Entity, document_id)   -- tech relation
+         PREREQUISITE_OF(Entity->Entity, document_id, confidence)         IMPLEMENTS(Entity->Entity, document_id)   -- tech relation
          EXTENDS(Entity->Entity, document_id)       -- tech relation
          USES(Entity->Entity, document_id)          -- tech relation
          REPLACES(Entity->Entity, document_id)      -- tech relation
          DEPENDS_ON(Entity->Entity, document_id)    -- tech relation
          VERSION_OF(Entity->Entity, document_id)    -- versioned library links
-         CONNECTS_TO(DiagramNode->DiagramNode, document_id, label)  -- S136
-         STORES_IN(DiagramNode->DiagramNode, document_id)            -- S136
-         SENDS_TO(DiagramNode->DiagramNode, document_id, message)    -- S136
-         HAS_FIELD(DiagramNode->DiagramNode, document_id)            -- S136
-         REFERENCES_DM(DiagramNode->DiagramNode, document_id)        -- S136
-         LEADS_TO(DiagramNode->DiagramNode, document_id, condition)  -- S136
-         DEPICTS(DiagramNode->Entity, document_id)                   -- S136
-         WRITTEN_ABOUT(Note->Entity, confidence)                     -- S163
-         TAG_IS_CONCEPT(Note->Entity, tag)                           -- S163
-         DERIVED_FROM(Note->Document)                                -- S163
-
+         CONNECTS_TO(DiagramNode->DiagramNode, document_id, label)         STORES_IN(DiagramNode->DiagramNode, document_id)                   SENDS_TO(DiagramNode->DiagramNode, document_id, message)           HAS_FIELD(DiagramNode->DiagramNode, document_id)                   REFERENCES_DM(DiagramNode->DiagramNode, document_id)               LEADS_TO(DiagramNode->DiagramNode, document_id, condition)         DEPICTS(DiagramNode->Entity, document_id)                          WRITTEN_ABOUT(Note->Entity, confidence)                            TAG_IS_CONCEPT(Note->Entity, tag)                                  DERIVED_FROM(Note->Document)                              
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
 

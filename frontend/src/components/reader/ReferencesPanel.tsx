@@ -1,5 +1,5 @@
 /**
- * ReferencesPanel -- S138 + S194
+ * ReferencesPanel -- 
  *
  * Shows web references for a document, grouped into three tiers:
  *  1. Verified (is_valid=true) -- green check badge

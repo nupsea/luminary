@@ -188,7 +188,7 @@ class StudyRepo:
         self, chunk_ids: Sequence[str]
     ) -> dict[str, str | None]:
         """Map chunk_id -> section_id (no heading join). Used by /due for
-        the S138 SourcePanel."""
+        the SourcePanel."""
         if not chunk_ids:
             return {}
         result = await self.session.execute(

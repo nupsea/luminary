@@ -295,7 +295,7 @@ const DEEP_TAG_TREE: TagTreeItem[] = [
   },
 ]
 
-describe("S190: filterTagTree substring match", () => {
+describe("filterTagTree substring match", () => {
   it("returns all items when query is empty", () => {
     const result = filterTagTree(DEEP_TAG_TREE, "")
     expect(result).toHaveLength(2)
@@ -335,7 +335,7 @@ describe("S190: filterTagTree substring match", () => {
   })
 })
 
-describe("S190: parent chain shown for deeply nested matching tags", () => {
+describe("parent chain shown for deeply nested matching tags", () => {
   it("genetics match includes science > biology parent chain", () => {
     const result = filterTagTree(DEEP_TAG_TREE, "genetics")
     expect(result).toHaveLength(1)
@@ -361,7 +361,7 @@ describe("S190: parent chain shown for deeply nested matching tags", () => {
   })
 })
 
-describe("S190: highlightMatch segments", () => {
+describe("highlightMatch segments", () => {
   it("highlights matching substring", () => {
     const segs = highlightMatch("genetics", "net")
     expect(segs).toHaveLength(3)

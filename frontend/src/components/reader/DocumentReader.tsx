@@ -903,7 +903,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 </div>
               </div>
 
-              {/* S152: Resume banner — shown once per session when a saved position exists */}
+              {/* Resume banner — shown once per session when a saved position exists */}
               {resumePosition && (
                 <ResumeBanner
                   position={resumePosition}
@@ -992,7 +992,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             </div>
           </div>
 
-          {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
+          {/* PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (() => {
             let targetPdfPage = initialPage
             if (!targetPdfPage && initialSectionId) {
@@ -1006,7 +1006,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             )
           })()}
 
-          {/* S149: Book View — lazy-mounted for EPUB documents */}
+          {/* Book View — lazy-mounted for EPUB documents */}
           {bookViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer documentId={documentId} />
@@ -1027,7 +1027,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             )}
           </div>
 
-          {/* S147: SelectionActionBar — fires on selections in both section list and PDF viewer */}
+          {/* SelectionActionBar — fires on selections in both section list and PDF viewer */}
           <SelectionActionBar
             containerRef={readerContainerRef}
             resolveSourceRef={resolveSourceRef}
@@ -1083,7 +1083,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   </p>
                 )}
                 <div className="px-6 pt-3">
-                  {/* S151: Inline search bar — shown when Cmd+F is pressed */}
+                  {/* Inline search bar — shown when Cmd+F is pressed */}
                   {searchOpen && (
                     <InDocSearchBar
                       documentId={documentId}
@@ -1229,7 +1229,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         />
       )}
 
-      {/* S147: Note creation dialog — pre-filled with selected text blockquote */}
+      {/* Note creation dialog — pre-filled with selected text blockquote */}
       <NoteCreationDialog
         open={selection.noteOpen}
         selectedText={selection.noteText}
@@ -1260,7 +1260,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         }}
       />
 
-      {/* S147: Flashcard generation dialog — scoped to selected text context */}
+      {/* Flashcard generation dialog — scoped to selected text context */}
       <DocumentFlashcardDialog
         open={selection.flashcardOpen}
         documentId={documentId}

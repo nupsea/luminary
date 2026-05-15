@@ -11,7 +11,7 @@
  *   - Positioning this component near the cursor
  *   - Calling onSelect to insert the [[id|text]] marker
  *
- * S171: includes a 5-option link type segmented control shown before confirmation.
+ * includes a 5-option link type segmented control shown before confirmation.
  */
 
 import { useEffect, useRef, useState } from "react"

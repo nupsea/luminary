@@ -281,7 +281,7 @@ export function FlashcardManager({
 
   return (
     <div className="flex flex-col gap-8">
-      {/* S143: section filter banner -- visible when the user arrived here
+      {/* section filter banner -- visible when the user arrived here
           via "Study" on a Chapter Goal. Dismissing clears the filter and
           restores the unfiltered deck. */}
       {activeSectionFilter && (

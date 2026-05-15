@@ -67,7 +67,7 @@ _HYDE_TIMEOUT_S = 20.0
 # fetch alias surface forms from the Kuzu Entity.aliases column. The expanded
 # query bridges the question/answer vocabulary gap deterministically (no LLM
 # in the query path -> no hallucination, no run-to-run variance, I-16 clean).
-# Pairs with S224 index-time entity injection so both sides speak the same
+# Pairs with index-time entity injection so both sides speak the same
 # canonical-entity vocabulary.
 _GRAPH_EXPAND_TYPES = {"PERSON", "ORGANIZATION", "PLACE", "CONCEPT"}
 _GRAPH_EXPAND_MAX_ALIASES_PER_ENTITY = 5

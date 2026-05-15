@@ -1,4 +1,4 @@
-"""S210: LearningGoalsService -- typed learning goals + progress aggregation.
+"""LearningGoalsService -- typed learning goals + progress aggregation.
 
 Goal types and progress semantics:
 - studying -- minutes_focused = sum(focus_minutes) of every completed linked
@@ -241,7 +241,7 @@ class LearningGoalsService:
     async def list_linked_sessions(
         self, goal_id: str, limit: int = 20
     ) -> list[PomodoroSessionModel]:
-        """Most-recent first, used by the S211 detail panel."""
+        """Most-recent first, used by the detail panel."""
         result = await self._session.execute(
             select(PomodoroSessionModel)
             .where(PomodoroSessionModel.goal_id == goal_id)

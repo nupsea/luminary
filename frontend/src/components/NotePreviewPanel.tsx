@@ -7,7 +7,7 @@
  *   - Collection count
  *   - "Open in Notes tab" button that fires luminary:navigate (I-11)
  *
- * S172: Note nodes in Viz Knowledge graph
+ * Note nodes in Viz Knowledge graph
  */
 import { useQuery } from "@tanstack/react-query"
 import { X } from "lucide-react"

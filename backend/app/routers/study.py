@@ -351,7 +351,7 @@ async def get_due_cards(
     result = await session.execute(stmt)
     cards = list(result.scalars().all())
 
-    # Build chunk_id -> section_id map for S138 SourcePanel
+    # Build chunk_id -> section_id map for SourcePanel
     repo = StudyRepo(session)
     chunk_to_section = await repo.chunk_section_id_map(
         [c.chunk_id for c in cards if c.chunk_id]

@@ -1,4 +1,4 @@
-"""Images API router — S133.
+"""Images API router — .
 
 Endpoints:
   GET /documents/{id}/images       -- paginated image list for a document

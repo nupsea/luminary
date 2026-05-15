@@ -37,7 +37,7 @@ class ExplorationSuggestion(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Template-based suggestion generation (pure logic, no LLM) -- S187 fallback
+# Template-based suggestion generation (pure logic, no LLM) -- fallback
 # ---------------------------------------------------------------------------
 
 _ONBOARDING_SUGGESTIONS = [
@@ -213,7 +213,7 @@ async def get_suggestions(
 ) -> SuggestionResponse:
     """Return 4 contextual suggestion items using LLM with Bloom progression.
 
-    Falls back to S187 template logic when LLM is unavailable.
+    Falls back to template logic when LLM is unavailable.
     """
     from app.services.suggestion_service import get_suggestion_service  # noqa: PLC0415
 
@@ -315,7 +315,7 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     except LLMUnavailableError:
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
-    # Fallback to S187 template logic
+    # Fallback to template logic
     if content_type == "book":
         suggestions = _book_suggestions(entities, headings)
     elif content_type in ("tech_book", "tech_article", "code"):

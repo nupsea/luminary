@@ -6,7 +6,7 @@
  *   2. Study activity chart: cards reviewed per day (last 30 days) + streak
  *   3. Notes over time chart: notes created per month
  *   4. Documents ingested count
- *   5. GoalsPanel (moved from Study tab in S177)
+ *   5. GoalsPanel (moved from Study tab in )
  *
  * Empty state: "Start studying to see your progress here" when no study history.
  */
@@ -585,7 +585,7 @@ export default function Progress() {
          <KnowledgeGapScanner docs={docList} />
       )}
 
-      {/* Learning Goals -- now shared with Study tab; replaced legacy GoalsPanel in S211 */}
+      {/* Learning Goals -- now shared with Study tab; replaced legacy GoalsPanel in  */}
       <GoalsList />
     </div>
   )
