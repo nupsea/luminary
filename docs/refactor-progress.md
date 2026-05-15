@@ -5,7 +5,7 @@ Completed phases live in `git log` (search `refactor:` / `chore:` since
 the branch root). Design principles distilled from completed audits are
 at the bottom.
 
-## Status snapshot (2026-05-14)
+## Status snapshot (2026-05-15)
 
 **Done:** #1 FlashcardService, #2 god-router schemas/helpers, #5 KuzuService
 (6 phases), #6 chat_graph (9 phases), #7 PLC0415 sweep (299→<100, target met),
@@ -13,8 +13,8 @@ at the bottom.
 Tag/Note/Flashcard/Document/Study repos + DocumentDeletionService +
 TagMergeService + small-router sweep), #11 god pages Phases A-G (Study, Viz,
 Notes, Monitoring, Chat, Learning, Teachback), #12 fetch standardization
-(248→8 raw fetches + eslint rule), #13 ingestion split (7 phases), #15
-OpenAPI→TS codegen.
+(248→8 raw fetches + eslint rule), #13 ingestion split (7 phases), **#15
+OpenAPI→TS codegen + frontend type alignment**.
 
 ## Still pending
 
@@ -41,12 +41,48 @@ apply the re-export + indirect-singleton pattern: split each into
 `<service>.py` (public class) + `<service>_strategies.py` (swappable
 bits). Otherwise leave alone.
 
-### #15 -- TypeScript codegen follow-through
-Replace remaining inline `type FooResponse = {...}` re-declarations with
-`components["schemas"]["FooResponse"]` imports from the generated
-`frontend/src/types/api.ts`. Pick up opportunistically as feature work
-touches each module. Acceptance: zero re-declarations of fields that
-already exist in api.ts.
+### #15 -- TypeScript codegen follow-through (DONE)
+Initial codegen landed earlier; in 2026-05-15 the frontend was swept
+to alias generated types wherever the shapes align. ~80 inline
+re-declarations across 17 files now read
+`components["schemas"]["FooResponse"]`. Twelve shapes were
+deliberately kept inline -- always with a comment explaining why --
+in the following categories:
+
+- **UI-only state**: ChatMessage, AnyCardData, SectionState<T>,
+  CollectionTreeNode, SummaryTabDef etc.
+- **Cross-page minimal subsets**: DocListItem (Study/Chat/Viz),
+  DocumentItem (Notes/NoteEditorDialog/NotesReaderPanel/GapDetectDialog/
+  NoteReaderSheet), DocItem (GoalCreateDialog), Document (Admin/
+  Monitoring 4-field projection of DocumentListItem).
+- **Backend returns `dict`**: /engagement/* family (XPHistoryItem,
+  XPSummary, StreakData, FocusStats, Achievement),
+  /collections/{id}/flashcards/generate (CollectionGenerateResponse),
+  /chat_meta auto-collection lookup (AutoCollection),
+  /search internal (NoteStub).
+- **Narrower literal unions cascade through indexed maps**:
+  WebReferenceItem.source_quality and WebRef.source_quality
+  (SourceQuality literal union drives QUALITY_LABEL records);
+  AnnotationItem.color (Omit + intersect kept locally on the reader
+  side -- the highlight-color UI exhaustively switches over the four
+  literals); library/types.ts DocumentListItem.content_type +
+  learning_status (ContentType / LearningStatus unions used by
+  CONTENT_TYPE_ICONS / CONTENT_TYPE_BADGE records).
+- **SSE event payloads**: QaStreamRequest, Citation, WebSource,
+  TransparencyInfo (not exposed via REST so not in OpenAPI).
+
+Acceptance: zero remaining schema-mirror re-declarations. The only
+inline `interface FooResponse` blocks left in `src/{pages,components}`
+are the four kept-local categories above, each with an inline
+comment that next time can be checked against without re-reading the
+schema.
+
+**Operational note recorded during this pass:** `npx tsc --noEmit`
+from `frontend/` does not validate the app project's references --
+always use `npx tsc -p tsconfig.app.json --noEmit` to catch missing
+fields (e.g. EvalRunListItem vs EvalRunResponse). This caught two
+real divergences (Monitoring EvalRun, Notes section_id) that the
+bare tsc invocation reported as clean.
 
 ## Design principles (apply to every remaining phase)
 
