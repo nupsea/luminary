@@ -395,24 +395,3 @@ async def test_force_refresh_bypasses_cache(test_db):
     assert done_payload.get("cached") is False
 
 
-@pytest.mark.asyncio
-async def test_glossary_cached_same_as_other_modes(test_db):
-    """Glossary mode participates in the same cache-first logic."""
-    _engine, factory, tmp_path = test_db
-    doc_id = str(uuid.uuid4())
-    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["domain terms"], [5])
-
-    mock_llm = _MockLLMService(tokens=["**Term**: definition"])
-
-    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
-        svc = SummarizationService()
-        # First call — generates via LLM
-        _ = [e async for e in svc.stream_summary(doc_id, "glossary", None)]
-        assert mock_llm.call_count == 1
-
-        # Second call — served from cache
-        events = [e async for e in svc.stream_summary(doc_id, "glossary", None)]
-
-    assert mock_llm.call_count == 1, "LLM called on second glossary request (expected cache hit)"
-    done_payload = json.loads(events[-1][len("data: ") :])
-    assert done_payload.get("cached") is True

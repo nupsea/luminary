@@ -1,4 +1,6 @@
-"""Retrieval strategy implementations (HyDE, graph expansion, reranking, diversity, context expansion).
+"""Retrieval strategy implementations.
+
+Covers: HyDE, graph expansion, reranking, diversity, context expansion.
 
 These are the swappable strategy functions used by HybridRetriever in retriever.py.
 Kept separate so retriever.py stays focused on the orchestration logic.

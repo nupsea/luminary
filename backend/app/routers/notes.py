@@ -752,7 +752,7 @@ async def reject_cluster_suggestion(
 
 
 # Note links and autocomplete
-# NOTE: /autocomplete MUST be registered before /{note_id} catch-all to prevent FastAPI matching "autocomplete" as a note ID.
+# NOTE: /autocomplete before /{note_id} — prevents FastAPI treating "autocomplete" as a note ID.
 
 
 @router.get("/autocomplete", response_model=list[NoteAutocompleteItem])

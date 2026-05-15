@@ -1958,7 +1958,8 @@ def _insert_correction_flashcard(
         reps=0,
         lapses=0,
     )
-    session.add(correction)  # correction card persisted in caller's session; commit is caller's responsibility
+    # correction card persisted in caller's session; commit is caller's responsibility
+    session.add(correction)
     return new_id
 
 

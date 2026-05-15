@@ -366,7 +366,7 @@ async def create_trace_flashcard(
 
 
 # Cloze deletion flashcard generation
-# NOTE: /cloze registered BEFORE /{document_id} to prevent FastAPI matching "cloze" as a document_id wildcard.
+# NOTE: /cloze before /{document_id} — prevents FastAPI treating "cloze" as a document_id.
 
 
 @router.post("/cloze/{section_id}", response_model=list[FlashcardResponse], status_code=201)
@@ -396,7 +396,7 @@ async def generate_cloze_flashcards(
 
 
 # Bloom's taxonomy coverage audit
-# NOTE: /audit routes registered BEFORE /{document_id} to prevent FastAPI matching "audit" as a document_id wildcard.
+# NOTE: /audit before /{document_id} — prevents FastAPI treating "audit" as a document_id.
 
 
 @router.get("/audit/{document_id}", response_model=CoverageReportResponse)
@@ -445,7 +445,7 @@ async def fill_audit_gaps(
 
 
 # Deck health report
-# NOTE: /health routes registered BEFORE /{document_id} to prevent FastAPI matching "health" as a document_id wildcard.
+# NOTE: /health before /{document_id} — prevents FastAPI treating "health" as a document_id.
 
 
 @router.get("/health/{document_id}", response_model=DeckHealthReportResponse)
@@ -500,7 +500,7 @@ async def fill_uncovered_sections(
 
 
 # Deck list
-# NOTE: /decks registered BEFORE /{document_id} to prevent FastAPI matching "decks" as a document_id wildcard.
+# NOTE: /decks before /{document_id} — prevents FastAPI treating "decks" as a document_id.
 
 
 @router.get("/decks", response_model=list[DeckItem])

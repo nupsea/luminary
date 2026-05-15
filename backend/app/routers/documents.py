@@ -429,7 +429,8 @@ async def ingest_document(
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
                 existing.content_type = content_type
-                await session.commit()  # commit stage reset before the background job polls document.stage
+                # commit stage reset before the background job polls document.stage
+                await session.commit()
                 get_ingestion_jobs().launch(
                     existing.id,
                     run_ingestion(existing.id, existing.file_path, existing.format, content_type),
