@@ -34,11 +34,10 @@ routers should be caught by a CI grep (not yet wired).
 genuinely changes shape.
 
 ### #14 -- mid-size services (exploratory, no commitment)
-`services/summarizer.py` (696), `services/feynman_service.py` (636).
-Each mixes orchestration with implementation; tests `mock.patch` private
-helpers. If pain persists, apply the re-export + indirect-singleton
-pattern: split each into `<service>.py` (public class) +
-`<service>_strategies.py` (swappable bits). Otherwise leave alone.
+`services/summarizer.py` (696) remains. The pattern is now established:
+split into `<service>.py` (orchestrator) + `<service>_strategies.py`
+(swappable bits), re-exporting moved symbols from the original module so
+all test imports and patch targets work unchanged.
 
 **retriever.py done (2026-05-15)**: 874 → 469 lines. Strategy helpers
 (`_round_robin`, `_diversify`, `_sanitize_fts_query`, `_expand_context`,
@@ -48,6 +47,14 @@ stays in `retriever.py` so `patch("app.services.retriever._get_reranker")`
 keeps intercepting its call to `_get_reranker`. Moved symbols re-exported
 from `retriever.py` so all test imports and patch targets work unchanged.
 43 retriever tests pass.
+
+**feynman_service.py done (2026-05-15)**: 636 → 496 lines. Prompt
+templates, `_SECTION_CONTEXT_CHAR_LIMIT`, `_fire_and_forget`, and all
+five parsers (`_parse_gaps`, `_parse_rubric`, `_parse_key_points`,
+`_strip_key_points_block`, `_strip_gaps_block`) extracted to
+`feynman_strategies.py` (166 lines). All symbols re-imported into
+`feynman_service.py` so tests that directly import parsers from there
+continue to work. 14 feynman tests pass.
 
 ### #15 -- TypeScript codegen follow-through (DONE)
 Initial codegen landed earlier; in 2026-05-15 the frontend was swept
