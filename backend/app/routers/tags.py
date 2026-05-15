@@ -431,7 +431,8 @@ async def accept_normalization_suggestion(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Validate both tags still exist
+    # Validate both tags still exist; these two checks share the session with the
+    # suggestion status update below so all three land in one transaction.
     source_tag = (
         await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
     ).scalar_one_or_none()
@@ -497,7 +498,10 @@ async def migrate_tag_naming(
     Merges duplicates that collapse to the same normalized form (keeps higher note_count).
     """
 
-    # Step 1: Load all canonical tags
+    # Bespoke multi-table normalization migration: rename/merge canonical_tags,
+    # note_tag_index, and NoteModel.tags atomically. Too many conditional writes
+    # (INSERT OR IGNORE, cascading deletes, JSON tag array updates) to express
+    # via existing repo methods.
     all_tags_result = await session.execute(select(CanonicalTagModel))
     all_tags = list(all_tags_result.scalars().all())
 

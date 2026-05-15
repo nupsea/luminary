@@ -216,6 +216,8 @@ async def create_note(
     )
     note.tags = tags
     logger.info("Auto-tagged new note %s with %d tags", note.id, len(tags))
+    # Four-table transactional write: note + FTS index + tag index + source pivot must
+    # all commit atomically; breaking this into a repo method adds no clarity.
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
     await _sync_tag_index(note.id, note.tags or [], session)
@@ -240,7 +242,7 @@ async def create_note(
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)
                 await svc.award_note_xp(note.id, len(tags))
-                await xp_session.commit()
+                await xp_session.commit()  # dedicated XP session; isolated from the note session
         except Exception:
             logger.warning("Failed to award XP for note creation", exc_info=True)
 
@@ -281,7 +283,8 @@ async def search_notes(
 @router.get("/groups", response_model=GroupsResponse)
 async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
     """Return distinct group names (with counts) and distinct tags (with counts)."""
-    # Groups
+    # Three bespoke aggregations that share a session; the middle one uses SQLite's
+    # json_each extension which is not expressible via SQLAlchemy ORM columns.
     group_result = await session.execute(
         select(NoteModel.group_name, func.count(NoteModel.id))
         .where(NoteModel.group_name.isnot(None))
@@ -360,10 +363,14 @@ async def list_notes(
             )
         )
 
+    # Dynamic filter composition built incrementally from query params; the stmt
+    # is too conditional to encapsulate in a NoteRepo.list() without complex args.
     result = await session.execute(stmt)
     notes = list(result.scalars().all())
 
     # Bulk-load collection memberships and source_document_ids in one query each.
+    # The note_ids set is only known after the above list executes, so these two
+    # queries must follow here rather than being folded into the primary query.
     coll_map: dict[str, list[str]] = {}
     src_map: dict[str, list[str]] = {}
     if notes:
@@ -419,8 +426,10 @@ async def _apply_note_update(
     # S175: sync source document pivot only when field is explicitly supplied
     if req.source_document_ids is not None:
         await _sync_note_sources(note.id, req.source_document_ids, session)
+    # Four-table update (note + FTS + tag index + source pivot) must commit together.
     await session.commit()
-    # Fetch updated source_document_ids for response
+    # Fetch updated source_document_ids for response; must run after commit to see
+    # the new pivot rows written by _sync_note_sources above.
     src_rows = (
         (
             await session.execute(
@@ -509,6 +518,8 @@ async def preview_note_flashcard_generation(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return {total_notes, already_covered} for a collection without generating (S169)."""
+    # Three sequential reads: existence check, then two counts that depend on
+    # collection.name -- all share the session so the name is resolved before use.
     coll_result = await session.execute(
         select(CollectionModel).where(CollectionModel.id == collection_id)
     )
@@ -594,6 +605,8 @@ async def list_note_flashcards(
 ) -> list[NoteFlashcardItem]:
     """Return all flashcards generated from notes (source='note'), newest first."""
 
+    # Read-only cross-model query (FlashcardModel filtered by source); no NoteRepo
+    # method owns FlashcardModel, so the router queries it directly here.
     result = await session.execute(
         select(FlashcardModel)
         .where(FlashcardModel.source == "note")

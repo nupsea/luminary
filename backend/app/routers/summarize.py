@@ -38,6 +38,8 @@ async def get_section_summaries(document_id: str) -> list[dict]:
     documents where section summarization was skipped due to Ollama being offline).
     """
     async with get_session_factory()() as session:
+        # Custom 3-column projection for this endpoint's list response; no SectionSummaryRepo
+        # method would be cleaner given the caller shapes the columns.
         rows = await session.execute(
             select(
                 SectionSummaryModel.unit_index,
@@ -60,6 +62,8 @@ async def get_cached_summaries(document_id: str) -> dict:
     a pre-loaded summary or a Generate button.
     """
     async with get_session_factory()() as session:
+        # Custom projection + dedup-by-mode fold; the caller owns the fold logic so this stays
+        # in the router rather than being wrapped in a SummaryRepo method.
         rows = await session.execute(
             select(SummaryModel.mode, SummaryModel.id, SummaryModel.content)
             .where(SummaryModel.document_id == document_id)

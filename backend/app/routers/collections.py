@@ -329,6 +329,9 @@ async def migrate_collection_naming(
     Merges duplicates that collapse to the same normalized form
     (keeps the collection with more members, reassigns members from the other).
     """
+    # Bespoke multi-table merge: reads all collections, groups by normalized name,
+    # then reassigns members and deletes duplicates atomically. Too many conditional
+    # writes (INSERT OR IGNORE, cascading deletes) to express via CollectionRepo.
     all_cols_result = await session.execute(select(CollectionModel))
     all_cols = list(all_cols_result.scalars().all())
 
@@ -501,6 +504,7 @@ async def export_collection(
     try:
         if format == "markdown":
             data = await svc.export_collection_markdown(collection_id, session)
+            # Fetch collection name for filename slug; not covered by export service return value.
             col = (
                 await session.execute(
                     select(CollectionModel).where(CollectionModel.id == collection_id)
@@ -516,6 +520,7 @@ async def export_collection(
             )
         else:
             data, card_count = await svc.export_collection_anki(collection_id, session)
+            # Fetch collection name for filename slug; not covered by export service return value.
             col = (
                 await session.execute(
                     select(CollectionModel).where(CollectionModel.id == collection_id)

@@ -358,6 +358,8 @@ async def create_trace_flashcard(
         flashcard_type="trace",
         bloom_level=None,
     )
+    # Card insert and FTS sync must be in the same transaction; _sync_flashcard_fts
+    # takes the live session mid-flight, so the commit must stay with the add here.
     session.add(card)
     # S184: sync FTS index for trace flashcards
     await _sync_flashcard_fts(card, session)
@@ -529,6 +531,9 @@ async def list_flashcard_decks(
     - "note" otherwise (tag-scoped or note_ids-scoped)
     """
 
+    # Custom aggregation + cross-table name lookup; this bespoke shape (GROUP BY deck,
+    # joined against CollectionModel names) lives in the router because no repo owns
+    # both FlashcardModel and CollectionModel in a single query.
     rows = (
         await session.execute(
             select(
@@ -578,6 +583,7 @@ async def export_flashcards_csv(
     repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> StreamingResponse:
     """Export all flashcards for a document as a CSV download."""
+    # Read document title for the CSV header; single-row lookup, no FlashcardRepo method needed.
     doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     doc = doc_result.scalar_one_or_none()
     document_title = doc.title if doc else ""
@@ -699,6 +705,8 @@ async def review_flashcard(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     if req.session_id:
+        # Conditional audit insert; only created when session_id is present.
+        # Kept inline because it is a single-row write with no business logic.
         event = ReviewEventModel(
             id=str(uuid.uuid4()),
             session_id=req.session_id,
@@ -724,7 +732,7 @@ async def review_flashcard(
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)
                 await svc.award_flashcard_xp(req.rating, card_id)
-                await xp_session.commit()
+                await xp_session.commit()  # dedicated XP session; isolated from the review session
         except Exception:
             logger.warning("Failed to award XP for flashcard review", exc_info=True)
 
@@ -755,6 +763,8 @@ async def get_source_context(
     if card.chunk_id is None:
         raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
 
+    # Hop-by-hop join chain with 404 at each step: chunk → section → document.
+    # Sequential reads are intentional -- each result gates whether the next query runs.
     chunk_result = await session.execute(select(ChunkModel).where(ChunkModel.id == card.chunk_id))
     chunk = chunk_result.scalar_one_or_none()
     if chunk is None or chunk.section_id is None:

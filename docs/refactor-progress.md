@@ -18,14 +18,20 @@ OpenAPI→TS codegen + frontend type alignment**.
 
 ## Still pending
 
-### #9 -- session-ops residual
-Total router-side direct `session.execute/add/commit/delete` calls are
-well below the original 263. Remaining ops are documented-inline by
-design (custom multi-table shapes, transactional flows). Acceptance is
-"every remaining inline op has a one-line comment explaining why."
-Outstanding documentation work: walk the remaining `session.X` sites and
-add the rationale comment where missing. New `session.execute(` in
-routers should be caught by a CI grep (not yet wired).
+### #9 -- session-ops residual (DONE 2026-05-15)
+All remaining inline `session.execute/add/commit/delete` calls in routers
+now have a rationale comment. 11 router files annotated: code_executor,
+summarize, images, search, chat_meta, flashcards, notes, collections,
+tags, documents, study. Patterns documented:
+- Custom projections / bespoke aggregations no repo method covers
+- Atomic multi-table writes (note + FTS + tag index + source pivot)
+- Shared session with get_or_404 guard
+- Ingestion document row before background job
+- Service delegation where session is passed through (delete cascade)
+- Hop-by-hop join chains with 404 at each step
+- Dedicated isolated sessions (XP background tasks)
+
+New `session.execute(` in routers should be caught by a CI grep (not yet wired).
 
 ### #11 -- god-page holdouts (intentional)
 `components/reader/DocumentReader.tsx` (~1,290) and

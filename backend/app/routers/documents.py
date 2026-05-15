@@ -264,6 +264,9 @@ async def list_documents(
             objectives_covered_sq.label("objectives_covered"),
         )
 
+        # Correlated 10-subquery select; the aggregation shape (flashcards, sections,
+        # study sessions, objectives) is this endpoint's bespoke projection and has
+        # no equivalent DocumentRepo method.
         result = await session.execute(stmt)
         rows = result.all()
 
@@ -431,7 +434,7 @@ async def ingest_document(
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
                 existing.content_type = content_type
-                await session.commit()
+                await session.commit()  # commit stage reset before the background job polls document.stage
                 get_ingestion_jobs().launch(
                     existing.id,
                     run_ingestion(existing.id, existing.file_path, existing.format, content_type),
@@ -480,6 +483,8 @@ async def ingest_document(
             file_hash=file_hash,
             stage="parsing",
         )
+        # Document row must exist in SQLite before the background ingestion job starts;
+        # the job uses document_id as its primary key.
         session.add(doc)
         await session.commit()
 
@@ -546,6 +551,7 @@ async def ingest_kindle(
                 stage="parsing",
                 tags=["kindle"],
             )
+            # Document row must exist in SQLite before the background ingestion job starts.
             session.add(doc)
             await session.commit()
 
@@ -603,6 +609,7 @@ async def ingest_url(
                 stage="parsing",
                 source_url=body.url,
             )
+            # Document row must exist in SQLite before the background ingestion job starts.
             session.add(doc)
             await session.commit()
 
@@ -701,6 +708,7 @@ async def ingest_url(
             channel_name=channel_name,
             youtube_url=body.url,
         )
+        # Document row must exist in SQLite before the background ingestion job starts.
         session.add(doc)
         await session.commit()
 
@@ -849,6 +857,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
                 status_code=400,
                 detail=f"Document is not a PDF (format={doc.format})",
             )
+        # Shares session with the get_or_404 check above; single-table count.
         section_count_result = await session.execute(
             select(func.count(SectionModel.id)).where(SectionModel.document_id == document_id)
         )
@@ -923,7 +932,8 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         if not fp.exists():
             raise HTTPException(status_code=404, detail="EPUB file not found on disk")
 
-        # Fetch all section IDs ordered by section_order for proportional assignment
+        # Section IDs needed to map chapter index to section IDs; shares session with
+        # the get_or_404 check above.
         sections_result = await session.execute(
             select(SectionModel.id)
             .where(SectionModel.document_id == document_id)
@@ -969,6 +979,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
     deleted = []
     for document_id in body.ids:
         async with get_session_factory()() as session:
+            # Existence check + cascade delete share one session per document;
+            # delete_sqlite_cascade uses the session directly for multi-table cleanup.
             result = await session.execute(
                 select(DocumentModel).where(DocumentModel.id == document_id)
             )
@@ -1039,7 +1051,7 @@ async def delete_document(document_id: str):
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         await svc.delete_sqlite_cascade(session, doc)
-        await session.commit()
+        await session.commit()  # cascade service took the session; commit completes the transaction
 
     svc.delete_lancedb_vectors(document_id)
     svc.delete_kuzu_nodes(document_id)
@@ -1075,7 +1087,8 @@ async def get_document_diagnostics(document_id: str):
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # SQLite chunk count
+        # Two counts share a session with the get_or_404 guard; FTS5 virtual table
+        # requires raw SQL so both stay here rather than going through a repo.
         chunk_result = await session.execute(
             select(func.count(ChunkModel.id)).where(ChunkModel.document_id == document_id)
         )
@@ -1180,6 +1193,7 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Shares session with get_or_404; simple document-scoped read-only list.
         snippets_result = await session.execute(
             select(CodeSnippetModel)
             .where(CodeSnippetModel.document_id == document_id)
@@ -1210,6 +1224,7 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Shares session with get_or_404; simple document-scoped read-only list.
         result = await session.execute(
             select(LearningObjectiveModel)
             .where(LearningObjectiveModel.document_id == document_id)
@@ -1261,7 +1276,7 @@ async def update_objective(
         if obj.document_id != document_id:
             raise HTTPException(status_code=404, detail="Objective not found in document")
         obj.covered = payload.covered
-        await session.commit()
+        await session.commit()  # single field update; session flows through get_or_404 above
         await session.refresh(obj)
         return LearningObjectiveItem(
             id=obj.id,
@@ -1338,6 +1353,8 @@ async def save_reading_position(
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Upsert: read then insert-or-update in one session to avoid a second connection;
+        # ReadingPositionModel is keyed by document_id (one row per doc).
         result = await session.execute(
             select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
         )
@@ -1380,6 +1397,7 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Shares session with get_or_404; single-row read.
         result = await session.execute(
             select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
         )

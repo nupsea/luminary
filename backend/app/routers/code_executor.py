@@ -86,6 +86,8 @@ async def execute_code(req: CodeExecuteRequest) -> CodeExecuteResponse:
     # Persist prediction event when expected_output is provided
     if req.expected_output is not None:
         async with get_session_factory()() as session:
+            # Single-row audit insert with no business logic; a PredictionEventRepo would add
+            # indirection for no gain here.
             event = PredictionEventModel(
                 id=str(uuid.uuid4()),
                 chunk_id=req.chunk_id,

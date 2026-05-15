@@ -203,7 +203,9 @@ async def get_due_count(
     if note_ids:
         stmt = stmt.where(FlashcardModel.note_id.in_(note_ids))
 
-    # Combined collection logic
+    # Combined collection logic -- inline queries resolve the collection hierarchy and
+    # tag membership before the main count. The filter set is determined at request
+    # time so the queries cannot be pre-built in a repo method.
     if collection_id and not (document_ids or note_ids):
         # Resolve all doc/note IDs in hierarchy
         c_doc_ids, c_note_ids = await _resolve_collection_members(collection_id, session)
@@ -289,6 +291,7 @@ async def get_due_cards(
     if note_ids:
         stmt = stmt.where(FlashcardModel.note_id.in_(note_ids))
 
+    # Collection/tag filter branches -- inline for the same reason as get_due_count.
     if collection_id and not (used_document_ids or note_ids):
         # Resolve all doc/note IDs in hierarchy
         c_doc_ids, c_note_ids = await _resolve_collection_members(collection_id, session)
@@ -608,7 +611,8 @@ async def get_collection_study_dashboard(
 
     from app.routers.documents import _safe_tags
 
-    # 1. Fetch collection name
+    # All queries in this endpoint share a session; the comment above the function
+    # explains why the selects are inline (bespoke aggregation, flat query count).
     coll_result = await session.execute(
         select(CollectionModel.name).where(CollectionModel.id == collection_id)
     )
@@ -1113,7 +1117,8 @@ async def teachback(
     session: AsyncSession = Depends(get_db),
 ) -> TeachbackResponse:
     """Evaluate a student's teach-back explanation with LLM. Tracks misconceptions."""
-    # Load flashcard
+    # Flashcard lookup; shares session with the persist writes below so all
+    # teachback artifacts (result row, misconceptions, correction card) commit together.
     card_result = await session.execute(
         select(FlashcardModel).where(FlashcardModel.id == req.flashcard_id)
     )
@@ -1149,7 +1154,8 @@ async def teachback(
         logger.warning("Rubric LLM call failed for flashcard=%s; null rubric", card.id)
         rubric_dict = None
 
-    # Persist teachback result
+    # Persist all teachback artifacts (result + optional misconceptions) atomically;
+    # the correction card is generated mid-session so it must land in the same tx.
     tb_result = TeachbackResultModel(
         id=str(uuid.uuid4()),
         flashcard_id=card.id,
@@ -1329,6 +1335,8 @@ async def _evaluate_teachback_bg(
     correction_card: FlashcardModel | None = None
     if score < 60 and misconceptions:
         session_factory = get_session_factory()
+        # Separate read session so the card fetch does not hold a write lock
+        # during the LLM correction card generation that follows.
         async with session_factory() as read_session:
             card_result = await read_session.execute(
                 select(FlashcardModel).where(FlashcardModel.id == card_id)
@@ -1443,7 +1451,8 @@ async def teachback_async(
     session: AsyncSession = Depends(get_db),
 ) -> TeachbackSubmitResponse:
     """Submit teach-back for background evaluation. Returns immediately."""
-    # Validate flashcard
+    # Existence check + pending row persist share one session; the bg evaluator
+    # opens its own session (invariant I-1).
     card_result = await session.execute(
         select(FlashcardModel).where(FlashcardModel.id == req.flashcard_id)
     )
@@ -1505,7 +1514,8 @@ async def get_teachback_results(
     if not id_list:
         return TeachbackResultsBatchResponse(results=[])
 
-    # Fetch results joined with flashcard for question + expected answer text
+    # Cross-table join (TeachbackResultModel + FlashcardModel) for question/answer text;
+    # no repo owns both tables, so the join lives in the router.
     stmt = (
         select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
         .join(
@@ -1560,6 +1570,7 @@ async def get_session_teachback_results(
     session: AsyncSession = Depends(get_db),
 ) -> TeachbackResultsBatchResponse:
     """Get all teach-back results for a study session."""
+    # Cross-table join for question/answer text; same pattern as get_teachback_results.
     stmt = (
         select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
         .join(
@@ -1797,6 +1808,8 @@ async def get_section_heatmap(
     fragility_score ranges from 0.0 (well-retained) to 1.0 (completely forgotten).
     Sections with no flashcards are absent from the heatmap dict.
     """
+    # Two sequential reads: cards first (to get chunk_ids), then chunk→section mapping.
+    # The chunk_ids set is only known after the card query, so the second read follows here.
     cards_result = await session.execute(
         select(FlashcardModel).where(FlashcardModel.document_id == document_id)
     )
@@ -1964,7 +1977,7 @@ def _insert_correction_flashcard(
         reps=0,
         lapses=0,
     )
-    session.add(correction)
+    session.add(correction)  # correction card persisted in caller's session; commit is caller's responsibility
     return new_id
 
 

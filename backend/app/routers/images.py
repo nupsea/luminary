@@ -130,6 +130,8 @@ async def get_document_images(
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Read-only list query scoped to this document; shares the same session as the
+        # preceding get_or_404 check so both reads happen in a single connection.
         result = await session.execute(
             select(ImageModel)
             .where(ImageModel.document_id == document_id)
@@ -210,6 +212,7 @@ async def get_enrichment_jobs(document_id: str) -> list[EnrichmentJobItem]:
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Read-only list query; shares the session with the get_or_404 guard above.
         result = await session.execute(
             select(EnrichmentJobModel)
             .where(EnrichmentJobModel.document_id == document_id)

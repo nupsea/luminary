@@ -197,6 +197,7 @@ async def get_suggestions_cached(
             .order_by(ChatSuggestionHistoryModel.shown_at.desc())
             .limit(4)
         )
+        # Inline query for a custom 2-column projection not exposed by ChatRepo.
         result = await session.execute(query)
         rows = result.all()
 
@@ -259,6 +260,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     """Handle single-document suggestions."""
     session_factory = get_session_factory()
     async with session_factory() as session:
+        # Existence check before building suggestion context; uses the same session
+        # as the section headings query below to avoid opening a second connection.
         doc = (
             await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
@@ -268,6 +271,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
 
         content_type = doc.content_type or "unknown"
 
+        # Heading preview for suggestion context; must share session with doc lookup above
+        # so both reads are in the same transaction.
         sections_result = await session.execute(
             select(SectionModel.heading)
             .where(SectionModel.document_id == document_id)

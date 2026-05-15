@@ -81,6 +81,8 @@ async def search(
     elif content_types:
         type_list = [t.strip() for t in content_types.split(",") if t.strip()]
         if type_list:
+            # Input-dependent filter: content_type list comes from query param, so the
+            # lookup must happen here before retrieval is dispatched.
             result = await session.execute(
                 select(DocumentModel.id).where(DocumentModel.content_type.in_(type_list))
             )
@@ -102,7 +104,8 @@ async def search(
     if not scored_chunks:
         return SearchResponse(results=[])
 
-    # Fetch document metadata for all matching document IDs
+    # Fetch document metadata for all matching document IDs; the set of IDs is only
+    # known after retrieval returns, so this join cannot be pre-computed in a repo.
     doc_ids = list({c.document_id for c in scored_chunks})
     doc_result = await session.execute(
         select(
