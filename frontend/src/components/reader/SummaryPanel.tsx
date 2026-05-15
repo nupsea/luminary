@@ -6,7 +6,6 @@ import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
-import { GlossaryPanel } from "./GlossaryPanel"
 import { NotesReaderPanel } from "./NotesReaderPanel"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { CONVERSATION_TAB, SUMMARY_TABS, type SummaryMode, type SummaryTabDef } from "./types"
@@ -14,7 +13,7 @@ import { CONVERSATION_TAB, SUMMARY_TABS, type SummaryMode, type SummaryTabDef } 
 type SummaryMap = Partial<Record<SummaryMode, string>>
 type StreamingMap = Partial<Record<SummaryMode, boolean>>
 
-type PanelTab = SummaryMode | "glossary" | "references" | "notes"
+type PanelTab = SummaryMode | "references" | "notes"
 
 interface SummaryPanelProps {
   documentId: string
@@ -30,7 +29,6 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
   const allTabs = [
     { mode: "notes" as PanelTab, label: "Notes" },
     ...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })),
-    { mode: "glossary" as PanelTab, label: "Glossary" },
     { mode: "references" as PanelTab, label: "References" },
   ]
 
@@ -137,7 +135,7 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
     }
   }
 
-  const isSidePanel = activeTab === "glossary" || activeTab === "references" || activeTab === "notes"
+  const isSidePanel = activeTab === "references" || activeTab === "notes"
   const currentSummary = !isSidePanel ? summaries[activeTab as SummaryMode] : undefined
   const isStreaming = !isSidePanel ? (streaming[activeTab as SummaryMode] ?? false) : false
 
@@ -170,8 +168,6 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
           <NotesReaderPanel documentId={documentId} activeSectionId={activeSectionId ?? null} onScrollToSection={onScrollToSection} onNoteCountKnown={handleNoteCountKnown} />
         ) : activeTab === "references" ? (
           <ReferencesPanel documentId={documentId} />
-        ) : activeTab === "glossary" ? (
-          <GlossaryPanel documentId={documentId} onScrollToSection={onScrollToSection} />
         ) : cacheLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />

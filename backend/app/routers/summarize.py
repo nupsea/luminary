@@ -19,7 +19,7 @@ router = APIRouter(prefix="/summarize", tags=["summarize"])
 
 
 class SummarizeRequest(BaseModel):
-    mode: Literal["one_sentence", "executive", "detailed", "conversation", "glossary"]
+    mode: Literal["one_sentence", "executive", "detailed", "conversation"]
     model: str | None = None
     force_refresh: bool = False
 

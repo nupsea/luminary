@@ -21,7 +21,6 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     FeynmanSessionModel,
     FeynmanTurnModel,
     FlashcardModel,
-    GlossaryTermModel,
     GoldenDatasetModel,
     GoldenQuestionModel,
     ImageModel,

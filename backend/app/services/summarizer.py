@@ -61,11 +61,6 @@ MODE_INSTRUCTIONS: dict[str, str] = {
         '"decisions" (list of strings), '
         '"action_items" (list of objects with "owner" and "task" keys).'
     ),
-    "glossary": (
-        "Extract a glossary of domain-specific terms from the text. "
-        "For each term provide a brief one-sentence definition. "
-        "Output as Markdown with each term **bolded** followed by a colon and the definition."
-    ),
 }
 
 # Token threshold above which map-reduce is applied
