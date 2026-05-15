@@ -34,12 +34,20 @@ routers should be caught by a CI grep (not yet wired).
 genuinely changes shape.
 
 ### #14 -- mid-size services (exploratory, no commitment)
-`services/retriever.py` (874), `services/summarizer.py` (696),
-`services/feynman_service.py` (636). Each mixes orchestration with
-implementation; tests `mock.patch` private helpers. If pain persists,
-apply the re-export + indirect-singleton pattern: split each into
-`<service>.py` (public class) + `<service>_strategies.py` (swappable
-bits). Otherwise leave alone.
+`services/summarizer.py` (696), `services/feynman_service.py` (636).
+Each mixes orchestration with implementation; tests `mock.patch` private
+helpers. If pain persists, apply the re-export + indirect-singleton
+pattern: split each into `<service>.py` (public class) +
+`<service>_strategies.py` (swappable bits). Otherwise leave alone.
+
+**retriever.py done (2026-05-15)**: 874 → 469 lines. Strategy helpers
+(`_round_robin`, `_diversify`, `_sanitize_fts_query`, `_expand_context`,
+`_CrossEncoderReranker`/`_get_reranker`, `_hyde_expand`, `_graph_expand`)
+extracted to `retriever_strategies.py` (431 lines). `_rerank_candidates`
+stays in `retriever.py` so `patch("app.services.retriever._get_reranker")`
+keeps intercepting its call to `_get_reranker`. Moved symbols re-exported
+from `retriever.py` so all test imports and patch targets work unchanged.
+43 retriever tests pass.
 
 ### #15 -- TypeScript codegen follow-through (DONE)
 Initial codegen landed earlier; in 2026-05-15 the frontend was swept
