@@ -13,28 +13,10 @@ import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 
 import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
-interface SearchMatch {
-  chunk_id: string
-  document_id: string
-  document_title: string
-  content_type: string
-  section_heading: string
-  page: number
-  text_excerpt: string
-  relevance_score: number
-}
-
-interface DocumentGroup {
-  document_id: string
-  document_title: string
-  content_type: string
-  matches: SearchMatch[]
-}
-
-interface SearchResponse {
-  results: DocumentGroup[]
-}
+type DocumentGroup = components["schemas"]["DocumentGroup"]
+type SearchResponse = components["schemas"]["SearchResponse"]
 
 const fetchSearch = (q: string): Promise<SearchResponse> =>
   apiGet<SearchResponse>("/search", { q, limit: 20 })

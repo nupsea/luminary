@@ -26,20 +26,18 @@ import { useQuery } from "@tanstack/react-query"
 import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
+import type { components } from "@/types/api"
 
 interface NoteStub {
   id: string
   content: string
 }
 
-interface NoteFlashcardItem {
-  id: string
-  question: string
-  answer: string
-  source_excerpt: string
-  source: string
-}
+type NoteFlashcardItem = components["schemas"]["NoteFlashcardItem"]
 
+// Local-only: the /collections/{id}/flashcards/generate endpoint
+// returns a `dict` (no Pydantic response_model) so no generated alias
+// exists; match the runtime payload here.
 interface CollectionGenerateResponse {
   created: number
   skipped: number

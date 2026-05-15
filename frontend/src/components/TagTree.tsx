@@ -21,18 +21,13 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 import { filterTagTree, highlightMatch } from "@/lib/tagUtils"
 import type { FilteredTagTreeItem } from "@/lib/tagUtils"
+import type { components } from "@/types/api"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types -- audit #15: alias to generated `TagTreeItem`.
 // ---------------------------------------------------------------------------
 
-export interface TagTreeItem {
-  id: string
-  display_name: string
-  parent_tag: string | null
-  note_count: number
-  children: TagTreeItem[]
-}
+export type TagTreeItem = components["schemas"]["TagTreeItem"]
 
 // ---------------------------------------------------------------------------
 // API helper

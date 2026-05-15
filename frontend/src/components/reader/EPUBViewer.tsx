@@ -17,22 +17,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types -- audit #15: aliased to generated schemas.
 // ---------------------------------------------------------------------------
 
-interface EpubTocItem {
-  chapter_index: number
-  title: string
-  word_count: number
-}
+import type { components } from "@/types/api"
 
-interface EpubChapter {
-  chapter_index: number
-  chapter_title: string
-  html: string
-  word_count: number
-  section_ids: string[]
-}
+type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
+type EpubChapter = components["schemas"]["EpubChapterResponse"]
 
 // ---------------------------------------------------------------------------
 // API fetch helpers

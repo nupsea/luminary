@@ -25,7 +25,9 @@ import {
 } from "@/components/ui/dialog"
 
 import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
+// Local-only: 2-field picker subset.
 interface DocumentItem {
   id: string
   title: string
@@ -36,12 +38,10 @@ interface NoteStub {
   content: string
 }
 
-interface GapDetectResult {
-  gaps: string[]
-  covered: string[]
-  query_used: string
-}
+type GapDetectResult = components["schemas"]["GapDetectResponse"]
 
+// Local: the auto-collection lookup endpoint returns a `dict` so no
+// generated alias exists.
 interface AutoCollection {
   id: string
   name: string

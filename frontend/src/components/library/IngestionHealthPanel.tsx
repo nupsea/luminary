@@ -2,14 +2,9 @@ import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 
 import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
-interface DiagnosticsResponse {
-  chunk_count: number
-  fts_count: number
-  entity_count: number
-  edge_count: number
-  vector_count: number
-}
+type DiagnosticsResponse = components["schemas"]["DocumentDiagnostics"]
 
 const fetchDiagnostics = (documentId: string): Promise<DiagnosticsResponse> =>
   apiGet<DiagnosticsResponse>(`/documents/${documentId}/diagnostics`)

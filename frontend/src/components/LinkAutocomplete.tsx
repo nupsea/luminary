@@ -21,10 +21,9 @@ import { apiGet } from "@/lib/apiClient"
 const LINK_TYPES = ["elaborates", "contradicts", "see-also", "supports", "questions"] as const
 type LinkType = typeof LINK_TYPES[number]
 
-interface AutocompleteItem {
-  id: string
-  preview: string
-}
+import type { components } from "@/types/api"
+
+type AutocompleteItem = components["schemas"]["NoteAutocompleteItem"]
 
 interface LinkAutocompleteProps {
   query: string

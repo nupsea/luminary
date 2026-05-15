@@ -113,6 +113,11 @@ function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
 // S138: SourcePanel
 // ---------------------------------------------------------------------------
 
+// Local: a 7-field projection of WebReferenceItem with `source_quality`
+// narrowed to a literal union for the QUALITY_LABEL badge map below.
+// Aliasing to the generated schema would relax that to `string` and
+// break the indexed lookup (audit #15: kept-local entry).
+
 type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
 
 interface WebRef {
