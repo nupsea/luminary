@@ -1,10 +1,6 @@
 import { describe, expect, it, vi, beforeEach, type Mock } from "vitest"
 import { createLinkService } from "./pdfLinkService"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /** Minimal pdfjs PDFDocumentProxy mock (same pattern as pdfTocUtils.test.ts). */
 function makeDoc(overrides: Record<string, unknown> = {}) {
   return {
@@ -20,10 +16,6 @@ function makeDoc(overrides: Record<string, unknown> = {}) {
 function makeLink(): HTMLAnchorElement {
   return { href: "", target: "", rel: "" } as unknown as HTMLAnchorElement
 }
-
-// ---------------------------------------------------------------------------
-// navigateTo
-// ---------------------------------------------------------------------------
 
 describe("navigateTo", () => {
   let mockGoToPage: Mock<(n: number) => void>
@@ -111,10 +103,6 @@ describe("navigateTo", () => {
     expect(mockGoToPage).not.toHaveBeenCalled()
   })
 })
-
-// ---------------------------------------------------------------------------
-// addLinkAttributes
-// ---------------------------------------------------------------------------
 
 describe("addLinkAttributes", () => {
   it("sets target=_blank and rel for external https URL", () => {

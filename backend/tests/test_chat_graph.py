@@ -23,9 +23,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.runtime.chat_graph import build_chat_graph, get_chat_graph
 
-# ---------------------------------------------------------------------------
 # Shared fixture — in-memory DB (needed for synthesize_node DB calls)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -71,9 +69,7 @@ def _make_initial_state(question: str) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # (a) test_summary_question_routes_to_summary_node
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -94,9 +90,7 @@ async def test_summary_question_routes_to_summary_node(test_db):
     assert isinstance(result, dict)
 
 
-# ---------------------------------------------------------------------------
 # (b) test_factual_question_routes_to_search_node
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -112,9 +106,7 @@ async def test_factual_question_routes_to_search_node(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # (c) test_graph_invoke_does_not_raise
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -133,9 +125,7 @@ async def test_graph_invoke_does_not_raise(test_db):
     assert "intent" in result
 
 
-# ---------------------------------------------------------------------------
 # Extra: get_chat_graph returns a compiled singleton
-# ---------------------------------------------------------------------------
 
 
 def test_get_chat_graph_returns_singleton():
@@ -145,9 +135,7 @@ def test_get_chat_graph_returns_singleton():
     assert g1 is g2
 
 
-# ---------------------------------------------------------------------------
 # test_streaming_is_progressive — true streaming AC
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

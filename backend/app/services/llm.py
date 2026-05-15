@@ -37,9 +37,7 @@ LLMUnavailableError: tuple[type[BaseException], ...] = (
     ConnectionRefusedError,
 )
 
-# ---------------------------------------------------------------------------
 # Langfuse — optional LLM call observability
-# ---------------------------------------------------------------------------
 
 _langfuse = None  # type: ignore[var-annotated]
 

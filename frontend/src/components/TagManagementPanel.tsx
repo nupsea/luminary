@@ -25,10 +25,6 @@ import {
 import { ApiError, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import type { TagTreeItem } from "@/components/TagTree"
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 const renameTag = (id: string, displayName: string): Promise<void> =>
   apiPut(`/tags/${encodeURIComponent(id)}`, { display_name: displayName })
 
@@ -66,10 +62,6 @@ async function fetchFlatTags(): Promise<{ id: string; display_name: string }[]> 
     return []
   }
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 interface TagManagementPanelProps {
   tag: TagTreeItem

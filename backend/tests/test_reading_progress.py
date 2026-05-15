@@ -11,9 +11,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, SectionModel
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -66,9 +64,7 @@ def _make_section(doc_id: str, section_id: str | None = None, order: int = 0) ->
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

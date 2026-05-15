@@ -1,4 +1,4 @@
-// API shapes sourced from generated `src/types/api.ts` (audit #15).
+// API shapes sourced from generated `src/types/api.ts`.
 // AnnotationItem's `color` is intersected to keep the strict literal
 // union the highlight-color UI uses (the generated schema has it as
 // plain `string`).

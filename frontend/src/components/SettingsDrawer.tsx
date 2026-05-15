@@ -8,9 +8,7 @@ import { useAppStore } from "@/store"
 import { apiGet, apiPatch } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface LLMSettings {
   // New DB-backed fields
@@ -41,9 +39,7 @@ interface StorageInfo {
   models_mb: number
 }
 
-// ---------------------------------------------------------------------------
 // API functions
-// ---------------------------------------------------------------------------
 
 const fetchLLMSettings = (): Promise<LLMSettings> =>
   apiGet<LLMSettings>("/settings/llm")
@@ -77,9 +73,7 @@ function formatModelOption(m: ModelOption): string {
   return label
 }
 
-// ---------------------------------------------------------------------------
 // SettingsDrawer
-// ---------------------------------------------------------------------------
 
 interface SettingsDrawerProps {
   open: boolean
@@ -523,9 +517,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // LLMModeBadge — shown in sidebar footer, populates Zustand store
-// ---------------------------------------------------------------------------
 
 interface LLMModeBadgeProps {
   onClick: () => void

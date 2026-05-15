@@ -23,10 +23,6 @@ import {
 import { Check, GripVertical, X, ArrowRight } from "lucide-react"
 import { apiPost } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface NotePreview {
   note_id: string
   excerpt: string
@@ -75,10 +71,6 @@ interface Props {
   onNamingFixesApplied?: (result: { tags_renamed: number; collections_renamed: number; tags_merged: number }) => void
 }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 const batchAccept = (
   items: { suggestion_id: string; name_override: string | null; note_ids: string[] }[],
 ): Promise<{ collection_ids: string[] }> =>
@@ -97,10 +89,6 @@ const applyNamingFixes = (
   fixes: { type: string; id: string; current_name: string; suggested_name: string; action: string }[],
 ): Promise<{ tags_renamed: number; collections_renamed: number; tags_merged: number }> =>
   apiPost("/notes/cluster/normalize-apply", { fixes })
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function OrganizationPlanDialog({
   open,
@@ -394,10 +382,6 @@ export function OrganizationPlanDialog({
     </Dialog>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function initGroups(suggestions: ClusterSuggestion[]): GroupState[] {
   return suggestions.map((s) => ({

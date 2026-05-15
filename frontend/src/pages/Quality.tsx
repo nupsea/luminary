@@ -25,10 +25,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 const fetchDatasets = (): Promise<GoldenDataset[]> =>
   apiGet<GoldenDataset[]>("/evals/datasets")
 
@@ -63,9 +59,7 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
   return data.items.filter((doc) => USABLE_STAGES.has(doc.stage))
 }
 
-// ---------------------------------------------------------------------------
 // Tab nav types
-// ---------------------------------------------------------------------------
 
 type TabId = "datasets" | "results" | "runs" | "routing" | "ablations" | "regressions"
 const TABS: { id: TabId; label: string }[] = [
@@ -92,10 +86,6 @@ function getInitialTab(): TabId {
   const hash = window.location.hash.replace("#", "") as TabId
   return TABS.some((t) => t.id === hash) ? hash : "datasets"
 }
-
-// ---------------------------------------------------------------------------
-// Page component
-// ---------------------------------------------------------------------------
 
 export default function Quality() {
   const qc = useQueryClient()

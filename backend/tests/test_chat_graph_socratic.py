@@ -18,9 +18,7 @@ from app.runtime.chat_graph import route_node, socratic_node
 from app.services.intent import classify_intent_heuristic
 from app.types import ChatState, ScoredChunk  # noqa: F401
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_minimal_state(**overrides) -> ChatState:
@@ -60,9 +58,7 @@ def _make_chunk(text: str = "Sample passage content.") -> ScoredChunk:
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) Intent heuristic returns socratic for quiz phrases
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -87,9 +83,7 @@ def test_socratic_intent_heuristic(phrase: str):
     assert confidence == 0.95
 
 
-# ---------------------------------------------------------------------------
 # (b) No false positive: 'what is the main theme?' is NOT socratic
-# ---------------------------------------------------------------------------
 
 
 def test_socratic_no_false_positive():
@@ -102,9 +96,7 @@ def test_socratic_no_false_positive_factual():
     assert intent != "socratic"
 
 
-# ---------------------------------------------------------------------------
 # (c) socratic_node returns valid __card__ with parsed Q and CONTEXT
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -140,9 +132,7 @@ async def test_socratic_node_returns_card():
     assert "error" not in card
 
 
-# ---------------------------------------------------------------------------
 # (d) Parse fallback: malformed LLM response yields default question, no exception
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -175,9 +165,7 @@ async def test_socratic_parse_fallback():
     assert "error" not in card
 
 
-# ---------------------------------------------------------------------------
 # (e) Ollama offline: ServiceUnavailableError -> card with error field, no exception
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -211,9 +199,7 @@ async def test_socratic_ollama_offline():
     assert "check settings" in card["error"].lower()
 
 
-# ---------------------------------------------------------------------------
 # (f) route_node returns 'socratic_node' for intent='socratic'
-# ---------------------------------------------------------------------------
 
 
 def test_route_node_socratic():

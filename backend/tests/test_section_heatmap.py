@@ -15,9 +15,7 @@ from app.main import app
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.routers.study import SectionHeatmapItem, _compute_section_heatmap
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -44,9 +42,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_section(doc_id: str) -> SectionModel:
@@ -96,9 +92,7 @@ def _make_card(
     )
 
 
-# ---------------------------------------------------------------------------
 # HTTP endpoint tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -217,9 +211,7 @@ async def test_section_heatmap_due_card_count(test_db):
     assert heatmap[section.id]["due_card_count"] == 2
 
 
-# ---------------------------------------------------------------------------
 # Pure function unit test
-# ---------------------------------------------------------------------------
 
 
 def test_compute_section_heatmap_never_reviewed_card():

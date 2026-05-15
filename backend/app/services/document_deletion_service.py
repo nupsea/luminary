@@ -12,7 +12,7 @@ locks or leave orphan rows in tables we just emptied.
 Service vs repo: this is *not* a `DocumentRepo` method because the cascade
 fans out to three external systems (LanceDB, Kuzu, filesystem) on top of
 SQLite. The repo layer is single-system; cross-system orchestration is a
-service responsibility per audit #9's design principle.
+service responsibility.
 """
 
 from __future__ import annotations

@@ -6,9 +6,7 @@ without any fixtures.  Orchestration lives in _chunk_tech_book (ingestion.py).
 
 import re
 
-# ---------------------------------------------------------------------------
 # Admonition detection
-# ---------------------------------------------------------------------------
 
 _ADMONITION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^NOTE\s*:", re.M), "note"),
@@ -43,9 +41,7 @@ def detect_admonition(text: str) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
 # Numbered hierarchy classification
-# ---------------------------------------------------------------------------
 
 _RE_PART = re.compile(r"^Part\s+[IVXLCDM\d]+\b", re.I)
 _RE_CHAPTER = re.compile(r"^Chapter\s+\d+\b", re.I)
@@ -105,9 +101,7 @@ def assign_parent_headings_dicts(sections: list[dict]) -> list[dict]:
     return sections
 
 
-# ---------------------------------------------------------------------------
 # Learning objective candidate detection
-# ---------------------------------------------------------------------------
 
 _OBJECTIVE_PHRASES: list[str] = [
     "you will",

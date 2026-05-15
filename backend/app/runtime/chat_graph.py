@@ -79,9 +79,7 @@ from app.types import ChatState
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # classify_node — intent detection + query rewriting
-# ---------------------------------------------------------------------------
 
 
 async def classify_node(state: ChatState) -> dict:
@@ -145,9 +143,7 @@ async def classify_node(state: ChatState) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # route_node — conditional edge function after classify_node
-# ---------------------------------------------------------------------------
 
 
 def route_node(state: ChatState) -> str:
@@ -229,9 +225,7 @@ def _route_after_strategy(state: ChatState) -> str:
 # above for back-compat.
 
 
-# ---------------------------------------------------------------------------
 # Graph construction + singleton
-# ---------------------------------------------------------------------------
 
 
 def build_chat_graph() -> StateGraph:

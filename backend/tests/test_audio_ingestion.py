@@ -20,9 +20,7 @@ from app.main import app
 from app.models import DocumentModel
 from app.workflows.ingestion import IngestionState, _chunk_audio, _classify
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -45,9 +43,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Pure function tests (no DB, no mocks needed)
-# ---------------------------------------------------------------------------
 
 
 def test_classify_returns_audio_for_mp3():
@@ -94,9 +90,7 @@ def test_chunk_audio_empty_segments():
     assert chunks == []
 
 
-# ---------------------------------------------------------------------------
 # Integration tests
-# ---------------------------------------------------------------------------
 
 
 async def test_audio_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):

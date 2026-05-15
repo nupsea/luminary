@@ -18,9 +18,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.flashcard import FlashcardService
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -97,9 +95,7 @@ def _make_flashcard(card_id: str | None = None, doc_id: str = "doc-1", **kwargs)
     return FlashcardModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # Service unit tests
-# ---------------------------------------------------------------------------
 
 
 async def test_service_parses_json_and_creates_cards(test_db):
@@ -420,9 +416,7 @@ async def test_bulk_delete_empty_ids_rejected(test_db):
         assert resp.status_code == 422
 
 
-# ---------------------------------------------------------------------------
 # Endpoint integration tests
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_endpoint_returns_201(test_db):
@@ -567,9 +561,7 @@ async def test_export_csv_returns_valid_csv(test_db):
     assert "My Study Guide" in text
 
 
-# ---------------------------------------------------------------------------
 # S73 — Smart question generation prompt tests
-# ---------------------------------------------------------------------------
 
 
 def test_flashcard_prompt_contains_taxonomy():

@@ -20,9 +20,7 @@ from app.models import (
 )
 from app.services.clustering_service import ClusteringService
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -74,9 +72,7 @@ def _make_suggestion(
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests: cluster_notes
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -329,9 +325,7 @@ async def test_reject_not_found(test_db):
     assert result is False
 
 
-# ---------------------------------------------------------------------------
 # Tests: HTTP endpoints
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -372,9 +366,7 @@ async def test_get_cluster_suggestions_empty(test_db):
     assert response.json() == []
 
 
-# ---------------------------------------------------------------------------
 # Tests: batch_accept_suggestions (S189)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

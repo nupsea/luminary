@@ -14,9 +14,7 @@ from app.types import WebSnippet
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Pure helper functions (no I/O)
-# ---------------------------------------------------------------------------
 
 _VERSION_RE = re.compile(
     r"\b(Python\s+\d+\.\d+|React\s+\d+|Node\.js\s+\d+|"
@@ -97,11 +95,6 @@ def _classify_source_quality(url: str, title: str) -> str:
     ):
         return "blog"
     return "unknown"
-
-
-# ---------------------------------------------------------------------------
-# WebSearcher service
-# ---------------------------------------------------------------------------
 
 
 class WebSearcher:
@@ -262,10 +255,6 @@ class WebSearcher:
             logger.warning("web_searcher: tavily search failed", exc_info=True)
             return []
 
-
-# ---------------------------------------------------------------------------
-# Singleton factory
-# ---------------------------------------------------------------------------
 
 _web_searcher: WebSearcher | None = None
 

@@ -9,7 +9,7 @@
 //     the studySectionFilter zustand value (set by ChapterGoals' Study
 //     button in DocumentReader).
 //
-// Extracted from pages/Study.tsx during audit #11 phase A7. The Study
+// Extracted from pages/Study.tsx. The Study
 // page now treats this as a black-box per-document panel with three
 // callbacks: documentId in, onStartStudy / onStartTeachback out.
 

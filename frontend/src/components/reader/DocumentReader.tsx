@@ -40,9 +40,7 @@ import { SummaryPanel } from "./SummaryPanel"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
-// ---------------------------------------------------------------------------
 // Error Boundary
-// ---------------------------------------------------------------------------
 
 class DocumentReaderErrorBoundary extends React.Component<
   { children: React.ReactNode },

@@ -1,8 +1,5 @@
-// ---------------------------------------------------------------------------
-// focus store -- Zustand state machine for the global FocusTimerPill.
-// Holds the current session id, phase, and remaining seconds. Persists a small
-// snapshot to localStorage so a refresh inside an active session can rehydrate.
-// ---------------------------------------------------------------------------
+// focus store — Zustand state machine for FocusTimerPill.
+// Persists session id/phase/remaining seconds to localStorage so a refresh can rehydrate.
 
 import { create } from "zustand"
 import type { Surface } from "@/lib/focusUtils"

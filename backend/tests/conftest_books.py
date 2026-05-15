@@ -47,9 +47,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 MANIFEST_PATH = REPO_ROOT / "DATA" / "books" / "manifest.json"
 
 
-# ---------------------------------------------------------------------------
 # Async helpers (run inside asyncio.run())
-# ---------------------------------------------------------------------------
 
 
 async def _setup_db(data_dir: Path) -> async_sessionmaker:
@@ -156,9 +154,7 @@ async def _run_all_ingestions(
     return results
 
 
-# ---------------------------------------------------------------------------
 # Session-scoped fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")

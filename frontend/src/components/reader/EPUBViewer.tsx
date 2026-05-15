@@ -16,18 +16,10 @@ import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types -- audit #15: aliased to generated schemas.
-// ---------------------------------------------------------------------------
-
 import type { components } from "@/types/api"
 
 type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
 type EpubChapter = components["schemas"]["EpubChapterResponse"]
-
-// ---------------------------------------------------------------------------
-// API fetch helpers
-// ---------------------------------------------------------------------------
 
 async function fetchToc(documentId: string): Promise<EpubTocItem[]> {
   const data = await apiGet<{ chapters: EpubTocItem[] }>(
@@ -41,10 +33,6 @@ const fetchChapter = (
   chapterIndex: number,
 ): Promise<EpubChapter> =>
   apiGet<EpubChapter>(`/documents/${documentId}/epub/chapter/${chapterIndex}`)
-
-// ---------------------------------------------------------------------------
-// EPUBViewer
-// ---------------------------------------------------------------------------
 
 interface EPUBViewerProps {
   documentId: string

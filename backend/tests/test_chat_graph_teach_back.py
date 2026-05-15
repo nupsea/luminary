@@ -18,9 +18,7 @@ from app.runtime.chat_graph import route_node, teach_back_node
 from app.services.intent import classify_intent_heuristic
 from app.types import ChatState, ScoredChunk  # noqa: F401
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_minimal_state(**overrides) -> ChatState:
@@ -60,9 +58,7 @@ def _make_chunk(text: str = "Sample passage content.") -> ScoredChunk:
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) Intent heuristic returns teach_back for first-person phrases
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -84,9 +80,7 @@ def test_teach_back_intent_heuristic(phrase: str):
     assert confidence == 0.95
 
 
-# ---------------------------------------------------------------------------
 # (b) No false positive: imperative 'explain X to me' != teach_back
-# ---------------------------------------------------------------------------
 
 
 def test_teach_back_no_false_positive():
@@ -99,9 +93,7 @@ def test_teach_back_no_false_positive_summary():
     assert intent != "teach_back"
 
 
-# ---------------------------------------------------------------------------
 # (c) teach_back_node returns valid __card__ with parsed JSON fields
-# ---------------------------------------------------------------------------
 
 _VALID_EVAL_JSON = json.dumps(
     {
@@ -151,9 +143,7 @@ async def test_teach_back_node_returns_card():
     assert "error" not in card
 
 
-# ---------------------------------------------------------------------------
 # (d) Malformed JSON fallback: non-JSON response -> fallback card, no exception
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -188,9 +178,7 @@ async def test_teach_back_malformed_json_fallback():
     assert "error" not in card
 
 
-# ---------------------------------------------------------------------------
 # (e) Ollama offline: ServiceUnavailableError -> error card, no exception
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -226,9 +214,7 @@ async def test_teach_back_ollama_offline():
     assert "check settings" in card["error"].lower()
 
 
-# ---------------------------------------------------------------------------
 # (f) route_node returns 'teach_back_node' for intent='teach_back'
-# ---------------------------------------------------------------------------
 
 
 def test_route_node_teach_back():
@@ -237,9 +223,7 @@ def test_route_node_teach_back():
     assert result == "teach_back_node"
 
 
-# ---------------------------------------------------------------------------
 # (g) Fenced JSON: LLM wraps response in ```json ... ``` block -> parsed correctly
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

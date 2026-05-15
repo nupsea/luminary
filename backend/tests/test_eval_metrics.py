@@ -39,9 +39,7 @@ from run_eval import (  # noqa: E402
     thresholds_for_dataset,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _sample(question: str, hint: str, chunks: list[str], ground_truth: str = "GT") -> dict:
@@ -61,9 +59,7 @@ def test_cross_domain_datasets_and_thresholds_are_configured():
     assert thresholds_for_dataset("book_alice")["hit_rate_5"] == THRESHOLDS["hit_rate_5"]
 
 
-# ---------------------------------------------------------------------------
 # HR@5 tests
-# ---------------------------------------------------------------------------
 
 
 def test_hit_rate_exact_match():
@@ -130,9 +126,7 @@ def test_hit_rate_newline_in_chunk():
     assert compute_hit_rate_5(samples) == pytest.approx(1.0)
 
 
-# ---------------------------------------------------------------------------
 # MRR tests
-# ---------------------------------------------------------------------------
 
 
 def test_mrr_first_chunk_match():
@@ -167,9 +161,7 @@ def test_mrr_empty_samples():
     assert compute_mrr([]) == pytest.approx(0.0)
 
 
-# ---------------------------------------------------------------------------
 # Threshold / passed logic tests
-# ---------------------------------------------------------------------------
 
 
 def test_passed_true_when_above_thresholds():
@@ -210,9 +202,7 @@ def test_passed_false_when_mrr_below_threshold():
     assert "MRR" in violations[0]
 
 
-# ---------------------------------------------------------------------------
 # S226: multi-hint context_hint schema and metrics
-# ---------------------------------------------------------------------------
 
 
 def test_golden_entry_accepts_string_hint():

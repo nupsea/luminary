@@ -1,5 +1,5 @@
 // Type interfaces consumed by Monitoring.tsx and its sub-components.
-// API shapes sourced from generated `src/types/api.ts` (audit #15);
+// API shapes sourced from generated `src/types/api.ts`;
 // UI-only shapes and 4-field doc subsets stay inline below.
 
 import type { components } from "@/types/api"

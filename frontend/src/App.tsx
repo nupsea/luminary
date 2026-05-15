@@ -36,10 +36,6 @@ const Admin = lazy(() => import("./pages/Admin"))
 
 import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Prefetch helpers
-// ---------------------------------------------------------------------------
-
 const prefetchDocuments = (): Promise<unknown> =>
   apiGet("/documents", { sort: "newest", page: 1, page_size: 20 })
 
@@ -48,10 +44,6 @@ const prefetchLLMSettings = (): Promise<unknown> => apiGet("/settings/llm")
 const prefetchDueCards = (): Promise<unknown> => apiGet("/study/due")
 
 const prefetchProgressData = (): Promise<unknown> => apiGet("/study/due-count")
-
-// ---------------------------------------------------------------------------
-// QueryClient
-// ---------------------------------------------------------------------------
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -70,9 +62,7 @@ const queryClient = new QueryClient({
   },
 })
 
-// ---------------------------------------------------------------------------
 // Nav items with per-tab prefetch config
-// ---------------------------------------------------------------------------
 
 interface NavItemDef {
   to: string
@@ -116,9 +106,7 @@ const NAV_ITEMS: NavItemDef[] = [
   },
 ]
 
-// ---------------------------------------------------------------------------
 // Global top-of-page loading bar
-// ---------------------------------------------------------------------------
 
 function GlobalLoadingBar() {
   const isFetching = useIsFetching({
@@ -147,9 +135,7 @@ function GlobalLoadingBar() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Page skeleton (Suspense fallback for lazy routes)
-// ---------------------------------------------------------------------------
 
 function PageSkeleton() {
   return (
@@ -164,9 +150,7 @@ function PageSkeleton() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Sidebar with hover-prefetch
-// ---------------------------------------------------------------------------
 
 function Sidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -261,9 +245,7 @@ function Sidebar() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // App shell with startup prefetch
-// ---------------------------------------------------------------------------
 
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -444,10 +426,6 @@ function AppShell() {
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Root
-// ---------------------------------------------------------------------------
 
 function App() {
   return (

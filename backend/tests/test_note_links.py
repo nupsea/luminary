@@ -21,9 +21,7 @@ def _create_note(client, content: str) -> dict:
     return resp.json()
 
 
-# ---------------------------------------------------------------------------
 # POST /notes/{id}/links
-# ---------------------------------------------------------------------------
 
 
 def test_create_link_returns_201(client):
@@ -88,9 +86,7 @@ def test_create_link_409_duplicate(client):
     assert resp.status_code == 409
 
 
-# ---------------------------------------------------------------------------
 # DELETE /notes/{id}/links/{target_id}
-# ---------------------------------------------------------------------------
 
 
 def test_delete_link_returns_204(client):
@@ -123,9 +119,7 @@ def test_delete_link_404_not_found(client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # GET /notes/{id}/links (3-note chain)
-# ---------------------------------------------------------------------------
 
 
 def test_get_links_3_note_chain(client):
@@ -171,9 +165,7 @@ def test_get_links_3_note_chain(client):
     assert c_data["incoming"][0]["note_id"] == note_b["id"]
 
 
-# ---------------------------------------------------------------------------
 # GET /notes/autocomplete
-# ---------------------------------------------------------------------------
 
 
 def test_autocomplete_returns_matching_notes(client):

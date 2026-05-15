@@ -48,9 +48,7 @@ from app.models import ChunkModel, DocumentModel
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-# ---------------------------------------------------------------------------
 # Mock helpers
-# ---------------------------------------------------------------------------
 
 
 class _MockEmbeddingService:
@@ -80,9 +78,7 @@ class _MockEntityExtractor:
         ]
 
 
-# ---------------------------------------------------------------------------
 # Test DB + service fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -156,9 +152,7 @@ async def integration_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helper: run ingestion directly (bypassing HTTP for speed)
-# ---------------------------------------------------------------------------
 
 
 async def _ingest_fixture(
@@ -210,9 +204,7 @@ async def _ingest_fixture(
     return doc_id
 
 
-# ---------------------------------------------------------------------------
 # Integration tests
-# ---------------------------------------------------------------------------
 
 
 async def test_ingest_fiction(integration_db, monkeypatch):

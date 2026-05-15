@@ -1,5 +1,5 @@
 // Shared types for the Learning page and its sub-modules.
-// API shapes sourced from generated `src/types/api.ts` (audit #15).
+// API shapes sourced from generated `src/types/api.ts`.
 
 import type { components } from "@/types/api"
 

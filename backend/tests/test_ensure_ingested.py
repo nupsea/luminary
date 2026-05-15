@@ -15,9 +15,7 @@ sys.path.insert(0, str(REPO_ROOT / "evals"))
 
 import run_eval  # noqa: E402 -- must come after sys.path manipulation
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_documents_response(doc_id: str, title: str, stage: str = "complete") -> MagicMock:
@@ -33,9 +31,7 @@ def _make_documents_response(doc_id: str, title: str, stage: str = "complete") -
     return mock_resp
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 def test_ensure_ingested_skips_reingest_when_document_exists(tmp_path, monkeypatch):

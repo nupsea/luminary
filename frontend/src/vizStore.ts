@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// vizStore -- Zustand store for Viz tab entity type filter
-// Separate from the main AppStore to keep Viz state isolated.
-// ---------------------------------------------------------------------------
+// vizStore — Zustand store for Viz tab entity type filter, isolated from AppStore
 
 import { create } from "zustand"
 import { ALL_ENTITY_TYPES } from "./lib/vizUtils"

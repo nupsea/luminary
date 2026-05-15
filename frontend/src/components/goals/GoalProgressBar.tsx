@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalProgressBar -- bar + label showing goal progress.
-// ---------------------------------------------------------------------------
+// GoalProgressBar — bar + label showing goal progress
 
 import { Progress } from "@/components/ui/progress"
 import {

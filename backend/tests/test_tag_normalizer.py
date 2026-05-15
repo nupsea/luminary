@@ -21,9 +21,7 @@ from app.models import (
 )
 from app.services.tag_normalizer import SmartTagNormalizerService
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -60,9 +58,7 @@ def _make_tag(tag_id: str, display_name: str, note_count: int = 5) -> CanonicalT
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests: scan
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -178,9 +174,7 @@ async def test_scan_with_fewer_than_two_tags_returns_zero(test_db):
     assert count == 0
 
 
-# ---------------------------------------------------------------------------
 # Tests: accept
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

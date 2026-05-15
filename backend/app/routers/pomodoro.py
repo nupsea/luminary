@@ -26,11 +26,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pomodoro", tags=["pomodoro"])
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
 SurfaceLiteral = Literal["read", "recall", "write", "explore", "none"]
 StatusLiteral = Literal["active", "paused", "completed", "abandoned"]
 
@@ -84,9 +79,7 @@ def _to_response(row: PomodoroSessionModel) -> SessionResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints -- order matters: /active and /stats before /{session_id}/...
-# ---------------------------------------------------------------------------
+# Endpoints — /active and /stats must come before /{session_id}/...
 
 
 @router.get("/active")

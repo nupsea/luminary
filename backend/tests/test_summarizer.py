@@ -27,9 +27,7 @@ from app.services.summarizer import (
     _build_system_prompt,
 )
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -96,9 +94,7 @@ async def _insert_doc_and_chunks(
         await session.commit()
 
 
-# ---------------------------------------------------------------------------
 # _build_system_prompt — mode-specific prompt construction
-# ---------------------------------------------------------------------------
 
 
 def test_one_sentence_prompt_contains_grounding():
@@ -154,9 +150,7 @@ def test_qa_system_prompt_contains_markdown_instruction():
     assert "Markdown" in QA_SYSTEM_PROMPT
 
 
-# ---------------------------------------------------------------------------
 # SummarizationService.stream_summary — SSE token events
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -201,9 +195,7 @@ async def test_stream_token_values_match_llm_output(test_db):
     assert collected == tokens
 
 
-# ---------------------------------------------------------------------------
 # SummarizationService — small document: no map-reduce
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -222,9 +214,7 @@ async def test_small_document_passes_full_text_to_llm(test_db):
     assert mock_llm.captured_prompts[0] == "chunk one\n\nchunk two"
 
 
-# ---------------------------------------------------------------------------
 # SummarizationService — large document: map-reduce applied
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -245,9 +235,7 @@ async def test_large_document_triggers_map_reduce(test_db):
     assert mock_llm.call_count >= 2
 
 
-# ---------------------------------------------------------------------------
 # SummarizationService — summary stored in SQLite after streaming
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -275,9 +263,7 @@ async def test_completed_summary_stored_in_sqlite(test_db):
     assert stored.content == "A summary"
 
 
-# ---------------------------------------------------------------------------
 # POST /summarize/{document_id} — HTTP endpoint
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -358,9 +344,7 @@ async def test_endpoint_accepts_conversation_mode(test_db):
     assert "token" in first
 
 
-# ---------------------------------------------------------------------------
 # S71 — Cache and force_refresh tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

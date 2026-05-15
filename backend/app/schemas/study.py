@@ -14,9 +14,7 @@ from pydantic import BaseModel
 
 from app.schemas.flashcards import FlashcardResponse
 
-# ---------------------------------------------------------------------------
 # Sessions
-# ---------------------------------------------------------------------------
 
 
 class StartSessionRequest(BaseModel):
@@ -80,9 +78,7 @@ class SessionCardDetail(BaseModel):
     reviewed_at: datetime
 
 
-# ---------------------------------------------------------------------------
 # Gaps
-# ---------------------------------------------------------------------------
 
 
 class GapResult(BaseModel):
@@ -92,9 +88,7 @@ class GapResult(BaseModel):
     sample_questions: list[str]
 
 
-# ---------------------------------------------------------------------------
 # Teachback
-# ---------------------------------------------------------------------------
 
 
 class TeachbackRequest(BaseModel):
@@ -155,9 +149,7 @@ class TeachbackResultsBatchResponse(BaseModel):
     results: list[TeachbackResultItem]
 
 
-# ---------------------------------------------------------------------------
 # Stats & history
-# ---------------------------------------------------------------------------
 
 
 class SectionStabilityItem(BaseModel):
@@ -214,9 +206,7 @@ class DueCountResponse(BaseModel):
     due_today: int
 
 
-# ---------------------------------------------------------------------------
 # Collection dashboard
-# ---------------------------------------------------------------------------
 
 
 class CollectionTopic(BaseModel):
@@ -248,9 +238,7 @@ class StudyCollectionDashboardResponse(BaseModel):
     sub_collections: list[CollectionSubEnclave] = []
 
 
-# ---------------------------------------------------------------------------
 # Per-document session API (start/review)
-# ---------------------------------------------------------------------------
 
 
 class SessionCardResponse(BaseModel):
@@ -277,9 +265,7 @@ class SessionReviewResponse(BaseModel):
     next_card: SessionCardResponse | None = None
 
 
-# ---------------------------------------------------------------------------
 # Session plan
-# ---------------------------------------------------------------------------
 
 
 class SessionPlanItem(BaseModel):
@@ -295,9 +281,7 @@ class SessionPlanResponse(BaseModel):
     items: list[SessionPlanItem]
 
 
-# ---------------------------------------------------------------------------
 # Session remaining cards
-# ---------------------------------------------------------------------------
 
 
 class SessionRemainingResponse(BaseModel):
@@ -306,9 +290,7 @@ class SessionRemainingResponse(BaseModel):
     cards: list[FlashcardResponse]
 
 
-# ---------------------------------------------------------------------------
 # Study path & start concepts
-# ---------------------------------------------------------------------------
 
 
 class StudyPathItemResponse(BaseModel):

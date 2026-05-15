@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 NOT_FOUND_SENTINEL = "NOT_FOUND_IN_CONTENT"
 
-# ---------------------------------------------------------------------------
 # Query rewriting — resolve vague pronouns via Kuzu entity lookup
-# ---------------------------------------------------------------------------
 
 VAGUE_REF_RE = re.compile(
     r"\b(they|he|she|it|them|the author|the speaker|the protagonist|"
@@ -405,7 +403,6 @@ class QAService:
 
                 root_span.set_attribute("qa.intent", result.get("intent") or "")
 
-                # -----------------------------------------------------------------------
                 # __card__ SSE Protocol (established in S96; used by S97, S98, S99)
                 #
                 # A graph node that produces a structured UI card sets:
@@ -422,7 +419,6 @@ class QAService:
                 # Protocol contract: this prefix and the two-event sequence must not
                 # change in S97, S98, or S99. Extend by adding new node types only.
                 # "__card__" is exactly 8 characters; raw_answer[8:] strips the prefix.
-                # -----------------------------------------------------------------------
                 raw_answer = result.get("answer") or ""
                 if raw_answer.startswith("__card__"):
                     card_json_str = raw_answer[8:]  # strip "__card__" prefix (8 chars)

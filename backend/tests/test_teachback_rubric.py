@@ -20,9 +20,7 @@ from app.main import app
 from app.models import FlashcardModel, TeachbackResultModel
 from app.routers.study import _parse_rubric
 
-# ---------------------------------------------------------------------------
 # Pure function tests for _parse_rubric
-# ---------------------------------------------------------------------------
 
 VALID_RUBRIC = {
     "accuracy": {"score": 82, "evidence": "The source says events are immutable records."},
@@ -62,9 +60,7 @@ def test_parse_rubric_strips_markdown_fences():
     assert "accuracy" in result
 
 
-# ---------------------------------------------------------------------------
 # Test DB fixture (same pattern as test_feynman_router.py)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -133,9 +129,7 @@ _RUBRIC_RESPONSE = json.dumps(VALID_RUBRIC)
 _MALFORMED_RUBRIC = "this is not valid json for the rubric"
 
 
-# ---------------------------------------------------------------------------
 # Integration tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

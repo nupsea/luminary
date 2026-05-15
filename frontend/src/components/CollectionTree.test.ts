@@ -24,9 +24,7 @@ import type { CollectionTreeItem } from "@/lib/collectionUtils"
 
 const API_BASE = "http://localhost:7820"
 
-// ---------------------------------------------------------------------------
-// Fixtures -- mirrors GET /collections/tree response
-// ---------------------------------------------------------------------------
+// Fixtures — mirrors GET /collections/tree response
 
 const MOCK_TREE: CollectionTreeItem[] = [
   {
@@ -67,10 +65,6 @@ const MOCK_TREE: CollectionTreeItem[] = [
     children: [],
   },
 ]
-
-// ---------------------------------------------------------------------------
-// AC: CollectionTree renders correct item count from mock fixture
-// ---------------------------------------------------------------------------
 
 describe("CollectionTree item count from fixture", () => {
   it("counts 4 items total: 2 top-level + 2 children", () => {
@@ -113,10 +107,6 @@ describe("CollectionTree item count from fixture", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// AC: Checkbox check fires POST /collections/{id}/members (correct endpoint)
-// ---------------------------------------------------------------------------
-
 describe("Checkbox fires correct endpoints", () => {
   const NOTE_ID = "note-abc-123"
   const COL_ID = "col-1"
@@ -152,10 +142,6 @@ describe("Checkbox fires correct endpoints", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Collection tree nesting structure
-// ---------------------------------------------------------------------------
-
 describe("flattenCollectionTree nesting", () => {
   it("parent comes before its children in flat output", () => {
     const flat = flattenCollectionTree(MOCK_TREE)
@@ -168,10 +154,6 @@ describe("flattenCollectionTree nesting", () => {
     expect(flattenCollectionTree(MOCK_TREE)).toHaveLength(4)
   })
 })
-
-// ---------------------------------------------------------------------------
-// Collection membership (pre-checked state for NoteEditorDialog)
-// ---------------------------------------------------------------------------
 
 describe("collection checkbox pre-checked state", () => {
   it("builds checked set from note collection_ids", () => {

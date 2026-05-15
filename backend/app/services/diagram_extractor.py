@@ -1,6 +1,6 @@
 """DiagramExtractorService: extract typed Kuzu nodes and edges from diagram descriptions.
 
-Phase 2 enrichment job type 'diagram_extract' runs after 'image_analyze' completes.
+Job type 'diagram_extract' runs after 'image_analyze' completes.
 Reads ImageModel rows where image_type is a qualifying diagram type and description
 is not null, calls the default LLM to extract JSON (nodes + edges), then writes
 DiagramNode rows and diagram edges to Kuzu.

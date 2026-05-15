@@ -49,11 +49,6 @@ from app.services.llm import LLMUnavailableError, get_llm_service
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# FeynmanService
-# ---------------------------------------------------------------------------
-
-
 class FeynmanService:
     """Manages Feynman technique sessions."""
 

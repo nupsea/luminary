@@ -1,6 +1,6 @@
 """Pydantic request/response schemas for the notes router.
 
-Extracted from `app/routers/notes.py` as part of the audit #2 refactor.
+Extracted from `app/routers/notes.py`.
 The router re-exports these names verbatim via `__all__` so existing
 imports keep working.
 """

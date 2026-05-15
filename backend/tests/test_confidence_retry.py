@@ -14,9 +14,7 @@ from app.runtime.chat_graph import (
     confidence_gate_node,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_state(**overrides) -> dict:
@@ -42,9 +40,7 @@ def _make_state(**overrides) -> dict:
     return base
 
 
-# ---------------------------------------------------------------------------
 # confidence_gate_node and routing
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -85,9 +81,7 @@ def test_no_double_retry():
     assert _route_after_confidence_gate(state) == END
 
 
-# ---------------------------------------------------------------------------
 # augment_node
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

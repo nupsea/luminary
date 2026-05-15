@@ -31,9 +31,7 @@ from app.models import (
 )
 from app.services.suggestion_service import SuggestionService, _jaccard_similarity
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -78,9 +76,7 @@ def _make_section(doc_id: str, heading: str, order: int) -> SectionModel:
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) Book document returns suggestions with entity names
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -109,9 +105,7 @@ async def test_suggestions_book_document(db_session):
     assert "Ulysses" in all_text
 
 
-# ---------------------------------------------------------------------------
 # (b) Null document_id returns cross-document suggestions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -131,9 +125,7 @@ async def test_suggestions_null_document_id(db_session):
     assert "quantum entanglement" in all_text
 
 
-# ---------------------------------------------------------------------------
 # (c) Technical document returns concept/tradeoff suggestions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -161,9 +153,7 @@ async def test_suggestions_technical_document(db_session):
     assert "consistency" in all_text or "Redis" in all_text
 
 
-# ---------------------------------------------------------------------------
 # (d) Video document returns argument/evidence suggestions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -190,9 +180,7 @@ async def test_suggestions_video_document(db_session):
     assert "neural networks" in all_text or "Hinton" in all_text
 
 
-# ---------------------------------------------------------------------------
 # (e) Empty library returns onboarding suggestions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -210,9 +198,7 @@ async def test_suggestions_empty_library(db_session):
     assert "Upload" in all_text or "import" in all_text.lower()
 
 
-# ---------------------------------------------------------------------------
 # (f) Always returns exactly 4 suggestions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -234,9 +220,7 @@ async def test_suggestions_returns_four(db_session):
     assert len(result.suggestions) == 4
 
 
-# ---------------------------------------------------------------------------
 # (g) AC11: suggestions not in recent history
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -309,9 +293,7 @@ async def test_suggestions_not_in_history(db_session):
         assert item.id != ""
 
 
-# ---------------------------------------------------------------------------
 # (h) AC12: bloom level decreases per 4 asked questions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -375,9 +357,7 @@ async def test_bloom_level_decrease(db_session):
     assert level == 2
 
 
-# ---------------------------------------------------------------------------
 # (i) AC13: fallback to template when LLM raises ServiceUnavailableError
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -428,9 +408,7 @@ async def test_fallback_on_llm_unavailable(db_session):
     assert "Hero" in all_text
 
 
-# ---------------------------------------------------------------------------
 # (j) AC14: Jaccard > 0.7 filtered out
-# ---------------------------------------------------------------------------
 
 
 def test_jaccard_filter():

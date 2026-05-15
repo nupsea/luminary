@@ -1,10 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalsList -- Goals sub-section rendered above the deck list on the
-// Study tab and reused on the Progress tab.
-//
-// Each row shows: title, type icon, description preview (stripMarkdown), and a
-// type-aware progress bar. Clicking a row opens GoalDetailPanel.
-// ---------------------------------------------------------------------------
+// GoalsList — Goals sub-section on Study/Progress tabs; each row shows title, icon, preview, progress bar
 
 import { useState } from "react"
 import { useQueries, useQuery } from "@tanstack/react-query"

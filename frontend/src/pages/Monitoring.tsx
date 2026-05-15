@@ -62,10 +62,6 @@ import type {
 } from "./Monitoring/types"
 import { initSection } from "./Monitoring/types"
 
-// ---------------------------------------------------------------------------
-// Monitoring page
-// ---------------------------------------------------------------------------
-
 export default function Monitoring() {
   const [activeTab, setActiveTab] = useState<"overview" | "mastery">("overview")
   const [overviewState, setOverviewState] = useState<SectionState<MonitoringOverview | null>>(

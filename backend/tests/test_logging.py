@@ -20,9 +20,7 @@ def client():
         yield c
 
 
-# ---------------------------------------------------------------------------
 # Notes router
-# ---------------------------------------------------------------------------
 
 
 def test_create_note_emits_info_log(client, caplog):
@@ -54,9 +52,7 @@ def test_delete_note_emits_info_log(client, caplog):
     assert any("Deleted note" in m for m in msgs), f"Expected 'Deleted note' in {msgs}"
 
 
-# ---------------------------------------------------------------------------
 # Documents router
-# ---------------------------------------------------------------------------
 
 
 def test_patch_document_emits_info_log(client, caplog):
@@ -97,9 +93,7 @@ def test_bulk_delete_emits_info_log(client, caplog):
     assert any("Bulk deleted" in m for m in msgs), f"Expected 'Bulk deleted' in {msgs}"
 
 
-# ---------------------------------------------------------------------------
 # Study router
-# ---------------------------------------------------------------------------
 
 
 def test_start_session_emits_info_log(client, caplog):
@@ -125,9 +119,7 @@ def test_end_session_emits_info_log(client, caplog):
     )
 
 
-# ---------------------------------------------------------------------------
 # Documents router — additional coverage
-# ---------------------------------------------------------------------------
 
 
 def test_ingest_file_received_emits_info_log(client, caplog):

@@ -42,11 +42,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/goals", tags=["goals"])
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
 GoalTypeLiteral = Literal["studying", "read", "recall", "write", "explore"]
 TargetUnitLiteral = Literal["minutes", "pages", "cards", "notes", "turns"]
 StatusLiteral = Literal["active", "paused", "completed", "archived"]
@@ -135,9 +130,7 @@ def _to_response(row: LearningGoalModel) -> GoalResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints -- literal paths first, then parametric
-# ---------------------------------------------------------------------------
+# Endpoints — literal paths first, then parametric
 
 
 @router.get("", response_model=list[GoalResponse])

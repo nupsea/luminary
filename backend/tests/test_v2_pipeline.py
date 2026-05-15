@@ -36,9 +36,7 @@ pytest_plugins = ["tests.conftest_books"]
 # individually via @pytest.mark.slow.
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _book_ids(all_books_ingested: dict) -> dict[str, str]:
@@ -89,9 +87,7 @@ def _make_mock_llm(
     return mock_llm
 
 
-# ---------------------------------------------------------------------------
 # (a) test_section_summaries_generated_for_all_books
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -112,9 +108,7 @@ async def test_section_summaries_generated_for_all_books(all_books_ingested):
             )
 
 
-# ---------------------------------------------------------------------------
 # (b) test_document_summary_uses_fast_path
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -147,9 +141,7 @@ async def test_document_summary_uses_fast_path(all_books_ingested):
             )
 
 
-# ---------------------------------------------------------------------------
 # (c) test_intent_routing_summary
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -186,9 +178,7 @@ async def test_intent_routing_summary(all_books_ingested):
     )
 
 
-# ---------------------------------------------------------------------------
 # (d) test_intent_routing_factual
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -231,9 +221,7 @@ async def test_intent_routing_factual(all_books_ingested):
     )
 
 
-# ---------------------------------------------------------------------------
 # (e) test_intent_routing_comparative
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -258,9 +246,7 @@ async def test_intent_routing_comparative(all_books_ingested):
     assert done.get("done"), "No done event in SSE response"
 
 
-# ---------------------------------------------------------------------------
 # (f) test_intent_routing_relational
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -291,9 +277,7 @@ async def test_intent_routing_relational(all_books_ingested):
     assert done.get("done"), "No done event in SSE response"
 
 
-# ---------------------------------------------------------------------------
 # (g) test_library_overview_includes_all_three_books
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -342,9 +326,7 @@ async def test_library_overview_includes_all_three_books(all_books_ingested):
     )
 
 
-# ---------------------------------------------------------------------------
 # (h) test_keyword_summary_word — unit test, no DB required
-# ---------------------------------------------------------------------------
 
 
 def test_keyword_summary_word():
@@ -356,9 +338,7 @@ def test_keyword_summary_word():
     assert conf > 0.0, f"Expected positive confidence, got {conf}"
 
 
-# ---------------------------------------------------------------------------
 # (i) test_streaming_not_buffered — unit test, no DB required
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

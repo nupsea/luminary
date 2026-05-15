@@ -13,11 +13,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
-// These shapes stay inline (audit #15): the /engagement/* endpoints
+// These shapes stay inline: the /engagement/* endpoints
 // declare `-> dict` in the router so there is no generated schema to
 // alias against. Match the runtime payload by eye until those
 // endpoints adopt typed response models.
@@ -61,9 +59,7 @@ interface FocusStats {
   days: number
 }
 
-// ---------------------------------------------------------------------------
 // Fetchers
-// ---------------------------------------------------------------------------
 
 // Browser tz offset in minutes (positive west of UTC). Re-read per call so
 // fixtures / DST transitions get the current value rather than a stale one
@@ -101,9 +97,7 @@ const fetchFocusStats = (): Promise<FocusStats> =>
     tz_offset_minutes: tzOffset(),
   })
 
-// ---------------------------------------------------------------------------
 // Icon map for achievements
-// ---------------------------------------------------------------------------
 
 const ICON_MAP: Record<string, typeof Trophy> = {
   flame: Flame,
@@ -113,9 +107,7 @@ const ICON_MAP: Record<string, typeof Trophy> = {
   "sticky-note": Trophy,
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export function StudyHabitsSection() {
   const { data: xpHistory, isLoading: historyLoading } = useQuery({
@@ -259,9 +251,7 @@ export function StudyHabitsSection() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Sub-components
-// ---------------------------------------------------------------------------
 
 function QuickStat({
   icon: Icon,

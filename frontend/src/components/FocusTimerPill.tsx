@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// FocusTimerPill -- global focus timer pill mounted in the app header.
-// Drives a Pomodoro session against the /pomodoro/* endpoints.
-// ---------------------------------------------------------------------------
+// FocusTimerPill — global focus timer pill in the app header, drives Pomodoro sessions against /pomodoro/*
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {

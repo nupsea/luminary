@@ -34,10 +34,6 @@ import { logger } from "@/lib/logger"
 import { apiGet } from "@/lib/apiClient"
 import type { components } from "@/types/api"
 
-// ---------------------------------------------------------------------------
-// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
-// ---------------------------------------------------------------------------
-
 type TraceItem = components["schemas"]["TraceItem"]
 type TracesResponse = components["schemas"]["TracesResponse"]
 type MonitoringOverview = components["schemas"]["MonitoringOverview"]
@@ -61,10 +57,6 @@ interface Document {
   content_type: string
 }
 
-// ---------------------------------------------------------------------------
-// Per-section state
-// ---------------------------------------------------------------------------
-
 interface SectionState<T> {
   loading: boolean
   data: T
@@ -75,9 +67,7 @@ function initSection<T>(data: T): SectionState<T> {
   return { loading: true, data, error: false }
 }
 
-// ---------------------------------------------------------------------------
 // API — throw on non-ok so catch handlers set error: true
-// ---------------------------------------------------------------------------
 
 const fetchOverview = (): Promise<MonitoringOverview> =>
   apiGet<MonitoringOverview>("/monitoring/overview")
@@ -100,10 +90,6 @@ async function fetchDocuments(): Promise<Document[]> {
 
 const fetchPhoenixUrl = (): Promise<PhoenixUrl> =>
   apiGet<PhoenixUrl>("/monitoring/phoenix-url")
-
-// ---------------------------------------------------------------------------
-// Helper components
-// ---------------------------------------------------------------------------
 
 function StatusBadge({ status }: { status: string }) {
   const isError = status === "error"
@@ -204,10 +190,6 @@ function TraceDetailPanel({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Empty / Error states
-// ---------------------------------------------------------------------------
-
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
@@ -244,9 +226,7 @@ function MetricCardSkeleton() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Model Usage — PieChart + latency BarChart
-// ---------------------------------------------------------------------------
 
 const PIE_COLORS = ["#6366f1", "#0ea5e9", "#22c55e", "#f59e0b", "#ec4899"]
 
@@ -306,9 +286,7 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Traces card — Phoenix link
-// ---------------------------------------------------------------------------
 
 function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
   const enabled = phoenix?.enabled ?? false
@@ -341,9 +319,7 @@ function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Mastery types and API
-// ---------------------------------------------------------------------------
 
 type MasteryConceptsResponse = components["schemas"]["MasteryConceptsOut"]
 type MasteryHeatmapResponse = components["schemas"]["MasteryHeatmapOut"]
@@ -555,9 +531,7 @@ function MasteryPanel({ documents }: { documents: Document[] }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Admin (Dev Tools) page -- dev-centric panels moved from Progress tab in 
-// ---------------------------------------------------------------------------
+// Admin — dev tools panel
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<"overview" | "mastery">("overview")

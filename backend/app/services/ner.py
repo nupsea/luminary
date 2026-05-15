@@ -62,9 +62,7 @@ _TECH_ENTITY_TYPES: frozenset[str] = frozenset(
     }
 )
 
-# ---------------------------------------------------------------------------
 # Noise-filter constants
-# ---------------------------------------------------------------------------
 
 # English pronouns — personal, possessive, reflexive, demonstrative, archaic.
 # These should never be extracted as named entities.
@@ -341,11 +339,6 @@ _MIN_CHUNK_FREQ = 2
 _NER_BATCH_SIZE = 8
 
 
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
-
-
 def _is_valid_entity(name: str, entity_type: str) -> bool:
     """Return False for clearly noisy entity candidates."""
     tokens = name.split()
@@ -391,10 +384,6 @@ def _is_valid_entity(name: str, entity_type: str) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
-
 _extractor: "EntityExtractor | None" = None
 
 
@@ -404,11 +393,6 @@ def get_entity_extractor() -> "EntityExtractor":
         settings = get_settings()
         _extractor = EntityExtractor(settings.DATA_DIR)
     return _extractor
-
-
-# ---------------------------------------------------------------------------
-# EntityExtractor
-# ---------------------------------------------------------------------------
 
 
 class EntityExtractor:

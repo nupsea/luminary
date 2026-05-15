@@ -28,9 +28,7 @@ FIXTURES_FULL_DIR = Path(__file__).parent / "fixtures" / "full"
 pytestmark = pytest.mark.slow
 
 
-# ---------------------------------------------------------------------------
 # Fixture: isolated full-pipeline environment
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -73,9 +71,7 @@ async def graph_api_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

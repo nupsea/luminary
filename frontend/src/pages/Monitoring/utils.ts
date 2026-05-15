@@ -4,9 +4,7 @@
 
 import type { EvalHistoryItem, EvalRun, ModelUsageItem } from "./types"
 
-// ---------------------------------------------------------------------------
 // Colour palettes
-// ---------------------------------------------------------------------------
 
 export const DATASET_COLORS: Record<string, string> = {
   book: "#6366f1",
@@ -36,9 +34,7 @@ export const EVAL_THRESHOLDS: Record<string, number> = {
   context_precision: 0.65,
 }
 
-// ---------------------------------------------------------------------------
 // Chart data builders
-// ---------------------------------------------------------------------------
 
 export function buildSparklineData(history: EvalHistoryItem[]) {
   const datasets = Array.from(new Set(history.map((h) => h.dataset)))
@@ -85,9 +81,7 @@ export function buildPieData(modelUsage: ModelUsageItem[]) {
   ].filter((d) => d.value > 0)
 }
 
-// ---------------------------------------------------------------------------
 // Score / mastery colour mappers
-// ---------------------------------------------------------------------------
 
 export function scoreColor(value: number | null, metricKey: string): string {
   if (value === null) return "text-muted-foreground"

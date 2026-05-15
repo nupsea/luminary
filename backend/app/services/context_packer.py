@@ -12,9 +12,7 @@ All I/O happens in the caller (synthesize_node in chat_graph.py).
 
 import litellm
 
-# ---------------------------------------------------------------------------
 # Token count — exact via litellm.token_counter (wraps tiktoken, graceful fallback)
-# ---------------------------------------------------------------------------
 
 
 def _token_estimate(text: str, model: str = "gpt-3.5-turbo") -> int:
@@ -26,9 +24,7 @@ def _token_estimate(text: str, model: str = "gpt-3.5-turbo") -> int:
     return litellm.token_counter(model=model, text=text)
 
 
-# ---------------------------------------------------------------------------
 # LCS-based similarity — determines whether a chunk is near-duplicate
-# ---------------------------------------------------------------------------
 
 _LCS_CHAR_LIMIT = 300  # truncate inputs for O(n²) DP performance
 
@@ -61,9 +57,7 @@ def _lcs_ratio(a: str, b: str) -> float:
     return longest / max(la, lb)
 
 
-# ---------------------------------------------------------------------------
 # _cap_per_document — per-doc diversity cap
-# ---------------------------------------------------------------------------
 
 
 def _cap_per_document(chunks: list[dict], max_per_doc: int = 2) -> list[dict]:
@@ -83,9 +77,7 @@ def _cap_per_document(chunks: list[dict], max_per_doc: int = 2) -> list[dict]:
     return result
 
 
-# ---------------------------------------------------------------------------
 # pack_context — main public function
-# ---------------------------------------------------------------------------
 
 
 def pack_context(
@@ -114,9 +106,7 @@ def pack_context(
     if not chunks:
         return ""
 
-    # -----------------------------------------------------------------------
     # 1. Normalise chunk dicts — accept 'score' as alias for 'relevance_score'
-    # -----------------------------------------------------------------------
     normalised: list[dict] = []
     for c in chunks:
         score = c.get("relevance_score") or c.get("score") or 0.0
@@ -132,9 +122,7 @@ def pack_context(
             }
         )
 
-    # -----------------------------------------------------------------------
     # 2. Group chunks by section key; sort groups by max relevance descending
-    # -----------------------------------------------------------------------
     groups: dict[object, list[dict]] = {}
     for c in normalised:
         key = c["_group_key"]
@@ -151,9 +139,7 @@ def pack_context(
     for grp in sorted_groups:
         grp.sort(key=lambda c: c["relevance_score"], reverse=True)
 
-    # -----------------------------------------------------------------------
     # 3. Assemble output respecting token_budget and dedup_ratio
-    # -----------------------------------------------------------------------
     parts: list[str] = []
     emitted_texts: list[str] = []  # track for near-duplicate detection
     total_tokens = 0

@@ -22,9 +22,7 @@ import type {
   SelectedNodeInfo,
 } from "./Viz/types"
 
-// ---------------------------------------------------------------------------
 // Error boundary
-// ---------------------------------------------------------------------------
 
 class VizErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   constructor(props: { children: ReactNode }) {
@@ -76,10 +74,6 @@ import { useSigma } from "./Viz/useSigma"
 import { VizCanvas } from "./Viz/VizCanvas"
 import { VizSidebar } from "./Viz/VizSidebar"
 
-
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
 
 export default function Viz() {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
@@ -330,9 +324,7 @@ export default function Viz() {
       }),
   })
 
-  // ---------------------------------------------------------------------------
   // Render helpers
-  // ---------------------------------------------------------------------------
   const showEmpty =
     !noDocSelected &&
     !isLoading &&

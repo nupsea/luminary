@@ -20,9 +20,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 
-# ---------------------------------------------------------------------------
 # Shared fixture — in-memory SQLite DB
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -51,9 +49,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 _UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
 
@@ -64,9 +60,7 @@ def _assert_detail_str(body: dict) -> None:
     assert isinstance(body["detail"], str), f"'detail' is not a string: {body['detail']!r}"
 
 
-# ---------------------------------------------------------------------------
 # /documents — 404 on unknown ID
-# ---------------------------------------------------------------------------
 
 
 async def test_get_document_unknown_id_returns_404(test_db):
@@ -76,9 +70,7 @@ async def test_get_document_unknown_id_returns_404(test_db):
     _assert_detail_str(r.json())
 
 
-# ---------------------------------------------------------------------------
 # /documents/{id}/audio — S120 audio endpoint contracts
-# ---------------------------------------------------------------------------
 
 
 async def test_get_audio_unknown_document_returns_404(test_db):
@@ -173,9 +165,7 @@ async def test_patch_document_unknown_id_returns_404(test_db):
     _assert_detail_str(r.json())
 
 
-# ---------------------------------------------------------------------------
 # /documents/ingest — 422 missing file, 400 unsupported type
-# ---------------------------------------------------------------------------
 
 
 async def test_ingest_missing_file_returns_422(test_db):
@@ -210,9 +200,7 @@ async def test_ingest_unsupported_binary_returns_400(test_db):
     _assert_detail_str(r.json())
 
 
-# ---------------------------------------------------------------------------
 # /summarize — 404 on unknown doc, 422 on missing mode
-# ---------------------------------------------------------------------------
 
 
 async def test_summarize_unknown_doc_returns_404(test_db):
@@ -231,9 +219,7 @@ async def test_summarize_missing_mode_returns_422(test_db):
     assert r.status_code == 422
 
 
-# ---------------------------------------------------------------------------
 # /flashcards — 422 on missing fields, 404 on bad IDs
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_flashcards_missing_document_id_returns_422(test_db):
@@ -263,9 +249,7 @@ async def test_review_flashcard_unknown_id_returns_404(test_db):
     _assert_detail_str(r.json())
 
 
-# ---------------------------------------------------------------------------
 # /notes — 422 on missing content, 404 on bad IDs
-# ---------------------------------------------------------------------------
 
 
 async def test_create_note_missing_content_returns_422(test_db):
@@ -288,9 +272,7 @@ async def test_delete_note_unknown_id_returns_404(test_db):
     _assert_detail_str(r.json())
 
 
-# ---------------------------------------------------------------------------
 # /search — 422 on missing q
-# ---------------------------------------------------------------------------
 
 
 async def test_search_missing_query_returns_422(test_db):
@@ -299,9 +281,7 @@ async def test_search_missing_query_returns_422(test_db):
     assert r.status_code == 422
 
 
-# ---------------------------------------------------------------------------
 # /qa — 422 on missing question
-# ---------------------------------------------------------------------------
 
 
 async def test_qa_missing_question_returns_422(test_db):
@@ -310,9 +290,7 @@ async def test_qa_missing_question_returns_422(test_db):
     assert r.status_code == 422
 
 
-# ---------------------------------------------------------------------------
 # /monitoring — graceful responses
-# ---------------------------------------------------------------------------
 
 
 async def test_monitoring_evals_returns_200_list(test_db):

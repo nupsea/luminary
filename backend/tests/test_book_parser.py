@@ -15,9 +15,7 @@ import pytest
 
 from app.services.book_parser import BookParser
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 DATA_BOOKS = Path(__file__).parents[2] / "DATA" / "books"
 DOCMATE_DATA = Path("/Users/sethurama/DEV/LM/doc-mate/DATA")
@@ -35,9 +33,7 @@ def _book(name: str) -> Path:
     pytest.skip(f"Book file not available: {name}")
 
 
-# ---------------------------------------------------------------------------
 # Metadata stripping
-# ---------------------------------------------------------------------------
 
 
 class TestGutenbergStripping:
@@ -72,9 +68,7 @@ class TestGutenbergStripping:
                 )
 
 
-# ---------------------------------------------------------------------------
 # Pattern P1 — CHAPTER N. (Alice in Wonderland)
-# ---------------------------------------------------------------------------
 
 
 class TestP1AliceChapters:
@@ -103,9 +97,7 @@ class TestP1AliceChapters:
             )
 
 
-# ---------------------------------------------------------------------------
 # Pattern P2 — Roman numeral + subtitle on next line (Time Machine)
-# ---------------------------------------------------------------------------
 
 
 class TestP2TimeMachineChapters:
@@ -123,9 +115,7 @@ class TestP2TimeMachineChapters:
             assert "Gutenberg" not in s.heading
 
 
-# ---------------------------------------------------------------------------
 # Pattern P3 — Roman numeral + CAPS title inline (Sherlock Holmes)
-# ---------------------------------------------------------------------------
 
 
 class TestP3SherlockHolmes:
@@ -148,9 +138,7 @@ class TestP3SherlockHolmes:
         )
 
 
-# ---------------------------------------------------------------------------
 # Pattern P4 — Centred roman numeral (Great Gatsby)
-# ---------------------------------------------------------------------------
 
 
 class TestP4GreatGatsby:
@@ -162,9 +150,7 @@ class TestP4GreatGatsby:
         assert len(result.sections) >= 9, f"Got {len(result.sections)} sections"
 
 
-# ---------------------------------------------------------------------------
 # Pattern P5 — Chapter N: Title (tech / modern books)
-# ---------------------------------------------------------------------------
 
 
 class TestP5TechChapter:
@@ -178,9 +164,7 @@ class TestP5TechChapter:
         assert result is None or len(result.sections) >= 1
 
 
-# ---------------------------------------------------------------------------
 # Pattern P6 — PART N / BOOK N (Gulliver's Travels — superstructure)
-# ---------------------------------------------------------------------------
 
 
 class TestP6GulliversTravels:
@@ -192,9 +176,7 @@ class TestP6GulliversTravels:
         assert len(result.sections) >= 4, f"Got {len(result.sections)} sections"
 
 
-# ---------------------------------------------------------------------------
 # Pattern P7 — CHAPTER N (Gita-style, confirmed by HERE ENDETH)
-# ---------------------------------------------------------------------------
 
 
 class TestP7BhagavadGita:
@@ -213,9 +195,7 @@ class TestP7BhagavadGita:
         assert any("CHAPTER" in h.upper() for h in headings), str(headings[:5])
 
 
-# ---------------------------------------------------------------------------
 # Pattern P8 — Bible book headings
-# ---------------------------------------------------------------------------
 
 
 class TestP8Bible:
@@ -235,9 +215,7 @@ class TestP8Bible:
         assert genesis_found, f"Genesis heading not found in: {headings_lower[:10]}"
 
 
-# ---------------------------------------------------------------------------
 # Marcus Aurelius — ordinal BOOK (P6b)
-# ---------------------------------------------------------------------------
 
 
 class TestMarcusAurelius:
@@ -248,9 +226,7 @@ class TestMarcusAurelius:
         assert len(result.sections) >= 12, f"Got {len(result.sections)} sections"
 
 
-# ---------------------------------------------------------------------------
 # Fallback — unstructured text should return None
-# ---------------------------------------------------------------------------
 
 
 class TestFallbackToNone:
@@ -272,9 +248,7 @@ class TestFallbackToNone:
         assert result is None, "Expected None for flat unstructured text"
 
 
-# ---------------------------------------------------------------------------
 # Multi-format: Markdown
-# ---------------------------------------------------------------------------
 
 
 class TestMarkdownFormat:
@@ -305,9 +279,7 @@ class TestMarkdownFormat:
         assert result.sections[0].level == 1
 
 
-# ---------------------------------------------------------------------------
 # Synthetic unit: _strip_gutenberg
-# ---------------------------------------------------------------------------
 
 
 class TestStripGutenberg:

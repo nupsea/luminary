@@ -20,9 +20,7 @@ from app.models import (
     SummaryModel,
 )
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -64,9 +62,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return DocumentModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # Unit tests for learning_status derivation
-# ---------------------------------------------------------------------------
 
 
 def test_derive_learning_status_not_started():
@@ -93,9 +89,7 @@ def test_derive_learning_status_studied():
     assert _derive_learning_status(1, 3, 1) == "studied"
 
 
-# ---------------------------------------------------------------------------
 # GET /documents endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_list_documents_empty(test_db):
@@ -282,9 +276,7 @@ async def test_list_documents_pagination(test_db):
     assert len(data2["items"]) == 1  # 5 docs, page 3 of size 2 → 1 item
 
 
-# ---------------------------------------------------------------------------
 # PATCH /documents/{id} endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_patch_document_title(test_db):
@@ -327,9 +319,7 @@ async def test_patch_document_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # DELETE /documents/{id} endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_delete_document_removes_doc_from_sqlite(test_db):
@@ -437,9 +427,7 @@ async def test_delete_document_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # POST /documents/bulk-delete endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_bulk_delete_removes_docs(test_db):
@@ -488,9 +476,7 @@ async def test_bulk_delete_skips_missing(test_db):
     assert resp.json()["count"] == 1
 
 
-# ---------------------------------------------------------------------------
 # PATCH /documents/{id}/tags endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_patch_tags_endpoint(test_db):
@@ -519,9 +505,7 @@ async def test_patch_tags_endpoint_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # chunk_count in GET /documents
-# ---------------------------------------------------------------------------
 
 
 async def test_documents_list_includes_chunk_count(test_db):
@@ -567,9 +551,7 @@ async def test_documents_chunk_count_is_zero_for_fresh_doc(test_db):
     assert items[0]["chunk_count"] == 0
 
 
-# ---------------------------------------------------------------------------
 # GET /documents/{id}/objectives endpoint tests (S132)
-# ---------------------------------------------------------------------------
 
 
 async def test_objectives_returns_empty_for_fiction(test_db):

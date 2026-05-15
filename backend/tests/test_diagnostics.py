@@ -30,9 +30,7 @@ MANIFEST: list[dict] = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 pytest_plugins = ["tests.conftest_books"]
 
 
-# ---------------------------------------------------------------------------
 # Fast test DB fixture (in-memory SQLite, no ML)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -56,9 +54,7 @@ async def _fast_test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Fast test (no ML required)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -69,9 +65,7 @@ async def test_diagnostics_not_found(_fast_test_db):
     assert resp.status_code == 404, f"Expected 404, got {resp.status_code}: {resp.text}"
 
 
-# ---------------------------------------------------------------------------
 # Slow parametrized tests (require all_books_ingested fixture)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

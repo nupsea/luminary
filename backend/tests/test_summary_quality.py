@@ -38,9 +38,7 @@ from app.services.section_summarizer import (
 )
 from app.services.summarizer import MODE_INSTRUCTIONS, SummarizationService
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -85,9 +83,7 @@ async def _insert_document(factory, doc_id: str) -> None:
         await session.commit()
 
 
-# ---------------------------------------------------------------------------
 # (e) test_is_metadata_section_true_for_gutenberg — pure function, no DB
-# ---------------------------------------------------------------------------
 
 
 def test_is_metadata_section_true_for_gutenberg():
@@ -114,9 +110,7 @@ def test_is_metadata_section_true_for_copyright_in_text():
     )
 
 
-# ---------------------------------------------------------------------------
 # (f) test_is_metadata_section_false_for_content — pure function, no DB
-# ---------------------------------------------------------------------------
 
 
 def test_is_metadata_section_false_for_content():
@@ -133,9 +127,7 @@ def test_is_metadata_section_false_for_named_characters():
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) test_metadata_section_filtered_in_generate
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -193,9 +185,7 @@ async def test_metadata_section_filtered_in_generate(test_db):
     assert mock_llm.call_count == 3, f"Expected 3 LLM calls (not 4), got {mock_llm.call_count}"
 
 
-# ---------------------------------------------------------------------------
 # (b) test_metadata_section_filtered_in_build_input
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -241,9 +231,7 @@ async def test_metadata_section_filtered_in_build_input(test_db):
     assert "Holmes" in result, "Content rows should still appear in the output"
 
 
-# ---------------------------------------------------------------------------
 # (c) test_build_input_returns_none_when_only_metadata
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -288,9 +276,7 @@ async def test_build_input_returns_none_when_only_metadata(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # (d) test_executive_prompt_not_listing_summaries
-# ---------------------------------------------------------------------------
 
 
 def test_executive_prompt_not_listing_summaries():

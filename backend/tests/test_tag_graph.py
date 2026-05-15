@@ -17,9 +17,7 @@ from app.services.tag_graph import (
     invalidate_tag_graph_cache,
 )
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -67,9 +65,7 @@ def _make_index_row(note_id: str, tag_full: str) -> NoteTagIndexModel:
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests: co-occurrence weight correctness
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -165,9 +161,7 @@ async def test_cooccurrence_multiple_edges(test_db):
     assert frozenset(["b", "c"]) in pairs
 
 
-# ---------------------------------------------------------------------------
 # Tests: cache invalidation
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -202,9 +196,7 @@ async def test_cache_invalidation(test_db):
     assert result3.generated_at != ts1, "After invalidation, generated_at should change"
 
 
-# ---------------------------------------------------------------------------
 # Tests: GET /tags/graph HTTP endpoint
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

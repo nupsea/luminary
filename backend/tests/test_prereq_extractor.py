@@ -24,9 +24,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.services.prereq_extractor import _parse_prereqs
 
-# ---------------------------------------------------------------------------
 # Pure function tests (AC2)
-# ---------------------------------------------------------------------------
 
 
 def test_parse_prereqs_valid():
@@ -97,9 +95,7 @@ def test_parse_prereqs_missing_fields():
     assert result == []
 
 
-# ---------------------------------------------------------------------------
 # Integration test: enrich() writes Kuzu edges (AC4)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

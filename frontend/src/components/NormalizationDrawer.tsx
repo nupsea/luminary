@@ -25,10 +25,6 @@ import {
 } from "@/components/ui/dialog"
 import { apiGet, apiPost } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface TagInfo {
   id: string
   display_name: string
@@ -46,10 +42,6 @@ interface MergeSuggestion {
 
 type RowState = "pending" | "accepting" | "accepted" | "rejecting" | "rejected" | "error"
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 const fetchSuggestions = (): Promise<MergeSuggestion[]> =>
   apiGet<MergeSuggestion[]>("/tags/normalization/suggestions")
 
@@ -61,9 +53,7 @@ const acceptSuggestion = (id: string): Promise<{ affected_notes: number }> =>
 const rejectSuggestion = (id: string): Promise<void> =>
   apiPost(`/tags/normalization/suggestions/${id}/reject`)
 
-// ---------------------------------------------------------------------------
 // SuggestionRow
-// ---------------------------------------------------------------------------
 
 interface RowMeta {
   rowState: RowState
@@ -158,10 +148,6 @@ function SuggestionRow({ suggestion, meta, onAccept, onReject }: SuggestionRowPr
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// NormalizationDrawer
-// ---------------------------------------------------------------------------
 
 interface NormalizationDrawerProps {
   open: boolean

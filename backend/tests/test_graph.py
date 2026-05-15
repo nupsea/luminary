@@ -5,9 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.services.graph import KuzuService
 
-# ---------------------------------------------------------------------------
 # Unit tests for KuzuService (uses a temp directory)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -157,9 +155,7 @@ def test_upsert_entity_writes_aliases(graph_svc: KuzuService):
     assert aliases_val == "holmes|mr. holmes"
 
 
-# ---------------------------------------------------------------------------
 # Integration tests via FastAPI TestClient
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -216,9 +212,7 @@ def test_get_graph_empty_doc_ids(client: TestClient):
     assert data["nodes"] == []
 
 
-# ---------------------------------------------------------------------------
 # S117: PREREQUISITE_OF edges and learning-path
-# ---------------------------------------------------------------------------
 
 
 def test_add_prerequisite_creates_edge(graph_svc: KuzuService):
@@ -355,9 +349,7 @@ def test_get_learning_path_cycle_handled_gracefully(graph_svc: KuzuService):
     assert isinstance(result["nodes"], list)
 
 
-# ---------------------------------------------------------------------------
 # S135: Tech relation edges
-# ---------------------------------------------------------------------------
 
 
 def test_schema_creates_tech_edge_tables(graph_svc: KuzuService):
@@ -533,10 +525,8 @@ def test_entities_endpoint_not_captured_by_document_id_route(client):
     assert "entities" in data  # entity list response, not graph document response
 
 
-# ---------------------------------------------------------------------------
 # S139: add_prerequisite_with_section, has_prerequisite_edges,
 #       get_entry_point_concepts, get_prerequisite_edges_for_graph
-# ---------------------------------------------------------------------------
 
 
 def test_add_prerequisite_with_section_creates_edge(graph_svc: KuzuService):
@@ -623,9 +613,7 @@ def test_get_prerequisite_edges_for_graph_wire_format(graph_svc: KuzuService):
     assert e["relation"] == "PREREQUISITE_OF"
 
 
-# ---------------------------------------------------------------------------
 # S172: Note nodes in Viz graph (include_notes param)
-# ---------------------------------------------------------------------------
 
 
 def _upsert_note_for_entity(

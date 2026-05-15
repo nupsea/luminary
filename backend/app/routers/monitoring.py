@@ -39,11 +39,6 @@ _phoenix_reachability_cache: dict = {}
 _SCORES_HISTORY_PATH = Path(__file__).parent.parent.parent.parent / "evals" / "scores_history.jsonl"
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
 class TraceItem(BaseModel):
     span_id: str
     trace_id: str
@@ -129,11 +124,6 @@ class PhoenixUrlResponse(BaseModel):
     enabled: bool
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 async def _check_phoenix_running() -> bool:
     try:
         async with httpx.AsyncClient(timeout=_TRACES_TIMEOUT) as client:
@@ -200,11 +190,6 @@ async def _fetch_phoenix_spans(limit: int = 50) -> list[TraceItem]:
     except Exception as exc:
         logger.debug("Phoenix span fetch failed: %s", exc)
         return []
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/phoenix-url", response_model=PhoenixUrlResponse)

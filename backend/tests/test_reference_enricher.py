@@ -23,9 +23,7 @@ from app.main import app
 from app.models import DocumentModel, SectionSummaryModel, WebReferenceModel
 from app.services.reference_enricher import ReferenceEnricherService, sort_by_quality
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -100,9 +98,7 @@ def _make_mock_llm_response(refs: list[dict]) -> MagicMock:
     return mock_resp
 
 
-# ---------------------------------------------------------------------------
 # AC3: Pure function test -- no I/O
-# ---------------------------------------------------------------------------
 
 
 def test_sort_by_quality_orders_official_before_tutorial_before_blog():
@@ -130,9 +126,7 @@ def test_sort_by_quality_unknown_ranks_last():
     assert sorted_refs[-1]["source_quality"] == "unknown"
 
 
-# ---------------------------------------------------------------------------
 # AC2: Mock LLM -- >=3 refs stored from 3+ term summary
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -195,9 +189,7 @@ async def test_enrich_creates_refs_from_multi_term_summary(test_db):
     assert len(rows) >= 3
 
 
-# ---------------------------------------------------------------------------
 # AC5: provider='none' -> all is_llm_suggested=True, no HTTP calls
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -278,9 +270,7 @@ async def test_no_http_calls_when_provider_none(test_db, monkeypatch):
     get_settings.cache_clear()
 
 
-# ---------------------------------------------------------------------------
 # AC4: Integration test -- enrichment runs, rows have source_quality set
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -329,9 +319,7 @@ async def test_enrichment_creates_rows_with_source_quality(test_db):
     assert all(r.source_quality != "" for r in rows)
 
 
-# ---------------------------------------------------------------------------
 # AC6: API -- GET /references/documents/{id} returns [] for fiction book
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

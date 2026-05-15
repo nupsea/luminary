@@ -12,10 +12,6 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Prompt templates
-# ---------------------------------------------------------------------------
-
 _FEYNMAN_SYSTEM_TMPL = (
     "You are a Socratic tutor using the Feynman technique. "
     "The learner is studying the concept: {concept}. "
@@ -81,11 +77,6 @@ def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-
-
-# ---------------------------------------------------------------------------
-# Gap parsing
-# ---------------------------------------------------------------------------
 
 
 def _parse_gaps(raw: str) -> list[str]:

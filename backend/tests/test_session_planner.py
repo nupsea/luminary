@@ -6,9 +6,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.routers.study import _build_session_plan
 
-# ---------------------------------------------------------------------------
 # (a) Review item appears first and is prioritized when due_count > 0
-# ---------------------------------------------------------------------------
 
 
 def test_build_plan_review_priority():
@@ -34,9 +32,7 @@ def test_build_plan_review_minutes_floor():
     assert items[0].minutes == 5
 
 
-# ---------------------------------------------------------------------------
 # (b) Total items capped at 5
-# ---------------------------------------------------------------------------
 
 
 def test_build_plan_caps_at_5():
@@ -62,9 +58,7 @@ def test_build_plan_max_2_gap_items():
     assert len(gap_items) == 2
 
 
-# ---------------------------------------------------------------------------
 # (c) Empty inputs return empty list
-# ---------------------------------------------------------------------------
 
 
 def test_build_plan_empty_inputs():
@@ -78,9 +72,7 @@ def test_build_plan_empty_inputs():
     assert items == []
 
 
-# ---------------------------------------------------------------------------
 # (d) API returns HTTP 200 and valid response schema
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -99,9 +91,7 @@ def test_session_plan_api_200(client):
     assert body["total_minutes"] == 20
 
 
-# ---------------------------------------------------------------------------
 # (e) API rejects minutes outside bounds (ge=5, le=120)
-# ---------------------------------------------------------------------------
 
 
 def test_session_plan_api_bounds_high(client):

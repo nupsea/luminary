@@ -38,10 +38,6 @@ import { CollectionHealthPanel } from "@/components/CollectionHealthPanel"
 export type { CollectionTreeItem }
 export { flattenCollectionTree }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 const fetchCollectionTree = (): Promise<CollectionTreeItem[]> =>
   apiGet<CollectionTreeItem[]>("/collections/tree")
 
@@ -60,9 +56,7 @@ const addNoteToCollection = (
     member_type: "note",
   })
 
-// ---------------------------------------------------------------------------
 // Single tree item row
-// ---------------------------------------------------------------------------
 
 interface CollectionTreeItemRowProps {
   item: CollectionTreeItem
@@ -382,9 +376,7 @@ function CollectionTreeItemRow({
   )
 }
 
-// ---------------------------------------------------------------------------
-// CollectionTree
-// ---------------------------------------------------------------------------
+
 
 export function CollectionTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())

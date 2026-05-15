@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
-
-
 class SuggestionItem(BaseModel):
     id: str
     text: str
@@ -36,9 +31,7 @@ class ExplorationSuggestion(BaseModel):
     entity_names: list[str]
 
 
-# ---------------------------------------------------------------------------
-# Template-based suggestion generation (pure logic, no LLM) -- fallback
-# ---------------------------------------------------------------------------
+# Template-based suggestion generation (fallback, no LLM)
 
 _ONBOARDING_SUGGESTIONS = [
     "Upload a document in the Learning tab to get started",
@@ -153,11 +146,6 @@ def _cross_document_suggestions(shared_entities: list[str]) -> list[str]:
 def _template_to_items(suggestions: list[str]) -> list[SuggestionItem]:
     """Convert plain template strings to SuggestionItem (id=empty for template fallback)."""
     return [SuggestionItem(id="", text=s) for s in suggestions]
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 # NOTE: POST /chat/suggestions/{id}/asked registered BEFORE any /{param} route
@@ -357,5 +345,4 @@ async def get_explorations(
             text = f"How is {display_a} related to {display_b}?"
         suggestions.append(ExplorationSuggestion(text=text, entity_names=[name_a, name_b]))
     logger.debug("explorations: doc=%s returned %d suggestions", document_id, len(suggestions))
-    return suggestions
     return suggestions

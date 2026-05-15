@@ -1,6 +1,6 @@
 """Pydantic request/response schemas for the flashcards router.
 
-Extracted from `app/routers/flashcards.py` as part of the audit #2 refactor.
+Extracted from `app/routers/flashcards.py`.
 The router re-exports these names verbatim via `__all__` so existing
 imports in `routers/study.py` and `schemas/study.py` keep working.
 """

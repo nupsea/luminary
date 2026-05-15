@@ -15,9 +15,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel, EvalRunModel, QAHistoryModel
 from app.services.eval_regression_service import detect_regressions
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -44,9 +42,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_document(doc_id: str | None = None) -> DocumentModel:
@@ -83,9 +79,7 @@ def _make_qa(doc_id: str, created_at: datetime) -> QAHistoryModel:
     )
 
 
-# ---------------------------------------------------------------------------
 # GET /monitoring/traces
-# ---------------------------------------------------------------------------
 
 
 async def test_traces_phoenix_disabled(test_db, monkeypatch):
@@ -180,9 +174,7 @@ async def test_traces_phoenix_running_returns_spans(test_db, monkeypatch):
     get_settings.cache_clear()
 
 
-# ---------------------------------------------------------------------------
 # GET /monitoring/overview
-# ---------------------------------------------------------------------------
 
 
 async def test_overview_document_and_chunk_counts(test_db, monkeypatch):
@@ -305,9 +297,7 @@ async def test_overview_empty_db_returns_zeros(test_db, monkeypatch):
     assert data["qa_calls_today"] == 0
 
 
-# ---------------------------------------------------------------------------
 # POST /monitoring/evals/store
-# ---------------------------------------------------------------------------
 
 
 async def test_store_eval_run_creates_row(test_db):
@@ -383,9 +373,7 @@ async def test_store_eval_run_with_null_ragas_scores(test_db):
     assert data["answer_relevance"] is None
 
 
-# ---------------------------------------------------------------------------
 # GET /monitoring/evals
-# ---------------------------------------------------------------------------
 
 
 async def test_get_evals_returns_run_history(test_db):
@@ -534,9 +522,7 @@ async def test_get_eval_regressions_endpoint(test_db):
     assert data[0]["metric"] == "mrr"
 
 
-# ---------------------------------------------------------------------------
 # GET /monitoring/model-usage
-# ---------------------------------------------------------------------------
 
 
 async def test_model_usage_aggregates_call_counts(test_db):
@@ -571,9 +557,7 @@ async def test_model_usage_empty_when_no_qa_history(test_db):
     assert resp.json() == []
 
 
-# ---------------------------------------------------------------------------
 # S72 — GET /monitoring/phoenix-url
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

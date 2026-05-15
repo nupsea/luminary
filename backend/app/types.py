@@ -38,9 +38,7 @@ class ScoredChunk:
     speaker: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Chat Router types (V2 agentic chat — S77+)
-# ---------------------------------------------------------------------------
+# Chat Router types
 
 IntentType = Literal[
     "summary",
@@ -122,9 +120,7 @@ class ChatState(TypedDict):
     transparency_augmented: bool
 
 
-# ---------------------------------------------------------------------------
 # Retrieval transparency
-# ---------------------------------------------------------------------------
 
 
 class TransparencyInfo(TypedDict):
@@ -140,9 +136,7 @@ class TransparencyInfo(TypedDict):
     augmented: bool  # True if augment_node ran (context extended after low confidence)
 
 
-# ---------------------------------------------------------------------------
 # Notes search
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -156,9 +150,7 @@ class NoteSearchResult:
     source: Literal["fts", "vector", "both"]
 
 
-# ---------------------------------------------------------------------------
 # Gap detection
-# ---------------------------------------------------------------------------
 
 
 class GapReport(TypedDict):
@@ -168,9 +160,7 @@ class GapReport(TypedDict):
     weak: list[str]  # concepts in notes with mastery < 0.3
 
 
-# ---------------------------------------------------------------------------
 # Web search
-# ---------------------------------------------------------------------------
 
 
 class WebSnippet(TypedDict):
@@ -182,9 +172,7 @@ class WebSnippet(TypedDict):
     domain: str  # extracted domain for [Web: domain.com] label
 
 
-# ---------------------------------------------------------------------------
 # Citation deep-links
-# ---------------------------------------------------------------------------
 
 
 class SourceCitation(TypedDict):
@@ -199,9 +187,7 @@ class SourceCitation(TypedDict):
     section_preview_snippet: str  # first 150 chars of chunk text for hover tooltip
 
 
-# ---------------------------------------------------------------------------
 # Learning path
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -220,9 +206,7 @@ class LearningPathResponse(TypedDict):
     edges: list[dict]  # list of {from_entity, to_entity, confidence}
 
 
-# ---------------------------------------------------------------------------
 # Study path
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -253,9 +237,7 @@ class StartConceptsResponse(TypedDict):
     concepts: list[StartConceptItem]  # up to 3, sorted by shortest chain then fewest cards
 
 
-# ---------------------------------------------------------------------------
 # Concept mastery
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -288,9 +270,7 @@ class MasteryHeatmapResponse(TypedDict):
     cells: list[HeatmapCell]
 
 
-# ---------------------------------------------------------------------------
 # Flashcard coverage audit
-# ---------------------------------------------------------------------------
 
 
 class BloomGap(TypedDict):
@@ -313,9 +293,7 @@ class CoverageReport(TypedDict):
     gaps: list[BloomGap]
 
 
-# ---------------------------------------------------------------------------
 # Teach-back rubric
-# ---------------------------------------------------------------------------
 
 
 class TeachBackRubricDimension(TypedDict):
@@ -334,9 +312,7 @@ class TeachBackRubric(TypedDict):
     clarity: TeachBackRubricDimension
 
 
-# ---------------------------------------------------------------------------
-# Deck Health Report
-# ---------------------------------------------------------------------------
+# Deck health report
 
 
 class HealthSection(TypedDict):

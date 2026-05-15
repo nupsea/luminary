@@ -17,9 +17,7 @@ from sqlalchemy import select
 pytest_plugins = ["conftest_books"]
 
 
-# ---------------------------------------------------------------------------
 # Alice in Wonderland retrieval tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -68,9 +66,7 @@ async def test_alice_factual_retrieval_hr3(all_books_ingested):
     assert hr3 >= 0.6, f"Alice HR@3={hr3:.2f} < 0.60 on {len(factual_qs)} factual questions"
 
 
-# ---------------------------------------------------------------------------
 # Odyssey retrieval tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -119,9 +115,7 @@ async def test_odyssey_factual_retrieval_hr3(all_books_ingested):
     assert hr3 >= 0.6, f"Odyssey HR@3={hr3:.2f} < 0.60 on {len(factual_qs)} factual questions"
 
 
-# ---------------------------------------------------------------------------
 # Entity extraction tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -167,9 +161,7 @@ async def test_odyssey_known_entities_extracted(all_books_ingested):
     )
 
 
-# ---------------------------------------------------------------------------
 # Section summary Gutenberg filter tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -228,9 +220,7 @@ async def test_odyssey_section_summaries_no_gutenberg(all_books_ingested):
             )
 
 
-# ---------------------------------------------------------------------------
 # Executive summary quality tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -318,9 +308,7 @@ async def test_odyssey_executive_summary_quality(all_books_ingested):
     assert not missing, f"Odyssey executive summary missing terms {missing}:\n{text[:400]}"
 
 
-# ---------------------------------------------------------------------------
 # Cross-book retrieval test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -341,9 +329,7 @@ async def test_cross_book_retrieval(all_books_ingested):
     )
 
 
-# ---------------------------------------------------------------------------
 # Section summary count test (all 3 books)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

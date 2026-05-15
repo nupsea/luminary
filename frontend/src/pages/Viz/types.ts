@@ -1,5 +1,5 @@
 // Type interfaces consumed by Viz.tsx and its sub-modules.
-// API shapes prefer generated `src/types/api.ts` (audit #15); types
+// API shapes prefer generated `src/types/api.ts`; types
 // without OpenAPI coverage or with a different UI shape stay inline.
 
 import type { components } from "@/types/api"

@@ -19,9 +19,7 @@ from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
 from app.services.youtube_downloader import is_youtube_url
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -44,9 +42,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_is_youtube_url_valid_watch():
@@ -65,9 +61,7 @@ def test_is_youtube_url_invalid_random():
     assert is_youtube_url("https://example.com/video.mp4") is False
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
@@ -199,9 +193,7 @@ async def test_document_list_includes_source_url(test_db):
     assert target["video_title"] == "My YouTube Talk"
 
 
-# ---------------------------------------------------------------------------
 # S182: chunks endpoint and channel_name field tests
-# ---------------------------------------------------------------------------
 
 
 def test_document_model_has_youtube_url_and_channel_name():

@@ -146,11 +146,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 _LEARNING_STATUS_ORDER = {
     "studied": 3,
     "flashcards_generated": 2,
@@ -869,9 +864,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     )
 
 
-# ---------------------------------------------------------------------------
 # EPUB chapter viewer endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/{document_id}/epub/toc", response_model=EpubTocResponse)
@@ -1124,9 +1117,7 @@ async def get_document_diagnostics(document_id: str):
     )
 
 
-# ---------------------------------------------------------------------------
-# In-document FTS5 search endpoint
-# ---------------------------------------------------------------------------
+# In-document FTS5 search
 
 
 @router.get("/{document_id}/search", response_model=list[DocumentSectionSearchResult])
@@ -1286,9 +1277,7 @@ async def update_objective(
         )
 
 
-# ---------------------------------------------------------------------------
-# Document learning progress endpoints
-# ---------------------------------------------------------------------------
+# Document learning progress
 
 
 @router.get("/{document_id}/progress", response_model=DocumentProgressResponse)
@@ -1335,9 +1324,7 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
     )
 
 
-# ---------------------------------------------------------------------------
-# Reading position persistence -- resume-where-you-left-off
-# ---------------------------------------------------------------------------
+# Reading position persistence — resume where you left off
 
 
 @router.post("/{document_id}/position", response_model=ReadingPositionResponse, status_code=200)

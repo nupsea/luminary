@@ -14,9 +14,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import FlashcardModel, StudySessionModel
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -90,9 +88,7 @@ def _make_session(
     )
 
 
-# ---------------------------------------------------------------------------
 # GET /study/stats/{document_id}
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -258,9 +254,7 @@ async def test_stats_all_card_stabilities(test_db):
     assert stab_values == {4.0, 7.5}
 
 
-# ---------------------------------------------------------------------------
 # GET /study/history
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

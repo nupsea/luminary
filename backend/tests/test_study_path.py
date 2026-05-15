@@ -21,9 +21,7 @@ from app.services.study_path_service import (
     should_skip,
 )
 
-# ---------------------------------------------------------------------------
 # Pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_compute_mastery_empty():
@@ -85,9 +83,7 @@ def test_should_skip_custom_threshold():
     assert should_skip(10.0, threshold=10.0) is True
 
 
-# ---------------------------------------------------------------------------
 # Integration test: get_study_path skip logic (AC3)
-# ---------------------------------------------------------------------------
 
 
 async def test_study_path_skip_stable_concept(tmp_path, monkeypatch):

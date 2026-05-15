@@ -7,9 +7,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from app.telemetry import trace_ingestion_node, trace_llm_call, trace_retrieval
 
-# ---------------------------------------------------------------------------
 # In-memory OTel exporter fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -28,9 +26,7 @@ def in_memory_tracer(monkeypatch):
     exporter.clear()
 
 
-# ---------------------------------------------------------------------------
 # trace_llm_call
-# ---------------------------------------------------------------------------
 
 
 def test_trace_llm_call_creates_span_with_model(in_memory_tracer):
@@ -82,9 +78,7 @@ def test_trace_llm_call_sets_token_attributes(in_memory_tracer):
     assert spans[0].attributes.get("llm.completion_tokens") == 20
 
 
-# ---------------------------------------------------------------------------
 # trace_retrieval
-# ---------------------------------------------------------------------------
 
 
 def test_trace_retrieval_creates_span_with_query(in_memory_tracer):
@@ -120,9 +114,7 @@ def test_trace_retrieval_records_latency(in_memory_tracer):
     assert spans[0].attributes.get("retrieval.latency_ms") is not None
 
 
-# ---------------------------------------------------------------------------
 # trace_ingestion_node
-# ---------------------------------------------------------------------------
 
 
 def test_trace_ingestion_node_creates_span_with_node_name(in_memory_tracer):

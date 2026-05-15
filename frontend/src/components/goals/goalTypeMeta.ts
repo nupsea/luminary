@@ -1,8 +1,4 @@
-// ---------------------------------------------------------------------------
-// goalTypeMeta -- pure helpers mapping goal types to display metadata
-// and to the focus surface they expect. Kept as pure functions so vitest
-// (node env) can cover them without DOM mounting.
-// ---------------------------------------------------------------------------
+// goalTypeMeta — maps goal types to display metadata and focus surface; pure so vitest can cover without DOM
 
 import { BookOpen, Brain, Compass, GraduationCap, Pencil, type LucideIcon } from "lucide-react"
 import type { GoalType, GoalProgressMetrics, TargetUnit } from "@/lib/goalsApi"

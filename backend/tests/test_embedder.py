@@ -27,9 +27,7 @@ skipif_no_model = pytest.mark.skipif(
 )
 
 
-# ---------------------------------------------------------------------------
 # Unit tests — do not load the real model
-# ---------------------------------------------------------------------------
 
 
 def test_embedding_service_instantiates():
@@ -40,9 +38,7 @@ def test_embedding_service_instantiates():
     assert svc._model is None
 
 
-# ---------------------------------------------------------------------------
 # Integration test — requires cached model
-# ---------------------------------------------------------------------------
 
 
 @skipif_no_model

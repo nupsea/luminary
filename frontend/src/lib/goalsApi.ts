@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// goalsApi -- typed wrappers for the typed-goals backend.
-// Uses the shared apiClient (#12 standardisation).
-// ---------------------------------------------------------------------------
+// goalsApi — typed wrappers for the typed-goals backend
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 

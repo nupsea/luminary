@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalCreateDialog -- dialog for creating a new typed learning goal.
-// Submits to POST /goals via createGoal helper.
-// ---------------------------------------------------------------------------
+// GoalCreateDialog — dialog for creating a new typed learning goal, submits to POST /goals
 
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"

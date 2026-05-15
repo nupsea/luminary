@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// focusApi -- wrappers for /pomodoro/* endpoints used by the global
-// FocusTimerPill. Uses the shared apiClient (#12 standardisation).
-// ---------------------------------------------------------------------------
+// focusApi — wrappers for /pomodoro/* endpoints used by the global FocusTimerPill
 
 import { apiGet, apiPost, ApiError, request } from "@/lib/apiClient"
 import type { Surface } from "@/lib/focusUtils"

@@ -1,6 +1,6 @@
 """Pydantic request/response schemas for the documents router.
 
-Extracted from `app/routers/documents.py` as part of the audit #2 refactor.
+Extracted from `app/routers/documents.py`.
 The router re-exports these names under their original (private) aliases
 via `__all__` so existing imports keep working.
 """

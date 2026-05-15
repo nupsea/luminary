@@ -12,9 +12,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -63,9 +61,7 @@ async def _create_document(doc_id: str) -> None:
         await session.commit()
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

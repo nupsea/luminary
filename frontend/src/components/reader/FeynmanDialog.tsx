@@ -28,10 +28,6 @@ import {
   summaryInflight,
 } from "./feynmanSummaryCache"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface ChatMessage {
   role: "tutor" | "learner"
   content: string
@@ -50,10 +46,6 @@ interface FeynmanDialogProps {
 }
 
 type DialogTab = "chat" | "history"
-
-// ---------------------------------------------------------------------------
-// FeynmanDialog
-// ---------------------------------------------------------------------------
 
 export function FeynmanDialog({
   documentId,
@@ -100,9 +92,7 @@ export function FeynmanDialog({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  // ---------------------------------------------------------------------------
   // Load section summary (left pane)
-  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false
@@ -148,9 +138,7 @@ export function FeynmanDialog({
     if (summaryContent !== null || summaryError !== null) setSummaryLoading(false)
   }, [summaryContent, summaryError])
 
-  // ---------------------------------------------------------------------------
   // Create session on mount
-  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false
@@ -188,9 +176,7 @@ export function FeynmanDialog({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  // ---------------------------------------------------------------------------
   // Load session history
-  // ---------------------------------------------------------------------------
 
   function loadHistory() {
     setHistoryLoading(true)
@@ -213,9 +199,7 @@ export function FeynmanDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  // ---------------------------------------------------------------------------
   // Send message
-  // ---------------------------------------------------------------------------
 
   async function handleSend() {
     if (!sessionId || !inputText.trim() || sending) return
@@ -313,9 +297,7 @@ export function FeynmanDialog({
     }
   }
 
-  // ---------------------------------------------------------------------------
   // Complete session
-  // ---------------------------------------------------------------------------
 
   async function handleComplete() {
     if (!sessionId || completing) return
@@ -340,9 +322,7 @@ export function FeynmanDialog({
 
   const learnerTurnCount = messages.filter((m) => m.role === "learner").length
 
-  // ---------------------------------------------------------------------------
   // Model explanation fetch and diff computation
-  // ---------------------------------------------------------------------------
 
   async function handleFetchModelExplanation() {
     if (!sessionId || modelExplanationStreaming) return
@@ -441,9 +421,7 @@ export function FeynmanDialog({
     }
   }
 
-  // ---------------------------------------------------------------------------
   // Render
-  // ---------------------------------------------------------------------------
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>

@@ -90,11 +90,6 @@ def _prune_in_flight() -> None:
 # Luminary backend always runs on port 7820; eval subprocess needs this to call /search etc.
 _BACKEND_URL = "http://localhost:7820"
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
 class EvalResultItem(BaseModel):
     dataset: str
     run_at: str
@@ -209,11 +204,6 @@ class GeneratedRunResponse(BaseModel):
     status: str
     run_id: str
     dataset_id: str
-
-
-# ---------------------------------------------------------------------------
-# Background task helper
-# ---------------------------------------------------------------------------
 
 
 def _fire_and_forget(coro) -> None:
@@ -368,11 +358,6 @@ def _dataset_to_item(
         error_message=dataset.error_message,
         last_run=last_run_payload,
     )
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 _GOLDEN_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")

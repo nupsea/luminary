@@ -2,10 +2,6 @@ import { describe, it, expect } from "vitest"
 import { isCodeDocument, shouldShowClusterView, buildClusterNodes } from "./vizUtils"
 import type { VizNodeBase } from "./vizUtils"
 
-// ---------------------------------------------------------------------------
-// isCodeDocument
-// ---------------------------------------------------------------------------
-
 describe("isCodeDocument", () => {
   it("returns true for canonical code format", () => {
     expect(isCodeDocument("code", "book")).toBe(true)
@@ -40,10 +36,6 @@ describe("isCodeDocument", () => {
     expect(isCodeDocument("CODE")).toBe(true)
   })
 })
-
-// ---------------------------------------------------------------------------
-// shouldShowClusterView
-// ---------------------------------------------------------------------------
 
 function makeNodes(count: number, type = "CONCEPT"): VizNodeBase[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -81,10 +73,6 @@ describe("shouldShowClusterView", () => {
     expect(shouldShowClusterView(nodes, true)).toBe(false)
   })
 })
-
-// ---------------------------------------------------------------------------
-// buildClusterNodes
-// ---------------------------------------------------------------------------
 
 describe("buildClusterNodes", () => {
   it("groups nodes by entity type", () => {

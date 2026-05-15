@@ -34,11 +34,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/collections", tags=["collections"])
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
 class CollectionCreateRequest(BaseModel):
     name: str
     description: str | None = None
@@ -96,11 +91,6 @@ class AddMembersRequest(BaseModel):
         if self.note_ids is not None:
             return self.note_ids
         return []
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _to_response(col: CollectionModel) -> CollectionResponse:
@@ -205,11 +195,6 @@ def _make_collection_name(title: str, content_type: str) -> str:
     short = "_".join(key_words)
 
     return normalize_collection_name(f"{short}_{suffix}")
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=CollectionResponse, status_code=201)

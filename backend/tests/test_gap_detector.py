@@ -20,9 +20,7 @@ from app.services.gap_detector import _extract_json
 pytest_plugins = ["conftest_books"]
 
 
-# ---------------------------------------------------------------------------
 # Unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_extract_json_clean():
@@ -43,9 +41,7 @@ def test_extract_json_malformed_returns_empty():
     assert result == {}
 
 
-# ---------------------------------------------------------------------------
 # API integration tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -135,9 +131,7 @@ def test_detect_gaps_malformed_llm(client):
     assert data["covered"] == []
 
 
-# ---------------------------------------------------------------------------
 # Slow integration test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

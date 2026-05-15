@@ -17,9 +17,7 @@ from app.main import app
 from app.models import DocumentModel
 from app.services.ingestion_jobs import IngestionJobRegistry, get_ingestion_jobs
 
-# ---------------------------------------------------------------------------
 # Registry unit tests (no DB, no FastAPI)
-# ---------------------------------------------------------------------------
 
 
 async def _sleep_forever() -> None:
@@ -103,9 +101,7 @@ async def test_cancel_propagates_through_finally_blocks():
     assert cleanup_ran.is_set()
 
 
-# ---------------------------------------------------------------------------
 # delete_document integration: cancel-before-teardown
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

@@ -14,9 +14,7 @@ import tiktoken
 
 from app.services.context_packer import _token_estimate, pack_context
 
-# ---------------------------------------------------------------------------
 # (a) test_sections_ordered_by_relevance
-# ---------------------------------------------------------------------------
 
 
 def test_sections_ordered_by_relevance():
@@ -43,9 +41,7 @@ def test_sections_ordered_by_relevance():
     assert idx_b < idx_a, f"Section B (higher score) should appear before A. Got: {result!r}"
 
 
-# ---------------------------------------------------------------------------
 # (b) test_deduplication_skips_similar_chunks
-# ---------------------------------------------------------------------------
 
 
 def test_deduplication_skips_similar_chunks():
@@ -75,9 +71,7 @@ def test_deduplication_skips_similar_chunks():
     assert result.count(original) == 1, f"Expected near-duplicate to be removed. Result: {result!r}"
 
 
-# ---------------------------------------------------------------------------
 # (c) test_token_budget_enforced
-# ---------------------------------------------------------------------------
 
 
 def test_token_budget_enforced():
@@ -103,9 +97,7 @@ def test_token_budget_enforced():
     )
 
 
-# ---------------------------------------------------------------------------
 # (d) test_section_summary_emitted_once
-# ---------------------------------------------------------------------------
 
 
 def test_section_summary_emitted_once():
@@ -128,9 +120,7 @@ def test_section_summary_emitted_once():
     )
 
 
-# ---------------------------------------------------------------------------
 # (e) test_empty_chunks_returns_empty_string
-# ---------------------------------------------------------------------------
 
 
 def test_empty_chunks_returns_empty_string():
@@ -139,9 +129,7 @@ def test_empty_chunks_returns_empty_string():
     assert result == "", f"Expected empty string, got: {result!r}"
 
 
-# ---------------------------------------------------------------------------
 # (f) test_no_section_id_chunks_handled
-# ---------------------------------------------------------------------------
 
 
 def test_no_section_id_chunks_handled():
@@ -167,9 +155,7 @@ def test_no_section_id_chunks_handled():
     assert "Orphan chunk" in result
 
 
-# ---------------------------------------------------------------------------
 # (g) test_dedup_ratio_1_includes_all
-# ---------------------------------------------------------------------------
 
 
 def test_dedup_ratio_1_includes_all():
@@ -193,9 +179,7 @@ def test_dedup_ratio_1_includes_all():
     )
 
 
-# ---------------------------------------------------------------------------
 # (h) test_token_count_accuracy_vs_tiktoken  [S105]
-# ---------------------------------------------------------------------------
 
 
 def test_token_count_accuracy_vs_tiktoken():

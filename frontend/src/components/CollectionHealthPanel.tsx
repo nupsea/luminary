@@ -24,10 +24,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface UncoveredNote {
   note_id: string
   preview: string
@@ -55,19 +51,13 @@ interface CollectionHealthReport {
   hotspot_tags: HotspotTag[]
 }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 const fetchCollectionHealth = (id: string): Promise<CollectionHealthReport> =>
   apiGet<CollectionHealthReport>(`/collections/${id}/health`)
 
 const archiveStaleNotes = (id: string): Promise<{ archived: number }> =>
   apiPost<{ archived: number }>(`/collections/${id}/health/archive-stale`)
 
-// ---------------------------------------------------------------------------
 // Cohesion pill
-// ---------------------------------------------------------------------------
 
 function CohesionPill({ score }: { score: number | null }) {
   if (score === null) {
@@ -88,10 +78,6 @@ function CohesionPill({ score }: { score: number | null }) {
     </span>
   )
 }
-
-// ---------------------------------------------------------------------------
-// CollectionHealthPanel
-// ---------------------------------------------------------------------------
 
 interface CollectionHealthPanelProps {
   open: boolean

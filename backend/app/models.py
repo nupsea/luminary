@@ -894,9 +894,7 @@ class ChatSuggestionHistoryModel(Base):
 
 
 
-# ---------------------------------------------------------------------------
-# Engagement: Streaks, XP, Achievements, Focus Sessions (Phase 7)
-# ---------------------------------------------------------------------------
+# Engagement: Streaks, XP, Achievements, Focus Sessions
 
 
 class StudyStreakModel(Base):

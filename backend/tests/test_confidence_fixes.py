@@ -35,9 +35,7 @@ from app.services.context_packer import _cap_per_document
 from app.services.qa import _split_response
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -94,9 +92,7 @@ def _make_scored_chunk(doc_id: str, text: str = "Some text content.", i: int = 0
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) test_library_summary_missing_returns_medium
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -181,9 +177,7 @@ async def test_library_summary_present_returns_high(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # (b) test_split_response_defaults_medium_for_long_answer
-# ---------------------------------------------------------------------------
 
 
 def test_split_response_defaults_medium_for_long_answer():
@@ -201,9 +195,7 @@ def test_split_response_defaults_medium_for_long_answer():
     assert answer == long_answer
 
 
-# ---------------------------------------------------------------------------
 # (c) test_split_response_defaults_low_for_short_answer
-# ---------------------------------------------------------------------------
 
 
 def test_split_response_defaults_low_for_short_answer():
@@ -222,9 +214,7 @@ def test_split_response_empty_answer_is_low():
     assert confidence == "low"
 
 
-# ---------------------------------------------------------------------------
 # (d) test_cap_per_document_limits_chunks
-# ---------------------------------------------------------------------------
 
 
 def test_cap_per_document_limits_chunks():
@@ -261,9 +251,7 @@ def test_cap_per_document_preserves_order():
     assert result[1]["text"] == "chunk 1"
 
 
-# ---------------------------------------------------------------------------
 # (e) test_search_node_caps_multi_doc_chunks
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

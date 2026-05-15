@@ -17,9 +17,7 @@ from app.services.intent import (
     classify_intent_heuristic,
 )
 
-# ---------------------------------------------------------------------------
 # (a) test_summary_keywords_detected
-# ---------------------------------------------------------------------------
 
 
 def test_summary_keywords_detected():
@@ -30,9 +28,7 @@ def test_summary_keywords_detected():
         assert conf >= 0.9
 
 
-# ---------------------------------------------------------------------------
 # (b) test_comparative_keywords_detected
-# ---------------------------------------------------------------------------
 
 
 def test_comparative_keywords_detected():
@@ -45,9 +41,7 @@ def test_comparative_keywords_detected():
         assert intent == "comparative", f"Expected 'comparative' for keyword {kw!r}, got {intent!r}"
 
 
-# ---------------------------------------------------------------------------
 # (c) test_relational_keywords_detected
-# ---------------------------------------------------------------------------
 
 
 def test_relational_keywords_detected():
@@ -58,9 +52,7 @@ def test_relational_keywords_detected():
         assert intent == "relational", f"Expected 'relational' for keyword {kw!r}, got {intent!r}"
 
 
-# ---------------------------------------------------------------------------
 # (d) test_low_confidence_triggers_llm_fallback
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -86,9 +78,7 @@ async def test_low_confidence_triggers_llm_fallback():
     assert result == "factual"
 
 
-# ---------------------------------------------------------------------------
 # (e) test_llm_fallback_offline_defaults_to_factual
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -100,9 +90,7 @@ async def test_llm_fallback_offline_defaults_to_factual():
     assert result == "factual"
 
 
-# ---------------------------------------------------------------------------
 # Extra: heuristic ordering — summary before factual
-# ---------------------------------------------------------------------------
 
 
 def test_summary_beats_factual_for_what_is_this_about():
@@ -118,9 +106,7 @@ def test_exploratory_for_unknown_question():
     assert confidence == 0.5
 
 
-# ---------------------------------------------------------------------------
 # New ACs: 'summary' word alone, and 'how does'/'how do' not relational
-# ---------------------------------------------------------------------------
 
 
 def test_summary_keyword_alone():
@@ -148,11 +134,9 @@ def test_factual_question_not_relational():
         assert intent == "relational", f"Expected relational for {q!r}, got {intent!r}"
 
 
-# ---------------------------------------------------------------------------
 # S95: test_suggestion_pills_route_correctly
 # Verifies that each suggestion pill label routes to the correct intent via
 # classify_intent_heuristic with confidence >= 0.9.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

@@ -6,10 +6,6 @@
  */
 import type { PDFDocumentProxy } from "pdfjs-dist"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 /** A resolved PDF outline (bookmark) entry with a 1-based page number. */
 export interface OutlineEntry {
   title: string
@@ -19,9 +15,7 @@ export interface OutlineEntry {
   children: OutlineEntry[]
 }
 
-// ---------------------------------------------------------------------------
 // resolveDestPage
-// ---------------------------------------------------------------------------
 
 /**
  * Resolve a pdfjs outline item's destination to a 1-based page number.
@@ -53,9 +47,7 @@ export async function resolveDestPage(
   return -1 // null ref = "current page" with no useful page number
 }
 
-// ---------------------------------------------------------------------------
 // resolveOutline
-// ---------------------------------------------------------------------------
 
 /**
  * Recursively resolve a pdfjs outline tree into OutlineEntry objects.
@@ -89,9 +81,7 @@ export async function resolveOutline(
   return results
 }
 
-// ---------------------------------------------------------------------------
 // flattenOutline
-// ---------------------------------------------------------------------------
 
 /** Flatten a nested outline tree into a single array, preserving level. */
 export function flattenOutline(entries: OutlineEntry[]): OutlineEntry[] {
@@ -103,9 +93,7 @@ export function flattenOutline(entries: OutlineEntry[]): OutlineEntry[] {
   return flat
 }
 
-// ---------------------------------------------------------------------------
 // buildFontTOC
-// ---------------------------------------------------------------------------
 
 /**
  * Build a TOC by scanning PDF text content for heading-sized lines.
@@ -218,9 +206,7 @@ export async function buildFontTOC(
   }))
 }
 
-// ---------------------------------------------------------------------------
 // shouldUseOutline
-// ---------------------------------------------------------------------------
 
 /**
  * Decide whether to render pdfOutline instead of backend sections.

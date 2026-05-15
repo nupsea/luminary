@@ -23,22 +23,13 @@ import { filterTagTree, highlightMatch } from "@/lib/tagUtils"
 import type { FilteredTagTreeItem } from "@/lib/tagUtils"
 import type { components } from "@/types/api"
 
-// ---------------------------------------------------------------------------
-// Types -- audit #15: alias to generated `TagTreeItem`.
-// ---------------------------------------------------------------------------
 
 export type TagTreeItem = components["schemas"]["TagTreeItem"]
-
-// ---------------------------------------------------------------------------
-// API helper
-// ---------------------------------------------------------------------------
 
 const fetchTagTree = (): Promise<TagTreeItem[]> =>
   apiGet<TagTreeItem[]>("/tags/tree")
 
-// ---------------------------------------------------------------------------
 // Single tag row
-// ---------------------------------------------------------------------------
 
 interface TagTreeItemRowProps {
   item: FilteredTagTreeItem
@@ -137,13 +128,7 @@ function TagTreeItemRow({
   )
 }
 
-// ---------------------------------------------------------------------------
-// TagTree
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Recursive tree renderer
-// ---------------------------------------------------------------------------
 
 function TagSubtree({
   items,
@@ -192,9 +177,7 @@ function TagSubtree({
   )
 }
 
-// ---------------------------------------------------------------------------
 // Collect all matched IDs from filtered tree (for Enter key: first match)
-// ---------------------------------------------------------------------------
 
 function collectMatchedIds(items: FilteredTagTreeItem[]): string[] {
   const result: string[] = []
@@ -204,10 +187,6 @@ function collectMatchedIds(items: FilteredTagTreeItem[]): string[] {
   }
   return result
 }
-
-// ---------------------------------------------------------------------------
-// TagTree
-// ---------------------------------------------------------------------------
 
 export function TagTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())

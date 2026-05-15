@@ -14,11 +14,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/engagement", tags=["engagement"])
 
 
-# ---------------------------------------------------------------------------
-# Pydantic request/response models
-# ---------------------------------------------------------------------------
-
-
 class FocusStartRequest(BaseModel):
     duration_minutes: int = 25
     session_type: str = "study"
@@ -31,9 +26,7 @@ class FocusSessionResponse(BaseModel):
     session_type: str
 
 
-# ---------------------------------------------------------------------------
 # Streak endpoints
-# ---------------------------------------------------------------------------
 
 
 _TZ_OFFSET_DESC = (
@@ -53,9 +46,7 @@ async def get_streak(
     return await svc.get_streak()
 
 
-# ---------------------------------------------------------------------------
 # XP endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/xp")
@@ -77,9 +68,7 @@ async def get_xp_history(
     return await svc.get_xp_history(days)
 
 
-# ---------------------------------------------------------------------------
 # Achievement endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/achievements")
@@ -97,9 +86,7 @@ async def get_recent_achievements(
     return await svc.get_recent_achievements(days)
 
 
-# ---------------------------------------------------------------------------
 # Focus session endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("/focus/start")

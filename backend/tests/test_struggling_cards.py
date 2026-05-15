@@ -12,9 +12,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, FlashcardModel, ReviewEventModel
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -83,9 +81,7 @@ def _make_review(
     )
 
 
-# ---------------------------------------------------------------------------
 # Service tests
-# ---------------------------------------------------------------------------
 
 
 async def test_get_struggling_cards_returns_card_with_3_agains(test_db):
@@ -174,9 +170,7 @@ async def test_good_ratings_not_counted(test_db):
     assert len(results) == 0
 
 
-# ---------------------------------------------------------------------------
 # Endpoint test
-# ---------------------------------------------------------------------------
 
 
 async def test_struggling_endpoint_returns_struggling_card(test_db):

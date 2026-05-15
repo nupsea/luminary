@@ -25,9 +25,7 @@ from app.models import ChunkModel, DocumentModel
 from app.services.conversation_chunker import ConversationChunker
 from app.workflows.ingestion import IngestionState, _chunk_conversation
 
-# ---------------------------------------------------------------------------
 # Sample texts
-# ---------------------------------------------------------------------------
 
 WHATSAPP_TEXT = "\n".join(
     [
@@ -74,9 +72,7 @@ out and touched the cover, feeling the weight of history beneath his fingertips.
 """.strip()
 
 
-# ---------------------------------------------------------------------------
 # Fixture — in-memory DB
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -137,9 +133,7 @@ def _make_conv_state(doc_id: str, raw_text: str) -> IngestionState:
     )
 
 
-# ---------------------------------------------------------------------------
 # Unit tests — pure ConversationChunker functions (no DB)
-# ---------------------------------------------------------------------------
 
 
 def test_detect_whatsapp_format():
@@ -234,9 +228,7 @@ def test_extract_timeline_returns_nulls_for_book():
     assert timeline["last_timestamp"] is None
 
 
-# ---------------------------------------------------------------------------
 # Integration tests — _chunk_conversation + DB
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

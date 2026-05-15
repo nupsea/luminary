@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalDetailPanel -- side sheet showing a single goal's progress,
-// linked sessions, and Edit / Archive / Complete / Delete actions.
-// ---------------------------------------------------------------------------
+// GoalDetailPanel — side sheet showing goal progress, linked sessions, and Edit/Archive/Complete/Delete actions
 
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"

@@ -26,9 +26,7 @@ import type { TagTreeItem, AutocompleteResult } from "@/lib/tagUtils"
 
 const API_BASE = "http://localhost:7820"
 
-// ---------------------------------------------------------------------------
-// Fixtures -- mirrors GET /tags/tree response
-// ---------------------------------------------------------------------------
+// Fixtures — mirrors GET /tags/tree response
 
 const MOCK_TAG_TREE: TagTreeItem[] = [
   {
@@ -77,10 +75,6 @@ const MOCK_TAG_TREE: TagTreeItem[] = [
   },
 ]
 
-// ---------------------------------------------------------------------------
-// AC: TagTree renders correct nesting from fixture
-// ---------------------------------------------------------------------------
-
 describe("TagTree nesting from fixture", () => {
   it("counts 6 items total: 2 top-level + 3 children of programming + 1 child of science", () => {
     expect(countTagTreeItems(MOCK_TAG_TREE)).toBe(6)
@@ -125,10 +119,6 @@ describe("TagTree nesting from fixture", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// AC: TagAutocomplete fires autocomplete request
-// ---------------------------------------------------------------------------
-
 describe("TagAutocomplete request construction", () => {
   it("builds correct URL for plain query", () => {
     const url = buildAutocompleteUrl(API_BASE, "prog")
@@ -145,10 +135,6 @@ describe("TagAutocomplete request construction", () => {
     expect(url).toBe(`${API_BASE}/tags/autocomplete?q=`)
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: Tag breadcrumb parsing
-// ---------------------------------------------------------------------------
 
 describe("parseTagBreadcrumb", () => {
   it("flat tag returns root only, no rest", () => {
@@ -169,10 +155,6 @@ describe("parseTagBreadcrumb", () => {
     expect(result.rest).toBe("/physics/quantum")
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: Merge request construction
-// ---------------------------------------------------------------------------
 
 describe("buildMergeRequest", () => {
   it("returns POST method", () => {
@@ -197,10 +179,6 @@ describe("buildMergeRequest", () => {
     expect(req.headers["Content-Type"]).toBe("application/json")
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: filterMergeOptions excludes source and filters by query
-// ---------------------------------------------------------------------------
 
 describe("filterMergeOptions", () => {
   const TAGS: AutocompleteResult[] = [
@@ -243,9 +221,7 @@ describe("filterMergeOptions", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
 // TagTree search input filters tags by substring match
-// ---------------------------------------------------------------------------
 
 const DEEP_TAG_TREE: TagTreeItem[] = [
   {

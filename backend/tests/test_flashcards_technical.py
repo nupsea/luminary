@@ -16,9 +16,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionModel
 from app.services.flashcard import FlashcardService
 
-# ---------------------------------------------------------------------------
 # Fixtures (match pattern in test_flashcards.py)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -97,9 +95,7 @@ def _make_chunk(
     return ChunkModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # AC3 — chunk with has_code=True produces trace/code_completion/debug card
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_code_chunk_produces_higher_bloom_card(test_db):
@@ -153,9 +149,7 @@ async def test_generate_technical_code_chunk_produces_higher_bloom_card(test_db)
     assert cards[0].bloom_level in (3, 4, 5)
 
 
-# ---------------------------------------------------------------------------
 # AC4 — section with admonition_type='warning' produces definition card
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_warning_admonition_produces_definition(test_db):
@@ -214,9 +208,7 @@ async def test_generate_technical_warning_admonition_produces_definition(test_db
     assert cards[0].bloom_level == 1
 
 
-# ---------------------------------------------------------------------------
 # AC5 — section heading with 'vs' or 'trade-off' yields design_decision card
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_tradeoff_heading_produces_design_decision(test_db):
@@ -280,9 +272,7 @@ async def test_generate_technical_tradeoff_heading_produces_design_decision(test
     assert cards[0].bloom_level == 5
 
 
-# ---------------------------------------------------------------------------
 # Regression guard — empty chunks returns []
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_returns_empty_when_no_chunks(test_db):
@@ -311,9 +301,7 @@ async def test_generate_technical_returns_empty_when_no_chunks(test_db):
     assert mock_llm.call_count == 0
 
 
-# ---------------------------------------------------------------------------
 # AC6 — stores both flashcard_type and bloom_level in DB
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_stores_type_and_bloom_level(test_db):
@@ -356,9 +344,7 @@ async def test_generate_technical_stores_type_and_bloom_level(test_db):
     assert cards[0].bloom_level == 5
 
 
-# ---------------------------------------------------------------------------
 # AC6 integration — endpoint returns 201 with flashcard_type and bloom_level
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db):
@@ -400,9 +386,7 @@ async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db)
     assert data[0]["bloom_level"] is not None
 
 
-# ---------------------------------------------------------------------------
 # bloom_level string coercion
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_technical_coerces_string_bloom_level(test_db):
@@ -446,9 +430,7 @@ async def test_generate_technical_coerces_string_bloom_level(test_db):
     assert isinstance(cards[0].bloom_level, int)
 
 
-# ---------------------------------------------------------------------------
 # Verify TECH_FLASHCARD_SYSTEM constant and usage in generate_technical
-# ---------------------------------------------------------------------------
 
 
 def test_tech_flashcard_system_constant_defined():

@@ -25,9 +25,7 @@ from evals.lib import (  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
-# ---------------------------------------------------------------------------
 # RetrievalGoldenEntry: S226 multi-hint coercion + validation
-# ---------------------------------------------------------------------------
 
 
 def test_retrieval_golden_entry_accepts_str_hint():
@@ -59,9 +57,7 @@ def test_retrieval_golden_entry_empty_str_becomes_empty_list():
     assert entry.context_hint == []
 
 
-# ---------------------------------------------------------------------------
 # Family subclasses
-# ---------------------------------------------------------------------------
 
 
 def test_summary_golden_entry_requires_expected_themes():
@@ -90,9 +86,7 @@ def test_flashcard_golden_entry_minimal():
     assert e.expected_card_count == 1
 
 
-# ---------------------------------------------------------------------------
 # load_golden: schema validation with file:line context
-# ---------------------------------------------------------------------------
 
 
 def test_load_golden_raises_on_bad_entry(tmp_path, monkeypatch):
@@ -141,9 +135,7 @@ def test_load_golden_passes_for_valid_file(tmp_path, monkeypatch):
     assert rows[1]["context_hint"] == ["h2a", "h2b"]
 
 
-# ---------------------------------------------------------------------------
 # append_history: eval_kind field
-# ---------------------------------------------------------------------------
 
 
 def test_append_history_writes_eval_kind(tmp_path):
@@ -191,9 +183,7 @@ def test_append_history_persists_citation_support_rate(tmp_path):
     assert rows[0]["citation_support_rate"] == 0.875
 
 
-# ---------------------------------------------------------------------------
 # Metric re-exports
-# ---------------------------------------------------------------------------
 
 
 def test_metrics_importable_from_lib():
@@ -220,9 +210,7 @@ def test_metrics_re_exported_from_run_eval():
     assert _mrr(samples) == 1.0
 
 
-# ---------------------------------------------------------------------------
 # audit CLI smoke (in-process)
-# ---------------------------------------------------------------------------
 
 
 def test_audit_main_returns_zero_for_clean_dir(tmp_path, monkeypatch):

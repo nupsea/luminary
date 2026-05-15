@@ -1,5 +1,5 @@
 // Shared types for the Chat page and its sub-modules.
-// API shapes prefer generated `src/types/api.ts` (audit #15); only
+// API shapes prefer generated `src/types/api.ts`; only
 // types not covered by REST schemas (SSE event payloads, UI-only
 // state) remain inline below.
 

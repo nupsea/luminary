@@ -368,9 +368,7 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
     return combined, chunks[0].id
 
 
-# ---------------------------------------------------------------------------
 # Chunk classifier helpers
-# ---------------------------------------------------------------------------
 
 _ANALOGY_PATTERNS = re.compile(
     r"\b(like a|similar to|imagine|think of it as|is like|just as|as if|as though"

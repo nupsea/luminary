@@ -27,19 +27,11 @@ import { Loader2 } from "lucide-react"
 
 import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
-// ---------------------------------------------------------------------------
-
 import type { components } from "@/types/api"
 
 type CardStabilityItem = components["schemas"]["CardStabilityItem"]
 type StudyStats = components["schemas"]["StudyStatsResponse"]
 type HistoryItem = components["schemas"]["DailyHistoryItem"]
-
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
 
 async function fetchStats(documentId: string): Promise<StudyStats | null> {
   try {
@@ -60,9 +52,7 @@ async function fetchHistory(documentId: string): Promise<HistoryItem[]> {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Retention curve helpers
-// ---------------------------------------------------------------------------
 
 function buildRetentionCurveData(
   cardStabilities: CardStabilityItem[],
@@ -77,9 +67,7 @@ function buildRetentionCurveData(
   })
 }
 
-// ---------------------------------------------------------------------------
 // Color helpers
-// ---------------------------------------------------------------------------
 
 function stabilityColor(avg: number): string {
   if (avg < 1) return "bg-red-200"
@@ -96,9 +84,7 @@ function streakCellColor(cards: number): string {
   return "bg-green-600"
 }
 
-// ---------------------------------------------------------------------------
 // SummaryCard
-// ---------------------------------------------------------------------------
 
 function SummaryCard({
   label,
@@ -114,10 +100,6 @@ function SummaryCard({
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// ProgressDashboard
-// ---------------------------------------------------------------------------
 
 interface ProgressDashboardProps {
   documentId: string

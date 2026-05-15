@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// Viz tab pure utility functions
-// No Sigma/DOM/Graphology imports -- safe for Vitest node environment.
-// ---------------------------------------------------------------------------
+// Viz tab pure utility functions — no Sigma/DOM/Graphology imports, safe for Vitest node environment
 
 export const ALL_ENTITY_TYPES = [
   "PERSON",
@@ -38,9 +35,7 @@ export interface VizNodeBase {
   outgoing_link_count?: number
 }
 
-// ---------------------------------------------------------------------------
 // Code document detection
-// ---------------------------------------------------------------------------
 
 const CODE_FORMATS: ReadonlySet<string> = new Set([
   "code",
@@ -60,9 +55,7 @@ export function isCodeDocument(format: string, contentType?: string): boolean {
   return false
 }
 
-// ---------------------------------------------------------------------------
 // Cluster view helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Returns true when cluster view should be active:

@@ -37,9 +37,7 @@ import {
 } from "@/lib/studyApi"
 import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
 // SourceContextPanel
-// ---------------------------------------------------------------------------
 
 interface SourceContextPanelProps {
   context: SourceContext
@@ -109,14 +107,12 @@ function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // SourcePanel
-// ---------------------------------------------------------------------------
 
 // Local: a 7-field projection of WebReferenceItem with `source_quality`
 // narrowed to a literal union for the QUALITY_LABEL badge map below.
 // Aliasing to the generated schema would relax that to `string` and
-// break the indexed lookup (audit #15: kept-local entry).
+// break the indexed lookup.
 
 type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
 
@@ -232,9 +228,7 @@ function SourcePanel({ card }: { card: Flashcard }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Rating buttons
-// ---------------------------------------------------------------------------
 
 const RATINGS: { label: string; value: Rating; className: string }[] = [
   { label: "Again", value: "again", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200" },
@@ -243,9 +237,7 @@ const RATINGS: { label: string; value: Rating; className: string }[] = [
   { label: "Easy", value: "easy", className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" },
 ]
 
-// ---------------------------------------------------------------------------
 // Progress bar
-// ---------------------------------------------------------------------------
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100)
@@ -265,9 +257,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // FlashCard (flippable)
-// ---------------------------------------------------------------------------
 
 interface FlashCardProps {
   card: Flashcard
@@ -306,9 +296,7 @@ function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // SessionComplete screen
-// ---------------------------------------------------------------------------
 
 interface SessionCompleteProps {
   reviewed: number
@@ -368,9 +356,7 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNex
   )
 }
 
-// ---------------------------------------------------------------------------
 // StudySession -- main component (flashcard-only)
-// ---------------------------------------------------------------------------
 
 interface StudySessionProps {
   initial: UseStudySessionInput["initial"]

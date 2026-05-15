@@ -24,9 +24,7 @@ def client():
         yield c
 
 
-# ---------------------------------------------------------------------------
 # POST /collections
-# ---------------------------------------------------------------------------
 
 
 def test_create_top_level_collection(client):
@@ -74,9 +72,7 @@ def test_create_collection_404_missing_parent(client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # GET /collections/tree
-# ---------------------------------------------------------------------------
 
 
 def test_tree_nests_correctly(client):
@@ -124,9 +120,7 @@ def test_tree_includes_note_count(client):
     assert node["note_count"] == 2
 
 
-# ---------------------------------------------------------------------------
 # DELETE /collections/{id}
-# ---------------------------------------------------------------------------
 
 
 def test_delete_collection_removes_members_not_notes(client):
@@ -153,9 +147,7 @@ def test_delete_collection_404(client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # GET /notes?collection_id=
-# ---------------------------------------------------------------------------
 
 
 def test_list_notes_filtered_by_collection(client):
@@ -172,9 +164,7 @@ def test_list_notes_filtered_by_collection(client):
     assert note_out["id"] not in ids
 
 
-# ---------------------------------------------------------------------------
 # POST /collections/{id}/notes (idempotent duplicate)
-# ---------------------------------------------------------------------------
 
 
 def test_add_notes_duplicate_is_idempotent(client):
@@ -193,9 +183,7 @@ def test_add_notes_duplicate_is_idempotent(client):
     assert node["note_count"] == 1
 
 
-# ---------------------------------------------------------------------------
 # group_name migration: existing groups endpoint still works
-# ---------------------------------------------------------------------------
 
 
 def test_groups_endpoint_still_works_after_migration(client):
@@ -209,9 +197,7 @@ def test_groups_endpoint_still_works_after_migration(client):
     assert f"grp_{suffix}" in group_names
 
 
-# ---------------------------------------------------------------------------
 # Unit test: migration preserves all distinct group_name values
-# ---------------------------------------------------------------------------
 
 
 def test_migration_preserves_group_name_values_and_memberships(client):

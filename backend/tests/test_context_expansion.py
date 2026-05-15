@@ -18,9 +18,7 @@ from app.models import ChunkModel, DocumentModel
 from app.services.retriever import _expand_context
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Fixture — in-memory DB with documents and chunks
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -93,9 +91,7 @@ def _scored(
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

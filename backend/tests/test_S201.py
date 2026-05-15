@@ -22,9 +22,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ClusterSuggestionModel, NoteModel
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -51,9 +49,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # AC9: suggest_tags returns normalized tag slugs
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -99,9 +95,7 @@ async def test_suggest_tags_returns_normalized_slugs(test_db):
     assert "Science/Cell_Division" not in tags
 
 
-# ---------------------------------------------------------------------------
 # AC10: duplicate note creation within 5s window returns existing note
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -134,9 +128,7 @@ async def test_duplicate_note_dedup_within_5s(test_db):
     assert note1["id"] == note2["id"], "Duplicate note should return existing note"
 
 
-# ---------------------------------------------------------------------------
 # AC11: batch_accept_suggestions stores UPPER-CASE collection names
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -14,10 +14,6 @@ import { ApiError, apiDelete, apiGet } from "@/lib/apiClient"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface AutoCollection {
   id: string
   name: string
@@ -47,10 +43,6 @@ interface NotesReaderPanelProps {
   /** Called when the initial note count is known, so parent can set default tab */
   onNoteCountKnown?: (count: number) => void
 }
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
 
 async function fetchAutoCollection(
   documentId: string,
@@ -89,10 +81,6 @@ async function fetchDocuments(): Promise<DocumentItem[]> {
     return []
   }
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function NotesReaderPanel({
   documentId,

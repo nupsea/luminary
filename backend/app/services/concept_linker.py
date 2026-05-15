@@ -46,11 +46,6 @@ _CONTRADICTION_SYSTEM = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Pure functions
-# ---------------------------------------------------------------------------
-
-
 def _parse_year(text: str) -> int | None:
     """Extract approximate publication year from document front matter.
 
@@ -119,11 +114,6 @@ def _strip_json_fences(text: str) -> str:
         lines = cleaned.splitlines()
         cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
     return cleaned.strip()
-
-
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
 
 
 class ConceptLinkerService:

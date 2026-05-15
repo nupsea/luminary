@@ -20,9 +20,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -65,9 +63,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return DocumentModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

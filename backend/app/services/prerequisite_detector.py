@@ -10,12 +10,8 @@ from incidental regex matches in prose.
 
 import re
 
-# ---------------------------------------------------------------------------
-# Marker patterns
-# Each entry: (compiled pattern, confidence_score)
-# Patterns use named groups (?P<dep>...) and (?P<prereq>...) to capture the
-# dependent concept and its prerequisite.
-# ---------------------------------------------------------------------------
+# Marker patterns — (compiled pattern, confidence_score)
+# Named groups (?P<dep>...) and (?P<prereq>...) capture the dependent and its prerequisite.
 
 _ENTITY_FRAG = r"[A-Za-z][A-Za-z\s'\-]{1,45}"
 

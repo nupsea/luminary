@@ -19,9 +19,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, FeynmanSessionModel, FeynmanTurnModel, FlashcardModel
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -48,9 +46,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # AC5: 3-turn session + flashcard generation
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -168,9 +164,7 @@ async def test_three_turn_session_stores_turns_and_generates_flashcards(test_db)
         assert card.flashcard_type == "concept_explanation"
 
 
-# ---------------------------------------------------------------------------
 # AC10: Offline 503 test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -206,9 +200,7 @@ async def test_create_session_offline_returns_503(test_db):
     assert "ollama serve" in detail
 
 
-# ---------------------------------------------------------------------------
 # AC9: GET /feynman/sessions returns list with gap_count and status
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

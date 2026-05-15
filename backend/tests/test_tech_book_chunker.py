@@ -28,9 +28,7 @@ from app.services.tech_book_chunker import (
 )
 from app.workflows.ingestion import ContentType, _chunk_tech_book, _classify
 
-# ---------------------------------------------------------------------------
 # Shared fixtures
-# ---------------------------------------------------------------------------
 
 TECH_DOC_WITH_CODE = """\
 # Python Tutorial
@@ -111,9 +109,7 @@ def _make_doc(doc_id: str, content_type: str = "tech_book") -> DocumentModel:
     )
 
 
-# ---------------------------------------------------------------------------
 # AC1: ContentType includes tech_book and tech_article
-# ---------------------------------------------------------------------------
 
 
 def test_content_type_includes_tech_types():
@@ -125,9 +121,7 @@ def test_content_type_includes_tech_types():
     assert "tech_article" in args
 
 
-# ---------------------------------------------------------------------------
 # AC2: _classify() detects tech_book from >= 3 fenced code blocks
-# ---------------------------------------------------------------------------
 
 
 def test_classify_tech_book_from_code_fences():
@@ -157,9 +151,7 @@ def test_classify_regular_book_not_overridden():
     assert result == "book"
 
 
-# ---------------------------------------------------------------------------
 # AC3: chunk_mixed_content preserves 50-line Python function intact
-# ---------------------------------------------------------------------------
 
 
 def test_atomic_code_block_not_split():
@@ -192,9 +184,7 @@ def test_prose_chunks_have_code_false():
     assert all(not c["has_code"] for c in chunks)
 
 
-# ---------------------------------------------------------------------------
 # AC4: _parse_ast_signature
-# ---------------------------------------------------------------------------
 
 
 def test_ast_signature_valid_function():
@@ -231,9 +221,7 @@ def test_ast_signature_no_definitions():
     assert sig is None
 
 
-# ---------------------------------------------------------------------------
 # AC5: CodeSnippetModel table exists after create_all_tables
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -288,9 +276,7 @@ async def test_chunk_model_has_code_columns(test_db):
     assert saved.code_signature == "def hello()"
 
 
-# ---------------------------------------------------------------------------
 # AC6: Integration test — ingest a Markdown tech doc with fenced code blocks
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -354,9 +340,7 @@ async def test_chunk_tech_book_creates_code_snippets(test_db):
     assert "python" in languages, "Python code blocks must produce snippets with language='python'"
 
 
-# ---------------------------------------------------------------------------
 # AC7: GET /documents/{id}/code_snippets endpoint
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

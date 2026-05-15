@@ -3,7 +3,7 @@
 // this UI relies on the narrower DatasetStatus / DatasetSize unions
 // and a typed EvalRunSummary for the "last run" inline preview.
 // EvalRegressionItem aliases the generated schema since its shape is
-// already concrete (no narrowing lost). (audit #15)
+// already concrete (no narrowing lost).
 
 import type { components } from "@/types/api"
 

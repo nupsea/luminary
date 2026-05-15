@@ -24,9 +24,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.services.code_executor import CodeExecutorService, _compare_prediction
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -53,9 +51,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Unit tests (no DB required)
-# ---------------------------------------------------------------------------
 
 
 def test_execute_python_hello():
@@ -112,9 +108,7 @@ def test_execute_memory_limit():
     )
 
 
-# ---------------------------------------------------------------------------
 # Pure function tests for _compare_prediction
-# ---------------------------------------------------------------------------
 
 
 def test_prediction_strip_normalizes_newline():
@@ -142,9 +136,7 @@ def test_prediction_multiline_mismatch():
     assert "expected" in diff and "actual" in diff
 
 
-# ---------------------------------------------------------------------------
 # JavaScript 503 test (unit)
-# ---------------------------------------------------------------------------
 
 
 def test_node_not_found_raises_lookup():
@@ -161,9 +153,7 @@ def test_unsupported_language_raises_value_error():
         svc.execute("print('hi')", "ruby")
 
 
-# ---------------------------------------------------------------------------
 # Integration tests (with DB and HTTP client)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

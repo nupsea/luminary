@@ -26,10 +26,6 @@ import {
   type ExcalidrawNoteDiagramRef,
 } from "@/lib/noteDiagrams"
 
-// ---------------------------------------------------------------------------
-// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
-// DocumentItem stays local as a 3-field subset of DocumentListItem.
-// ---------------------------------------------------------------------------
 
 import type { components } from "@/types/api"
 
@@ -42,10 +38,6 @@ interface DocumentItem {
   title: string
   status: string
 }
-
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
 
 const patchNote = (
   id: string,
@@ -130,10 +122,6 @@ const deleteNoteLink = (
   apiDelete(
     `/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
   )
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 interface NoteEditorDialogProps {
   note: Note | null

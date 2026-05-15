@@ -125,10 +125,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
 # NOTE: /search is registered BEFORE /{document_id} to prevent FastAPI from
 # matching the literal segment "search" as a document_id wildcard.
 
@@ -369,11 +365,8 @@ async def create_trace_flashcard(
     return _to_response(card)
 
 
-# ---------------------------------------------------------------------------
 # Cloze deletion flashcard generation
-# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "cloze" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# NOTE: /cloze registered BEFORE /{document_id} to prevent FastAPI matching "cloze" as a document_id wildcard.
 
 
 @router.post("/cloze/{section_id}", response_model=list[FlashcardResponse], status_code=201)
@@ -402,11 +395,8 @@ async def generate_cloze_flashcards(
     return [_to_response(c) for c in cards]
 
 
-# ---------------------------------------------------------------------------
 # Bloom's taxonomy coverage audit
-# NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "audit" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# NOTE: /audit routes registered BEFORE /{document_id} to prevent FastAPI matching "audit" as a document_id wildcard.
 
 
 @router.get("/audit/{document_id}", response_model=CoverageReportResponse)
@@ -454,11 +444,8 @@ async def fill_audit_gaps(
     return FillGapsResponse(created=created)
 
 
-# ---------------------------------------------------------------------------
 # Deck health report
-# NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "health" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# NOTE: /health routes registered BEFORE /{document_id} to prevent FastAPI matching "health" as a document_id wildcard.
 
 
 @router.get("/health/{document_id}", response_model=DeckHealthReportResponse)
@@ -512,11 +499,8 @@ async def fill_uncovered_sections(
     return FillUncoveredResponse(queued=len(req.section_ids))
 
 
-# ---------------------------------------------------------------------------
 # Deck list
-# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "decks" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# NOTE: /decks registered BEFORE /{document_id} to prevent FastAPI matching "decks" as a document_id wildcard.
 
 
 @router.get("/decks", response_model=list[DeckItem])

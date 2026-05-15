@@ -14,9 +14,7 @@ from app.main import app
 from app.models import FlashcardModel
 from app.services.fsrs_service import FSRSService
 
-# ---------------------------------------------------------------------------
 # Shared test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -71,9 +69,7 @@ def _make_card(
     return FlashcardModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # FSRSService unit tests
-# ---------------------------------------------------------------------------
 
 
 async def test_schedule_good_sets_future_due_date_and_positive_stability(test_db):
@@ -165,9 +161,7 @@ async def test_schedule_easy_sets_review_state(test_db):
     assert updated.fsrs_stability > 0
 
 
-# ---------------------------------------------------------------------------
 # GET /study/due endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_get_due_cards_returns_only_past_due(test_db):
@@ -214,9 +208,7 @@ async def test_get_due_cards_filtered_by_document(test_db):
     assert card_b.id not in ids
 
 
-# ---------------------------------------------------------------------------
 # POST /flashcards/{id}/review endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_review_endpoint_good_rating(test_db):
@@ -264,9 +256,7 @@ async def test_review_endpoint_404_for_missing_card(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Study session endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_start_session_creates_row(test_db):

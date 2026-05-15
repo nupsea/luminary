@@ -20,9 +20,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionModel
 from app.workflows.ingestion import IngestionState, _chunk_book
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 CHAPTER_1 = "Chapter One content. " * 30  # ~150 words — enough for at least 1 chunk
 CHAPTER_2 = "Chapter Two content. " * 30
@@ -95,9 +93,7 @@ def _make_state(doc_id: str, sections: list[dict]) -> IngestionState:
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

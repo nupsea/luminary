@@ -36,11 +36,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tags", tags=["tags"])
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
 class TagResponse(BaseModel):
     id: str
     display_name: str
@@ -116,11 +111,6 @@ class TagGraphResponse(BaseModel):
     generated_at: float
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _to_response(tag: CanonicalTagModel) -> TagResponse:
     return TagResponse(
         id=tag.id,
@@ -143,11 +133,6 @@ def _compute_inclusive_count(
         for child in children_by_parent.get(tag_id, [])
     )
     return direct + child_sum
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/graph", response_model=TagGraphResponse)
@@ -318,9 +303,7 @@ async def merge_tags(
     return TagMergeResponse(affected_notes=result.affected_notes)
 
 
-# ---------------------------------------------------------------------------
 # Normalization schemas
-# ---------------------------------------------------------------------------
 
 
 class TagInfo(BaseModel):
@@ -347,9 +330,7 @@ class NormalizationAcceptResponse(BaseModel):
     affected_notes: int
 
 
-# ---------------------------------------------------------------------------
-# Normalization endpoints (static paths -- must come before /{tag_id})
-# ---------------------------------------------------------------------------
+# Normalization endpoints — static paths must come before /{tag_id}
 
 
 @router.post("/normalization/scan", response_model=NormalizationScanResponse)

@@ -36,9 +36,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # AC1: defaults
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -54,9 +52,7 @@ async def test_post_start_returns_200_with_defaults(test_db):
     assert body["goal_id"] is None
 
 
-# ---------------------------------------------------------------------------
 # AC2: 409 if active exists
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -72,9 +68,7 @@ async def test_start_returns_409_when_active_exists(test_db):
     assert detail["existing_session_id"] == existing_id
 
 
-# ---------------------------------------------------------------------------
 # AC3: pause / resume cycle
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -94,9 +88,7 @@ async def test_pause_then_resume(test_db):
         assert resume.json()["paused_at"] is None
 
 
-# ---------------------------------------------------------------------------
 # AC4: complete + AC8: cannot complete twice
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -121,9 +113,7 @@ async def test_abandon_sets_status(test_db):
     assert resp.json()["status"] == "abandoned"
 
 
-# ---------------------------------------------------------------------------
 # AC5: GET /active 204 when none, payload otherwise
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -144,9 +134,7 @@ async def test_get_active_returns_session(test_db):
     assert resp.json()["surface"] == "read"
 
 
-# ---------------------------------------------------------------------------
 # AC6: stats only includes completed
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

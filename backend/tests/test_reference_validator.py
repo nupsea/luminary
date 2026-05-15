@@ -25,9 +25,7 @@ from app.main import app
 from app.models import DocumentModel, SectionSummaryModel, WebReferenceModel
 from app.services.reference_validator import ReferenceValidatorService
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -98,9 +96,7 @@ async def _insert_ref(
     return ref_id
 
 
-# ---------------------------------------------------------------------------
 # AC9: validate_references marks reachable URL as is_valid=True
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -136,9 +132,7 @@ async def test_validate_marks_reachable_url_as_valid(test_db):
     assert ref.last_checked_at is not None
 
 
-# ---------------------------------------------------------------------------
 # AC10: validate_references marks unreachable URL as is_valid=False
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -171,9 +165,7 @@ async def test_validate_marks_unreachable_url_as_invalid(test_db):
     assert ref.last_checked_at is not None
 
 
-# ---------------------------------------------------------------------------
 # AC10 variant: 404 status code
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -206,9 +198,7 @@ async def test_validate_marks_404_url_as_invalid(test_db):
     assert ref.is_valid is False
 
 
-# ---------------------------------------------------------------------------
 # AC11: GET /references excludes invalid refs by default
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -244,9 +234,7 @@ async def test_get_references_excludes_invalid_by_default(test_db):
         assert len(refs2) == 3
 
 
-# ---------------------------------------------------------------------------
 # AC12: extraction + validation pipeline sets is_valid on new refs
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -330,9 +318,7 @@ async def test_extraction_validates_refs_before_persisting(test_db):
     assert all(r.last_checked_at is not None for r in rows)
 
 
-# ---------------------------------------------------------------------------
 # Validate URLs helper
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

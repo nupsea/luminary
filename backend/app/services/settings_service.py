@@ -13,16 +13,12 @@ from app.models import SettingsModel
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Keychain constants
-# ---------------------------------------------------------------------------
 
 _KEYCHAIN_SERVICE = "luminary"
 _KEYCHAIN_SENTINEL = "__keychain__"
 
-# ---------------------------------------------------------------------------
 # XOR encryption — kept for migration of pre-keychain DB entries only
-# ---------------------------------------------------------------------------
 
 _XOR_KEY: bytes = hashlib.sha256(socket.gethostname().encode()).digest()
 
@@ -86,9 +82,7 @@ def _is_xor_encrypted(value: str) -> bool:
 # The actual key follows the prefix so load can distinguish it from legacy XOR values.
 _PLAINTEXT_PREFIX = "__plain__:"
 
-# ---------------------------------------------------------------------------
 # Keyring helpers — fall back to plaintext-in-DB when no system keyring (e.g. Docker)
-# ---------------------------------------------------------------------------
 
 
 def _keyring_set(field: str, value: str) -> bool:
@@ -114,11 +108,6 @@ def _keyring_delete(field: str) -> None:
         keyring.delete_password(_KEYCHAIN_SERVICE, field)
     except (keyring.errors.PasswordDeleteError, keyring.errors.NoKeyringError):
         pass
-
-
-# ---------------------------------------------------------------------------
-# DB CRUD
-# ---------------------------------------------------------------------------
 
 
 async def load_llm_settings(db: AsyncSession) -> None:
@@ -250,9 +239,7 @@ async def update_llm_settings(
     logger.debug("LLM settings updated: %s", list(updates_db.keys()))
 
 
-# ---------------------------------------------------------------------------
 # Routing helper — used by LLMService
-# ---------------------------------------------------------------------------
 
 
 def get_effective_routing(background: bool = False) -> tuple[str, str | None]:

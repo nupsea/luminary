@@ -35,11 +35,6 @@ def _is_outdated(created_at: datetime) -> bool:
     return aware < cutoff
 
 
-# ---------------------------------------------------------------------------
-# Pydantic response models
-# ---------------------------------------------------------------------------
-
-
 class WebReferenceItem(BaseModel):
     id: str
     section_id: str | None
@@ -88,11 +83,6 @@ def _to_item(row: WebReferenceModel) -> WebReferenceItem:
         created_at=row.created_at,
         is_outdated=_is_outdated(row.created_at),
     )
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/documents/{document_id}", response_model=DocumentReferencesResponse)

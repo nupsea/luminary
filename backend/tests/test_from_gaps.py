@@ -22,9 +22,7 @@ def client():
         yield c
 
 
-# ---------------------------------------------------------------------------
 # API boundary tests
-# ---------------------------------------------------------------------------
 
 
 def test_from_gaps_api_422_empty_gaps(client):
@@ -62,9 +60,7 @@ def test_from_gaps_api_503_ollama_offline(client):
     assert "ollama serve" in resp.json()["detail"].lower()
 
 
-# ---------------------------------------------------------------------------
 # Service unit tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

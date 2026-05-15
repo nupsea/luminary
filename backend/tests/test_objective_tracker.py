@@ -25,9 +25,7 @@ from app.models import (
 )
 from app.services.objective_tracker import ObjectiveTrackerService
 
-# ---------------------------------------------------------------------------
 # Test DB fixture (same pattern as test_learning.py)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -54,9 +52,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_doc(doc_id: str | None = None) -> DocumentModel:
@@ -134,9 +130,7 @@ def _make_objective(doc_id: str, section_id: str) -> LearningObjectiveModel:
     )
 
 
-# ---------------------------------------------------------------------------
 # Unit tests: update_coverage
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -369,9 +363,7 @@ async def test_get_progress_no_objectives(test_db):
     assert result["by_chapter"] == []
 
 
-# ---------------------------------------------------------------------------
 # Integration tests: API endpoints
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

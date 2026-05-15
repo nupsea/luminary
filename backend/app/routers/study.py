@@ -108,12 +108,7 @@ __all__ = [
 
 router = APIRouter(prefix="/study", tags=["study"])
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# Gap-detection thresholds now live in repos/study_repo.py; no callers
-# in this file or in tests still reference the old _GAP_* names.
+# Gap-detection thresholds live in repos/study_repo.py.
 
 # Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
@@ -178,11 +173,6 @@ _RUBRIC_USER_TMPL = (
 
 
 _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/due-count", response_model=DueCountResponse)
@@ -1222,9 +1212,7 @@ async def teachback(
     )
 
 
-# ---------------------------------------------------------------------------
 # Async teach-back: submit + background evaluate + batch poll
-# ---------------------------------------------------------------------------
 
 
 def _score_to_rating(score: int) -> str:
@@ -1837,9 +1825,7 @@ async def get_section_heatmap(
     return SectionHeatmapResponse(heatmap=heatmap)
 
 
-# ---------------------------------------------------------------------------
 # Study path endpoints
-# ---------------------------------------------------------------------------
 
 
 
@@ -1883,11 +1869,6 @@ async def get_start_concepts(
         document_id=result["document_id"],
         concepts=[StartConceptItemResponse(**vars(item)) for item in result["concepts"]],
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _parse_rubric(raw: str) -> dict | None:
@@ -1998,9 +1979,7 @@ async def _generate_correction_flashcard(
     return _insert_correction_flashcard(card, payload, session)
 
 
-# ---------------------------------------------------------------------------
 # Lightweight session API (stateless start + review)
-# ---------------------------------------------------------------------------
 
 
 async def _get_due_for_session(document_id: str, session: AsyncSession) -> list[FlashcardModel]:

@@ -45,9 +45,7 @@ import {
 } from "@/lib/studySessionService"
 
 
-// ---------------------------------------------------------------------------
 // Document list for the in-tab picker
-// ---------------------------------------------------------------------------
 
 import { apiGet } from "@/lib/apiClient"
 
@@ -58,20 +56,11 @@ import { FlashcardManager } from "./Study/FlashcardManager"
 
 
 
-// ---------------------------------------------------------------------------
-// Old document-centric GoalsPanel removed in favour of typed-goals UI
-// in @/components/goals/GoalsList. Re-export DocListItem for Progress.tsx.
-// ---------------------------------------------------------------------------
-
 export type { DocListItem } from "./Study/types"  // re-exported for Progress.tsx
 
 // SessionHistoryTab replaced by SessionManager component
 
 // DocPicker now lives in pages/Study/DocPicker.tsx.
-
-// ---------------------------------------------------------------------------
-// Study page
-// ---------------------------------------------------------------------------
 
 export default function Study() {
   const navigate = useNavigate()

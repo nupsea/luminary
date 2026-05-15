@@ -22,11 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Response dataclasses
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class TagNodeOut:
     id: str
@@ -49,9 +44,7 @@ class TagGraphOut:
     generated_at: float  # unix timestamp
 
 
-# ---------------------------------------------------------------------------
 # In-memory cache
-# ---------------------------------------------------------------------------
 
 _CACHE_TTL = 60.0  # seconds
 
@@ -81,18 +74,9 @@ def get_cached_graph() -> TagGraphOut | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 MAX_NODES = 200
 MAX_EDGES = 500
 MIN_EDGE_WEIGHT = 2
-
-
-# ---------------------------------------------------------------------------
-# Service function
-# ---------------------------------------------------------------------------
 
 
 async def build_tag_graph(session: AsyncSession) -> TagGraphOut:

@@ -36,9 +36,7 @@ def _base_state(**overrides) -> dict:
     return state
 
 
-# ---------------------------------------------------------------------------
 # web_augment_node -- firing conditions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -144,9 +142,7 @@ async def test_web_augment_node_accumulates_web_calls():
     assert r4 == {}  # rate-limited
 
 
-# ---------------------------------------------------------------------------
 # _route_after_confidence_gate with web_enabled
-# ---------------------------------------------------------------------------
 
 
 def test_route_after_confidence_gate_routes_to_web_augment_when_enabled():
@@ -182,9 +178,7 @@ def test_route_after_confidence_gate_routes_to_web_augment_respects_rate_limit()
     assert route == "augment_node"
 
 
-# ---------------------------------------------------------------------------
 # Version mismatch prompt extension in synthesize_node
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

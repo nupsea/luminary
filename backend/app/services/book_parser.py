@@ -35,10 +35,6 @@ from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared regex patterns
-# ---------------------------------------------------------------------------
-
 # Gutenberg delimiters
 _RE_PG_START = re.compile(
     r"\*{3}\s*START OF (?:THE |THIS )?PROJECT GUTENBERG EBOOK[^\n]*\*{3}",

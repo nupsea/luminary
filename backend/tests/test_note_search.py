@@ -19,9 +19,7 @@ from app.types import NoteSearchResult
 
 pytest_plugins = ["conftest_books"]
 
-# ---------------------------------------------------------------------------
 # Unit tests (pure functions — no I/O)
-# ---------------------------------------------------------------------------
 
 
 def test_sanitize_fts_query_strips_operators():
@@ -81,9 +79,7 @@ def test_rrf_merge_dedup_both_source():
     assert merged[0].source == "both"
 
 
-# ---------------------------------------------------------------------------
 # Integration + API tests (use TestClient(app) — lifespan creates in-memory DB)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -186,9 +182,7 @@ def test_fts_sync_on_delete(client):
     assert note_id not in [r["note_id"] for r in miss.json()["results"]]
 
 
-# ---------------------------------------------------------------------------
 # Slow integration test (requires all_books_ingested fixture)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

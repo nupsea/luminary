@@ -40,9 +40,7 @@ from app.main import app
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
-# ---------------------------------------------------------------------------
 # Shared schema validation
-# ---------------------------------------------------------------------------
 
 
 def _assert_status_schema(body: dict) -> None:
@@ -56,9 +54,7 @@ def _assert_status_schema(body: dict) -> None:
     assert 0 <= body["progress_pct"] <= 100, f"progress_pct out of range: {body['progress_pct']}"
 
 
-# ---------------------------------------------------------------------------
 # E2E tests — require live backend + Ollama
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.e2e
@@ -172,9 +168,7 @@ async def test_status_polling_contract():
             pytest.fail(f"Ingestion did not complete within 120s. Stages seen: {seen_stages}")
 
 
-# ---------------------------------------------------------------------------
 # Mock helpers shared by integration_http tests
-# ---------------------------------------------------------------------------
 
 
 class _MockEmbeddingService:
@@ -200,9 +194,7 @@ class _MockEntityExtractor:
         ]
 
 
-# ---------------------------------------------------------------------------
 # integration_http fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -271,9 +263,7 @@ async def upload_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # integration_http tests — included in make ci
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration_http

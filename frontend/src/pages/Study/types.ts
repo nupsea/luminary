@@ -1,5 +1,5 @@
 // Type interfaces consumed by Study.tsx and its sub-components.
-// API shapes sourced from generated `src/types/api.ts` (audit #15);
+// API shapes sourced from generated `src/types/api.ts`;
 // only shapes not represented in the OpenAPI schema stay inline.
 
 import type { components } from "@/types/api"

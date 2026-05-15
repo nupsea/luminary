@@ -2,9 +2,7 @@
 
 from app.services.naming import normalize_collection_name, normalize_tag_slug
 
-# ---------------------------------------------------------------------------
 # normalize_collection_name
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeCollectionName:
@@ -42,9 +40,7 @@ class TestNormalizeCollectionName:
         assert normalize_collection_name("python") == "PYTHON"
 
 
-# ---------------------------------------------------------------------------
 # normalize_tag_slug
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeTagSlug:

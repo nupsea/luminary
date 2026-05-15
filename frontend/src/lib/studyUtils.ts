@@ -46,9 +46,7 @@ export function getDeckDisplayName(params: {
   return docTitle ?? deckName
 }
 
-// ---------------------------------------------------------------------------
 // Flashcard search constants and helpers
-// ---------------------------------------------------------------------------
 
 export const FSRS_STATE_LABELS: Record<string, string> = {
   new: "New",
@@ -82,9 +80,7 @@ export interface FlashcardSearchFilters {
   page_size?: number
 }
 
-// ---------------------------------------------------------------------------
 // Insights accordion sections and adaptive generate params
-// ---------------------------------------------------------------------------
 
 /** Load-bearing constant: InsightsAccordion uses this to enumerate its sections. */
 export const INSIGHTS_SECTIONS = ["health_report", "bloom_audit", "struggling"] as const

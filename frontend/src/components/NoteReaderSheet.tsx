@@ -28,10 +28,6 @@ import {
   type ExcalidrawNoteDiagramRef,
 } from "@/lib/noteDiagrams"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 import type { Note } from "@/pages/Notes/types"
 
 interface DocumentItem {
@@ -50,10 +46,6 @@ export interface NoteReaderSheetProps {
   /** When set, this collection appears checked and cannot be unchecked (reader context). */
   lockedCollectionId?: string | null
 }
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
 
 async function createNote(payload: {
   content: string
@@ -105,10 +97,6 @@ async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<str
     return []
   }
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function NoteReaderSheet({
   note,

@@ -4,9 +4,7 @@ import pytest
 
 from app.services.code_parser import CodeParser, get_code_parser
 
-# ---------------------------------------------------------------------------
 # detect_language
-# ---------------------------------------------------------------------------
 
 
 def test_detect_language_python():
@@ -45,9 +43,7 @@ def test_is_code_file():
     assert p.is_code_file("styles.css") is False
 
 
-# ---------------------------------------------------------------------------
 # parse_file — Python
-# ---------------------------------------------------------------------------
 
 PYTHON_SOURCE = '''
 def greet(name: str) -> str:
@@ -119,9 +115,7 @@ def test_parse_file_invalid_language_returns_empty():
     assert defs == []
 
 
-# ---------------------------------------------------------------------------
 # chunk_code_file metadata — function_name, file_path, start_line
-# ---------------------------------------------------------------------------
 
 
 def test_chunk_text_contains_function_name():
@@ -137,9 +131,7 @@ def test_chunk_start_line_set():
         assert d["start_line"] > 0
 
 
-# ---------------------------------------------------------------------------
 # Call edge detection
-# ---------------------------------------------------------------------------
 
 PYTHON_CALLS = """
 def helper():
@@ -187,9 +179,7 @@ def test_build_call_edges_empty_when_no_calls():
     assert edges == []
 
 
-# ---------------------------------------------------------------------------
 # Singleton
-# ---------------------------------------------------------------------------
 
 
 def test_get_code_parser_returns_same_instance():
@@ -202,9 +192,7 @@ def test_get_code_parser_returns_same_instance():
     cp_module._code_parser = None
 
 
-# ---------------------------------------------------------------------------
 # GET /graph/{doc_id}?type=call_graph endpoint
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

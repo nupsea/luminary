@@ -33,10 +33,6 @@ import type { Clip, CollectionTreeNode, Note } from "./Notes/types"
 
 
 
-// ---------------------------------------------------------------------------
-// Main Notes page
-// ---------------------------------------------------------------------------
-
 type FilterState =
   | { type: "all" }
   | { type: "journal" }

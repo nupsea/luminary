@@ -17,20 +17,12 @@ import { useDebounce } from "@/hooks/useDebounce"
 import { request } from "@/lib/apiClient"
 import { normalizeTagSlug } from "@/lib/tagUtils"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface AutocompleteResult {
   id: string
   display_name: string
   parent_tag: string | null
   note_count: number
 }
-
-// ---------------------------------------------------------------------------
-// API helper
-// ---------------------------------------------------------------------------
 
 async function fetchAutocomplete(q: string, signal?: AbortSignal): Promise<AutocompleteResult[]> {
   try {
@@ -43,9 +35,7 @@ async function fetchAutocomplete(q: string, signal?: AbortSignal): Promise<Autoc
   }
 }
 
-// ---------------------------------------------------------------------------
-// TagBreadcrumb -- renders 'root/child' as breadcrumb style in inline display
-// ---------------------------------------------------------------------------
+// TagBreadcrumb — renders 'root/child' as breadcrumb style
 
 export function TagBreadcrumb({ tag }: { tag: string }) {
   const parts = tag.split("/")
@@ -61,10 +51,6 @@ export function TagBreadcrumb({ tag }: { tag: string }) {
     </>
   )
 }
-
-// ---------------------------------------------------------------------------
-// TagAutocomplete
-// ---------------------------------------------------------------------------
 
 interface TagAutocompleteProps {
   tags: string[]

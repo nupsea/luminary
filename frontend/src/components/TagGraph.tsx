@@ -19,10 +19,6 @@ import {
 } from "@/lib/tagGraphUtils"
 import { logger } from "@/lib/logger"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface TagNodeData {
   id: string
   display_name: string
@@ -44,9 +40,7 @@ interface TagGraphProps {
   onRetry: () => void
 }
 
-// ---------------------------------------------------------------------------
 // Graph builder
-// ---------------------------------------------------------------------------
 
 function buildTagGraphology(nodes: TagNodeData[], edges: TagEdgeData[]): Graph {
   const g = new Graph({ type: "undirected", multi: false })
@@ -89,10 +83,6 @@ function buildTagGraphology(nodes: TagNodeData[], edges: TagEdgeData[]): Graph {
 
   return g
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: TagGraphProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -164,9 +154,7 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
     }
   }, [nodes, edges, isLoading, isError])
 
-  // ---------------------------------------------------------------------------
   // Loading state
-  // ---------------------------------------------------------------------------
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -180,9 +168,7 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
     )
   }
 
-  // ---------------------------------------------------------------------------
   // Error state
-  // ---------------------------------------------------------------------------
   if (isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -199,9 +185,7 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
     )
   }
 
-  // ---------------------------------------------------------------------------
   // Empty state
-  // ---------------------------------------------------------------------------
   if (nodes.length < 3) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center p-6">
@@ -214,9 +198,7 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
     )
   }
 
-  // ---------------------------------------------------------------------------
   // Graph canvas
-  // ---------------------------------------------------------------------------
   return (
     <div ref={canvasRef} style={{ width: "100%", height: "100%" }} />
   )

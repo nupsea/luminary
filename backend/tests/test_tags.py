@@ -13,9 +13,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel
 
-# ---------------------------------------------------------------------------
 # Fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -58,9 +56,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return DocumentModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -167,9 +163,7 @@ async def test_patch_tags_replaces_not_appends(test_db):
 # ===========================================================================
 
 
-# ---------------------------------------------------------------------------
 # NoteTagIndexModel population on note create
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_create_note_populates_tag_index(test_db):
@@ -193,9 +187,7 @@ async def test_s162_create_note_populates_tag_index(test_db):
         assert any(n["id"] == note_id for n in go_resp.json())
 
 
-# ---------------------------------------------------------------------------
 # Hierarchical prefix filtering
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_parent_tag_filter_returns_children(test_db):
@@ -230,9 +222,7 @@ async def test_s162_parent_tag_filter_returns_children(test_db):
         assert unrelated["id"] not in result_ids
 
 
-# ---------------------------------------------------------------------------
 # Deletion removes index rows and decrements note_count
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_delete_note_removes_tag_rows_and_decrements_count(test_db):
@@ -266,9 +256,7 @@ async def test_s162_delete_note_removes_tag_rows_and_decrements_count(test_db):
         assert all(n["id"] != note_id for n in filter_resp.json())
 
 
-# ---------------------------------------------------------------------------
 # Autocomplete
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_autocomplete_prefix_matches(test_db):
@@ -298,9 +286,7 @@ async def test_s162_autocomplete_limit_10(test_db):
         assert len(resp.json()) <= 10
 
 
-# ---------------------------------------------------------------------------
 # GET /tags/tree
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_tag_tree_nests_children(test_db):
@@ -341,9 +327,7 @@ async def test_s162_tag_tree_inclusive_count(test_db):
         assert parent_node["note_count"] == 3  # 1 direct + 2 children
 
 
-# ---------------------------------------------------------------------------
 # DELETE /tags/{id}
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_delete_tag_409_when_notes_exist(test_db):
@@ -369,9 +353,7 @@ async def test_s162_delete_tag_204_when_empty(test_db):
         assert (await client.delete(f"/tags/{unique_tag}")).status_code == 204
 
 
-# ---------------------------------------------------------------------------
 # Concurrent note creates do not corrupt note_count
-# ---------------------------------------------------------------------------
 
 
 async def test_s162_concurrent_creates_note_count_accurate(test_db):

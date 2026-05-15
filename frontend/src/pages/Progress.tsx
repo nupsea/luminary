@@ -30,10 +30,6 @@ import { GoalsList } from "@/components/goals/GoalsList"
 import type { DocListItem } from "./Study"
 import type { components } from "@/types/api"
 
-// ---------------------------------------------------------------------------
-// Types -- API shapes sourced from generated `src/types/api.ts` (audit #15).
-// ---------------------------------------------------------------------------
-
 type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
 type DueCountResponse = components["schemas"]["DueCountResponse"]
 type SessionListResponse = components["schemas"]["SessionListResponse"]
@@ -46,10 +42,6 @@ interface MonitoringOverview {
 }
 
 type Note = components["schemas"]["NoteResponse"]
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
 
 const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
   apiGet<DailyHistoryItem[]>("/study/history", {
@@ -82,9 +74,7 @@ const fetchRecentNotes = (): Promise<Note[]> =>
 const fetchSessions = (): Promise<SessionListResponse> =>
   apiGet<SessionListResponse>("/study/sessions", { page: 1, page_size: 50 })
 
-// ---------------------------------------------------------------------------
-// Helper: build notes-over-time chart data (group by month)
-// ---------------------------------------------------------------------------
+// Notes-over-time chart data builder (groups by month)
 
 function buildNotesOverTimeData(notes: Note[]): { month: string; count: number }[] {
   const counts: Record<string, number> = {}
@@ -98,10 +88,6 @@ function buildNotesOverTimeData(notes: Note[]): { month: string; count: number }
     .slice(-12)
     .map(([month, count]) => ({ month, count }))
 }
-
-// ---------------------------------------------------------------------------
-// Skeleton / Error helpers
-// ---------------------------------------------------------------------------
 
 function SectionSkeleton({ rows = 3 }: { rows?: number }) {
   return (
@@ -121,10 +107,6 @@ function SectionError({ name }: { name: string }) {
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// StatCard
-// ---------------------------------------------------------------------------
 
 function StatCard({
   label,
@@ -186,9 +168,7 @@ function StatCard({
   )
 }
 
-// ---------------------------------------------------------------------------
-// KnowledgeGapScanner (Added in Phase 4)
-// ---------------------------------------------------------------------------
+// KnowledgeGapScanner
 
 function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
   const [selectedDoc, setSelectedDoc] = useState<string>("")
@@ -311,10 +291,6 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
     </section>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Progress page
-// ---------------------------------------------------------------------------
 
 export default function Progress() {
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -557,7 +533,7 @@ export default function Progress() {
         )}
       </section>
 
-      {/* Study Habits: streaks, XP, achievements (Phase 7) */}
+      {/* Study Habits: streaks, XP, achievements */}
       <StudyHabitsSection />
 
       {/* Notes over time chart */}
@@ -580,7 +556,7 @@ export default function Progress() {
         </section>
       )}
 
-      {/* Knowledge Gap Scanner (Added in Phase 4) */}
+      {/* Knowledge Gap Scanner */}
       {!docsLoading && docList.length > 0 && (
          <KnowledgeGapScanner docs={docList} />
       )}
@@ -590,10 +566,6 @@ export default function Progress() {
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Format a Date as a local-time YYYY-MM-DD key (not UTC). Matches the

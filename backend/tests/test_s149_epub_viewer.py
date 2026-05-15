@@ -26,9 +26,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.services.epub_service import EpubService
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_epub(chapters: int, tmp_dir: Path) -> Path:
@@ -72,9 +70,7 @@ def _make_epub(chapters: int, tmp_dir: Path) -> Path:
     return epub_path
 
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -101,9 +97,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Unit tests — EpubService.sanitize_html
-# ---------------------------------------------------------------------------
 
 
 def test_sanitize_strips_script():
@@ -152,9 +146,7 @@ def test_sanitize_keeps_code_em_pre():
     assert "<pre>" in result
 
 
-# ---------------------------------------------------------------------------
 # HTTP endpoint tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

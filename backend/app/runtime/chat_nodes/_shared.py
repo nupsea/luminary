@@ -22,9 +22,7 @@ from app.types import ScoredChunk
 _background_tasks: set[asyncio.Task] = set()
 
 
-# ---------------------------------------------------------------------------
 # Intent-specific system prompts (used by synthesize_node)
-# ---------------------------------------------------------------------------
 
 _SUMMARY_SYSTEM = (
     "You are a knowledge assistant. Answer using the provided document summary. "
@@ -67,11 +65,6 @@ def _get_system_prompt(intent: str | None) -> str:
     if intent == "factual":
         return QA_FACTUAL_SYSTEM_PROMPT
     return QA_SYSTEM_PROMPT
-
-
-# ---------------------------------------------------------------------------
-# Chunk shape helpers
-# ---------------------------------------------------------------------------
 
 
 def _chunk_to_dict(c: ScoredChunk) -> dict:

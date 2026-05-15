@@ -8,10 +8,6 @@ import {
   type OutlineEntry,
 } from "./pdfTocUtils"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /** Minimal pdfjs PDFDocumentProxy mock. */
 function makeDoc(overrides: Record<string, unknown> = {}) {
   return {
@@ -35,10 +31,6 @@ function makePage(items: { str: string; height: number; transform?: number[] }[]
     }),
   }
 }
-
-// ---------------------------------------------------------------------------
-// shouldUseOutline
-// ---------------------------------------------------------------------------
 
 describe("shouldUseOutline", () => {
   it("returns false when outline is empty", () => {
@@ -67,10 +59,6 @@ describe("shouldUseOutline", () => {
     expect(shouldUseOutline(20, 5)).toBe(true)
   })
 })
-
-// ---------------------------------------------------------------------------
-// flattenOutline
-// ---------------------------------------------------------------------------
 
 describe("flattenOutline", () => {
   it("returns empty array for empty input", () => {
@@ -116,10 +104,6 @@ describe("flattenOutline", () => {
     expect(flat.map(e => e.level)).toEqual([1, 2, 3])
   })
 })
-
-// ---------------------------------------------------------------------------
-// resolveDestPage
-// ---------------------------------------------------------------------------
 
 describe("resolveDestPage", () => {
   it("resolves a RefProxy destination (standard pdfjs format)", async () => {
@@ -167,10 +151,6 @@ describe("resolveDestPage", () => {
     expect(page).toBe(-1)
   })
 })
-
-// ---------------------------------------------------------------------------
-// resolveOutline
-// ---------------------------------------------------------------------------
 
 describe("resolveOutline", () => {
   it("resolves all entries when all dests are valid", async () => {
@@ -259,10 +239,6 @@ describe("resolveOutline", () => {
     expect(flat.map(e => e.page)).toEqual([10, 30, 60])
   })
 })
-
-// ---------------------------------------------------------------------------
-// buildFontTOC
-// ---------------------------------------------------------------------------
 
 describe("buildFontTOC", () => {
   it("returns empty array for a doc with no text", async () => {

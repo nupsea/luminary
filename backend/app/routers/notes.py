@@ -58,9 +58,8 @@ from app.schemas.notes import (
 # indirect: tests patch `app.services.note_tagger.get_note_tagger`
 from app.services import note_tagger as _note_tagger_module
 
-# Promoted from inline lazy imports (audit #7 sweep). All of these
-# import cleanly without back-importing `app.routers.notes`; the
-# original noqa: PLC0415 markers were leftovers from earlier circular
+# Promoted from inline lazy imports — all import cleanly without back-importing `app.routers.notes`;
+# the original noqa: PLC0415 markers were leftovers from earlier circular
 # cycles that have since been broken.
 from app.services.clustering_service import get_clustering_service
 from app.services.engagement_service import EngagementService
@@ -144,11 +143,6 @@ __all__ = [
     "_upsert_note_graph",
     "router",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=NoteResponse, status_code=201)
@@ -616,9 +610,7 @@ async def list_note_flashcards(
     return [NoteFlashcardItem.model_validate(c) for c in cards]
 
 
-# ---------------------------------------------------------------------------
-# Cluster endpoints (static paths must come before /{note_id} catch-all)
-# ---------------------------------------------------------------------------
+# Cluster endpoints — static paths must come before /{note_id} catch-all
 
 
 @router.post("/cluster", status_code=202)
@@ -707,9 +699,7 @@ async def batch_accept_cluster_suggestions(
     return {"collection_ids": created_ids}
 
 
-# ---------------------------------------------------------------------------
 # Naming normalization check & apply
-# ---------------------------------------------------------------------------
 
 
 # NOTE: These routes registered BEFORE /{suggestion_id} to prevent path collision
@@ -761,12 +751,8 @@ async def reject_cluster_suggestion(
     return {"ok": True}
 
 
-# ---------------------------------------------------------------------------
 # Note links and autocomplete
-# NOTE: GET /notes/autocomplete is a static path and MUST be registered before
-# the /{note_id} catch-all to prevent FastAPI from matching "autocomplete" as a
-# note ID.
-# ---------------------------------------------------------------------------
+# NOTE: /autocomplete MUST be registered before /{note_id} catch-all to prevent FastAPI matching "autocomplete" as a note ID.
 
 
 @router.get("/autocomplete", response_model=list[NoteAutocompleteItem])

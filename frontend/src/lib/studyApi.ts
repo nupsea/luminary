@@ -13,10 +13,6 @@ import {
   type QueryParams,
 } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface Flashcard {
   id: string
   question: string
@@ -87,10 +83,6 @@ export interface SessionListResponse {
   page_size: number
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /** Resolves a fetch that should silently fall back on any error. */
 async function tryOr<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -99,10 +91,6 @@ async function tryOr<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
     return fallback
   }
 }
-
-// ---------------------------------------------------------------------------
-// API Functions
-// ---------------------------------------------------------------------------
 
 export async function startSession(
   documentId: string | null,
@@ -236,9 +224,7 @@ export const fetchSourceContext = (
     null,
   )
 
-// ---------------------------------------------------------------------------
 // Teach-back API
-// ---------------------------------------------------------------------------
 
 export async function submitTeachbackAsync(
   flashcardId: string,
@@ -283,9 +269,7 @@ export const fetchSessionTeachbackResults = (
     [],
   )
 
-// ---------------------------------------------------------------------------
 // Session listing
-// ---------------------------------------------------------------------------
 
 export async function fetchSessions(
   page: number,
@@ -311,9 +295,7 @@ export async function fetchSessions(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Flashcard generation
-// ---------------------------------------------------------------------------
 
 export type Difficulty = "easy" | "medium" | "hard"
 
@@ -394,10 +376,6 @@ export async function generateCollectionFlashcards(
 
   return result
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 export function scoreBadgeClass(score: number): string {
   if (score >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"

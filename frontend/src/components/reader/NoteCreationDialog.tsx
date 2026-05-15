@@ -21,10 +21,6 @@ import type { SourceRef } from "./SelectionActionBar"
 import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import type { Note } from "@/components/NoteEditorDialog"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface ExistingNote {
   id: string
   content: string
@@ -41,10 +37,6 @@ interface NoteCreationDialogProps {
   /** Called with the saved Note so parent can open NoteEditorDialog on it */
   onSaved: (note: Note) => void
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function buildBlockquote(text: string, sourceRef: SourceRef | null, sectionHeading?: string): string {
   const parts = [sourceRef?.documentTitle, sectionHeading].filter(Boolean)
@@ -70,10 +62,6 @@ function firstLine(content: string): string {
   const line = content.split("\n").find((l) => l.trim().length > 0) ?? ""
   return line.length > 80 ? line.slice(0, 80) + "..." : line
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function NoteCreationDialog({
   open,

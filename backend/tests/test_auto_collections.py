@@ -47,9 +47,7 @@ def _create_document(client, title="Test Book", content_type="book") -> str:
     return doc_id
 
 
-# ---------------------------------------------------------------------------
 # GET /collections/by-document/{document_id}
-# ---------------------------------------------------------------------------
 
 
 def test_by_document_404_when_no_auto_collection(client):
@@ -74,9 +72,7 @@ def test_by_document_returns_auto_collection(client):
     assert data["auto_document_id"] == doc_id
 
 
-# ---------------------------------------------------------------------------
 # POST /collections/auto/{document_id}
-# ---------------------------------------------------------------------------
 
 
 def test_create_auto_collection(client):

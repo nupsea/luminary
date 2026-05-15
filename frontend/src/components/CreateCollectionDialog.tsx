@@ -21,9 +21,7 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { normalizeCollectionName } from "@/lib/tagUtils"
 
-// ---------------------------------------------------------------------------
 // 8 colour swatches
-// ---------------------------------------------------------------------------
 
 export const COLLECTION_COLORS = [
   "#6366F1", // indigo
@@ -35,10 +33,6 @@ export const COLLECTION_COLORS = [
   "#3B82F6", // blue
   "#6B7280", // gray
 ]
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
 
 async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
   try {
@@ -54,10 +48,6 @@ const createCollection = (payload: {
   color: string
   parent_collection_id: string | null
 }): Promise<void> => apiPost("/collections", payload)
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 interface CreateCollectionDialogProps {
   open: boolean

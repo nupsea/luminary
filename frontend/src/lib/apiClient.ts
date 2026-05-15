@@ -1,16 +1,5 @@
-// ---------------------------------------------------------------------------
-// apiClient -- single fetch entry point for the Luminary frontend.
-//
-// All `*Api.ts` modules should funnel through `request<T>` (or the verb
-// helpers below) instead of calling `fetch` directly. This centralises:
-//   - base URL prefixing (`API_BASE` from config)
-//   - JSON encoding/decoding
-//   - query-param serialisation
-//   - error mapping (failures throw `ApiError`, never plain `Error`)
-//   - 204 No Content handling (returns `null`)
-//
-// See `frontend/src/lib/goalsApi.ts` for the canonical usage pattern.
-// ---------------------------------------------------------------------------
+// apiClient — single fetch entry point. All *Api.ts modules use request<T> instead of fetch directly.
+// Centralises: base URL, JSON encode/decode, query params, ApiError mapping, 204 handling.
 
 import { API_BASE } from "@/lib/config"
 

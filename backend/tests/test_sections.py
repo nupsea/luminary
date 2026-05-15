@@ -19,9 +19,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import IngestionState, _chunk_book, _chunk_conversation
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -128,9 +126,7 @@ def _make_conv_state(doc_id: str) -> IngestionState:
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) test_sections_endpoint_returns_ordered_list
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -159,9 +155,7 @@ async def test_sections_endpoint_returns_ordered_list(test_db):
     assert sections[2]["heading"] == "Chapter 3"
 
 
-# ---------------------------------------------------------------------------
 # (b) test_sections_endpoint_chunk_count_matches_db
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -209,9 +203,7 @@ async def test_sections_endpoint_chunk_count_matches_db(test_db):
         )
 
 
-# ---------------------------------------------------------------------------
 # (c) test_conversation_metadata_endpoint_returns_roster
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

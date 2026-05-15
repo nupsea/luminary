@@ -51,9 +51,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_session(
@@ -80,9 +78,7 @@ def _make_session(
     )
 
 
-# ---------------------------------------------------------------------------
 # CRUD
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -199,9 +195,7 @@ async def test_archive_and_complete(test_db):
         assert completed.completed_at is not None
 
 
-# ---------------------------------------------------------------------------
 # Linking
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -243,9 +237,7 @@ async def test_link_unknown_session_raises(test_db):
             await svc.link_session(goal.id, "no-session")
 
 
-# ---------------------------------------------------------------------------
 # delete_goal sets goal_id NULL on linked sessions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -290,9 +282,7 @@ async def test_delete_unknown_goal_returns_false(test_db):
         assert ok is False
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: studying
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -351,9 +341,7 @@ async def test_progress_studying_counts_all_completed_surfaces(test_db):
     assert out["completed_pct"] == pytest.approx(75.0)
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: read
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -393,9 +381,7 @@ async def test_progress_read_sums_completed_minutes(test_db):
     assert out["completed_pct"] == pytest.approx(87.5)
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: recall
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -518,9 +504,7 @@ async def test_progress_recall_no_sessions_returns_zero(test_db):
     assert out["sessions_completed"] == 0
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: write
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -577,9 +561,7 @@ async def test_progress_write_counts_notes_in_session_window(test_db):
     assert out["completed_pct"] == pytest.approx(60.0)
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: explore
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -630,9 +612,7 @@ async def test_progress_explore_counts_qa_turns_in_session_window(test_db):
     assert out["completed_pct"] == pytest.approx(50.0)
 
 
-# ---------------------------------------------------------------------------
 # Goalless sessions remain visible to /pomodoro/stats (don't disappear).
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -26,9 +26,7 @@ def _make_chunk(
     return {"id": chunk_id, "document_id": doc_id, "text": text, "has_code": has_code}
 
 
-# ---------------------------------------------------------------------------
 # Unit tests with mocked GLiNER model
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -155,9 +153,7 @@ def test_extract_strips_context_header(extractor: EntityExtractor):
     assert header not in called_texts[0]
 
 
-# ---------------------------------------------------------------------------
 # AC3: Tech noise filter
-# ---------------------------------------------------------------------------
 
 
 def test_tech_noise_filter_rejects_generic_library_terms(extractor: EntityExtractor):
@@ -190,9 +186,7 @@ def test_tech_noise_filter_allows_legitimate_library_names(extractor: EntityExtr
     assert result[0]["name"] == "numpy"
 
 
-# ---------------------------------------------------------------------------
 # AC5: Code-block confidence boost
-# ---------------------------------------------------------------------------
 
 
 def test_code_block_boost_code_chunk_uses_lower_threshold(extractor: EntityExtractor):
@@ -265,9 +259,7 @@ def test_tech_content_type_includes_all_types(extractor: EntityExtractor):
             assert "LIBRARY" in active
 
 
-# ---------------------------------------------------------------------------
 # Integration test (skipped if model not cached)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(

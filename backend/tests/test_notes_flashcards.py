@@ -19,9 +19,7 @@ from app.main import app
 pytest_plugins = ["conftest_books"]
 
 
-# ---------------------------------------------------------------------------
 # Unit test — pure ValueError check
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -36,9 +34,7 @@ async def test_generate_from_notes_raises_without_tag_or_ids():
         await svc.generate_from_notes(tag=None, note_ids=[], count=5, session=None)  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------
 # API integration tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -125,9 +121,7 @@ def test_generate_from_notes_by_ids(client):
     assert all(c["question"] for c in cards)
 
 
-# ---------------------------------------------------------------------------
 # Slow integration test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
