@@ -1,4 +1,4 @@
-"""In-document FTS5 search service (S151).
+"""In-document FTS5 search service
 
 Returns section-grouped results scoped to a single document_id.
 """

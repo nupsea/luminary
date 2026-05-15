@@ -95,7 +95,7 @@ async def get_graph_for_document(
 
     Pass ?type=call_graph to get the function call graph (code documents only).
     Default is the knowledge entity graph.
-    Pass ?include_notes=true to overlay Note nodes connected to entities in scope (S172).
+    Pass ?include_notes=true to overlay Note nodes connected to entities in scope
     """
     svc = get_graph_service()
     if type == "call_graph":
@@ -113,8 +113,8 @@ async def get_graph(
 
     Pass ?doc_ids=id1,id2,id3 to filter by specific documents.
     Returns the union of all known documents when doc_ids is empty.
-    Pass ?include_same_concept=true to include SAME_CONCEPT cross-book edges (S141).
-    Pass ?include_notes=true to overlay Note nodes connected to entities in scope (S172).
+    Pass ?include_same_concept=true to include SAME_CONCEPT cross-book edges
+    Pass ?include_notes=true to overlay Note nodes connected to entities in scope
     """
     svc = get_graph_service()
     if doc_ids:

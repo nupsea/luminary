@@ -1,5 +1,5 @@
 /**
- * FeynmanDialog -- split-pane guided explanation session (S144).
+ * FeynmanDialog -- split-pane guided explanation session
  *
  * Left pane (40%): section summary (or fallback preview)
  * Right pane (60%): SSE-streaming Socratic tutor chat
@@ -87,7 +87,7 @@ export function FeynmanDialog({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
 
-  // S159: model explanation state
+  // model explanation state
   const [showModelExplanation, setShowModelExplanation] = useState(false)
   const [modelExplanationStreaming, setModelExplanationStreaming] = useState(false)
   const [modelExplanationText, setModelExplanationText] = useState<string | null>(null)
@@ -341,7 +341,7 @@ export function FeynmanDialog({
   const learnerTurnCount = messages.filter((m) => m.role === "learner").length
 
   // ---------------------------------------------------------------------------
-  // S159: Model explanation fetch and diff computation
+  // Model explanation fetch and diff computation
   // ---------------------------------------------------------------------------
 
   async function handleFetchModelExplanation() {

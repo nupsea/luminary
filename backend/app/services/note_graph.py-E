@@ -1,0 +1,412 @@
+"""NoteGraphService: Kuzu graph integration for notes.
+
+Manages Note nodes and edges in the Kuzu knowledge graph:
+  - WRITTEN_ABOUT (Note -> Entity): auto-extracted via GLiNER on note save
+  - TAG_IS_CONCEPT (Note -> Entity): when a note tag matches an existing Entity.name
+  - DERIVED_FROM   (Note -> Document): when a note has a source document_id
+
+All Kuzu calls are synchronous; async methods wrap sync work in asyncio.to_thread (I-2).
+Every Kuzu result loop guards get_next() with has_next() (I-3).
+"""
+
+import asyncio
+import logging
+from datetime import UTC, datetime
+
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
+
+logger = logging.getLogger(__name__)
+
+_note_graph_service: "NoteGraphService | None" = None
+
+
+def get_note_graph_service() -> "NoteGraphService":
+    global _note_graph_service
+    if _note_graph_service is None:
+        _note_graph_service = NoteGraphService()
+    return _note_graph_service
+
+
+class NoteGraphService:
+    """Manages Note nodes and their edges in the Kuzu knowledge graph."""
+
+    # ------------------------------------------------------------------
+    # Upsert
+    # ------------------------------------------------------------------
+
+    async def upsert_note_node(
+        self,
+        note_id: str,
+        content: str,
+        document_id: str | None,
+        tags: list[str],
+        source_document_ids: list[str] | None = None,
+    ) -> None:
+        """Upsert Note node and all associated edges.
+
+        Steps:
+        1. Upsert Note node (id = note_id, preview = first 200 chars).
+        2. If document_id provided and Document node exists: upsert DERIVED_FROM edge.
+        3. For each source_document_id in source_document_ids: upsert DERIVED_FROM edge (S175).
+        4. Run GLiNER on content; for each extracted entity found in Kuzu: upsert WRITTEN_ABOUT.
+        5. For each tag: if Entity with matching name exists: upsert TAG_IS_CONCEPT.
+
+        This method is called as asyncio.create_task (fire-and-forget) from notes.py.
+        Body wrapped in try/except so failures are logged but never propagate.
+        """
+        try:
+            await asyncio.to_thread(
+                self._upsert_note_node_sync,
+                note_id,
+                content,
+                document_id,
+                tags,
+                source_document_ids or [],
+            )
+        except Exception as exc:
+            logger.warning("upsert_note_node failed (non-fatal): %s", exc, exc_info=True)
+
+    def _upsert_note_node_sync(
+        self,
+        note_id: str,
+        content: str,
+        document_id: str | None,
+        tags: list[str],
+        source_document_ids: list[str] | None = None,
+    ) -> None:
+
+        gs = _graph_module.get_graph_service()
+
+        # Run GLiNER BEFORE acquiring the lock -- inference is slow and should
+        # not block other Kuzu operations (Kuzu connection is not thread-safe,
+        # so all _conn.execute() calls must be serialised via gs._lock).
+        entities = self._extract_entities(note_id, content, document_id)
+
+        with gs._lock:
+            self._upsert_note_node_locked(
+                gs._conn,
+                note_id,
+                content,
+                document_id,
+                tags,
+                entities,
+                source_document_ids or [],
+            )
+
+    def _extract_entities(
+        self,
+        note_id: str,
+        content: str,
+        document_id: str | None,
+    ) -> list[dict]:
+        """Run GLiNER extraction (slow) outside the Kuzu lock."""
+        try:
+
+            extractor = _ner_module.get_entity_extractor()
+            chunks = [{"id": note_id, "document_id": document_id or "", "text": content}]
+            return extractor.extract(chunks, content_type="unknown")
+        except Exception as exc:
+            logger.warning("GLiNER extraction failed for note %s: %s", note_id, exc)
+            return []
+
+    def _upsert_note_node_locked(
+        self,
+        conn: object,
+        note_id: str,
+        content: str,
+        document_id: str | None,
+        tags: list[str],
+        entities: list[dict],
+        source_document_ids: list[str] | None = None,
+    ) -> None:
+        """Execute all Kuzu writes. Caller must hold gs._lock."""
+        preview = content[:200]
+        created_at = datetime.now(UTC).isoformat()
+
+        # 1. Upsert Note node
+        result = conn.execute(
+            "MATCH (n:Note {id: $id}) RETURN n.id",
+            {"id": note_id},
+        )
+        if result.has_next():
+            conn.execute(
+                "MATCH (n:Note {id: $id}) SET n.preview = $preview",
+                {"id": note_id, "preview": preview},
+            )
+        else:
+            conn.execute(
+                "CREATE (:Note {id: $id, note_id: $note_id,"
+                " preview: $preview, created_at: $created_at})",
+                {
+                    "id": note_id,
+                    "note_id": note_id,
+                    "preview": preview,
+                    "created_at": created_at,
+                },
+            )
+
+        # 2. DERIVED_FROM edge for legacy document_id
+        if document_id:
+            doc_result = conn.execute(
+                "MATCH (d:Document {id: $did}) RETURN d.id",
+                {"did": document_id},
+            )
+            if doc_result.has_next():
+                # Check if edge already exists
+                edge_result = conn.execute(
+                    "MATCH (n:Note {id: $nid})-[:DERIVED_FROM]->(d:Document {id: $did})"
+                    " RETURN n.id",
+                    {"nid": note_id, "did": document_id},
+                )
+                if not edge_result.has_next():
+                    conn.execute(
+                        "MATCH (n:Note {id: $nid}), (d:Document {id: $did})"
+                        " CREATE (n)-[:DERIVED_FROM]->(d)",
+                        {"nid": note_id, "did": document_id},
+                    )
+
+        # 2b. S175: DERIVED_FROM edges for each NoteSourceModel row
+        for src_doc_id in source_document_ids or []:
+            # Skip if same as legacy document_id (already handled above to avoid duplicate)
+            if src_doc_id == document_id:
+                continue
+            src_result = conn.execute(
+                "MATCH (d:Document {id: $did}) RETURN d.id",
+                {"did": src_doc_id},
+            )
+            if src_result.has_next():
+                src_edge = conn.execute(
+                    "MATCH (n:Note {id: $nid})-[:DERIVED_FROM]->(d:Document {id: $did})"
+                    " RETURN n.id",
+                    {"nid": note_id, "did": src_doc_id},
+                )
+                if not src_edge.has_next():
+                    conn.execute(
+                        "MATCH (n:Note {id: $nid}), (d:Document {id: $did})"
+                        " CREATE (n)-[:DERIVED_FROM]->(d)",
+                        {"nid": note_id, "did": src_doc_id},
+                    )
+
+        # 3. WRITTEN_ABOUT edges from pre-extracted entities
+        self._upsert_written_about_edges_locked(conn, note_id, entities)
+
+        # 4. TAG_IS_CONCEPT edges
+        for tag in tags:
+            entity_result = conn.execute(
+                "MATCH (e:Entity) WHERE LOWER(e.name) = LOWER($name) RETURN e.id",
+                {"name": tag},
+            )
+            if entity_result.has_next():
+                entity_row = entity_result.get_next()
+                entity_id = entity_row[0]
+                # Check if edge already exists
+                tag_edge = conn.execute(
+                    "MATCH (n:Note {id: $nid})-[r:TAG_IS_CONCEPT]->(e:Entity {id: $eid})"
+                    " RETURN r.tag",
+                    {"nid": note_id, "eid": entity_id},
+                )
+                if not tag_edge.has_next():
+                    conn.execute(
+                        "MATCH (n:Note {id: $nid}), (e:Entity {id: $eid})"
+                        " CREATE (n)-[:TAG_IS_CONCEPT {tag: $tag}]->(e)",
+                        {"nid": note_id, "eid": entity_id, "tag": tag},
+                    )
+
+    def _upsert_written_about_edges_locked(
+        self,
+        conn: object,
+        note_id: str,
+        entities: list[dict],
+    ) -> None:
+        """Create WRITTEN_ABOUT edges for pre-extracted entities. Caller must hold gs._lock."""
+        for entity in entities:
+            entity_name = entity.get("name", "")
+            entity_score = float(entity.get("score", 0.8))
+            if not entity_name:
+                continue
+
+            # Look up matching Entity in Kuzu (case-insensitive)
+            entity_result = conn.execute(
+                "MATCH (e:Entity) WHERE LOWER(e.name) = LOWER($name) RETURN e.id",
+                {"name": entity_name},
+            )
+            if not entity_result.has_next():
+                continue  # Entity not in graph -- silently skip
+
+            entity_row = entity_result.get_next()
+            entity_id = entity_row[0]
+
+            # Check if WRITTEN_ABOUT edge already exists
+            edge_result = conn.execute(
+                "MATCH (n:Note {id: $nid})-[r:WRITTEN_ABOUT]->(e:Entity {id: $eid})"
+                " RETURN r.confidence",
+                {"nid": note_id, "eid": entity_id},
+            )
+            if edge_result.has_next():
+                # Update confidence
+                conn.execute(
+                    "MATCH (n:Note {id: $nid})-[r:WRITTEN_ABOUT]->(e:Entity {id: $eid})"
+                    " SET r.confidence = $conf",
+                    {"nid": note_id, "eid": entity_id, "conf": entity_score},
+                )
+            else:
+                conn.execute(
+                    "MATCH (n:Note {id: $nid}), (e:Entity {id: $eid})"
+                    " CREATE (n)-[:WRITTEN_ABOUT {confidence: $conf}]->(e)",
+                    {"nid": note_id, "eid": entity_id, "conf": entity_score},
+                )
+
+    # ------------------------------------------------------------------
+    # LINKS_TO edges
+    # ------------------------------------------------------------------
+
+    async def upsert_links_to_edge(self, source_id: str, target_id: str, link_type: str) -> None:
+        """Upsert a LINKS_TO(link_type) edge between two Note nodes in Kuzu.
+
+        Fire-and-forget safe: errors are logged and suppressed.
+        """
+        try:
+            await asyncio.to_thread(self._upsert_links_to_sync, source_id, target_id, link_type)
+        except Exception as exc:
+            logger.warning("upsert_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
+
+    def _upsert_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
+
+        gs = _graph_module.get_graph_service()
+        with gs._lock:
+            # Check both Note nodes exist
+            for nid in (source_id, target_id):
+                r = gs._conn.execute("MATCH (n:Note {id: $id}) RETURN n.id", {"id": nid})
+                if not r.has_next():
+                    return  # Node not yet in Kuzu -- silently skip
+
+            # Upsert: check if edge already exists with same link_type
+            existing = gs._conn.execute(
+                "MATCH (s:Note {id: $sid})-[r:LINKS_TO]->(t:Note {id: $tid})"
+                " WHERE r.link_type = $lt RETURN r.link_type",
+                {"sid": source_id, "tid": target_id, "lt": link_type},
+            )
+            if not existing.has_next():
+                gs._conn.execute(
+                    "MATCH (s:Note {id: $sid}), (t:Note {id: $tid})"
+                    " CREATE (s)-[:LINKS_TO {link_type: $lt}]->(t)",
+                    {"sid": source_id, "tid": target_id, "lt": link_type},
+                )
+
+    async def delete_links_to_edge(self, source_id: str, target_id: str, link_type: str) -> None:
+        """Delete a LINKS_TO edge from Kuzu. Fire-and-forget safe."""
+        try:
+            await asyncio.to_thread(self._delete_links_to_sync, source_id, target_id, link_type)
+        except Exception as exc:
+            logger.warning("delete_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
+
+    def _delete_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
+
+        gs = _graph_module.get_graph_service()
+        with gs._lock:
+            gs._conn.execute(
+                "MATCH (s:Note {id: $sid})-[r:LINKS_TO]->(t:Note {id: $tid})"
+                " WHERE r.link_type = $lt DELETE r",
+                {"sid": source_id, "tid": target_id, "lt": link_type},
+            )
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    async def delete_note_node(self, note_id: str) -> None:
+        """Delete Note node from Kuzu. Kuzu cascades incident edges on node delete."""
+        try:
+            await asyncio.to_thread(self._delete_note_node_sync, note_id)
+        except Exception as exc:
+            logger.warning("delete_note_node failed (non-fatal): %s", exc, exc_info=True)
+
+    def _delete_note_node_sync(self, note_id: str) -> None:
+
+        gs = _graph_module.get_graph_service()
+        with gs._lock:
+            gs._conn.execute(  # type: ignore[union-attr]
+                "MATCH (n:Note {id: $id}) DETACH DELETE n",
+                {"id": note_id},
+            )
+
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
+
+    async def get_entities_for_note(self, note_id: str) -> list[dict]:
+        """Return entities linked to a note via WRITTEN_ABOUT or TAG_IS_CONCEPT edges.
+
+        Returns list of dicts: {name, type, confidence, edge_type}.
+        """
+        return await asyncio.to_thread(self._get_entities_for_note_sync, note_id)
+
+    def _get_entities_for_note_sync(self, note_id: str) -> list[dict]:
+
+        gs = _graph_module.get_graph_service()
+        entities: list[dict] = []
+
+        with gs._lock:
+            try:
+                result = gs._conn.execute(
+                    "MATCH (n:Note {id: $nid})-[r:WRITTEN_ABOUT]->(e:Entity)"
+                    " RETURN e.name, e.type, r.confidence",
+                    {"nid": note_id},
+                )
+                while result.has_next():
+                    row = result.get_next()
+                    entities.append(
+                        {
+                            "name": row[0],
+                            "type": row[1],
+                            "confidence": float(row[2]) if row[2] is not None else 0.0,
+                            "edge_type": "WRITTEN_ABOUT",
+                        }
+                    )
+            except Exception as exc:
+                logger.warning("get_entities_for_note WRITTEN_ABOUT failed: %s", exc)
+
+            try:
+                result = gs._conn.execute(
+                    "MATCH (n:Note {id: $nid})-[r:TAG_IS_CONCEPT]->(e:Entity)"
+                    " RETURN e.name, e.type, r.tag",
+                    {"nid": note_id},
+                )
+                while result.has_next():
+                    row = result.get_next()
+                    entities.append(
+                        {
+                            "name": row[0],
+                            "type": row[1],
+                            "confidence": 1.0,
+                            "edge_type": "TAG_IS_CONCEPT",
+                        }
+                    )
+            except Exception as exc:
+                logger.warning("get_entities_for_note TAG_IS_CONCEPT failed: %s", exc)
+
+        return entities
+
+    async def get_notes_for_entity(self, entity_name: str) -> list[str]:
+        """Return note_ids linked to an entity (case-insensitive name match)."""
+        return await asyncio.to_thread(self._get_notes_for_entity_sync, entity_name)
+
+    def _get_notes_for_entity_sync(self, entity_name: str) -> list[str]:
+
+        gs = _graph_module.get_graph_service()
+        note_ids: list[str] = []
+        with gs._lock:
+            try:
+                result = gs._conn.execute(
+                    "MATCH (n:Note)-[:WRITTEN_ABOUT|:TAG_IS_CONCEPT]->(e:Entity)"
+                    " WHERE LOWER(e.name) = LOWER($name)"
+                    " RETURN n.note_id",
+                    {"name": entity_name},
+                )
+                while result.has_next():
+                    row = result.get_next()
+                    note_ids.append(row[0])
+            except Exception as exc:
+                logger.warning("get_notes_for_entity failed: %s", exc)
+        return note_ids

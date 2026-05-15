@@ -1,4 +1,4 @@
-"""KuzuConceptRepo: SAME_CONCEPT cross-document edges + concept clustering (S141).
+"""KuzuConceptRepo: SAME_CONCEPT cross-document edges + concept clustering
 
 Methods are lifted verbatim from `KuzuService` so query strings and
 return shapes are unchanged. `KuzuService` keeps the public method

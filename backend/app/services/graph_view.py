@@ -102,7 +102,7 @@ class KuzuViewRepo:
         Includes Entity nodes (with CO_OCCURS + tech-relation edges) and
         DiagramNode rows (with diagram edges) merged into a single graph.
         Pass include_notes=True to also include Note nodes connected to entities
-        via WRITTEN_ABOUT or TAG_IS_CONCEPT edges (S172).
+        via WRITTEN_ABOUT or TAG_IS_CONCEPT edges
         """
         result = self._conn.execute(
             "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
@@ -128,15 +128,15 @@ class KuzuViewRepo:
 
         edges = self._get_co_occurrence_edges(entity_ids, document_id)
         edges.extend(self._tech._get_tech_relation_edges(entity_ids, document_id))
-        # Include PREREQUISITE_OF edges for Viz tab (S139)
+        # Include PREREQUISITE_OF edges for Viz tab
         edges.extend(self._prereq.get_prerequisite_edges_for_graph(document_id))
 
-        # Include diagram-derived nodes and edges (S136)
+        # Include diagram-derived nodes and edges
         diagram_nodes = self._tech.get_diagram_nodes_for_document(document_id)
         nodes.extend(diagram_nodes)
         edges.extend(self._tech.get_diagram_edges_for_document(document_id))
 
-        # Include Note nodes connected to entities in scope (S172)
+        # Include Note nodes connected to entities in scope
         if include_notes and entity_ids:
             note_nodes, note_edges = self._get_note_nodes_for_entities(entity_ids)
             nodes.extend(note_nodes)
@@ -153,8 +153,8 @@ class KuzuViewRepo:
         """Return merged nodes and edges for multiple documents.
 
         Includes Entity nodes and DiagramNode rows from all specified documents.
-        Pass include_same_concept=True to include SAME_CONCEPT cross-book edges (S141).
-        Pass include_notes=True to include Note nodes connected to entities in scope (S172).
+        Pass include_same_concept=True to include SAME_CONCEPT cross-book edges
+        Pass include_notes=True to include Note nodes connected to entities in scope
         """
         if not document_ids:
             return {"nodes": [], "edges": []}
@@ -187,13 +187,13 @@ class KuzuViewRepo:
         edges: list[dict] = []
         for doc_id in document_ids:
             edges.extend(self._get_co_occurrence_edges(entity_ids, doc_id))
-            # Include diagram-derived nodes and edges for this document (S136)
+            # Include diagram-derived nodes and edges for this document
             for dnode in self._tech.get_diagram_nodes_for_document(doc_id):
                 if dnode["id"] not in nodes_map:
                     nodes_map[dnode["id"]] = dnode
             edges.extend(self._tech.get_diagram_edges_for_document(doc_id))
 
-        # Include SAME_CONCEPT cross-book edges when requested (S141)
+        # Include SAME_CONCEPT cross-book edges when requested
         if include_same_concept:
             sc_edges = self._concept.get_same_concept_edges()
             for e in sc_edges:
@@ -208,7 +208,7 @@ class KuzuViewRepo:
                         }
                     )
 
-        # Include Note nodes connected to entities in scope (S172)
+        # Include Note nodes connected to entities in scope
         if include_notes and entity_ids:
             note_nodes, note_edges = self._get_note_nodes_for_entities(entity_ids)
             for nn in note_nodes:
@@ -219,7 +219,7 @@ class KuzuViewRepo:
         return {"nodes": list(nodes_map.values()), "edges": edges}
 
     def _get_note_nodes_for_entities(self, entity_ids: set[str]) -> tuple[list[dict], list[dict]]:
-        """Return Note nodes and their edges for entities in scope (S172).
+        """Return Note nodes and their edges for entities in scope
 
         Returns (note_nodes, note_edges) where:
           - note_nodes: list of {id, note_id, label, type='note', size, outgoing_link_count}

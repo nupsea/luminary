@@ -74,7 +74,7 @@ export default function Learning() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const tagFilter = searchParams.get("tag")
-  // S148: citation deep-link params — doc opens DocumentReader, page sets initial PDF page
+  // citation deep-link params — doc opens DocumentReader, page sets initial PDF page
   // Capture into state so they survive URL param cleanup (params are cleared after first use
   // but DocumentReader needs them after its async doc fetch completes).
   const docParam = searchParams.get("doc")
@@ -163,7 +163,7 @@ export default function Learning() {
     }
   }
 
-  // S191: Document action menu handler
+  // Document action menu handler
   function handleDocAction(docId: string, action: DocAction) {
     if (action === "read") {
       handleDocumentClick(docId)
@@ -241,7 +241,7 @@ export default function Learning() {
     setPage(1)
   }
 
-  // S148: when arriving from a citation deep-link, open the referenced document
+  // when arriving from a citation deep-link, open the referenced document
   // then clear doc/section_id/page params so the Back button and next doc-open work correctly
   useEffect(() => {
     if (docParam) {
@@ -409,7 +409,7 @@ export default function Learning() {
                 </div>
               )}
 
-              {/* Stats bar -- compact single-row pills (S183) */}
+              {/* Stats bar -- compact single-row pills */}
               {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
                 <LibraryStatsBar
                   totalDocuments={total}
@@ -417,7 +417,7 @@ export default function Learning() {
                 />
               )}
 
-              {/* Continue reading -- single highlighted row for most recently accessed doc (S183) */}
+              {/* Continue reading -- single highlighted row for most recently accessed doc */}
               {recentItems && recentItems.length > 0 && selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
                 <div
                   className="flex cursor-pointer select-none items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10"

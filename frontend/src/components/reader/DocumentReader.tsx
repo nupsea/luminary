@@ -41,7 +41,7 @@ import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
 // ---------------------------------------------------------------------------
-// Error Boundary (S200)
+// Error Boundary
 // ---------------------------------------------------------------------------
 
 class DocumentReaderErrorBoundary extends React.Component<
@@ -100,7 +100,7 @@ interface DocumentReaderProps {
   onBack: () => void
   initialSectionId?: string
   initialChunkId?: string
-  initialPage?: number  // S148: PDF page to navigate to on mount (from citation deep-link)
+  initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
 }
 
 export function DocumentReader(props: DocumentReaderProps) {
@@ -151,24 +151,24 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const highlightsPanelRef = useRef<HTMLDivElement>(null)
   const highlightsToggleRef = useRef<HTMLButtonElement>(null)
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
-  // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
+  // tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
-  // S144: Feynman mode — section id to open dialog for; null = closed
+  // Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
   // Unified "section the user is currently focused on" — set by every section
   // action (Read, Practice, Note, PDF jump, Goals, citation deep-link). Drives
   // the sticky banner in the sections tab and the active-row visual treatment.
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
-  // S197: noteCount for "Compare my notes" button visibility
+  // noteCount for "Compare my notes" button visibility
   const [noteCount, setNoteCount] = useState(0)
-  // S151: in-document Cmd+F search state
+  // in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
   const [searchHitIndex, setSearchHitIndex] = useState(0)
   const [listLimit, setListLimit] = useState(200)
 
-  // S152: reading position — resume banner
+  // reading position — resume banner
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
   // ref tracking the last section_id we POSTed so we only POST when it changes
   const lastPostedSectionRef = useRef<string | null>(null)
@@ -180,20 +180,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const navigate = useNavigate()
   const setChatPreload = useAppStore((s) => s.setChatPreload)
 
-  // Audio mini-player state (S120) — only active for audio documents
+  // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [audioPlaying, setAudioPlaying] = useState(false)
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
 
-  // Video player state (S121) — only active for video documents
+  // Video player state — only active for video documents
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   const isAudio = doc?.content_type === "audio"
   const isVideo = doc?.content_type === "video"
   const isYouTube = isYouTubeDoc(doc ?? {})
 
-  // S111: Pre-calculate section map for O(1) lookups in highlight loops
+  // Pre-calculate section map for O(1) lookups in highlight loops
   const sectionMap = useMemo(() => {
     const m = new Map<string, SectionItem>()
     if (doc?.sections) {
@@ -249,7 +249,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     void el.play()
   }
 
-  // Scroll to initialSectionId once document sections are loaded (S114)
+  // Scroll to initialSectionId once document sections are loaded
   useEffect(() => {
     if (!initialSectionId || !doc) return
     // Wait a tick for DOM to update after doc is available
@@ -262,7 +262,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return () => clearTimeout(timer)
   }, [initialSectionId, doc])
 
-  // S151: Explicit scroll when switching to Read tab via citation link
+  // Explicit scroll when switching to Read tab via citation link
   useEffect(() => {
     if (leftTab === "read" && readSectionId) {
       const timer = setTimeout(() => {
@@ -397,14 +397,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch notes for this document so dot indicators persist across reloads (S106)
+  // Fetch notes for this document so dot indicators persist across reloads
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
     queryKey: ["notes-for-doc", documentId],
     queryFn: () => apiGet<NoteEntry[]>("/notes", { document_id: documentId }),
     staleTime: 30_000,
   })
 
-  // Fetch annotations for highlight reconstruction and panel (S111)
+  // Fetch annotations for highlight reconstruction and panel
   const {
     data: docAnnotations,
   } = useQuery<AnnotationItem[]>({
@@ -414,7 +414,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     staleTime: 30_000,
   })
 
-  // Fetch objective progress for mini rings on section headers (S143)
+  // Fetch objective progress for mini rings on section headers
   const { data: progressData } = useQuery<{
     by_chapter: { section_id: string; progress_pct: number }[]
   }>({
@@ -436,13 +436,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     [progressData],
   )
 
-  // S151: derived set of section IDs that have a search hit (O(1) lookup)
+  // derived set of section IDs that have a search hit (O(1) lookup)
   const searchHitSectionIds = useMemo(
     () => new Set(searchResults.map((r) => r.section_id)),
     [searchResults],
   )
 
-  // S131: Group annotations by section for O(1) retrieval in section list
+  // Group annotations by section for O(1) retrieval in section list
   const annotationsBySection = useMemo(() => {
     const m = new Map<string, AnnotationItem[]>()
     if (docAnnotations) {
@@ -455,7 +455,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [docAnnotations])
 
-  // S151: Pre-calculate search snippet map for O(1) retrieval
+  // Pre-calculate search snippet map for O(1) retrieval
   const searchSnippetMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const r of searchResults) {
@@ -483,7 +483,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (leftTab !== "sections" && searchOpen) closeReaderSearch()
   }, [leftTab, searchOpen, closeReaderSearch])
 
-  // S151: scroll current hit into view when hitIndex or results change
+  // scroll current hit into view when hitIndex or results change
   useEffect(() => {
     if (searchResults.length === 0) return
     const targetId = searchResults[searchHitIndex]?.section_id
@@ -498,7 +498,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     void navigate("/study")
   }
 
-  // Fetch FSRS fragility heatmap for section coloring (S116)
+  // Fetch FSRS fragility heatmap for section coloring
   const { data: heatmapData } = useQuery<Record<string, SectionHeatmapItem>>({
     queryKey: ["section-heatmap", documentId],
     queryFn: async () => {
@@ -546,7 +546,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Track reading progress via IntersectionObserver (3-second dwell per section)
   useReadingProgress(documentId, doc?.sections.length ?? 0)
 
-  // S152: fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
+  // fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
   useEffect(() => {
     if (!doc) return
     const dismissedKey = `resume-dismissed-${documentId}`
@@ -561,7 +561,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       })
   }, [documentId, doc])
 
-  // S152: IntersectionObserver — track the topmost visible section and throttle-POST position
+  // IntersectionObserver — track the topmost visible section and throttle-POST position
   useEffect(() => {
     if (!doc || doc.sections.length === 0) return
     const sectionElements = Array.from(
@@ -690,7 +690,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [highlightsPanelOpen])
 
 
-  // S131: Use virtualization for the section list if it's very large.
+  // Use virtualization for the section list if it's very large.
   const renderedSectionItems = useMemo(() => {
     if (!doc?.sections) return null
     // Filter out sections whose ancestor is collapsed *before* slicing, so
@@ -839,7 +839,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Back button + Compare my notes (S197) */}
+      {/* Back button + Compare my notes */}
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
           <button
@@ -1161,7 +1161,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
         {/* Right panel — 40%, sticky */}
         <div className="w-2/5 overflow-auto p-6">
-          {/* Video player for video documents (S121) */}
+          {/* Video player for video documents */}
           {isVideo && videoUrl && (
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
           )}
@@ -1190,7 +1190,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         </div>
       </div>
 
-      {/* Audio mini-player — sticky bottom bar, audio documents only (S120) */}
+      {/* Audio mini-player — sticky bottom bar, audio documents only */}
       {isAudio && audioUrl && (
         <AudioMiniPlayer
           audioRef={audioRef}
@@ -1210,7 +1210,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         />
       )}
 
-      {/* Feynman dialog (S144) */}
+      {/* Feynman dialog */}
       {feynmanSection && (
         <FeynmanDialog
           documentId={documentId}

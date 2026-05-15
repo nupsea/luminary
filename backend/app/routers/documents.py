@@ -222,7 +222,7 @@ async def list_documents(
             select(EnrichmentJobModel.status)
             .where(EnrichmentJobModel.document_id == DocumentModel.id)
             .order_by(
-                # Prioritize image-related jobs for the status display (S134)
+                # Prioritize image-related jobs for the status display
                 case(
                     (EnrichmentJobModel.job_type == "image_analyze", 1),
                     (EnrichmentJobModel.job_type == "image_extract", 2),
@@ -823,7 +823,7 @@ async def serve_video_file(document_id: str) -> FileResponse:
 async def serve_document_file(document_id: str) -> FileResponse:
     """Serve the raw uploaded file for a document.
 
-    Used by the PDF.js viewer (S146) to stream PDF bytes.
+    Used by the PDF.js viewer to stream PDF bytes.
     Returns 404 if the document does not exist or the file is not found on disk.
     Returns the file with the appropriate Content-Type based on document format.
     """
@@ -870,7 +870,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
 
 
 # ---------------------------------------------------------------------------
-# S149: EPUB chapter viewer endpoints
+# EPUB chapter viewer endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -1125,7 +1125,7 @@ async def get_document_diagnostics(document_id: str):
 
 
 # ---------------------------------------------------------------------------
-# S151: In-document FTS5 search endpoint
+# In-document FTS5 search endpoint
 # ---------------------------------------------------------------------------
 
 
@@ -1287,7 +1287,7 @@ async def update_objective(
 
 
 # ---------------------------------------------------------------------------
-# S143: Document learning progress endpoints
+# Document learning progress endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -1336,7 +1336,7 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
 
 
 # ---------------------------------------------------------------------------
-# S152: Reading position persistence -- resume-where-you-left-off
+# Reading position persistence -- resume-where-you-left-off
 # ---------------------------------------------------------------------------
 
 

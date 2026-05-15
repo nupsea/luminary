@@ -48,7 +48,7 @@ class NoteGraphService:
         Steps:
         1. Upsert Note node (id = note_id, preview = first 200 chars).
         2. If document_id provided and Document node exists: upsert DERIVED_FROM edge.
-        3. For each source_document_id in source_document_ids: upsert DERIVED_FROM edge (S175).
+        3. For each source_document_id in source_document_ids: upsert DERIVED_FROM edge
         4. Run GLiNER on content; for each extracted entity found in Kuzu: upsert WRITTEN_ABOUT.
         5. For each tag: if Entity with matching name exists: upsert TAG_IS_CONCEPT.
 
@@ -258,7 +258,7 @@ class NoteGraphService:
                 )
 
     # ------------------------------------------------------------------
-    # LINKS_TO edges (S171)
+    # LINKS_TO edges
     # ------------------------------------------------------------------
 
     async def upsert_links_to_edge(self, source_id: str, target_id: str, link_type: str) -> None:

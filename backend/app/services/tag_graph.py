@@ -1,4 +1,4 @@
-"""Tag co-occurrence graph service (S167).
+"""Tag co-occurrence graph service
 
 Computes a tag co-occurrence network from NoteTagIndexModel data.
 Exposes an in-memory cache that is invalidated whenever _sync_tag_index writes.

@@ -7,7 +7,7 @@ pipeline. For each chunk it:
   3. Writes Entity nodes + MENTIONED_IN edges + (optionally)
      CO_OCCURS, RELATED_TO, IMPLEMENTS, VERSION_OF edges into Kuzu.
   4. Concatenates the canonical entity tail back into ChunkModel
-     so embed/keyword index can match on it (S224).
+     so embed/keyword index can match on it
 
 For code documents, also builds a function-level call graph via
 _build_call_graph.
@@ -158,7 +158,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 canonical_entities.append({**ent, "id": canonical_id, "name": canonical})
                 chunk_to_entities.setdefault(ent["chunk_id"], set()).add(canonical)
 
-            # S224: Entity injection (option b) -- store canonical entities in a
+            # Entity injection (option b) -- store canonical entities in a
             # sibling entities_text column. Display text is preserved; downstream
             # embed_node and keyword_index_node concatenate entities_text into the
             # FTS5 indexed text and the embedding input. Idempotent: every reindex

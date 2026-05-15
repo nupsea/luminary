@@ -1,4 +1,4 @@
-"""Bloom-progressive chat suggestion generation with LLM + dedup (S195)."""
+"""Bloom-progressive chat suggestion generation with LLM + dedup"""
 
 import json
 import logging

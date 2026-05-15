@@ -550,7 +550,7 @@ async def get_collection_health(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Return CollectionHealthReport for the given collection (S173)."""
+    """Return CollectionHealthReport for the given collection"""
     try:
         report = await get_collection_health_service().analyze(collection_id, session)
     except ValueError as exc:
@@ -563,7 +563,7 @@ async def archive_stale_notes(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Set archived=True for all stale notes in this collection (S173).
+    """Set archived=True for all stale notes in this collection
 
     Returns {archived: int}.
     """

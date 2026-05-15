@@ -155,7 +155,7 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
             },
         )
 
-    # Invalidate tag graph cache when tag index changes (S167)
+    # Invalidate tag graph cache when tag index changes
     if removed or added:
 
         invalidate_tag_graph_cache()
@@ -164,7 +164,7 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
 async def sync_note_sources(
     note_id: str, source_document_ids: list[str], session: AsyncSession
 ) -> None:
-    """Sync NoteSourceModel rows for a note (S175).
+    """Sync NoteSourceModel rows for a note
 
     Deletes rows not in new list; inserts new rows via INSERT OR IGNORE (idempotent).
     """

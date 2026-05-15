@@ -8,7 +8,7 @@
  * The hexagon SDF uses flat-top orientation:
  *   max(|p.x| * 0.866 + |p.y| * 0.5, |p.y|) - r
  *
- * Used in Viz.tsx for COMPONENT nodes (S136: diagram-derived nodes).
+ * Used in Viz.tsx for COMPONENT nodes
  */
 import { NodeCircleProgram } from "sigma/rendering"
 

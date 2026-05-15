@@ -9,12 +9,12 @@ Schema:
          RELATED_TO(Entity->Entity, relation_label, confidence),
          CALLS(Entity->Entity, document_id)  -- function call graph for code documents
          PREREQUISITE_OF(Entity->Entity, document_id, confidence)  -- S117
-         IMPLEMENTS(Entity->Entity, document_id)   -- tech relation (S135)
-         EXTENDS(Entity->Entity, document_id)       -- tech relation (S135)
-         USES(Entity->Entity, document_id)          -- tech relation (S135)
-         REPLACES(Entity->Entity, document_id)      -- tech relation (S135)
-         DEPENDS_ON(Entity->Entity, document_id)    -- tech relation (S135)
-         VERSION_OF(Entity->Entity, document_id)    -- versioned library links (S135)
+         IMPLEMENTS(Entity->Entity, document_id)   -- tech relation
+         EXTENDS(Entity->Entity, document_id)       -- tech relation
+         USES(Entity->Entity, document_id)          -- tech relation
+         REPLACES(Entity->Entity, document_id)      -- tech relation
+         DEPENDS_ON(Entity->Entity, document_id)    -- tech relation
+         VERSION_OF(Entity->Entity, document_id)    -- versioned library links
          CONNECTS_TO(DiagramNode->DiagramNode, document_id, label)  -- S136
          STORES_IN(DiagramNode->DiagramNode, document_id)            -- S136
          SENDS_TO(DiagramNode->DiagramNode, document_id, message)    -- S136
@@ -29,7 +29,7 @@ Schema:
 Note: `aliases` column on Entity was added in S86.  Databases created before S86 will
 not have this column; aliases writes are wrapped in try/except for graceful degradation.
 
-SAME_CONCEPT edge (S141): links two Entity nodes from different documents that represent
+SAME_CONCEPT edge: links two Entity nodes from different documents that represent
 the same concept. Properties: source_doc_id, target_doc_id, confidence (FLOAT),
 contradiction (INT64 0/1 -- Kuzu does not support BOOLEAN in all versions),
 contradiction_note (STRING), prefer_source (STRING "a"|"b"|"").
@@ -114,7 +114,7 @@ class KuzuService:
         return self._entity.get_co_occurring_pairs_for_document(document_id, limit=limit)
 
     # -------------------------------------------------------------------------
-    # Prerequisite edges (S117)
+    # Prerequisite edges
     # -------------------------------------------------------------------------
 
     def add_prerequisite(
@@ -156,7 +156,7 @@ class KuzuService:
         return self._prereq.get_learning_path(start_entity_name, document_id)
 
     # -------------------------------------------------------------------------
-    # SAME_CONCEPT edges (S141)
+    # SAME_CONCEPT edges
     # -------------------------------------------------------------------------
 
     def add_same_concept_edge(

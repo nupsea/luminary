@@ -1,5 +1,5 @@
 /**
- * Pure utility functions for the tag co-occurrence graph (S167).
+ * Pure utility functions for the tag co-occurrence graph
  * No React/store/DOM imports -- safe for Vitest node environment.
  */
 

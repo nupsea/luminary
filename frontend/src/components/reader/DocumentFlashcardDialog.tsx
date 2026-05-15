@@ -1,5 +1,5 @@
 /**
- * DocumentFlashcardDialog -- generate flashcards scoped to selected text context (S147).
+ * DocumentFlashcardDialog -- generate flashcards scoped to selected text context
  *
  * Distinct from GenerateFlashcardsDialog (which is note-scoped).
  * Calls POST /flashcards/generate with scope="section" when sectionHeading is provided,

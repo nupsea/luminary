@@ -37,7 +37,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
     maxFreq === minFreq ? 10 : 4 + ((freq - minFreq) / (maxFreq - minFreq)) * 16
 
   nodes.forEach((node) => {
-    // Note nodes (S172): square renderer, indigo color, size from outgoing_link_count
+    // Note nodes: square renderer, indigo color, size from outgoing_link_count
     if (node.type === "note") {
       const linkCount = node.outgoing_link_count ?? 1
       const nid = node.note_id ?? node.id
@@ -60,7 +60,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
       size: scaleSize(node.size),
       color: TYPE_COLORS[node.type as EntityType] ?? DEFAULT_COLOR,
     }
-    // COMPONENT nodes use the hexagon renderer (S136)
+    // COMPONENT nodes use the hexagon renderer
     if (node.type === "COMPONENT") {
       attrs.type = "hexagon"
     }
@@ -77,7 +77,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
         const isLinksTo = edge.relation === "LINKS_TO"
 
         if (isSameConcept) {
-          // SAME_CONCEPT: undirected, low weight, gray or red based on contradiction (S141)
+          // SAME_CONCEPT: undirected, low weight, gray or red based on contradiction
           const edgeColor = edge.contradiction
             ? SAME_CONCEPT_CONTRADICTION_COLOR
             : SAME_CONCEPT_COLOR
@@ -92,7 +92,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
         }
 
         if (isWrittenAbout) {
-          // Note -> Entity: thin grey undirected line (S172)
+          // Note -> Entity: thin grey undirected line
           g.addUndirectedEdge(edge.source, edge.target, {
             key: `e-${idx}`,
             weight: edge.weight ?? 0.5,
@@ -104,7 +104,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
         }
 
         if (isLinksTo) {
-          // Note -> Note: indigo undirected line (S172)
+          // Note -> Note: indigo undirected line
           // Sigma does not natively support dashed edges; use distinct color.
           g.addUndirectedEdge(edge.source, edge.target, {
             key: `e-${idx}`,
@@ -142,7 +142,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   return g
 }
 
-/** Learning path graph (S117): directed graphology graph with
+/** Learning path graph: directed graphology graph with
  *  vertical depth-based layout so deeper prerequisites sit lower. */
 export function buildLearningPathGraph(data: LearningPathData): Graph {
   // Use a directed graph so Sigma renders arrows
@@ -200,7 +200,7 @@ export function buildLearningPathGraph(data: LearningPathData): Graph {
   return g
 }
 
-/** Cluster graph (S181): non-expanded entity types collapse into
+/** Cluster graph: non-expanded entity types collapse into
  *  single cluster nodes; expanded types and note nodes render
  *  individually. */
 export function buildClusterGraphology(

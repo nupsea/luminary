@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for naming convention normalizers (S199).
+ * Vitest unit tests for naming convention normalizers
  * Node environment -- tests pure utility functions from tagUtils.ts.
  */
 

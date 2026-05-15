@@ -71,7 +71,7 @@ async def _delete_flashcard_fts(card_id: str, session: AsyncSession) -> None:
 
 
 class FlashcardSearchService:
-    """FTS5 + filter search over flashcards (S184/S206)."""
+    """FTS5 + filter search over flashcards"""
 
     async def search(
         self,
@@ -88,7 +88,7 @@ class FlashcardSearchService:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[FlashcardModel], int]:
-        """Search flashcards with optional FTS query and structured filters (S184).
+        """Search flashcards with optional FTS query and structured filters
 
         All filters combine with AND. Returns (cards, total_count).
         """
@@ -169,7 +169,7 @@ class FlashcardSearchService:
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await session.execute(count_stmt)).scalar_one()
 
-        # S206: LIKE fallback when FTS5 returns 0 results
+        # LIKE fallback when FTS5 returns 0 results
         if total == 0 and _fts_query_used and query:
             like_pat = f"%{query.strip()}%"
             stmt_fallback = select(FlashcardModel).where(

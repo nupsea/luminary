@@ -1,0 +1,235 @@
+"""Images API router — S133.
+
+Endpoints:
+  GET /documents/{id}/images       -- paginated image list for a document
+  GET /images/{id}/raw             -- serve raw PNG file
+  GET /documents/{id}/enrichment   -- enrichment job list for a document
+"""
+
+import json
+import logging
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy import select
+
+from app.config import get_settings
+from app.database import get_session_factory
+from app.models import DocumentModel, EnrichmentJobModel, ImageModel
+from app.services.repo_helpers import get_or_404
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["images"])
+
+
+class ImageItem(BaseModel):
+    id: str
+    document_id: str
+    chunk_id: str | None
+    page: int
+    path: str
+    width: int
+    height: int
+    content_hash: str
+    image_type: str | None
+    description: str | None
+    created_at: str
+
+
+class ImageListResponse(BaseModel):
+    items: list[ImageItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class EnrichmentJobItem(BaseModel):
+    id: str
+    document_id: str
+    job_type: str
+    status: str
+    started_at: str | None
+    completed_at: str | None
+    error_message: str | None
+    created_at: str
+
+
+class UploadResponse(BaseModel):
+    path: str
+    filename: str
+
+
+@router.post("/images/notes", response_model=UploadResponse)
+async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
+    """Upload a note asset such as an image, SVG diagram, or Excalidraw scene.
+
+    Saves to DATA_DIR/images/notes/{uuid}_{filename}.
+    Returns the __LUMINARY_IMG__ prefixed path for Markdown resolution.
+    """
+    settings = get_settings()
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    notes_img_dir = data_dir / "images" / "notes"
+    notes_img_dir.mkdir(parents=True, exist_ok=True)
+
+    content_type = file.content_type or ""
+    filename = file.filename or "asset"
+    ext = Path(filename).suffix.lower()
+    is_excalidraw_scene = (
+        content_type in {"application/json", "text/json"}
+        and filename.endswith(".excalidraw.json")
+    )
+    if not content_type.startswith("image/") and not is_excalidraw_scene:
+        raise HTTPException(
+            status_code=400,
+            detail="Only image files or Excalidraw JSON scenes are allowed",
+        )
+
+    if ext == ".json" and filename.endswith(".excalidraw.json"):
+        ext = ".excalidraw.json"
+    unique_filename = f"{uuid.uuid4()}{ext}"
+    target_path = notes_img_dir / unique_filename
+
+    try:
+        content = await file.read()
+        if is_excalidraw_scene:
+            try:
+                scene = json.loads(content)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+            if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
+                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+        with open(target_path, "wb") as f:
+            f.write(content)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to save note image: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to save image file")
+
+    # Returns the pseudo-path that MarkdownRenderer.tsx resolves to API_BASE
+    return UploadResponse(
+        path=f"__LUMINARY_IMG__/notes/{unique_filename}",
+        filename=unique_filename,
+    )
+
+
+@router.get("/documents/{document_id}/images", response_model=ImageListResponse)
+async def get_document_images(
+    document_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> ImageListResponse:
+    """Return paginated image list for a document.
+
+    Returns empty list (not 404) for text-only documents.
+    Returns 404 if the document does not exist.
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+
+        # Read-only list query scoped to this document; shares the same session as the
+        # preceding get_or_404 check so both reads happen in a single connection.
+        result = await session.execute(
+            select(ImageModel)
+            .where(ImageModel.document_id == document_id)
+            .order_by(ImageModel.page, ImageModel.created_at)
+        )
+        all_images = result.scalars().all()
+
+    total = len(all_images)
+    start = (page - 1) * page_size
+    page_images = all_images[start : start + page_size]
+    return ImageListResponse(
+        items=[
+            ImageItem(
+                id=img.id,
+                document_id=img.document_id,
+                chunk_id=img.chunk_id,
+                page=img.page,
+                path=img.path,
+                width=img.width,
+                height=img.height,
+                content_hash=img.content_hash,
+                image_type=img.image_type,
+                description=img.description,
+                created_at=img.created_at.isoformat(),
+            )
+            for img in page_images
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/images/{image_id}/raw")
+async def serve_image_raw(image_id: str) -> FileResponse:
+    """Serve the raw PNG file for an extracted image.
+
+    Returns 200 with Content-Type image/png.
+    Returns 404 if image not found in DB or file missing from disk.
+    """
+    async with get_session_factory()() as session:
+        img = await get_or_404(session, ImageModel, image_id, name="Image")
+
+    settings = get_settings()
+    abs_path = Path(settings.DATA_DIR).expanduser() / img.path
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found on disk")
+
+    return FileResponse(str(abs_path), media_type="image/png")
+
+
+@router.get("/images/local/{doc_id}/{filename}")
+async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
+    """Serve a locally mirrored image for an article."""
+    settings = get_settings()
+    abs_path = Path(settings.DATA_DIR).expanduser() / "images" / doc_id / filename
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail="Local image not found")
+
+    # Detect media type from extension
+    ext = filename.rsplit(".", maxsplit=1)[-1].lower()
+    if ext == "svg":
+        media_type = "image/svg+xml"
+    elif ext == "json":
+        media_type = "application/json"
+    else:
+        media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "image/png"
+    return FileResponse(str(abs_path), media_type=media_type)
+
+
+@router.get("/documents/{document_id}/enrichment", response_model=list[EnrichmentJobItem])
+async def get_enrichment_jobs(document_id: str) -> list[EnrichmentJobItem]:
+    """Return all enrichment jobs for a document (all job_types and statuses).
+
+    Returns 404 if document does not exist.
+    Returns [] if no enrichment jobs have been created yet.
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+
+        # Read-only list query; shares the session with the get_or_404 guard above.
+        result = await session.execute(
+            select(EnrichmentJobModel)
+            .where(EnrichmentJobModel.document_id == document_id)
+            .order_by(EnrichmentJobModel.created_at)
+        )
+        jobs = result.scalars().all()
+
+    return [
+        EnrichmentJobItem(
+            id=j.id,
+            document_id=j.document_id,
+            job_type=j.job_type,
+            status=j.status,
+            started_at=j.started_at.isoformat() if j.started_at else None,
+            completed_at=j.completed_at.isoformat() if j.completed_at else None,
+            error_message=j.error_message,
+            created_at=j.created_at.isoformat(),
+        )
+        for j in jobs
+    ]

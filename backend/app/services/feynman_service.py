@@ -1,4 +1,4 @@
-"""Feynman technique session service (S144).
+"""Feynman technique session service
 
 Manages guided explanation sessions where a Socratic tutor:
 1. Asks the learner to explain a concept from scratch
@@ -327,7 +327,7 @@ class FeynmanService:
         tracker = get_objective_tracker_service()
         _fire_and_forget(tracker.update_coverage(feynman_session.document_id))
 
-        # S156: rubric evaluation using full learner transcript as explanation
+        # rubric evaluation using full learner transcript as explanation
         rubric_dict: dict | None = None
         try:
             learner_texts = [t.content for t in learner_turns if t.content]

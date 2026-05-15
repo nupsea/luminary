@@ -1,6 +1,6 @@
 // Floating popover that appears next to a clicked node. Shows the
 // label + type pill, the mention count or learning-path breadcrumb,
-// the source-diagram thumbnail (S136) when applicable, and a
+// the source-diagram thumbnail when applicable, and a
 // "Find in document" jump.
 
 import { X } from "lucide-react"
@@ -65,7 +65,7 @@ export function NodePopover({
           {node.frequency} {node.frequency === 1 ? "mention" : "mentions"}
         </p>
       )}
-      {/* Image thumbnail for diagram-derived nodes (S136) */}
+      {/* Image thumbnail for diagram-derived nodes */}
       {node.source_image_id && (
         <div className="mb-3">
           <img

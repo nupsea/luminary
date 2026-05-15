@@ -1,5 +1,5 @@
 /**
- * RubricCard -- shared 3-dimension rubric component for Feynman and Teach-back (S156).
+ * RubricCard -- shared 3-dimension rubric component for Feynman and Teach-back
  *
  * Three UI states:
  *   Loading: parent handles this -- RubricCard only renders when rubric is present

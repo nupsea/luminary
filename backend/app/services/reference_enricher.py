@@ -162,7 +162,7 @@ class ReferenceEnricherService:
             if not refs:
                 continue
 
-            # Validate URLs via HEAD request (S194)
+            # Validate URLs via HEAD request
             url_validity = await self._validate_urls(refs)
 
             # Optionally verify URLs via HEAD request (legacy provider check)
@@ -260,7 +260,7 @@ class ReferenceEnricherService:
         if not refs:
             return 0
 
-        # Validate URLs via HEAD request (S194)
+        # Validate URLs via HEAD request
         url_validity = await self._validate_urls(refs)
 
         if provider != "none":
@@ -293,7 +293,7 @@ class ReferenceEnricherService:
         return len(sorted_refs)
 
     async def _validate_urls(self, refs: list[dict]) -> dict[str, bool]:
-        """Validate URLs via HEAD requests (S194). Returns {url: is_reachable}."""
+        """Validate URLs via HEAD requests Returns {url: is_reachable}."""
         from app.services.reference_validator import ReferenceValidatorService  # noqa: PLC0415
 
         urls = [str(r.get("url", "")) for r in refs if r.get("url")]

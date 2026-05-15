@@ -1,4 +1,4 @@
-"""Vision LLM image analysis service (S134).
+"""Vision LLM image analysis service
 
 Processes ImageModel rows with description=null, calling a vision LLM (llava:13b)
 to classify each image and generate a text description.  Descriptions are embedded
@@ -282,7 +282,7 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
     await svc.enrich(document_id)
     logger.info("image_analyze_handler: done doc=%s job=%s", document_id, job_id)
 
-    # Enqueue diagram_extract if qualifying diagram images now exist (S136)
+    # Enqueue diagram_extract if qualifying diagram images now exist
     _QUALIFYING_DIAGRAM_TYPES = [
         "architecture_diagram",
         "sequence_diagram",

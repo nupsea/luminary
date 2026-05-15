@@ -1,11 +1,11 @@
 /**
- * Study tab — Flashcard section (S20b) and Progress section placeholder (S23b).
+ * Study tab — Flashcard section and Progress section placeholder
  *
  * Flashcard section:
  *  - Generate panel: count selector, scope (full/section), Generate button
  *  - Flashcard list: show/hide answer, inline edit, delete with confirmation
- *  - Bottom bar: card count, Start Studying (S21b), CSV export
- * Study session (S21b):
+ *  - Bottom bar: card count, Start Studying, CSV export
+ * Study session:
  *  - Full-screen StudySession replaces tab content when studying
  */
 
@@ -59,7 +59,7 @@ import { FlashcardManager } from "./Study/FlashcardManager"
 
 
 // ---------------------------------------------------------------------------
-// (S211) Old document-centric GoalsPanel removed in favour of typed-goals UI
+// Old document-centric GoalsPanel removed in favour of typed-goals UI
 // in @/components/goals/GoalsList. Re-export DocListItem for Progress.tsx.
 // ---------------------------------------------------------------------------
 
@@ -302,7 +302,7 @@ export default function Study() {
         ) : (
           /* Landing page: goals + session manager + collection grid */
           <div className="flex flex-col gap-10">
-            {/* (S211) Goals sub-section -- typed learning goals + progress */}
+            {/* Goals sub-section -- typed learning goals + progress */}
             <GoalsList />
 
             <SessionManager

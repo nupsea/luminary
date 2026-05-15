@@ -143,7 +143,7 @@ export function VizCanvas(props: VizCanvasProps) {
         onKgRetry={onKgRetry}
       />
 
-      {/* Tag co-occurrence graph (S167) */}
+      {/* Tag co-occurrence graph */}
       {viewMode === "tags" && (
         <div className="absolute inset-0">
           <TagGraph
@@ -191,7 +191,7 @@ export function VizCanvas(props: VizCanvasProps) {
         typeCounts={graphStats?.typeCounts ?? null}
       />
 
-      {/* Note node preview panel (S172) */}
+      {/* Note node preview panel */}
       {selectedNoteId && (
         <NotePreviewPanel noteId={selectedNoteId} onClose={onCloseNotePreview} />
       )}

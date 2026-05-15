@@ -1,4 +1,4 @@
-"""Context packer for the V2 agentic chat router (S79).
+"""Context packer for the V2 agentic chat router
 
 pack_context() assembles retrieved chunks into a context string that:
   - Groups chunks by section_id (or section_heading when section_id absent)

@@ -1,4 +1,4 @@
-"""Conversation-aware chunking for speaker-formatted text (S56).
+"""Conversation-aware chunking for speaker-formatted text
 
 ConversationChunker handles three common conversation formats:
   A: Timestamp prefix  — [HH:MM] Speaker: message

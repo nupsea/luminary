@@ -2,14 +2,14 @@
 
 Routes:
   POST /flashcards/generate                              — LLM-generate cards for a document
-  POST /flashcards/from-gaps                             — one LLM flashcard per gap string (S97)
-  POST /flashcards/cloze/{section_id}                   — generate cloze deletion cards (S154)
-  GET  /flashcards/search                               — unified search with FTS + filters (S184)
-  GET  /flashcards/audit/{document_id}                  — Bloom's coverage report (S153)
-  POST /flashcards/audit/{document_id}/fill             — fill Bloom's gaps (S153)
-  GET  /flashcards/health/{document_id}                 — deck health report (S160)
-  POST /flashcards/health/{document_id}/archive-mastered — archive mastered cards (S160)
-  POST /flashcards/health/{document_id}/fill-uncovered  — generate for uncovered sections (S160)
+  POST /flashcards/from-gaps                             — one LLM flashcard per gap string
+  POST /flashcards/cloze/{section_id}                   — generate cloze deletion cards
+  GET  /flashcards/search                               — unified search with FTS + filters
+  GET  /flashcards/audit/{document_id}                  — Bloom's coverage report
+  POST /flashcards/audit/{document_id}/fill             — fill Bloom's gaps
+  GET  /flashcards/health/{document_id}                 — deck health report
+  POST /flashcards/health/{document_id}/archive-mastered — archive mastered cards
+  POST /flashcards/health/{document_id}/fill-uncovered  — generate for uncovered sections
   GET  /flashcards/{document_id}/export/csv             — CSV download
   GET  /flashcards/{document_id}                        — list cards ordered by created_at desc
   PUT  /flashcards/{card_id}                — update question/answer, sets is_user_edited
@@ -17,7 +17,7 @@ Routes:
   POST /flashcards/bulk-delete              — delete multiple cards by ID
   DELETE /flashcards/document/{document_id} — delete all cards for a document (204)
   POST /flashcards/{card_id}/review         — FSRS review with rating
-  GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel (S155)
+  GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel
 
 NOTE: The /search, /audit, /cloze, /health routes must be registered BEFORE /{document_id}
 to prevent FastAPI from matching literal segments as document_id.
@@ -149,7 +149,7 @@ async def search_flashcards(
     session: AsyncSession = Depends(get_db),
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> FlashcardSearchResponse:
-    """Search flashcards with optional FTS query and structured filters (S184).
+    """Search flashcards with optional FTS query and structured filters
 
     All filters combine with AND. Returns paginated FlashcardResponse list.
     """
@@ -220,7 +220,7 @@ async def generate_from_gaps(
     session: AsyncSession = Depends(get_db),
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> FromGapsResponse:
-    """Generate one LLM-authored flashcard per knowledge gap (S97).
+    """Generate one LLM-authored flashcard per knowledge gap
 
     Raises 422 when gaps is empty. Raises 503 when Ollama is unreachable.
     """
@@ -361,7 +361,7 @@ async def create_trace_flashcard(
     # Card insert and FTS sync must be in the same transaction; _sync_flashcard_fts
     # takes the live session mid-flight, so the commit must stay with the add here.
     session.add(card)
-    # S184: sync FTS index for trace flashcards
+    # sync FTS index for trace flashcards
     await _sync_flashcard_fts(card, session)
     await session.commit()
     await session.refresh(card)
@@ -370,7 +370,7 @@ async def create_trace_flashcard(
 
 
 # ---------------------------------------------------------------------------
-# S154: Cloze deletion flashcard generation
+# Cloze deletion flashcard generation
 # NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
 # from matching the literal segment "cloze" as a document_id wildcard.
 # ---------------------------------------------------------------------------
@@ -403,7 +403,7 @@ async def generate_cloze_flashcards(
 
 
 # ---------------------------------------------------------------------------
-# Bloom's taxonomy coverage audit (S153)
+# Bloom's taxonomy coverage audit
 # NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
 # from matching the literal segment "audit" as a document_id wildcard.
 # ---------------------------------------------------------------------------
@@ -455,7 +455,7 @@ async def fill_audit_gaps(
 
 
 # ---------------------------------------------------------------------------
-# Deck health report (S160)
+# Deck health report
 # NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
 # from matching the literal segment "health" as a document_id wildcard.
 # ---------------------------------------------------------------------------
@@ -467,7 +467,7 @@ async def get_deck_health(
     session: AsyncSession = Depends(get_db),
     health_service: DeckHealthService = Depends(get_deck_health_service),
 ) -> DeckHealthReportResponse:
-    """Return a deck health report for a document's flashcard deck (S160)."""
+    """Return a deck health report for a document's flashcard deck"""
     report = await health_service.analyze(document_id, session)
     return DeckHealthReportResponse(**report)
 
@@ -478,7 +478,7 @@ async def archive_mastered_cards(
     session: AsyncSession = Depends(get_db),
     health_service: DeckHealthService = Depends(get_deck_health_service),
 ) -> ArchiveMasteredResponse:
-    """Archive all mastered cards (stability > 180) for a document (S160)."""
+    """Archive all mastered cards (stability > 180) for a document"""
     archived = await health_service.archive_mastered(document_id, session)
     return ArchiveMasteredResponse(archived=archived)
 
@@ -493,7 +493,7 @@ async def fill_uncovered_sections(
     req: FillUncoveredRequest,
     health_service: DeckHealthService = Depends(get_deck_health_service),
 ) -> FillUncoveredResponse:
-    """Queue fire-and-forget card generation for uncovered sections (S160).
+    """Queue fire-and-forget card generation for uncovered sections
 
     Returns HTTP 202 immediately. Cards are generated in the background using
     a fresh DB session to avoid sharing the request-scope session with a
@@ -513,7 +513,7 @@ async def fill_uncovered_sections(
 
 
 # ---------------------------------------------------------------------------
-# Deck list (S169)
+# Deck list
 # NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
 # from matching the literal segment "decks" as a document_id wildcard.
 # ---------------------------------------------------------------------------
@@ -523,7 +523,7 @@ async def fill_uncovered_sections(
 async def list_flashcard_decks(
     session: AsyncSession = Depends(get_db),
 ) -> list[DeckItem]:
-    """Return all distinct decks with card counts and source type (S169).
+    """Return all distinct decks with card counts and source type
 
     source_type is derived by joining deck name against CollectionModel.name:
     - "collection" when the deck matches a CollectionModel.name
@@ -636,7 +636,7 @@ async def update_flashcard(
         card.answer = req.answer
     card.is_user_edited = True
 
-    # S184: keep FTS index in sync on question/answer edits
+    # keep FTS index in sync on question/answer edits
     await _sync_flashcard_fts(card, session)
     await repo.commit_refresh(card)
     logger.info("Updated flashcard", extra={"card_id": card_id})
@@ -652,7 +652,7 @@ async def delete_flashcard(
     """Delete a flashcard by ID."""
     await repo.get_or_404(card_id)
 
-    # S184: remove from FTS index before deleting
+    # remove from FTS index before deleting
     await _delete_flashcard_fts(card_id, session)
     await repo.delete_by_id(card_id)
     logger.info("Deleted flashcard", extra={"card_id": card_id})

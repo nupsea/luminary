@@ -1,4 +1,4 @@
-"""Objective coverage tracking service (S143).
+"""Objective coverage tracking service
 
 Marks LearningObjectiveModel rows covered based on average FSRS stability
 of non-definition flashcards in the same section_id.

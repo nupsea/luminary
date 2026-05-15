@@ -1,7 +1,7 @@
 """prerequisite_detector: scan chunk text for prerequisite linguistic markers.
 
 Pure function module — no I/O, no DB, no ML.  Called from entity_extract_node
-in the ingestion workflow (S117).
+in the ingestion workflow
 
 Detected pairs are only returned when BOTH entity names appear in the
 GLiNER-confirmed entity_names set for the document, preventing false positives

@@ -1,5 +1,5 @@
 /**
- * Unit tests for resolveSourceRefUtils (S198).
+ * Unit tests for resolveSourceRefUtils
  *
  * Environment is "node" (no jsdom), so DOM tests use minimal mock objects.
  * resolvePdfFallback tests are purely computational.

@@ -1,4 +1,4 @@
-"""KuzuPrereqRepo: PREREQUISITE_OF edges + learning path traversal (S117).
+"""KuzuPrereqRepo: PREREQUISITE_OF edges + learning path traversal
 
 Methods are lifted verbatim from `KuzuService` so query strings, error
 handling, and return shapes are unchanged. `KuzuService` keeps the

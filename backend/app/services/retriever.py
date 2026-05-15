@@ -208,7 +208,7 @@ class HybridRetriever:
         section/speaker re-ranking. Use this for focused per-document
         queries where breadth is undesirable -- diversification trades
         high-scoring chunks for section variety, which collapses HR@5
-        when the question targets one section (S212 fix).
+        when the question targets one section
         """
         scores: dict[str, float] = {}
         meta: dict[str, ScoredChunk] = {}
@@ -272,12 +272,12 @@ class HybridRetriever:
         breadth -- the diversifier was authored for broad cross-document
         queries where variety helps. Without this skip, top-scored
         chunks from one chapter get bumped down by less-relevant chunks
-        from elsewhere in the same book and HR@5 collapses (S212).
+        from elsewhere in the same book and HR@5 collapses
 
         When *hyde* is True, generates a hypothetical answer via the local
         LLM and uses ``"<query> <answer>"`` as the search query for both
         vector and BM25. This bridges question/answer phrasing divergence
-        (S212): the hypothetical contains likely answer vocabulary that
+       : the hypothetical contains likely answer vocabulary that
         the bare question lacks. Falls back to the original query on LLM
         failure so retrieval is never harder than the no-hyde baseline.
 
@@ -295,7 +295,7 @@ class HybridRetriever:
         # cross-document corpus, 20+20 leaves enough headroom for RRF; with
         # a single book of ~500 chunks where the question phrasing diverges
         # from the answer phrasing, the right chunk can sit at rank 25-40
-        # in vector or BM25 alone and never reach RRF (S212).
+        # in vector or BM25 alone and never reach RRF.
         # When rerank=True we always need a wide pool (50) so the cross-encoder
         # has enough headroom to recover answer chunks at deep ranks.
         if rerank:
@@ -310,10 +310,10 @@ class HybridRetriever:
         # helps match chunks whose surface form differs from the question.
         # SQLite FTS5 MATCH uses AND semantics across terms, so appending
         # tokens that may be absent from the corpus collapses BM25 recall to
-        # zero (S225 iter 8) -- keep the keyword side on the unexpanded query.
+        # zero -- keep the keyword side on the unexpanded query.
         # HyDE, by contrast, augments with a full hypothetical answer that is
         # designed to share vocabulary with the source text, so it flows into
-        # both vector and keyword (preserving the S212 iter 4 behavior).
+        # both vector and keyword (preserving the behavior).
         vector_query = await _graph_expand(query) if graph_expand and strategy == "rrf" else query
         keyword_query = query
         if hyde:
@@ -369,7 +369,7 @@ class HybridRetriever:
                 # hypothetical introduces vocabulary that does not appear in the
                 # source text, and the cross-encoder rewards chunks containing
                 # that hallucinated vocabulary over the answer chunks. The
-                # original query is the user's authoritative intent. (S212)
+                # original query is the user's authoritative intent.
                 results = await asyncio.to_thread(_rerank_candidates, query, results, k)
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))

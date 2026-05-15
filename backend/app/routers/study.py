@@ -156,7 +156,7 @@ _CORRECTION_USER_TMPL = (
     'Output JSON: {{"question": str, "answer": str, "source_excerpt": str}}'
 )
 
-# S156: rubric evaluation prompts (duplicated in feynman_service.py -- same layer)
+# rubric evaluation prompts (duplicated in feynman_service.py -- same layer)
 _RUBRIC_SYSTEM = (
     "You are an expert tutor evaluating a student explanation. "
     "Output a JSON object only -- no preamble, no markdown fences."
@@ -601,7 +601,7 @@ async def get_collection_study_dashboard(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> StudyCollectionDashboardResponse:
-    """Return a summary of study status for all material in a collection (S192).
+    """Return a summary of study status for all material in a collection
 
     Rewritten to use SQL aggregates and a small fixed number of queries regardless
     of tag count, sub-enclave count, or tree depth. Previously this endpoint could
@@ -1141,7 +1141,7 @@ async def teachback(
     missing_points: list[str] = parsed.get("missing_points", [])
     misconceptions: list[str] = parsed.get("misconceptions", [])
 
-    # S156: rubric evaluation (second LLM call; graceful fallback on failure)
+    # rubric evaluation (second LLM call; graceful fallback on failure)
     rubric_dict: dict | None = None
     try:
         rubric_prompt = _RUBRIC_USER_TMPL.format(
@@ -1838,7 +1838,7 @@ async def get_section_heatmap(
 
 
 # ---------------------------------------------------------------------------
-# Study path endpoints (S139)
+# Study path endpoints
 # ---------------------------------------------------------------------------
 
 

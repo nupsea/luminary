@@ -1,5 +1,5 @@
 /**
- * EPUBViewer — Two-column chapter reader for EPUB documents (S149).
+ * EPUBViewer — Two-column chapter reader for EPUB documents
  *
  * Left panel: scrollable chapter TOC with active chapter highlighted.
  * Right panel: sanitized chapter HTML rendered in a Tailwind prose div.

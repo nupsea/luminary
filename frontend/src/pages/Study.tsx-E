@@ -1,0 +1,439 @@
+/**
+ * Study tab — Flashcard section (S20b) and Progress section placeholder (S23b).
+ *
+ * Flashcard section:
+ *  - Generate panel: count selector, scope (full/section), Generate button
+ *  - Flashcard list: show/hide answer, inline edit, delete with confirmation
+ *  - Bottom bar: card count, Start Studying (S21b), CSV export
+ * Study session (S21b):
+ *  - Full-screen StudySession replaces tab content when studying
+ */
+
+import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
+import {
+  BookOpen,
+  ChevronRight,
+  CornerDownRight,
+  Layers,
+  Loader2,
+  Plus,
+  StickyNote,
+} from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { motion } from "framer-motion"
+import { toast } from "sonner"
+import { useAppStore } from "@/store"
+import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
+import { isDocumentReady } from "@/lib/documentReadiness"
+import {
+  FLASHCARD_CARD_LIMIT,
+  StudySession,
+} from "@/components/StudySession"
+import {
+  TEACHBACK_CARD_LIMIT,
+  TeachbackSession,
+} from "@/components/TeachbackSession"
+import { SessionManager } from "@/components/SessionManager"
+import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
+import { GoalsList } from "@/components/goals/GoalsList"
+import {
+  type PrepareStudySessionOptions,
+  type PreparedStudySessionOutcome,
+  type StudyMode,
+  prepareStudySession,
+} from "@/lib/studySessionService"
+
+
+// ---------------------------------------------------------------------------
+// Document list for the in-tab picker
+// ---------------------------------------------------------------------------
+
+import { apiGet } from "@/lib/apiClient"
+
+import type { DocListItem } from "./Study/types"
+import { fetchDocList } from "./Study/api"
+import { DocPicker } from "./Study/DocPicker"
+import { FlashcardManager } from "./Study/FlashcardManager"
+
+
+
+// ---------------------------------------------------------------------------
+// Old document-centric GoalsPanel removed in favour of typed-goals UI
+// in @/components/goals/GoalsList. Re-export DocListItem for Progress.tsx.
+// ---------------------------------------------------------------------------
+
+export type { DocListItem } from "./Study/types"  // re-exported for Progress.tsx
+
+// SessionHistoryTab replaced by SessionManager component
+
+// DocPicker now lives in pages/Study/DocPicker.tsx.
+
+// ---------------------------------------------------------------------------
+// Study page
+// ---------------------------------------------------------------------------
+
+export default function Study() {
+  const navigate = useNavigate()
+  const {
+    setActiveDocument,
+    activeCollectionId,
+    setActiveCollectionId,
+  } = useAppStore()
+
+  // Effective doc: ready-only fallback so we never feed an in-progress doc
+  // into prepareStudySession or FlashcardManager. Both depend on populated
+  // chunks/embeddings/flashcards, which simply don't exist mid-ingestion.
+  const { doc: effectiveDoc, effectiveDocumentId, isFallingBack } =
+    useEffectiveActiveDocument()
+  const studyDocumentId = effectiveDocumentId
+
+  // Study-session lifecycle lives entirely in this one state variable.
+  // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
+  // handleStartTeachback, handleExit). Session creation happens in the
+  // "preparing" phase via prepareStudySession (one user click = one call).
+  type StudyPhase =
+    | { phase: "idle" }
+    | { phase: "preparing"; mode: StudyMode }
+    | {
+        phase: "ready"
+        mode: StudyMode
+        outcome: PreparedStudySessionOutcome
+        scopeForBeginNew: PrepareStudySessionOptions
+      }
+  const [studyPhase, setStudyPhase] = useState<StudyPhase>({ phase: "idle" })
+
+  const { data: collections = [], isLoading: loadingCollections } = useQuery({
+    queryKey: ["collections-list"],
+    queryFn: async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return await apiGet<any[]>("/collections/tree")
+      } catch {
+        return []
+      }
+    },
+  })
+
+  const { data: docList = [] } = useQuery<DocListItem[]>({
+    queryKey: ["study-doc-list"],
+    queryFn: fetchDocList,
+  })
+
+  type StudyFiltersLike = {
+    tag?: string
+    document_ids?: string[]
+    note_ids?: string[]
+  }
+  const startStudy = async (
+    mode: StudyMode,
+    filters: StudyFiltersLike | null,
+    resumeId: string | null,
+  ) => {
+    // Guard: if we are already preparing or in a ready state, ignore the
+    // click. This prevents a double-click (or a re-fired event from a
+    // downstream component) from launching two prepareStudySession calls.
+    if (studyPhase.phase !== "idle") return
+
+    setStudyPhase({ phase: "preparing", mode })
+    const options: PrepareStudySessionOptions = {
+      mode,
+      documentId: studyDocumentId,
+      collectionId: activeCollectionId ?? null,
+      filters: filters ?? undefined,
+      cardLimit:
+        mode === "teachback" ? TEACHBACK_CARD_LIMIT : FLASHCARD_CARD_LIMIT,
+      resumeSessionId: resumeId,
+    }
+    try {
+      const outcome = await prepareStudySession(options)
+      setStudyPhase({
+        phase: "ready",
+        mode,
+        outcome,
+        scopeForBeginNew: { ...options, resumeSessionId: null },
+      })
+    } catch (err) {
+      console.warn("Failed to prepare study session", err)
+      setStudyPhase({ phase: "idle" })
+      toast.error("Could not start study session. Please try again.")
+    }
+  }
+
+  const handleStartFlashcard = (filters?: StudyFiltersLike) => {
+    void startStudy("flashcard", filters ?? null, null)
+  }
+
+  const handleStartTeachback = (
+    filters?: StudyFiltersLike,
+    resumeId?: string,
+  ) => {
+    void startStudy("teachback", filters ?? null, resumeId ?? null)
+  }
+
+  // Walk the nested collection tree to find a name by id.
+  const findCollectionName = (
+    items: any[],
+    id: string | null,
+  ): string | null => {
+    if (!id) return null
+    for (const item of items) {
+      if (item.id === id) return item.name ?? null
+      if (item.children?.length) {
+        const found = findCollectionName(item.children, id)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  const activeDocTitle = effectiveDoc?.title ?? null
+  const activeCollectionName = findCollectionName(collections, activeCollectionId)
+  const subjectLabel =
+    activeCollectionName || activeDocTitle || null
+
+  const handleExit = () => {
+    setStudyPhase({ phase: "idle" })
+  }
+
+  // ---- Active session routes ------------------------------------------------
+  if (studyPhase.phase === "preparing") {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2
+          size={32}
+          className={
+            studyPhase.mode === "teachback"
+              ? "animate-spin text-violet-500"
+              : "animate-spin text-primary"
+          }
+        />
+      </div>
+    )
+  }
+
+  if (studyPhase.phase === "ready" && studyPhase.mode === "flashcard") {
+    return (
+      <StudySession
+        initial={
+          studyPhase.outcome.kind === "empty"
+            ? { kind: "empty" }
+            : {
+                kind: studyPhase.outcome.kind,
+                session: studyPhase.outcome.session,
+              }
+        }
+        scopeForBeginNew={studyPhase.scopeForBeginNew}
+        onExit={handleExit}
+      />
+    )
+  }
+
+  if (studyPhase.phase === "ready" && studyPhase.mode === "teachback") {
+    return (
+      <TeachbackSession
+        initial={
+          studyPhase.outcome.kind === "empty"
+            ? { kind: "empty" }
+            : {
+                kind: studyPhase.outcome.kind,
+                session: studyPhase.outcome.session,
+              }
+        }
+        scopeForBeginNew={studyPhase.scopeForBeginNew}
+        onExit={handleExit}
+        subjectLabel={subjectLabel}
+      />
+    )
+  }
+
+  // ---- Main study dashboard -------------------------------------------------
+  return (
+    <div className="flex h-full flex-col bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
+        <div className="flex items-center gap-8">
+          <h1
+            className="cursor-pointer text-xl font-bold tracking-tight text-foreground"
+            onClick={() => {
+              setActiveCollectionId(null)
+              setActiveDocument(null)
+            }}
+          >
+            Study
+          </h1>
+
+          <DocPicker
+            docs={docList.filter(isDocumentReady)}
+            activeId={studyDocumentId}
+            onSelect={(id) => {
+              setActiveDocument(id)
+              if (id) setActiveCollectionId(null)
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto p-8 lg:p-12">
+        {activeCollectionId ? (
+          <CollectionStudyDashboard
+            collectionId={activeCollectionId}
+            onBack={() => setActiveCollectionId(null)}
+            onStartStudy={handleStartFlashcard}
+            onStartTeachback={(filters, resumeId) =>
+              handleStartTeachback(filters, resumeId)
+            }
+            onNavigateToCollection={(id) => setActiveCollectionId(id)}
+          />
+        ) : studyDocumentId ? (
+          <>
+            {isFallingBack && (
+              <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                The selected document is still ingesting. Showing your previous
+                document while it finishes.
+              </div>
+            )}
+            <FlashcardManager
+              documentId={studyDocumentId}
+              onStartStudy={handleStartFlashcard}
+              onStartTeachback={(f) => handleStartTeachback(f)}
+            />
+          </>
+        ) : (
+          /* Landing page: goals + session manager + collection grid */
+          <div className="flex flex-col gap-10">
+            {/* (S211) Goals sub-section -- typed learning goals + progress */}
+            <GoalsList />
+
+            <SessionManager
+              onContinueTeachback={(sessionId, documentId, collectionId) => {
+                if (documentId) setActiveDocument(documentId)
+                if (collectionId) setActiveCollectionId(collectionId)
+                
+                const filters: any = {}
+                if (documentId) filters.document_id = documentId
+                if (collectionId) filters.collection_id = collectionId
+                
+                handleStartTeachback(
+                  Object.keys(filters).length > 0 ? filters : null,
+                  sessionId
+                )
+              }}
+            />
+
+            {/* Focused Enclaves heading */}
+            <div className="flex flex-col gap-2 max-w-2xl">
+              <motion.h1
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="text-3xl font-bold tracking-tight text-foreground"
+              >
+                Focused Enclaves
+              </motion.h1>
+              <p className="text-muted-foreground text-lg">
+                Grouped knowledge silos for topic-centric learning.
+              </p>
+            </div>
+
+            {loadingCollections ? (
+              <div className="flex py-20 justify-center">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {(() => {
+                  const flatten = (items: any[], parentName: string | null = null): any[] => {
+                    let result: any[] = []
+                    items.forEach((item) => {
+                      result.push({ ...item, _parentName: parentName, _isNested: parentName !== null })
+                      if (item.children && item.children.length > 0) {
+                        result = result.concat(flatten(item.children, item.name))
+                      }
+                    })
+                    return result
+                  }
+                  const flatCollections = flatten(collections)
+                  return flatCollections.map((coll, idx) => (
+                    <motion.div
+                      key={coll.id}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      whileHover={{ y: -5 }}
+                      onClick={() => {
+                        setActiveCollectionId(coll.id)
+                        setActiveDocument(null)
+                      }}
+                      className={`group relative cursor-pointer overflow-hidden rounded-3xl border p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl ${
+                        coll._isNested ? "border-primary/20 bg-card/30" : "border-border bg-card/40"
+                      }`}
+                    >
+                      {coll._isNested && (
+                        <div className="absolute top-3 right-3 flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                          <CornerDownRight size={10} />
+                          <span className="font-medium">{coll._parentName}</span>
+                        </div>
+                      )}
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:scale-110">
+                        <Layers size={24} />
+                      </div>
+                      <div className="mt-6 flex flex-col gap-2">
+                        <h3 className="text-lg font-semibold text-foreground">{coll.name}</h3>
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed opacity-70">
+                          {coll.description || "Synthesize knowledge across documents and notes."}
+                        </p>
+                      </div>
+                      <div className="mt-4 flex items-center gap-3">
+                        {coll.document_count > 0 || coll.note_count > 0 ? (
+                          <>
+                            {coll.document_count > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <BookOpen size={12} className="text-blue-500/70" />
+                                {coll.document_count} {coll.document_count === 1 ? "doc" : "docs"}
+                              </span>
+                            )}
+                            {coll.note_count > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <StickyNote size={12} className="text-amber-500/70" />
+                                {coll.note_count} {coll.note_count === 1 ? "note" : "notes"}
+                              </span>
+                            )}
+                            {coll.children && coll.children.length > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <Layers size={12} className="text-primary/50" />
+                                {coll.children.length} sub
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground/50 italic">No sources yet</span>
+                        )}
+                      </div>
+                      <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
+                        <div className="text-xs font-semibold uppercase text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                          Enter Context
+                        </div>
+                        <ChevronRight size={16} className="text-primary translate-x-4 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+                      </div>
+                    </motion.div>
+                  ))
+                })()}
+
+                <motion.button
+                  onClick={() => navigate("/notes")}
+                  className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
+                >
+                  <Plus size={24} className="group-hover:scale-110 transition-transform" />
+                  <div className="text-center">
+                    <p className="text-sm font-semibold uppercase">New Enclave</p>
+                  </div>
+                </motion.button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+

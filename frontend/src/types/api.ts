@@ -316,7 +316,7 @@ export interface paths {
         };
         /**
          * Get Collection Health
-         * @description Return CollectionHealthReport for the given collection (S173).
+         * @description Return CollectionHealthReport for the given collection
          */
         get: operations["get_collection_health_collections__collection_id__health_get"];
         put?: never;
@@ -338,7 +338,7 @@ export interface paths {
         put?: never;
         /**
          * Archive Stale Notes
-         * @description Set archived=True for all stale notes in this collection (S173).
+         * @description Set archived=True for all stale notes in this collection
          *
          *     Returns {archived: int}.
          */
@@ -701,7 +701,7 @@ export interface paths {
          * Serve Document File
          * @description Serve the raw uploaded file for a document.
          *
-         *     Used by the PDF.js viewer (S146) to stream PDF bytes.
+         *     Used by the PDF.js viewer to stream PDF bytes.
          *     Returns 404 if the document does not exist or the file is not found on disk.
          *     Returns the file with the appropriate Content-Type based on document format.
          */
@@ -1763,7 +1763,7 @@ export interface paths {
         };
         /**
          * Search Flashcards
-         * @description Search flashcards with optional FTS query and structured filters (S184).
+         * @description Search flashcards with optional FTS query and structured filters
          *
          *     All filters combine with AND. Returns paginated FlashcardResponse list.
          */
@@ -1807,7 +1807,7 @@ export interface paths {
         put?: never;
         /**
          * Generate From Gaps
-         * @description Generate one LLM-authored flashcard per knowledge gap (S97).
+         * @description Generate one LLM-authored flashcard per knowledge gap
          *
          *     Raises 422 when gaps is empty. Raises 503 when Ollama is unreachable.
          */
@@ -1974,7 +1974,7 @@ export interface paths {
         };
         /**
          * Get Deck Health
-         * @description Return a deck health report for a document's flashcard deck (S160).
+         * @description Return a deck health report for a document's flashcard deck
          */
         get: operations["get_deck_health_flashcards_health__document_id__get"];
         put?: never;
@@ -1996,7 +1996,7 @@ export interface paths {
         put?: never;
         /**
          * Archive Mastered Cards
-         * @description Archive all mastered cards (stability > 180) for a document (S160).
+         * @description Archive all mastered cards (stability > 180) for a document
          */
         post: operations["archive_mastered_cards_flashcards_health__document_id__archive_mastered_post"];
         delete?: never;
@@ -2016,7 +2016,7 @@ export interface paths {
         put?: never;
         /**
          * Fill Uncovered Sections
-         * @description Queue fire-and-forget card generation for uncovered sections (S160).
+         * @description Queue fire-and-forget card generation for uncovered sections
          *
          *     Returns HTTP 202 immediately. Cards are generated in the background using
          *     a fresh DB session to avoid sharing the request-scope session with a
@@ -2038,7 +2038,7 @@ export interface paths {
         };
         /**
          * List Flashcard Decks
-         * @description Return all distinct decks with card counts and source type (S169).
+         * @description Return all distinct decks with card counts and source type
          *
          *     source_type is derived by joining deck name against CollectionModel.name:
          *     - "collection" when the deck matches a CollectionModel.name
@@ -2299,7 +2299,7 @@ export interface paths {
          *
          *     Pass ?type=call_graph to get the function call graph (code documents only).
          *     Default is the knowledge entity graph.
-         *     Pass ?include_notes=true to overlay Note nodes connected to entities in scope (S172).
+         *     Pass ?include_notes=true to overlay Note nodes connected to entities in scope
          */
         get: operations["get_graph_for_document_graph__document_id__get"];
         put?: never;
@@ -2323,8 +2323,8 @@ export interface paths {
          *
          *     Pass ?doc_ids=id1,id2,id3 to filter by specific documents.
          *     Returns the union of all known documents when doc_ids is empty.
-         *     Pass ?include_same_concept=true to include SAME_CONCEPT cross-book edges (S141).
-         *     Pass ?include_notes=true to overlay Note nodes connected to entities in scope (S172).
+         *     Pass ?include_same_concept=true to include SAME_CONCEPT cross-book edges
+         *     Pass ?include_notes=true to overlay Note nodes connected to entities in scope
          */
         get: operations["get_graph_graph_get"];
         put?: never;
@@ -2735,7 +2735,7 @@ export interface paths {
         };
         /**
          * Preview Note Flashcard Generation
-         * @description Return {total_notes, already_covered} for a collection without generating (S169).
+         * @description Return {total_notes, already_covered} for a collection without generating
          */
         get: operations["preview_note_flashcard_generation_notes_flashcards_generate_preview_get"];
         put?: never;
@@ -2757,7 +2757,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Note Flashcards
-         * @description Generate flashcards from user notes scoped by tag, note IDs, or collection (S169).
+         * @description Generate flashcards from user notes scoped by tag, note IDs, or collection
          */
         post: operations["generate_note_flashcards_notes_flashcards_generate_post"];
         delete?: never;
@@ -2940,7 +2940,7 @@ export interface paths {
         };
         /**
          * Autocomplete Notes
-         * @description Return up to 8 notes whose content starts with q (case-insensitive). (S171)
+         * @description Return up to 8 notes whose content starts with q (case-insensitive).
          *
          *     Registered BEFORE /{note_id} to prevent FastAPI from matching "autocomplete"
          *     as a note ID wildcard.
@@ -2963,7 +2963,7 @@ export interface paths {
         };
         /**
          * Get Note Links
-         * @description Return outgoing and incoming links for a note. (S171)
+         * @description Return outgoing and incoming links for a note.
          *
          *     Outgoing: links WHERE source_note_id = note_id
          *     Incoming: links WHERE target_note_id = note_id (backlinks)
@@ -2973,7 +2973,7 @@ export interface paths {
         put?: never;
         /**
          * Create Note Link
-         * @description Create a typed link from note_id to req.target_note_id. (S171)
+         * @description Create a typed link from note_id to req.target_note_id.
          *
          *     Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
          *     Returns 409 if the (source, target, link_type) triple already exists.
@@ -2997,7 +2997,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Note Link
-         * @description Delete a typed link from note_id to target_note_id. (S171)
+         * @description Delete a typed link from note_id to target_note_id.
          *
          *     Fires an async Kuzu edge delete. Returns 404 if link not found.
          */
@@ -3369,7 +3369,7 @@ export interface paths {
          * @description Hybrid search across all documents. Returns results grouped by document.
          *
          *     When ``document_id`` is supplied, retrieval is scoped to that single
-         *     document. Eval pipelines (S212) need this to measure per-document
+         *     document. Eval pipelines need this to measure per-document
          *     retrieval quality without having the target document drowned out by
          *     the rest of the corpus in global ranking.
          *
@@ -3743,7 +3743,7 @@ export interface paths {
         };
         /**
          * Get Collection Study Dashboard
-         * @description Return a summary of study status for all material in a collection (S192).
+         * @description Return a summary of study status for all material in a collection
          *
          *     Rewritten to use SQL aggregates and a small fixed number of queries regardless
          *     of tag count, sub-enclave count, or tree depth. Previously this endpoint could
@@ -4614,7 +4614,7 @@ export interface components {
         };
         /**
          * ArchiveMasteredResponse
-         * @description Response schema for POST /flashcards/health/{document_id}/archive-mastered (S160).
+         * @description Response schema for POST /flashcards/health/{document_id}/archive-mastered
          */
         ArchiveMasteredResponse: {
             /** Archived */
@@ -4998,7 +4998,7 @@ export interface components {
         };
         /**
          * CoverageReportResponse
-         * @description Response schema for GET /flashcards/audit/{document_id} (S153).
+         * @description Response schema for GET /flashcards/audit/{document_id}
          */
         CoverageReportResponse: {
             /** Total Cards */
@@ -5053,7 +5053,7 @@ export interface components {
         };
         /**
          * DeckHealthReportResponse
-         * @description Response schema for GET /flashcards/health/{document_id} (S160).
+         * @description Response schema for GET /flashcards/health/{document_id}
          */
         DeckHealthReportResponse: {
             /** Orphaned */
@@ -5625,7 +5625,7 @@ export interface components {
         };
         /**
          * FillGapsResponse
-         * @description Response schema for POST /flashcards/audit/{document_id}/fill (S153).
+         * @description Response schema for POST /flashcards/audit/{document_id}/fill
          */
         FillGapsResponse: {
             /** Created */
@@ -5633,7 +5633,7 @@ export interface components {
         };
         /**
          * FillUncoveredRequest
-         * @description Request body for POST /flashcards/health/{document_id}/fill-uncovered (S160).
+         * @description Request body for POST /flashcards/health/{document_id}/fill-uncovered
          */
         FillUncoveredRequest: {
             /** Section Ids */
@@ -5641,7 +5641,7 @@ export interface components {
         };
         /**
          * FillUncoveredResponse
-         * @description Response schema for POST /flashcards/health/{document_id}/fill-uncovered (S160).
+         * @description Response schema for POST /flashcards/health/{document_id}/fill-uncovered
          */
         FillUncoveredResponse: {
             /** Queued */
@@ -6992,7 +6992,7 @@ export interface components {
         };
         /**
          * SourceContextResponse
-         * @description Response schema for GET /flashcards/{card_id}/source-context (S155).
+         * @description Response schema for GET /flashcards/{card_id}/source-context
          */
         SourceContextResponse: {
             /** Section Heading */

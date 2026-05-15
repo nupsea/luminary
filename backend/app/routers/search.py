@@ -55,7 +55,7 @@ async def search(
     """Hybrid search across all documents. Returns results grouped by document.
 
     When ``document_id`` is supplied, retrieval is scoped to that single
-    document. Eval pipelines (S212) need this to measure per-document
+    document. Eval pipelines need this to measure per-document
     retrieval quality without having the target document drowned out by
     the rest of the corpus in global ranking.
 

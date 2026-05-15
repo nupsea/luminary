@@ -33,7 +33,7 @@ async def socratic_node(state: ChatState) -> dict:
     (5) On Ollama offline: returns card with 'error' field (no exception raised).
 
     Returns state['answer'] = '__card__' + JSON so the existing SSE protocol
-    in stream_answer() handles delivery without any changes (S96 contract).
+    in stream_answer() handles delivery without any changes
     Routes directly to END — card answers bypass synthesize/confidence nodes.
     """
     doc_ids = state.get("doc_ids") or []

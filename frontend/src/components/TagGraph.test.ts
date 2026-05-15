@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for tag graph utility functions (S167).
+ * Vitest unit tests for tag graph utility functions
  *
  * Node environment (no DOM) -- tests pure functions from tagGraphUtils.ts.
  * Tests cover:

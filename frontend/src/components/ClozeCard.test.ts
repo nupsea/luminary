@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for ClozeCard parsing logic (S154).
+ * Vitest unit tests for ClozeCard parsing logic
  * Tests the pure `parseClozeSegments` function exported from ClozeCard.tsx.
  */
 

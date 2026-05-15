@@ -79,23 +79,23 @@ class FlashcardResponse(BaseModel):
     reps: int
     lapses: int
     created_at: datetime
-    # S137: Bloom's Taxonomy fields
+    # Bloom's Taxonomy fields
     flashcard_type: str | None = None
     bloom_level: int | None = None
-    # S138: section_id derived from chunk -- populated by endpoints that do the join
+    # section_id derived from chunk -- populated by endpoints that do the join
     section_id: str | None = None
-    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+    # cloze deletion text with {{term}} markers; null for non-cloze cards
     cloze_text: str | None = None
-    # S179: chunk classifier label; null for non-document-chunk cards
+    # chunk classifier label; null for non-document-chunk cards
     chunk_classification: str | None = None
-    # S188: section heading for source grounding display
+    # section heading for source grounding display
     section_heading: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class CoverageReportResponse(BaseModel):
-    """Response schema for GET /flashcards/audit/{document_id} (S153)."""
+    """Response schema for GET /flashcards/audit/{document_id}"""
 
     total_cards: int
     by_bloom_level: dict[str, int]  # JSON keys are always strings
@@ -105,13 +105,13 @@ class CoverageReportResponse(BaseModel):
 
 
 class FillGapsResponse(BaseModel):
-    """Response schema for POST /flashcards/audit/{document_id}/fill (S153)."""
+    """Response schema for POST /flashcards/audit/{document_id}/fill"""
 
     created: int
 
 
 class DeckHealthReportResponse(BaseModel):
-    """Response schema for GET /flashcards/health/{document_id} (S160)."""
+    """Response schema for GET /flashcards/health/{document_id}"""
 
     orphaned: int
     orphaned_ids: list[str]
@@ -125,25 +125,25 @@ class DeckHealthReportResponse(BaseModel):
 
 
 class ArchiveMasteredResponse(BaseModel):
-    """Response schema for POST /flashcards/health/{document_id}/archive-mastered (S160)."""
+    """Response schema for POST /flashcards/health/{document_id}/archive-mastered"""
 
     archived: int
 
 
 class FillUncoveredRequest(BaseModel):
-    """Request body for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
+    """Request body for POST /flashcards/health/{document_id}/fill-uncovered"""
 
     section_ids: list[str] = Field(min_length=1)
 
 
 class FillUncoveredResponse(BaseModel):
-    """Response schema for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
+    """Response schema for POST /flashcards/health/{document_id}/fill-uncovered"""
 
     queued: int
 
 
 class SourceContextResponse(BaseModel):
-    """Response schema for GET /flashcards/{card_id}/source-context (S155)."""
+    """Response schema for GET /flashcards/{card_id}/source-context"""
 
     section_heading: str
     section_preview: str

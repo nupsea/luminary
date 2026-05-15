@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for TagTree and TagAutocomplete logic (S165).
+ * Vitest unit tests for TagTree and TagAutocomplete logic
  *
  * Tests cover:
  *   1. TagTree renders correct nesting from mock GET /tags/tree fixture
@@ -244,7 +244,7 @@ describe("filterMergeOptions", () => {
 })
 
 // ---------------------------------------------------------------------------
-// S190: TagTree search input filters tags by substring match
+// TagTree search input filters tags by substring match
 // ---------------------------------------------------------------------------
 
 const DEEP_TAG_TREE: TagTreeItem[] = [

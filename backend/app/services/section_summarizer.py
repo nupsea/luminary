@@ -2,7 +2,7 @@
 
 Generates 1-2 sentence summaries for each qualifying section of a document,
 grouped into at most 100 units to bound LLM call count for large books.
-These summaries feed into the document-level summarization step (S76).
+These summaries feed into the document-level summarization step
 """
 
 import asyncio

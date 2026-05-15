@@ -1,6 +1,6 @@
 /**
  * resolveSourceRefUtils -- pure helpers for resolving section IDs from DOM
- * nodes and PDF section arrays. Extracted from DocumentReader.tsx (S198)
+ * nodes and PDF section arrays. Extracted from DocumentReader.tsx
  * for testability.
  */
 

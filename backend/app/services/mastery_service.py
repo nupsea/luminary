@@ -143,7 +143,7 @@ class MasteryService:
     ) -> ConceptMastery:
         """Compute mastery for concept_name across document_ids.
 
-        Also checks SAME_CONCEPT clusters (S141) so cross-book variants contribute.
+        Also checks SAME_CONCEPT clusters so cross-book variants contribute.
         Returns ConceptMastery with no_flashcards=True when no cards exist.
         """
         # Resolve cross-book cluster: expand document_ids to include cluster partners

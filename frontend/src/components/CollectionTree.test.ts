@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for CollectionTree logic (S164).
+ * Vitest unit tests for CollectionTree logic
  *
  * Tests cover:
  *   1. CollectionTree renders correct item count from mock fixture

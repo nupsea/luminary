@@ -1,0 +1,974 @@
+"""CRUD endpoints for notes.
+
+Routes: POST /notes, GET /notes, PUT /notes/{id}, DELETE /notes/{id}, GET /notes/groups,
+        GET /notes/search.
+"""
+
+import asyncio
+import hashlib
+import logging
+import uuid
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db, get_session_factory
+from app.models import (
+    CollectionMemberModel,
+    CollectionModel,
+    FlashcardModel,
+    NoteModel,
+    NoteSourceModel,
+    NoteTagIndexModel,
+)
+from app.repos.note_repo import NoteRepo, get_note_repo
+from app.schemas.notes import (
+    BatchAcceptItem,
+    BatchAcceptRequest,
+    ClusterNotePreview,
+    ClusterSuggestionResponse,
+    GapDetectRequest,
+    GapDetectResponse,
+    GroupInfo,
+    GroupsResponse,
+    NamingFixItem,
+    NamingFixRequest,
+    NamingViolation,
+    NoteAutocompleteItem,
+    NoteCreateRequest,
+    NoteEntityItem,
+    NoteFlashcardGenerateRequest,
+    NoteFlashcardGenerateResponse,
+    NoteFlashcardItem,
+    NoteLinkCreateRequest,
+    NoteLinkItem,
+    NoteLinksResponse,
+    NoteResponse,
+    NoteSearchItem,
+    NoteSearchResponse,
+    NoteTitleSuggestRequest,
+    NoteTitleSuggestResponse,
+    NoteUpdateRequest,
+    SuggestedTagsResponse,
+    TagInfo,
+)
+
+# indirect: tests patch `app.services.note_tagger.get_note_tagger`
+from app.services import note_tagger as _note_tagger_module
+
+# Promoted from inline lazy imports (audit #7 sweep). All of these
+# import cleanly without back-importing `app.routers.notes`; the
+# original noqa: PLC0415 markers were leftovers from earlier circular
+# cycles that have since been broken.
+from app.services.clustering_service import get_clustering_service
+from app.services.engagement_service import EngagementService
+from app.services.flashcard import get_flashcard_service
+from app.services.gap_detector import get_gap_detector
+from app.services.llm import LLMUnavailableError
+from app.services.naming import normalize_tag_slug
+from app.services.note_graph import get_note_graph_service
+from app.services.note_search import get_note_search_service
+from app.services.note_title_generator import get_title_generator
+from app.services.notes_service import (
+    embed_and_store_note as _embed_and_store_note,
+)
+from app.services.notes_service import (
+    fts_delete as _fts_delete,
+)
+from app.services.notes_service import (
+    fts_insert as _fts_insert,
+)
+from app.services.notes_service import (
+    fts_update as _fts_update,
+)
+from app.services.notes_service import (
+    sync_note_sources as _sync_note_sources,
+)
+from app.services.notes_service import (
+    sync_tag_index as _sync_tag_index,
+)
+from app.services.notes_service import (
+    to_response as _to_response,
+)
+from app.services.notes_service import (
+    upsert_note_graph as _upsert_note_graph,
+)
+from app.services.vector_store import get_lancedb_service
+
+logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
+
+router = APIRouter(prefix="/notes", tags=["notes"])
+
+# Back-compat re-exports for tests and routers/tags.py that import these
+# private aliases from this module.
+__all__ = [
+    "BatchAcceptItem",
+    "BatchAcceptRequest",
+    "ClusterNotePreview",
+    "ClusterSuggestionResponse",
+    "GapDetectRequest",
+    "GapDetectResponse",
+    "GroupInfo",
+    "GroupsResponse",
+    "NamingFixItem",
+    "NamingFixRequest",
+    "NamingViolation",
+    "NoteAutocompleteItem",
+    "NoteCreateRequest",
+    "NoteEntityItem",
+    "NoteFlashcardGenerateRequest",
+    "NoteFlashcardGenerateResponse",
+    "NoteFlashcardItem",
+    "NoteLinkCreateRequest",
+    "NoteLinkItem",
+    "NoteLinksResponse",
+    "NoteResponse",
+    "NoteSearchItem",
+    "NoteSearchResponse",
+    "NoteTitleSuggestRequest",
+    "NoteTitleSuggestResponse",
+    "NoteUpdateRequest",
+    "SuggestedTagsResponse",
+    "TagInfo",
+    "_embed_and_store_note",
+    "_fts_delete",
+    "_fts_insert",
+    "_fts_update",
+    "_sync_note_sources",
+    "_sync_tag_index",
+    "_to_response",
+    "_upsert_note_graph",
+    "router",
+]
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("", response_model=NoteResponse, status_code=201)
+async def create_note(
+    req: NoteCreateRequest,
+    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> NoteResponse:
+    """Create a new note."""
+
+    # Dedup: if a note with identical (document_id, section_id, content_hash) was
+    # created within the last 5 seconds, return the existing note instead.
+    content_hash = hashlib.sha256(req.content.encode()).hexdigest()[:16]
+    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=5)
+    existing = await repo.find_for_dedup(
+        document_id=req.document_id,
+        section_id=req.section_id,
+        content_hash=content_hash,
+        cutoff=dedup_cutoff,
+    )
+    if existing is not None:
+        logger.info("Dedup: returning existing note %s", existing.id)
+        return _to_response(existing)
+
+    # Automatic tag saving for new notes if none provided
+    tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
+    if not tags and req.content.strip():
+
+        try:
+            raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(req.content)
+            tags = [_nt for t in raw_tags if (_nt := normalize_tag_slug(t))]
+        except Exception:
+            logger.warning("Auto-tagging failed for note creation", exc_info=True)
+
+    # Re-check dedup AFTER auto-tagging. The first check at the top of this
+    # endpoint can be lost to a race when the client fires several POSTs in
+    # quick succession (e.g. Cmd+S held down): each request reads "no match"
+    # before any of them commits, and all three then create distinct rows.
+    # Auto-tagging widens that window because it can take seconds. Repeating
+    # the lookup here, with a freshly-evaluated cutoff, closes it: by this
+    # point any sibling request that arrived first will have committed, so
+    # we'll see its row and reuse it instead of inserting a fourth.
+    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=5)
+    existing = await repo.find_for_dedup(
+        document_id=req.document_id,
+        section_id=req.section_id,
+        content_hash=content_hash,
+        cutoff=dedup_cutoff,
+    )
+    if existing is not None:
+        logger.info("Dedup (post-tag): returning existing note %s", existing.id)
+        return _to_response(existing)
+
+    now = datetime.now(UTC)
+    note = NoteModel(
+        id=str(uuid.uuid4()),
+        document_id=req.document_id,
+        chunk_id=req.chunk_id,
+        section_id=req.section_id,
+        content=req.content,
+        content_hash=content_hash,
+        group_name=req.group_name,
+        created_at=now,
+        updated_at=now,
+    )
+    note.tags = tags
+    logger.info("Auto-tagged new note %s with %d tags", note.id, len(tags))
+    # Four-table transactional write: note + FTS index + tag index + source pivot must
+    # all commit atomically; breaking this into a repo method adds no clarity.
+    session.add(note)
+    await _fts_insert(note.id, note.content, note.document_id, session)
+    await _sync_tag_index(note.id, note.tags or [], session)
+    # sync multi-document source pivot
+    await _sync_note_sources(note.id, req.source_document_ids, session)
+    await session.commit()
+    task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    graph_task = asyncio.create_task(
+        _upsert_note_graph(
+            note.id, note.content, note.document_id, note.tags or [], req.source_document_ids
+        )
+    )
+    _background_tasks.add(graph_task)
+    graph_task.add_done_callback(_background_tasks.discard)
+
+    # Fire-and-forget XP award for note creation.
+    async def _award_note_xp() -> None:
+        try:
+
+            async with get_session_factory()() as xp_session:
+                svc = EngagementService(xp_session)
+                await svc.award_note_xp(note.id, len(tags))
+                await xp_session.commit()  # dedicated XP session; isolated from the note session
+        except Exception:
+            logger.warning("Failed to award XP for note creation", exc_info=True)
+
+    _xp_task = asyncio.create_task(_award_note_xp())
+    _background_tasks.add(_xp_task)
+    _xp_task.add_done_callback(_background_tasks.discard)
+
+    logger.info("Created note", extra={"note_id": note.id})
+    return _to_response(note, source_document_ids=req.source_document_ids)
+
+
+@router.get("/search", response_model=NoteSearchResponse)
+async def search_notes(
+    q: str = Query(..., min_length=1),
+    k: int = Query(default=10, ge=1, le=50),
+) -> NoteSearchResponse:
+    """Hybrid FTS + semantic search over notes. Returns 422 if q is empty."""
+
+    results = await get_note_search_service().search(q, k=k)
+    return NoteSearchResponse(
+        query=q,
+        results=[
+            NoteSearchItem(
+                note_id=r.note_id,
+                content=r.content,
+                tags=r.tags,
+                group_name=r.group_name,
+                document_id=r.document_id,
+                score=round(r.score, 6),
+                source=r.source,
+            )
+            for r in results
+        ],
+        total=len(results),
+    )
+
+
+@router.get("/groups", response_model=GroupsResponse)
+async def get_groups(session: AsyncSession = Depends(get_db)) -> GroupsResponse:
+    """Return distinct group names (with counts) and distinct tags (with counts)."""
+    # Three bespoke aggregations that share a session; the middle one uses SQLite's
+    # json_each extension which is not expressible via SQLAlchemy ORM columns.
+    group_result = await session.execute(
+        select(NoteModel.group_name, func.count(NoteModel.id))
+        .where(NoteModel.group_name.isnot(None))
+        .group_by(NoteModel.group_name)
+        .order_by(NoteModel.group_name)
+    )
+    groups = [GroupInfo(name=row[0], count=row[1]) for row in group_result.fetchall()]
+
+    # Tags — use JSON_EACH to explode the JSON array stored in the tags column
+    tag_result = await session.execute(
+        text(
+            "SELECT j.value, COUNT(*) as cnt "
+            "FROM notes, json_each(notes.tags) AS j "
+            "GROUP BY j.value "
+            "ORDER BY j.value"
+        )
+    )
+    tags = [TagInfo(name=row[0], count=row[1]) for row in tag_result.fetchall()]
+
+    # Total notes count (unarchived)
+    total_result = await session.execute(
+        select(func.count()).select_from(NoteModel).where(NoteModel.archived.is_(False))
+    )
+    total_notes = total_result.scalar_one()
+
+    return GroupsResponse(groups=groups, tags=tags, total_notes=total_notes)
+
+
+@router.get("", response_model=list[NoteResponse])
+async def list_notes(
+    document_id: str | None = Query(default=None),
+    group: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    collection_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteResponse]:
+    """List notes with optional filters."""
+    stmt = (
+        select(NoteModel).where(NoteModel.archived.is_(False)).order_by(NoteModel.updated_at.desc())
+    )
+
+    if document_id:
+        # match notes via legacy document_id OR via NoteSourceModel pivot
+        stmt = stmt.where(
+            or_(
+                NoteModel.document_id == document_id,
+                NoteModel.id.in_(
+                    select(NoteSourceModel.note_id).where(
+                        NoteSourceModel.document_id == document_id
+                    )
+                ),
+            )
+        )
+    if group:
+        stmt = stmt.where(NoteModel.group_name == group)
+    if tag:
+        # Filter notes using NoteTagIndexModel prefix query.
+        # 'science' matches notes tagged 'science', 'science/biology', 'science/physics/quantum'.
+        stmt = stmt.where(
+            NoteModel.id.in_(
+                select(NoteTagIndexModel.note_id).where(
+                    or_(
+                        NoteTagIndexModel.tag_full == tag,
+                        NoteTagIndexModel.tag_full.like(f"{tag}/%"),
+                    )
+                )
+            )
+        )
+    if collection_id:
+        stmt = stmt.where(
+            NoteModel.id.in_(
+                select(CollectionMemberModel.member_id).where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_type == "note",
+                )
+            )
+        )
+
+    # Dynamic filter composition built incrementally from query params; the stmt
+    # is too conditional to encapsulate in a NoteRepo.list() without complex args.
+    result = await session.execute(stmt)
+    notes = list(result.scalars().all())
+
+    # Bulk-load collection memberships and source_document_ids in one query each.
+    # The note_ids set is only known after the above list executes, so these two
+    # queries must follow here rather than being folded into the primary query.
+    coll_map: dict[str, list[str]] = {}
+    src_map: dict[str, list[str]] = {}
+    if notes:
+        note_ids = [n.id for n in notes]
+        member_rows = (
+            await session.execute(
+                select(
+                    CollectionMemberModel.member_id,
+                    CollectionMemberModel.collection_id,
+                ).where(
+                    CollectionMemberModel.member_id.in_(note_ids),
+                    CollectionMemberModel.member_type == "note",
+                )
+            )
+        ).all()
+        for row in member_rows:
+            coll_map.setdefault(row[0], []).append(row[1])
+
+        # bulk-load source_document_ids from pivot
+        src_rows = (
+            await session.execute(
+                select(
+                    NoteSourceModel.note_id,
+                    NoteSourceModel.document_id,
+                ).where(NoteSourceModel.note_id.in_(note_ids))
+            )
+        ).all()
+        for row in src_rows:
+            src_map.setdefault(row[0], []).append(row[1])
+
+    return [_to_response(n, coll_map.get(n.id, []), src_map.get(n.id, [])) for n in notes]
+
+
+async def _apply_note_update(
+    note_id: str, req: NoteUpdateRequest, session: AsyncSession, repo: NoteRepo
+) -> NoteResponse:
+    note = await repo.get_or_404(note_id)
+
+    if req.content is not None:
+        note.content = req.content
+    if req.tags is not None:
+        note.tags = [normalize_tag_slug(t) for t in req.tags if normalize_tag_slug(t)]
+    if req.group_name is not None:
+        note.group_name = req.group_name
+    if req.section_id is not None:
+        note.section_id = req.section_id
+    note.updated_at = datetime.now(UTC)
+
+    await session.flush()  # Ensure content update is visible to other queries if needed
+    await _fts_update(note.id, note.content, note.document_id, session)
+    if req.tags is not None:
+        await _sync_tag_index(note.id, note.tags or [], session)
+    # sync source document pivot only when field is explicitly supplied
+    if req.source_document_ids is not None:
+        await _sync_note_sources(note.id, req.source_document_ids, session)
+    # Four-table update (note + FTS + tag index + source pivot) must commit together.
+    await session.commit()
+    # Fetch updated source_document_ids for response; must run after commit to see
+    # the new pivot rows written by _sync_note_sources above.
+    src_rows = (
+        (
+            await session.execute(
+                select(NoteSourceModel.document_id).where(NoteSourceModel.note_id == note.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Delete stale vector synchronously so hybrid search doesn't return the
+    # old embedding while the background task re-embeds the new content.
+
+    get_lancedb_service().delete_note_vector(note.id)
+    task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    graph_task = asyncio.create_task(
+        _upsert_note_graph(note.id, note.content, note.document_id, note.tags or [], list(src_rows))
+    )
+    _background_tasks.add(graph_task)
+    graph_task.add_done_callback(_background_tasks.discard)
+    # Re-fetch relevant IDs for a fully populated response
+    coll_rows = await repo.collection_ids_for(note.id)
+
+    logger.info("Updated note", extra={"note_id": note_id})
+    return _to_response(
+        note,
+        collection_ids=coll_rows,
+        source_document_ids=list(src_rows),
+    )
+
+
+@router.put("/{note_id}", response_model=NoteResponse)
+async def update_note(
+    note_id: str,
+    req: NoteUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> NoteResponse:
+    """Update a note's content, tags, or group."""
+    return await _apply_note_update(note_id, req, session, repo)
+
+
+@router.patch("/{note_id}", response_model=NoteResponse)
+async def patch_note(
+    note_id: str,
+    req: NoteUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> NoteResponse:
+    """Partially update a note's content, tags, or group."""
+    return await _apply_note_update(note_id, req, session, repo)
+
+
+@router.delete("/{note_id}", status_code=204)
+async def delete_note(
+    note_id: str,
+    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> None:
+    """Delete a note by ID."""
+    await repo.get_or_404(note_id)
+
+    await _fts_delete(note_id, session)
+    await _sync_tag_index(note_id, [], session)
+    # Delete Note graph node synchronously before removing the SQL row
+
+    await get_note_graph_service().delete_note_node(note_id)
+    await repo.delete_by_id(note_id)
+
+    get_lancedb_service().delete_note_vector(note_id)
+    logger.info("Deleted note", extra={"note_id": note_id})
+
+
+@router.get("/{note_id}/entities", response_model=list[NoteEntityItem])
+async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
+    """Return entities linked to a note via WRITTEN_ABOUT or TAG_IS_CONCEPT Kuzu edges."""
+
+    entities = await get_note_graph_service().get_entities_for_note(note_id)
+    return [NoteEntityItem(**e) for e in entities]
+
+
+@router.get("/flashcards/generate/preview")
+async def preview_note_flashcard_generation(
+    collection_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return {total_notes, already_covered} for a collection without generating (S169)."""
+    # Three sequential reads: existence check, then two counts that depend on
+    # collection.name -- all share the session so the name is resolved before use.
+    coll_result = await session.execute(
+        select(CollectionModel).where(CollectionModel.id == collection_id)
+    )
+    collection = coll_result.scalar_one_or_none()
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    member_result = await session.execute(
+        select(func.count())
+        .select_from(CollectionMemberModel)
+        .where(
+            CollectionMemberModel.collection_id == collection_id,
+            CollectionMemberModel.member_type == "note",
+        )
+    )
+    total_notes = member_result.scalar_one()
+
+    covered_result = await session.execute(
+        select(func.count(FlashcardModel.source_content_hash.distinct())).where(
+            FlashcardModel.deck == collection.name,
+            FlashcardModel.source == "note",
+            FlashcardModel.source_content_hash.is_not(None),
+        )
+    )
+    already_covered = covered_result.scalar_one()
+
+    return {"total_notes": total_notes, "already_covered": already_covered}
+
+
+@router.post("/flashcards/generate", status_code=201)
+async def generate_note_flashcards(
+    req: NoteFlashcardGenerateRequest,
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteFlashcardItem] | NoteFlashcardGenerateResponse:
+    """Generate flashcards from user notes scoped by tag, note IDs, or collection (S169)."""
+
+    # 422 guard: collection_id and note_ids are mutually exclusive
+    if req.collection_id and req.note_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either collection_id or note_ids, not both",
+        )
+
+    try:
+        if req.collection_id:
+            result = await get_flashcard_service().generate_from_collection(
+                collection_id=req.collection_id,
+                count_per_note=req.count,
+                difficulty=req.difficulty,
+                session=session,
+                force_regenerate=req.force_regenerate,
+            )
+            logger.info(
+                "Collection flashcard gen: created=%d skipped=%d deck=%s",
+                result["created"],
+                result["skipped"],
+                result["deck"],
+            )
+            return NoteFlashcardGenerateResponse(**result)
+
+        cards = await get_flashcard_service().generate_from_notes(
+            tag=req.tag,
+            note_ids=req.note_ids,
+            count=req.count,
+            difficulty=req.difficulty,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Start it with: ollama serve",
+        ) from exc
+
+    logger.info("Generated %d note flashcards tag=%s", len(cards), req.tag)
+    return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
+@router.get("/flashcards", response_model=list[NoteFlashcardItem])
+async def list_note_flashcards(
+    session: AsyncSession = Depends(get_db),
+) -> list[NoteFlashcardItem]:
+    """Return all flashcards generated from notes (source='note'), newest first."""
+
+    # Read-only cross-model query (FlashcardModel filtered by source); no NoteRepo
+    # method owns FlashcardModel, so the router queries it directly here.
+    result = await session.execute(
+        select(FlashcardModel)
+        .where(FlashcardModel.source == "note")
+        .order_by(FlashcardModel.created_at.desc())
+    )
+    cards = list(result.scalars().all())
+    return [NoteFlashcardItem.model_validate(c) for c in cards]
+
+
+# ---------------------------------------------------------------------------
+# Cluster endpoints (static paths must come before /{note_id} catch-all)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/cluster", status_code=202)
+async def trigger_cluster(
+    session: AsyncSession = Depends(get_db),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> dict:
+    """Fire-and-forget HDBSCAN clustering over note_vectors_v2.
+
+    Returns {queued: True, total_notes: int} or {cached: True, last_run: ISO str}
+    if a pending suggestion was created within the last hour.
+    """
+
+    svc = get_clustering_service()
+
+    # Check rate-limit synchronously before spawning task
+    last_run = await svc.get_pending_last_run(session)
+    if last_run is not None:
+
+        now = datetime.now(UTC)
+        age = now - (last_run.replace(tzinfo=UTC) if last_run.tzinfo is None else last_run)
+        if age < timedelta(hours=1):
+            return {"cached": True, "last_run": last_run.isoformat()}
+
+    # Count total notes
+    total_notes = await repo.count_all()
+
+    # Spawn fire-and-forget task with its own session
+    async def _run_clustering() -> None:
+        try:
+            async with get_session_factory()() as new_session:
+                count = await get_clustering_service().cluster_notes(new_session)
+                logger.info("Background clustering finished: %d suggestions", count)
+        except Exception as exc:
+            logger.error("Background clustering task failed: %s", exc)
+
+    task = asyncio.create_task(_run_clustering())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return {"queued": True, "total_notes": total_notes}
+
+
+@router.get("/cluster/suggestions", response_model=list[ClusterSuggestionResponse])
+async def list_cluster_suggestions(
+    session: AsyncSession = Depends(get_db),
+) -> list[ClusterSuggestionResponse]:
+    """Return pending cluster suggestions sorted by confidence_score DESC with note previews."""
+
+    items = await get_clustering_service().get_pending_suggestions(session)
+    return [
+        ClusterSuggestionResponse(
+            id=item["id"],
+            suggested_name=item["suggested_name"],
+            note_ids=item.get("note_ids", []),
+            note_count=item["note_count"],
+            confidence_score=item["confidence_score"],
+            status=item["status"],
+            created_at=item["created_at"],
+            previews=[ClusterNotePreview(**p) for p in item["previews"]],
+        )
+        for item in items
+    ]
+
+
+# NOTE: batch-accept must be registered BEFORE /{suggestion_id} routes
+@router.post("/cluster/suggestions/batch-accept")
+async def batch_accept_cluster_suggestions(
+    req: BatchAcceptRequest,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Accept multiple cluster suggestions in a single transaction.
+
+    Returns list of created collection IDs.
+    """
+
+    items_dicts = [
+        {
+            "suggestion_id": it.suggestion_id,
+            "name_override": it.name_override,
+            "note_ids": it.note_ids,
+        }
+        for it in req.items
+    ]
+    created_ids = await get_clustering_service().batch_accept_suggestions(items_dicts, session)
+    return {"collection_ids": created_ids}
+
+
+# ---------------------------------------------------------------------------
+# Naming normalization check & apply
+# ---------------------------------------------------------------------------
+
+
+# NOTE: These routes registered BEFORE /{suggestion_id} to prevent path collision
+@router.post("/cluster/normalize-check", response_model=list[NamingViolation])
+async def normalize_check(
+    session: AsyncSession = Depends(get_db),
+) -> list[NamingViolation]:
+    """Return naming violation suggestions for tags and collections."""
+
+    violations = await get_clustering_service().detect_naming_violations(session)
+    return [NamingViolation(**v) for v in violations]
+
+
+@router.post("/cluster/normalize-apply")
+async def normalize_apply(
+    req: NamingFixRequest,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Apply naming fixes transactionally."""
+
+    fixes_dicts = [f.model_dump() for f in req.fixes]
+    result = await get_clustering_service().apply_naming_fixes(fixes_dicts, session)
+    return result
+
+
+@router.post("/cluster/suggestions/{suggestion_id}/accept")
+async def accept_cluster_suggestion(
+    suggestion_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Accept a cluster suggestion: create Collection + member rows."""
+
+    collection_id = await get_clustering_service().accept_suggestion(suggestion_id, session)
+    if collection_id is None:
+        raise HTTPException(status_code=404, detail="Cluster suggestion not found")
+    return {"collection_id": collection_id}
+
+
+@router.post("/cluster/suggestions/{suggestion_id}/reject")
+async def reject_cluster_suggestion(
+    suggestion_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Reject a cluster suggestion."""
+
+    found = await get_clustering_service().reject_suggestion(suggestion_id, session)
+    if not found:
+        raise HTTPException(status_code=404, detail="Cluster suggestion not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Note links and autocomplete
+# NOTE: GET /notes/autocomplete is a static path and MUST be registered before
+# the /{note_id} catch-all to prevent FastAPI from matching "autocomplete" as a
+# note ID.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/autocomplete", response_model=list[NoteAutocompleteItem])
+async def autocomplete_notes(
+    q: str = Query(default="", max_length=200),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> list[NoteAutocompleteItem]:
+    """Return up to 8 notes whose content starts with q (case-insensitive). (S171)
+
+    Registered BEFORE /{note_id} to prevent FastAPI from matching "autocomplete"
+    as a note ID wildcard.
+    """
+    rows = (
+        await repo.list_recent(limit=8)
+        if not q.strip()
+        else await repo.autocomplete_content(q, limit=8)
+    )
+    return [NoteAutocompleteItem(id=nid, preview=content[:100]) for nid, content in rows]
+
+
+@router.post("/{note_id}/links", response_model=NoteLinkItem, status_code=201)
+async def create_note_link(
+    note_id: str,
+    req: NoteLinkCreateRequest,
+    repo: NoteRepo = Depends(get_note_repo),
+) -> NoteLinkItem:
+    """Create a typed link from note_id to req.target_note_id. (S171)
+
+    Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
+    Returns 409 if the (source, target, link_type) triple already exists.
+    """
+
+    # Validate source and target exist
+    await repo.get_or_404(note_id, name="Source note")
+    target = await repo.get_or_404(req.target_note_id, name="Target note")
+
+    # Check uniqueness
+    if await repo.find_link(note_id, req.target_note_id, req.link_type) is not None:
+        raise HTTPException(status_code=409, detail="Link already exists")
+
+    link = await repo.create_link(
+        source_note_id=note_id,
+        target_note_id=req.target_note_id,
+        link_type=req.link_type,
+        created_at=datetime.now(UTC),
+    )
+
+    # Fire-and-forget Kuzu edge upsert
+    task = asyncio.create_task(
+        get_note_graph_service().upsert_links_to_edge(note_id, req.target_note_id, req.link_type)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return NoteLinkItem(
+        id=link.id,
+        note_id=req.target_note_id,
+        preview=target.content[:100],
+        link_type=link.link_type,
+        created_at=link.created_at,
+    )
+
+
+@router.delete("/{note_id}/links/{target_note_id}", status_code=204)
+async def delete_note_link(
+    note_id: str,
+    target_note_id: str,
+    link_type: str = Query(default="see-also"),
+    repo: NoteRepo = Depends(get_note_repo),
+) -> None:
+    """Delete a typed link from note_id to target_note_id. (S171)
+
+    Fires an async Kuzu edge delete. Returns 404 if link not found.
+    """
+
+    link = await repo.find_link(note_id, target_note_id, link_type)
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    await repo.delete_link(link)
+
+    task = asyncio.create_task(
+        get_note_graph_service().delete_links_to_edge(note_id, target_note_id, link_type)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+@router.get("/{note_id}/links", response_model=NoteLinksResponse)
+async def get_note_links(
+    note_id: str,
+    repo: NoteRepo = Depends(get_note_repo),
+) -> NoteLinksResponse:
+    """Return outgoing and incoming links for a note. (S171)
+
+    Outgoing: links WHERE source_note_id = note_id
+    Incoming: links WHERE target_note_id = note_id (backlinks)
+    Each item includes a 100-char preview from the linked note's content.
+    """
+    out_rows = await repo.outgoing_links_with_content(note_id)
+    in_rows = await repo.incoming_links_with_content(note_id)
+
+    outgoing = [
+        NoteLinkItem(
+            id=r.link.id,
+            note_id=r.link.target_note_id,
+            preview=r.content[:100],
+            link_type=r.link.link_type,
+            created_at=r.link.created_at,
+        )
+        for r in out_rows
+    ]
+    incoming = [
+        NoteLinkItem(
+            id=r.link.id,
+            note_id=r.link.source_note_id,
+            preview=r.content[:100],
+            link_type=r.link.link_type,
+            created_at=r.link.created_at,
+        )
+        for r in in_rows
+    ]
+    return NoteLinksResponse(outgoing=outgoing, incoming=incoming)
+
+
+@router.get("/{note_id}", response_model=NoteResponse)
+async def get_note(
+    note_id: str,
+    repo: NoteRepo = Depends(get_note_repo),
+) -> NoteResponse:
+    """Get a single note by ID, including collection_ids.
+
+    Registered AFTER all static-path GET routes (/search, /groups, /flashcards)
+    to prevent the dynamic {note_id} segment from shadowing them.
+    """
+    note = await repo.get_or_404(note_id)
+    member_rows = await repo.collection_ids_for(note_id)
+    src_rows = await repo.source_document_ids_for(note_id)
+    return _to_response(note, member_rows, src_rows)
+
+
+@router.post("/gap-detect", response_model=GapDetectResponse)
+async def gap_detect(
+    req: GapDetectRequest,
+    session: AsyncSession = Depends(get_db),
+) -> GapDetectResponse:
+    """Identify book concepts absent from the user's notes."""
+    if not req.note_ids:
+        raise HTTPException(status_code=422, detail="note_ids must be non-empty")
+
+
+    try:
+        report = await get_gap_detector().detect_gaps(
+            note_ids=req.note_ids,
+            document_id=req.document_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LLMUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Start it with: ollama serve",
+        ) from exc
+
+    logger.info(
+        "gap_detect: doc=%s gaps=%d covered=%d",
+        req.document_id,
+        len(report["gaps"]),
+        len(report["covered"]),
+    )
+    return GapDetectResponse(
+        gaps=report["gaps"],
+        covered=report["covered"],
+        query_used=report["query_used"],
+    )
+
+
+@router.post("/{note_id}/suggest-tags", response_model=SuggestedTagsResponse)
+async def suggest_tags(
+    note_id: str,
+    repo: NoteRepo = Depends(get_note_repo),
+) -> SuggestedTagsResponse:
+    """Return LLM-suggested tags for an existing note. Always HTTP 200 when note exists."""
+    note = await repo.get_or_404(note_id)
+
+    # Grab content before releasing DB session to avoid holding a connection
+    # during a potentially slow LLM call.
+    note_content = note.content
+
+
+    raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(note_content)
+    tags = [n for t in raw_tags if (n := normalize_tag_slug(t))]
+    logger.debug("suggest_tags note_id=%s returned %d tags", note_id, len(tags))
+    return SuggestedTagsResponse(tags=tags)
+
+
+@router.post("/suggest-title", response_model=NoteTitleSuggestResponse)
+async def suggest_title(
+    req: NoteTitleSuggestRequest,
+) -> NoteTitleSuggestResponse:
+    """Return LLM-suggested title for the provided note content."""
+
+    title = await get_title_generator().suggest_title(req.content)
+    return NoteTitleSuggestResponse(title=title)

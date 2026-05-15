@@ -460,7 +460,7 @@ export function DocumentCard({
         </div>
       )}
 
-      {/* Objective progress ring (S143) — shown only when objectives have been extracted */}
+      {/* Objective progress ring — shown only when objectives have been extracted */}
       {doc.objective_progress_pct !== null && (
         <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           <ProgressRing pct={doc.objective_progress_pct} size={24} />

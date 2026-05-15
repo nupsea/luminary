@@ -1,4 +1,4 @@
-"""KuzuTechRepo: code-graph + diagram + tech-relation edges (S135 / S140 / S160).
+"""KuzuTechRepo: code-graph + diagram + tech-relation edges
 
 Methods are lifted verbatim from `KuzuService` so query strings, error
 handling, and return shapes are unchanged. `KuzuService` keeps the
@@ -8,7 +8,7 @@ Covers six edge / node types:
 - CALLS                 function-to-function call edges (code docs)
 - IMPLEMENTS / EXTENDS / USES / REPLACES / DEPENDS_ON   tech relations
 - VERSION_OF            entity-version provenance (e.g. Python 3.12 → Python)
-- DiagramNode           extracted diagram nodes (S140)
+- DiagramNode           extracted diagram nodes
 - diagram edges         arrows / containment between diagram nodes
 - DEPICTS               diagram-node-to-Entity links
 
@@ -45,7 +45,7 @@ class KuzuTechRepo:
             )
 
     # -------------------------------------------------------------------------
-    # Tech relation edges (S135)
+    # Tech relation edges
     # -------------------------------------------------------------------------
 
     _TECH_REL_TYPES: frozenset[str] = frozenset(
@@ -159,7 +159,7 @@ class KuzuTechRepo:
                 {"vid": versioned_entity_id, "bid": base_entity_id, "did": document_id},
             )
 
-    # Diagram-derived node types (S136) -- queried from DiagramNode table, not Entity
+    # Diagram-derived node types -- queried from DiagramNode table, not Entity
     _DIAGRAM_NODE_TYPES: frozenset[str] = frozenset({"COMPONENT", "ACTOR", "ENTITY_DM", "STEP"})
 
     def get_entities_by_type(self, document_id: str, entity_type: str) -> list[dict]:
@@ -225,7 +225,7 @@ class KuzuTechRepo:
             return []
 
     # -------------------------------------------------------------------------
-    # Diagram-derived nodes and edges (S136)
+    # Diagram-derived nodes and edges
     # -------------------------------------------------------------------------
 
     def upsert_diagram_node(

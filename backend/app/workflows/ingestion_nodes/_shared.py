@@ -4,7 +4,7 @@ Holds the cross-node infrastructure that several nodes import:
 - `IngestionState` TypedDict (the StateGraph state shape)
 - `ContentType` literal
 - `CHUNK_CONFIGS` per-content-type chunker settings
-- `ENTITY_TAIL_MAX` + `build_entity_tail` (S224)
+- `ENTITY_TAIL_MAX` + `build_entity_tail`
 - `STAGE_PROGRESS` map
 - `_classify` heuristic that picks the content type
 - `_update_stage` async helper that writes the document's stage column
@@ -59,7 +59,7 @@ CHUNK_CONFIGS: dict[str, dict[str, int]] = {
     "kindle_clippings": {"chunk_size": 300, "chunk_overlap": 75},
 }
 
-# S224: cap on canonical entities included in a chunk's entity tail.
+# cap on canonical entities included in a chunk's entity tail.
 # Bounds embedding distortion and BM25 dilution from very entity-dense chunks.
 ENTITY_TAIL_MAX = 12
 

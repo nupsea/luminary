@@ -1,5 +1,5 @@
 /**
- * TagGraph component (S167)
+ * TagGraph component
  *
  * Renders a Sigma.js + Graphology co-occurrence network of canonical tags.
  * Node click dispatches 'luminary:navigate' to cross-navigate to Notes tab.

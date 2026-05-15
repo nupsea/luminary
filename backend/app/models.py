@@ -92,14 +92,14 @@ class ChunkModel(Base):
     page_number: Mapped[int] = mapped_column(Integer, default=0)
     speaker: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    # S146: PDF page number (1-based) for chunks from PDF documents.
+    # PDF page number (1-based) for chunks from PDF documents.
     # Null for non-PDF content types (txt, docx, epub, audio, code, etc.).
     pdf_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Code-aware chunking fields (set by tech_book/tech_article content type)
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     code_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # S224: canonical entity tail injected at index time for vocabulary bridging
+    # canonical entity tail injected at index time for vocabulary bridging
     # ("[Entities: A, B, C]"); concatenated into FTS5 text and embedding input,
     # not into the displayed text.
     entities_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -125,7 +125,7 @@ class FlashcardModel(Base):
     chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # 'document' for book-chunk cards, 'note' for note-sourced cards, 'gap' for gap-bridge cards
     source: Mapped[str] = mapped_column(String, nullable=False, default="document")
-    # Logical deck name; 'gaps' for cards created via POST /flashcards/from-gaps (S97)
+    # Logical deck name; 'gaps' for cards created via POST /flashcards/from-gaps
     deck: Mapped[str] = mapped_column(String, nullable=False, default="default")
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
@@ -139,20 +139,20 @@ class FlashcardModel(Base):
     reps: Mapped[int] = mapped_column(Integer, default=0)
     lapses: Mapped[int] = mapped_column(Integer, default=0)
     last_review: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # S137: Bloom's Taxonomy fields — set by generate_technical(); null for non-tech cards
+    # Bloom's Taxonomy fields — set by generate_technical(); null for non-tech cards
     flashcard_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     bloom_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+    # cloze deletion text with {{term}} markers; null for non-cloze cards
     cloze_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # S169: 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
+    # 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
     # for collection-based generation. Null for non-collection cards.
     source_content_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    # S173: note_id FK for note-sourced cards; enables per-note coverage tracking
+    # note_id FK for note-sourced cards; enables per-note coverage tracking
     note_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S179: chunk classifier label (concept/definition/example/analogy/narrative/transition);
+    # chunk classifier label (concept/definition/example/analogy/narrative/transition);
     # null for note/gap/context-sourced cards that bypass the classifier
     chunk_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # S188: section heading denormalized at generation time for source grounding display
+    # section heading denormalized at generation time for source grounding display
     section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -197,7 +197,7 @@ class TeachbackResultModel(Base):
     correct_points: Mapped[list] = mapped_column(JSON, default=list)
     missing_points: Mapped[list] = mapped_column(JSON, default=list)
     misconceptions: Mapped[list] = mapped_column(JSON, default=list)
-    # S156: structured rubric JSON; null when rubric LLM call fails or for legacy rows
+    # structured rubric JSON; null when rubric LLM call fails or for legacy rows
     rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Async evaluation: "pending" | "complete" | "error"
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
@@ -229,9 +229,9 @@ class NoteModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S201: short hash of content for dedup (sha256[:16])
+    # short hash of content for dedup (sha256[:16])
     content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S173: archived flag -- excluded from default GET /notes list; set by archive-stale
+    # archived flag -- excluded from default GET /notes list; set by archive-stale
     archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
@@ -295,7 +295,7 @@ class EvalRunModel(Base):
     context_precision: Mapped[float | None] = mapped_column(Float, nullable=True)
     context_recall: Mapped[float | None] = mapped_column(Float, nullable=True)
     model_used: Mapped[str] = mapped_column(String, nullable=False)
-    # S213: tags the kind of eval -- 'retrieval', 'generation', 'classifier',
+    # tags the kind of eval -- 'retrieval', 'generation', 'classifier',
     # 'summary', 'flashcard', 'citation'. Nullable for legacy rows.
     eval_kind: Mapped[str | None] = mapped_column(String, nullable=True, default="retrieval")
     citation_support_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -462,9 +462,9 @@ class FeynmanSessionModel(Base):
     concept: Mapped[str] = mapped_column(String(300), nullable=False)
     # active|complete
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    # S156: structured rubric JSON written at complete_session(); null until completion
+    # structured rubric JSON written at complete_session(); null until completion
     rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # S159: model-generated explanation and key points (null until POST /model-explanation)
+    # model-generated explanation and key points (null until POST /model-explanation)
     model_explanation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     key_points_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
@@ -607,7 +607,7 @@ class WebReferenceModel(Base):
     # official_docs | spec | wiki | tutorial | blog | unknown
     source_quality: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
     is_llm_suggested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # S194: URL validation status — None = unchecked, True = reachable, False = dead link
+    # URL validation status — None = unchecked, True = reachable, False = dead link
     is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
@@ -693,7 +693,7 @@ class CollectionModel(Base):
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Self-FK for 2-level hierarchy; null = top-level collection
     parent_collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S192: auto-collection for a document (one per document, nullable for manual collections)
+    # auto-collection for a document (one per document, nullable for manual collections)
     auto_document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
@@ -805,7 +805,7 @@ class ClusterSuggestionModel(Base):
 
 
 class NoteLinkModel(Base):
-    """Explicit note-to-note Zettelkasten-style link (S171).
+    """Explicit note-to-note Zettelkasten-style link
 
     Each row represents a directed typed connection from source_note_id to target_note_id.
     Bidirectionality is achieved by querying both directions in GET /notes/{id}/links.
@@ -878,7 +878,7 @@ class PredictionEventModel(Base):
 
 
 class ChatSuggestionHistoryModel(Base):
-    """Tracks shown/asked chat suggestion pills for Bloom-progressive dedup (S195)."""
+    """Tracks shown/asked chat suggestion pills for Bloom-progressive dedup"""
 
     __tablename__ = "chat_suggestion_history"
 

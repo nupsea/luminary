@@ -173,7 +173,7 @@ async def create_note(
         logger.info("Dedup: returning existing note %s", existing.id)
         return _to_response(existing)
 
-    # S208: Automatic tag saving for new notes if none provided
+    # Automatic tag saving for new notes if none provided
     tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
     if not tags and req.content.strip():
 
@@ -221,7 +221,7 @@ async def create_note(
     session.add(note)
     await _fts_insert(note.id, note.content, note.document_id, session)
     await _sync_tag_index(note.id, note.tags or [], session)
-    # S175: sync multi-document source pivot
+    # sync multi-document source pivot
     await _sync_note_sources(note.id, req.source_document_ids, session)
     await session.commit()
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
@@ -327,7 +327,7 @@ async def list_notes(
     )
 
     if document_id:
-        # S175: match notes via legacy document_id OR via NoteSourceModel pivot
+        # match notes via legacy document_id OR via NoteSourceModel pivot
         stmt = stmt.where(
             or_(
                 NoteModel.document_id == document_id,
@@ -389,7 +389,7 @@ async def list_notes(
         for row in member_rows:
             coll_map.setdefault(row[0], []).append(row[1])
 
-        # S175: bulk-load source_document_ids from pivot
+        # bulk-load source_document_ids from pivot
         src_rows = (
             await session.execute(
                 select(
@@ -423,7 +423,7 @@ async def _apply_note_update(
     await _fts_update(note.id, note.content, note.document_id, session)
     if req.tags is not None:
         await _sync_tag_index(note.id, note.tags or [], session)
-    # S175: sync source document pivot only when field is explicitly supplied
+    # sync source document pivot only when field is explicitly supplied
     if req.source_document_ids is not None:
         await _sync_note_sources(note.id, req.source_document_ids, session)
     # Four-table update (note + FTS + tag index + source pivot) must commit together.
@@ -517,7 +517,7 @@ async def preview_note_flashcard_generation(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Return {total_notes, already_covered} for a collection without generating (S169)."""
+    """Return {total_notes, already_covered} for a collection without generating"""
     # Three sequential reads: existence check, then two counts that depend on
     # collection.name -- all share the session so the name is resolved before use.
     coll_result = await session.execute(
@@ -554,7 +554,7 @@ async def generate_note_flashcards(
     req: NoteFlashcardGenerateRequest,
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteFlashcardItem] | NoteFlashcardGenerateResponse:
-    """Generate flashcards from user notes scoped by tag, note IDs, or collection (S169)."""
+    """Generate flashcards from user notes scoped by tag, note IDs, or collection"""
 
     # 422 guard: collection_id and note_ids are mutually exclusive
     if req.collection_id and req.note_ids:
@@ -708,7 +708,7 @@ async def batch_accept_cluster_suggestions(
 
 
 # ---------------------------------------------------------------------------
-# S207: Naming normalization check & apply
+# Naming normalization check & apply
 # ---------------------------------------------------------------------------
 
 
@@ -762,7 +762,7 @@ async def reject_cluster_suggestion(
 
 
 # ---------------------------------------------------------------------------
-# S171: Note links and autocomplete
+# Note links and autocomplete
 # NOTE: GET /notes/autocomplete is a static path and MUST be registered before
 # the /{note_id} catch-all to prevent FastAPI from matching "autocomplete" as a
 # note ID.
@@ -774,7 +774,7 @@ async def autocomplete_notes(
     q: str = Query(default="", max_length=200),
     repo: NoteRepo = Depends(get_note_repo),
 ) -> list[NoteAutocompleteItem]:
-    """Return up to 8 notes whose content starts with q (case-insensitive). (S171)
+    """Return up to 8 notes whose content starts with q (case-insensitive).
 
     Registered BEFORE /{note_id} to prevent FastAPI from matching "autocomplete"
     as a note ID wildcard.
@@ -793,7 +793,7 @@ async def create_note_link(
     req: NoteLinkCreateRequest,
     repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteLinkItem:
-    """Create a typed link from note_id to req.target_note_id. (S171)
+    """Create a typed link from note_id to req.target_note_id.
 
     Fires an async Kuzu edge upsert. Returns 404 if source or target note missing.
     Returns 409 if the (source, target, link_type) triple already exists.
@@ -837,7 +837,7 @@ async def delete_note_link(
     link_type: str = Query(default="see-also"),
     repo: NoteRepo = Depends(get_note_repo),
 ) -> None:
-    """Delete a typed link from note_id to target_note_id. (S171)
+    """Delete a typed link from note_id to target_note_id.
 
     Fires an async Kuzu edge delete. Returns 404 if link not found.
     """
@@ -860,7 +860,7 @@ async def get_note_links(
     note_id: str,
     repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteLinksResponse:
-    """Return outgoing and incoming links for a note. (S171)
+    """Return outgoing and incoming links for a note.
 
     Outgoing: links WHERE source_note_id = note_id
     Incoming: links WHERE target_note_id = note_id (backlinks)

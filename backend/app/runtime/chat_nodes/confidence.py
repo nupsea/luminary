@@ -1,4 +1,4 @@
-"""confidence_gate_node + augment_node + web_augment_node (S81, S142).
+"""confidence_gate_node + augment_node + web_augment_node
 
 confidence_gate_node is a no-op data node; the routing decision lives
 in `_route_after_confidence_gate`. The retry loop is single-shot:
@@ -163,7 +163,7 @@ async def augment_node(state: ChatState) -> dict:
         "chunks": combined_chunks,
         "section_context": combined_section_context,
         "retry_attempted": True,
-        "transparency_augmented": True,  # S158: signals synthesize_node to set augmented=True
+        "transparency_augmented": True,  # signals synthesize_node to set augmented=True
     }
 
 

@@ -1,5 +1,5 @@
 /**
- * SelectionActionBar -- unified text-selection popup for DocumentReader (S147).
+ * SelectionActionBar -- unified text-selection popup for DocumentReader
  *
  * Listens on document for mousedown/mouseup to track drag selections.
  * Uses the mouseup event coordinates for positioning (not range.getBoundingClientRect,
@@ -122,7 +122,7 @@ export function SelectionActionBar({
           left = mouseUpCoords.current.x
         }
 
-        // S198: clamp to viewport bounds so bar is never offscreen
+        // clamp to viewport bounds so bar is never offscreen
         top = Math.max(8, Math.min(top, window.innerHeight - BAR_HEIGHT - 8))
         left = Math.max(BAR_HALF_WIDTH, Math.min(left, window.innerWidth - BAR_HALF_WIDTH))
 

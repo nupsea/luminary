@@ -1,4 +1,4 @@
-"""EPUB chapter rendering service (S149).
+"""EPUB chapter rendering service
 
 Provides sanitized HTML chapter content and table-of-contents for EPUB documents.
 Sanitization removes script, iframe, and on* attributes; preserves prose elements.

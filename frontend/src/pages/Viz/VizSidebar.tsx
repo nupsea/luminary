@@ -3,7 +3,7 @@
 // Contains five sections:
 //   1. Library context: doc filter + per-doc quick-select list
 //   2. Notes in Context (when the notes layer is on)
-//   3. Learning path start-entity input (S117, only in learning_path mode)
+//   3. Learning path start-entity input (only in learning_path mode)
 //   4. Layers toggles (diagrams, prerequisites, cross-book, notes,
 //      retention)
 //   5. Needs Attention list (only when retention overlay is on)
@@ -255,7 +255,7 @@ export function VizSidebar(props: VizSidebarProps) {
         </div>
       )}
 
-      {/* Learning path: start entity input (S117) */}
+      {/* Learning path: start entity input */}
       {viewMode === "learning_path" && (
         <div className="p-4 border-b border-border/50">
           <p className="mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">

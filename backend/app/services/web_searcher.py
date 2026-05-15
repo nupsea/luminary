@@ -1,4 +1,4 @@
-"""Web search service for optional per-conversation web augmentation (S142).
+"""Web search service for optional per-conversation web augmentation
 
 Dispatches to the configured provider (none/brave/tavily/duckduckgo).
 Privacy invariant: web snippets are NEVER stored in the database.
@@ -113,7 +113,7 @@ class WebSearcher:
     provider='duckduckgo' -- uses duckduckgo_search library (no key required)
 
     All provider failures are caught and logged; returns [] on any error.
-    Content is NOT stored in the database per privacy invariant (S142).
+    Content is NOT stored in the database per privacy invariant
     """
 
     async def search(self, query: str, k: int = 3) -> list[WebSnippet]:

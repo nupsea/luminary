@@ -481,7 +481,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           <div className="border-t border-border" />
 
-          {/* Section 3: Notifications (S118) */}
+          {/* Section 3: Notifications */}
           <section>
             <h3 className="mb-3 text-sm font-semibold text-foreground">Notifications</h3>
             <label className="flex cursor-pointer items-start justify-between gap-4">

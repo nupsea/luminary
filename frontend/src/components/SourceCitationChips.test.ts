@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for SourceCitationChips logic (S157).
+ * Vitest unit tests for SourceCitationChips logic
  * Tests the pure `deduplicateCitations` function exported from SourceCitationChips.tsx.
  *
  * The number of items returned by deduplicateCitations maps directly to the

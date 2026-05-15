@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// FocusTimerPill (S209) -- global focus timer pill mounted in the app header.
-// Drives a Pomodoro session against the /pomodoro/* endpoints from S208.
+// FocusTimerPill -- global focus timer pill mounted in the app header.
+// Drives a Pomodoro session against the /pomodoro/* endpoints.
 // ---------------------------------------------------------------------------
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -112,7 +112,7 @@ export function FocusTimerPill() {
     retry: 1,
   })
 
-  // (S211) active goals for the Attach-to-goal select. Only fetched when the
+  // active goals for the Attach-to-goal select. Only fetched when the
   // popover is open to keep idle traffic minimal.
   const goalsQuery = useQuery<Goal[]>({
     queryKey: ["goals", "active"],
@@ -220,7 +220,7 @@ export function FocusTimerPill() {
           if (!muted) playChime()
           enterBreak(breakMinutes * 60)
           await qc.invalidateQueries({ queryKey: POMODORO_STATS_KEY })
-          // (S211) refresh goal lists/progress when a session completes so the
+          // refresh goal lists/progress when a session completes so the
           // open GoalsList and GoalDetailPanel reflect the new state.
           await qc.invalidateQueries({ queryKey: ["goals"] })
           if (goalId) {
@@ -513,7 +513,7 @@ export function FocusTimerPill() {
             {" -- inferred from the active tab."}
           </p>
 
-          {/* (S211) Attach-to-goal select */}
+          {/* Attach-to-goal select */}
           <div className="mt-3 flex flex-col gap-1">
             <label
               htmlFor="focus-attach-goal"

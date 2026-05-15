@@ -1,4 +1,4 @@
-"""Feynman technique session router (S144).
+"""Feynman technique session router
 
 Routes:
   POST /feynman/sessions              -- create session, return opening message
@@ -54,7 +54,7 @@ class FeynmanMessageRequest(BaseModel):
 class FeynmanCompleteResponse(BaseModel):
     gap_count: int
     flashcard_ids: list[str]
-    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric evaluation failed
+    rubric: TeachbackRubricResponse | None = None  # null when rubric evaluation failed
 
 
 class FeynmanSessionListItem(BaseModel):
