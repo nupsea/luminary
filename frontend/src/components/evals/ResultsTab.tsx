@@ -16,12 +16,30 @@ import {
 import { Play } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiGet, apiPost } from "@/lib/apiClient"
-import type { components } from "@/types/api"
+import { API_BASE } from "@/lib/config"
 import { RunEvalDialog } from "./RunEvalDialog"
 
-type EvalResultItem = components["schemas"]["EvalResultItem"]
-type EvalHistoryItem = components["schemas"]["EvalHistoryItem"]
+interface EvalResultItem {
+  dataset: string
+  run_at: string
+  hit_rate_5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  context_precision: number | null
+  context_recall: number | null
+  answer_relevancy: number | null
+  passed_thresholds: boolean | null
+}
+
+interface EvalHistoryItem {
+  timestamp: string
+  dataset: string
+  model: string
+  hr5: number | null
+  mrr: number | null
+  faithfulness: number | null
+  passed: boolean
+}
 
 const EVAL_THRESHOLDS: Record<string, number> = {
   hit_rate_5: 0.6,
@@ -58,11 +76,17 @@ const METRIC_BARS = [
   { key: "context_precision", label: "Ctx Prec.", color: "#ec4899" },
 ]
 
-const fetchEvalResults = (): Promise<EvalResultItem[]> =>
-  apiGet<EvalResultItem[]>("/evals/results")
+async function fetchEvalResults(): Promise<EvalResultItem[]> {
+  const res = await fetch(`${API_BASE}/evals/results`)
+  if (!res.ok) throw new Error("Failed to fetch eval results")
+  return res.json() as Promise<EvalResultItem[]>
+}
 
-const fetchEvalHistory = (): Promise<EvalHistoryItem[]> =>
-  apiGet<EvalHistoryItem[]>("/monitoring/eval-history")
+async function fetchEvalHistory(): Promise<EvalHistoryItem[]> {
+  const res = await fetch(`${API_BASE}/monitoring/eval-history`)
+  if (!res.ok) throw new Error("Failed to fetch eval history")
+  return res.json() as Promise<EvalHistoryItem[]>
+}
 
 function buildSparklineData(history: EvalHistoryItem[]) {
   const allTimestamps = Array.from(new Set(history.map((h) => h.timestamp))).sort()
@@ -101,12 +125,18 @@ export function ResultsTab({ onRunStarted }: { onRunStarted?: () => void }) {
       max_questions: number
     }) => {
       if (!runTarget) throw new Error("No dataset selected")
-      return apiPost("/evals/run", {
-        dataset: runTarget,
-        judge_model: payload.judge_model || null,
-        check_citations: payload.check_citations,
-        max_questions: payload.max_questions,
+      const res = await fetch(`${API_BASE}/evals/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataset: runTarget,
+          judge_model: payload.judge_model || null,
+          check_citations: payload.check_citations,
+          max_questions: payload.max_questions,
+        }),
       })
+      if (!res.ok) throw new Error("Failed to start eval run")
+      return res.json()
     },
     onSuccess: () => {
       setRunDialogOpen(false)

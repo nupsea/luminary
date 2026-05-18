@@ -10,11 +10,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { apiGet } from "@/lib/apiClient"
-import type { components } from "@/types/api"
+import { API_BASE } from "@/lib/config"
 
-type EvalHistoryItem = components["schemas"]["EvalHistoryItem"]
-type EvalRegression = components["schemas"]["EvalRegressionResponse"]
+interface EvalHistoryItem {
+  dataset: string
+  timestamp: string
+  hr5: number | null
+  mrr: number | null
+  faithfulness: number | null
+}
+
+interface EvalRegression {
+  dataset: string
+  metric: string
+  current_value: number
+  baseline_value: number
+  drop_pct: number
+  eval_kind: string | null
+}
 
 export function EvalTrendsPanel({ history }: { history: EvalHistoryItem[] }) {
   const [dataset, setDataset] = useState("")
@@ -33,12 +46,10 @@ export function EvalTrendsPanel({ history }: { history: EvalHistoryItem[] }) {
   useEffect(() => {
     let cancelled = false
     async function load() {
-      try {
-        const data = await apiGet<EvalRegression[]>("/monitoring/evals/regressions")
-        if (!cancelled) setRegressions(data)
-      } catch {
-        // best-effort polling; ignore failures
-      }
+      const res = await fetch(`${API_BASE}/monitoring/evals/regressions`)
+      if (!res.ok) return
+      const data = (await res.json()) as EvalRegression[]
+      if (!cancelled) setRegressions(data)
     }
     void load()
     const timer = window.setInterval(() => void load(), 60_000)

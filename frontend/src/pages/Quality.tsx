@@ -23,43 +23,63 @@ import type {
 type AnyRun = EvalRunSummary | EvalRunFull
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
 
-const fetchDatasets = (): Promise<GoldenDataset[]> =>
-  apiGet<GoldenDataset[]>("/evals/datasets")
+// ---------------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------------
 
-const fetchDataset = (id: string): Promise<GoldenDatasetDetail> =>
-  apiGet<GoldenDatasetDetail>(`/evals/datasets/${id}`, { limit: 50 })
+async function fetchDatasets(): Promise<GoldenDataset[]> {
+  const res = await fetch(`${API_BASE}/evals/datasets`)
+  if (!res.ok) throw new Error("Failed to fetch datasets")
+  return res.json() as Promise<GoldenDataset[]>
+}
 
-const fetchDatasetRuns = (id: string): Promise<EvalRunSummary[]> =>
-  apiGet<EvalRunSummary[]>(`/evals/datasets/${id}/runs`)
+async function fetchDataset(id: string): Promise<GoldenDatasetDetail> {
+  const res = await fetch(`${API_BASE}/evals/datasets/${id}?limit=50`)
+  if (!res.ok) throw new Error("Failed to fetch dataset")
+  return res.json() as Promise<GoldenDatasetDetail>
+}
 
-const fetchGoldenFile = (
+async function fetchDatasetRuns(id: string): Promise<EvalRunSummary[]> {
+  const res = await fetch(`${API_BASE}/evals/datasets/${id}/runs`)
+  if (!res.ok) throw new Error("Failed to fetch dataset runs")
+  return res.json() as Promise<EvalRunSummary[]>
+}
+
+async function fetchGoldenFile(
   name: string,
-): Promise<{
-  name: string
-  total: number
-  questions: FileQuestion[]
-  offset: number
-  limit: number
-}> =>
-  apiGet(`/evals/golden/${name}`, { limit: 50 })
+): Promise<{ name: string; total: number; questions: FileQuestion[]; offset: number; limit: number }> {
+  const res = await fetch(`${API_BASE}/evals/golden/${name}?limit=50`)
+  if (!res.ok) throw new Error("Failed to fetch golden file")
+  return res.json() as Promise<{
+    name: string
+    total: number
+    questions: FileQuestion[]
+    offset: number
+    limit: number
+  }>
+}
 
-const fetchFileRuns = (name: string): Promise<EvalRunFull[]> =>
-  apiGet<EvalRunFull[]>("/evals/runs", { dataset_name: name, limit: 50 })
+async function fetchFileRuns(name: string): Promise<EvalRunFull[]> {
+  const res = await fetch(`${API_BASE}/evals/runs?dataset_name=${encodeURIComponent(name)}&limit=50`)
+  if (!res.ok) throw new Error("Failed to fetch file runs")
+  return res.json() as Promise<EvalRunFull[]>
+}
 
 const USABLE_STAGES = new Set(["embedding", "entity_extract", "indexing", "complete"])
 
 async function fetchDocuments(): Promise<DocumentOption[]> {
-  const data = await apiGet<{ items: DocumentOption[] }>("/documents", {
-    sort: "newest",
-    page: 1,
-    page_size: 100,
-  })
+  const params = new URLSearchParams({ sort: "newest", page: "1", page_size: "100" })
+  const res = await fetch(`${API_BASE}/documents?${params.toString()}`)
+  if (!res.ok) throw new Error("Failed to fetch documents")
+  const data = (await res.json()) as { items: DocumentOption[] }
   return data.items.filter((doc) => USABLE_STAGES.has(doc.stage))
 }
 
+// ---------------------------------------------------------------------------
 // Tab nav types
+// ---------------------------------------------------------------------------
 
 type TabId = "datasets" | "results" | "runs" | "routing" | "ablations" | "regressions"
 const TABS: { id: TabId; label: string }[] = [
@@ -86,6 +106,10 @@ function getInitialTab(): TabId {
   const hash = window.location.hash.replace("#", "") as TabId
   return TABS.some((t) => t.id === hash) ? hash : "datasets"
 }
+
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
 
 export default function Quality() {
   const qc = useQueryClient()
@@ -114,13 +138,15 @@ export default function Quality() {
     let cancelled = false
     async function poll() {
       try {
-        const rows = await apiGet<Array<{
+        const res = await fetch(`${API_BASE}/evals/in-flight`)
+        if (!res.ok) return
+        const rows = (await res.json()) as Array<{
           key: string
           run_id: string
           status: "running" | "failed" | "done"
           error: string | null
           finished_at: number | null
-        }>>("/evals/in-flight")
+        }>
         if (cancelled) return
         const anyRunning = rows.some((r) => r.status === "running")
         if (anyRunning) markEvalRunning()
@@ -203,13 +229,21 @@ export default function Quality() {
 
   // Mutations
   const createMutation = useMutation({
-    mutationFn: (payload: {
+    mutationFn: async (payload: {
       name: string
       size: DatasetSize
       document_ids: string[]
       generator_model?: string
       question_count?: number
-    }) => apiPost<{ id: string; status: string }>("/evals/datasets", payload),
+    }) => {
+      const res = await fetch(`${API_BASE}/evals/datasets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error("Failed to create dataset")
+      return res.json() as Promise<{ id: string; status: string }>
+    },
     onSuccess: (data) => {
       setGenerateOpen(false)
       setSelectedId(data.id)
@@ -220,22 +254,34 @@ export default function Quality() {
   })
 
   const runMutation = useMutation({
-    mutationFn: (payload: {
+    mutationFn: async (payload: {
       judge_model: string
       check_citations: boolean
       max_questions: number
     }) => {
       if (selectedFileName) {
         // File-backed: POST /evals/run
-        return apiPost("/evals/run", {
-          dataset: selectedFileName,
-          judge_model: payload.judge_model || null,
-          check_citations: payload.check_citations,
-          max_questions: payload.max_questions,
+        const res = await fetch(`${API_BASE}/evals/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dataset: selectedFileName,
+            judge_model: payload.judge_model || null,
+            check_citations: payload.check_citations,
+            max_questions: payload.max_questions,
+          }),
         })
+        if (!res.ok) throw new Error("Failed to start eval run")
+        return res.json()
       }
       // DB-backed: POST /evals/datasets/{id}/run
-      return apiPost(`/evals/datasets/${selectedId}/run`, payload)
+      const res = await fetch(`${API_BASE}/evals/datasets/${selectedId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error("Failed to start eval run")
+      return res.json()
     },
     onSuccess: () => {
       setRunOpen(false)
@@ -250,7 +296,10 @@ export default function Quality() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiDelete(`/evals/datasets/${id}`),
+    mutationFn: async (id: string) => {
+      const res = await fetch(`${API_BASE}/evals/datasets/${id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Failed to delete dataset")
+    },
     onSuccess: () => {
       setSelectedId(null)
       void qc.invalidateQueries({ queryKey: ["eval-datasets"] })

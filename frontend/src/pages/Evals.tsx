@@ -14,23 +14,31 @@ import type {
   GoldenDatasetDetail,
 } from "@/components/evals/types"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
 
-const fetchDatasets = (): Promise<GoldenDataset[]> =>
-  apiGet<GoldenDataset[]>("/evals/datasets")
+async function fetchDatasets(): Promise<GoldenDataset[]> {
+  const res = await fetch(`${API_BASE}/evals/datasets`)
+  if (!res.ok) throw new Error("Failed to fetch datasets")
+  return res.json() as Promise<GoldenDataset[]>
+}
 
-const fetchDataset = (id: string): Promise<GoldenDatasetDetail> =>
-  apiGet<GoldenDatasetDetail>(`/evals/datasets/${id}`, { limit: 50 })
+async function fetchDataset(id: string): Promise<GoldenDatasetDetail> {
+  const res = await fetch(`${API_BASE}/evals/datasets/${id}?limit=50`)
+  if (!res.ok) throw new Error("Failed to fetch dataset")
+  return res.json() as Promise<GoldenDatasetDetail>
+}
 
-const fetchDatasetRuns = (id: string): Promise<EvalRunSummary[]> =>
-  apiGet<EvalRunSummary[]>(`/evals/datasets/${id}/runs`)
+async function fetchDatasetRuns(id: string): Promise<EvalRunSummary[]> {
+  const res = await fetch(`${API_BASE}/evals/datasets/${id}/runs`)
+  if (!res.ok) throw new Error("Failed to fetch dataset runs")
+  return res.json() as Promise<EvalRunSummary[]>
+}
 
 async function fetchDocuments(): Promise<DocumentOption[]> {
-  const data = await apiGet<{ items: DocumentOption[] }>("/documents", {
-    sort: "newest",
-    page: 1,
-    page_size: 100,
-  })
+  const params = new URLSearchParams({ sort: "newest", page: "1", page_size: "100" })
+  const res = await fetch(`${API_BASE}/documents?${params.toString()}`)
+  if (!res.ok) throw new Error("Failed to fetch documents")
+  const data = (await res.json()) as { items: DocumentOption[] }
   return data.items.filter((doc) => doc.stage === "complete")
 }
 
@@ -73,12 +81,20 @@ export default function Evals() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (payload: {
+    mutationFn: async (payload: {
       name: string
       size: DatasetSize
       document_ids: string[]
       generator_model?: string
-    }) => apiPost<{ id: string; status: string }>("/evals/datasets", payload),
+    }) => {
+      const res = await fetch(`${API_BASE}/evals/datasets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error("Failed to create dataset")
+      return res.json() as Promise<{ id: string; status: string }>
+    },
     onSuccess: (data) => {
       setGenerateOpen(false)
       setSelectedId(data.id)
@@ -89,11 +105,19 @@ export default function Evals() {
   })
 
   const runMutation = useMutation({
-    mutationFn: (payload: {
+    mutationFn: async (payload: {
       judge_model: string
       check_citations: boolean
       max_questions: number
-    }) => apiPost(`/evals/datasets/${selectedId}/run`, payload),
+    }) => {
+      const res = await fetch(`${API_BASE}/evals/datasets/${selectedId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error("Failed to start eval run")
+      return res.json()
+    },
     onSuccess: () => {
       setRunOpen(false)
       void qc.invalidateQueries({ queryKey: ["eval-dataset-runs", selectedId] })
@@ -103,7 +127,10 @@ export default function Evals() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiDelete(`/evals/datasets/${id}`),
+    mutationFn: async (id: string) => {
+      const res = await fetch(`${API_BASE}/evals/datasets/${id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Failed to delete dataset")
+    },
     onSuccess: () => {
       setSelectedId(null)
       void qc.invalidateQueries({ queryKey: ["eval-datasets"] })

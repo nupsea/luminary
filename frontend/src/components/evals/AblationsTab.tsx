@@ -10,11 +10,14 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiGet } from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
 import type { EvalRunFull } from "./types"
 
-const fetchAblationRuns = (): Promise<EvalRunFull[]> =>
-  apiGet<EvalRunFull[]>("/evals/runs", { eval_kind: "ablation", limit: 200 })
+async function fetchAblationRuns(): Promise<EvalRunFull[]> {
+  const res = await fetch(`${API_BASE}/evals/runs?eval_kind=ablation&limit=200`)
+  if (!res.ok) throw new Error("Failed to fetch ablation runs")
+  return res.json() as Promise<EvalRunFull[]>
+}
 
 const STRATEGIES = ["vector", "fts", "graph", "rrf"] as const
 
@@ -90,11 +93,7 @@ export function AblationsTab() {
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="dataset" tick={{ fontSize: 11 }} />
           <YAxis tickFormatter={(v: number) => `${Math.round(v * 100)}%`} tick={{ fontSize: 11 }} />
-          <Tooltip
-            formatter={(value) =>
-              typeof value === "number" ? `${Math.round(value * 100)}%` : String(value ?? "")
-            }
-          />
+          <Tooltip formatter={(value: number) => `${Math.round(value * 100)}%`} />
           <Legend />
           {STRATEGIES.map((strategy) => (
             <Bar key={strategy} dataKey={strategy} fill={COLORS[strategy]} />
