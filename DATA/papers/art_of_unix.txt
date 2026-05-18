@@ -1,0 +1,2166 @@
+Chapter 1. Philosophy
+Chapter 1. Philosophy
+Prev Part I. Context
+Next
+Chapter 1. Philosophy
+Philosophy Matters
+Table of ContentsCulture? What Culture?The Durability of UnixThe Case against Learning Unix CultureWhat Unix Gets WrongWhat Unix Gets RightOpen-Source SoftwareCross-Platform Portability and Open StandardsThe Internet and the World Wide WebThe Open-Source CommunityFlexibility All the Way DownUnix Is Fun to HackThe Lessons of Unix Can Be Applied ElsewhereBasics of the Unix PhilosophyRule of Modularity: Write simple parts connected by clean interfaces.Rule of Clarity: Clarity is better than cleverness.Rule of Composition: Design programs to be connected with other programs.Rule of Separation: Separate policy from mechanism;
+separate interfaces from engines.Rule of Simplicity: Design for simplicity; add complexity only where you must.Rule of Parsimony: Write a big program only when it is
+clear by demonstration that nothing else will do.Rule of Transparency: Design for visibility to make
+inspection and debugging easier.Rule of Robustness: Robustness is the child of transparency and simplicity.Rule of Representation: Fold knowledge into data,
+so program logic can be stupid and robust.Rule of Least Surprise: In interface design, always do
+the least surprising thing.Rule of Silence: When a program has nothing surprising
+to say, it should say nothing.Rule of Repair: Repair what you can &#8212; but when you
+must fail, fail noisily and as soon as possible.Rule of Economy: Programmer time is expensive; conserve it in
+preference to machine time.Rule of Generation: Avoid hand-hacking; write programs to write
+programs when you can.Rule of Optimization:
+Prototype before polishing. Get it working before you optimize
+it.Rule of Diversity: Distrust all claims for
+one true way.Rule of Extensibility: Design for the future, because it
+will be here sooner than you think.The Unix Philosophy in One LessonApplying the Unix PhilosophyAttitude Matters Too
+Those who do not understand Unix are condemned to reinvent it, poorly.--
+Henry Spencer
+Usenet signature, November 1987
+Prev
+Up
+Next
+Part I. Context
+Home
+Culture? What Culture?
+
+Culture? What Culture?
+Culture? What Culture?
+Prev Chapter 1. Philosophy
+Next
+Culture? What Culture?
+This is a book about Unix programming, but in it we're going to
+toss around the words &#8216;culture&#8217;, &#8216;art&#8217;, and
+&#8216;philosophy&#8217; a lot. If you are not a programmer, or you
+are a programmer who has had little contact with the Unix world, this
+may seem strange. But Unix has a culture; it has a distinctive art of
+programming; and it carries with it a powerful design
+philosophy. Understanding these traditions will help you build better
+software, even if you're developing for a non-Unix platform.
+Every branch of engineering and design has technical cultures.
+In most kinds of engineering, the unwritten traditions of the field
+are parts of a working practitioner's education as important as (and,
+as experience grows, often more important than) the official handbooks
+and textbooks. Senior engineers develop huge bodies of implicit
+knowledge, which they pass to their juniors by (as
+Zen Buddhists put it)
+&#8220;a special transmission, outside the scriptures&#8221;.
+Software engineering is generally an exception to this rule;
+technology has changed so rapidly, software environments have come and
+gone so quickly, that technical cultures have been weak and
+ephemeral. There are, however, exceptions to this exception. A very
+few software technologies have proved durable enough to evolve strong
+technical cultures, distinctive arts, and an associated design
+philosophy transmitted across generations of engineers.
+The Unix culture is one of these. The Internet culture is
+another &#8212; or, in the twenty-first century, arguably the same
+one. The two have grown increasingly difficult to separate since the
+early 1980s, and in this book we won't try particularly hard.
+Prev
+Up
+Next
+Chapter 1. Philosophy
+Home
+The Durability of Unix
+
+The Durability of Unix
+The Durability of Unix
+Prev Chapter 1. Philosophy
+Next
+The Durability of Unix
+Unix was born in 1969 and has been in continuous production use
+ever since. That's several geologic eras by computer-industry
+standards &#8212; older than the PC or workstations or microprocessors
+or even video display terminals, and contemporaneous with the first
+semiconductor memories. Of all production timesharing systems today,
+only IBM's VM/CMS can claim to have existed longer, and Unix machines
+have provided hundreds of thousands of times more service hours;
+indeed, Unix has probably supported more computing than all other
+timesharing systems put together.
+Unix has found use on a wider variety of machines than any other
+operating system can claim. From supercomputers to handhelds and
+embedded networking hardware, through workstations and servers and PCs
+and minicomputers, Unix has probably seen more architectures and more
+odd hardware than any three other operating systems combined.
+Unix has supported a mind-bogglingly wide spectrum of uses. No
+other operating system has shone simultaneously as a research vehicle,
+a friendly host for technical custom applications, a platform for
+commercial-off-the-shelf business software, and a vital component
+technology of the Internet.
+Confident predictions that Unix would wither away, or be crowded
+out by other operating systems, have been made yearly since its
+infancy. And yet Unix, in its present-day avatars as
+Linux
+and BSD and Solaris and MacOS X and half a dozen other variants,
+seems stronger than ever today.
+Robert Metcalf [the inventor of Ethernet] says that if something
+comes along to replace Ethernet, it will be called
+&#8220;Ethernet&#8221;, so therefore Ethernet will never
+die.[4]  Unix has already undergone
+several such transformations.
+--
+Ken Thompson
+At least one of Unix's central technologies &#8212; the C
+language &#8212; has been widely naturalized elsewhere. Indeed it is
+now hard to imagine doing software engineering without
+C as a ubiquitous
+common language of systems programming.  Unix also introduced both the
+now-ubiquitous tree-shaped file namespace with directory nodes and
+the pipeline for connecting programs.
+Unix's durability and adaptability have been nothing short of
+astonishing. Other technologies have come and gone like mayflies.
+Machines have increased a thousandfold in power, languages have
+mutated, industry practice has gone through multiple revolutions &#8212;
+and Unix hangs in there, still producing, still paying the bills,
+and still commanding loyalty from many of the best and brightest
+software technologists on the planet.
+One of the many consequences of the exponential
+power-versus-time curve in computing, and the corresponding pace of
+software development, is that 50% of what one knows becomes obsolete
+over every 18 months.  Unix does not abolish this phenomenon, but does
+do a good job of containing it.  There's a bedrock of unchanging
+basics &#8212; languages, system calls, and tool invocations &#8212;
+that one can actually keep using for years, even decades.  Elsewhere
+it is impossible to predict what will be stable; even entire operating
+systems cycle out of use.  Under Unix, there is a fairly sharp
+distinction between transient knowledge and lasting knowledge, and one
+can know ahead of time (with about 90% certainty) which category
+something is likely to fall in when one learns it.  Thus the loyalty
+Unix commands.
+Much of Unix's stability and success has to be attributed to its
+inherent strengths, to design decisions Ken
+Thompson,
+Dennis Ritchie, Brian
+Kernighan, Doug McIlroy, Rob Pike and other early Unix developers made back at
+the beginning; decisions that have been proven sound over and
+over. But just as much is due to the design philosophy, art of
+programming, and technical culture that grew up around Unix in the
+early days. This tradition has continuously and successfully
+propagated itself in symbiosis with Unix ever since.
+[4] In fact, Ethernet has already been replaced by a
+different technology with the same name &#8212; twice.  Once when coax
+was replaced with twisted pair, and a second time when gigabit
+Ethernet came in.
+Prev
+Up
+Next
+Culture? What Culture?
+Home
+The Case against Learning Unix Culture
+
+The Case against Learning Unix Culture
+The Case against Learning Unix Culture
+Prev Chapter 1. Philosophy
+Next
+The Case against Learning Unix Culture
+Unix's durability and its technical culture are certainly of
+interest to people who already like Unix, and perhaps to historians of
+technology. But Unix's original application as a general-purpose
+timesharing system for mid-sized and larger computers is rapidly
+receding into the mists of history, killed off by personal
+workstations. And there is certainly room for doubt that it will ever
+achieve success in the mainstream business-desktop market now
+dominated by
+Microsoft.
+Outsiders have frequently dismissed Unix as an academic toy or a
+hacker's sandbox.  One well-known polemic, the Unix Hater's
+Handbook [Garfinkel], follows an
+antagonistic line nearly as old as Unix itself in writing its devotees
+off as a cult religion of freaks and losers. Certainly the colossal
+and repeated blunders of
+AT&T,
+Sun, Novell,
+and other commercial vendors and standards consortia in mispositioning
+and mismarketing Unix have become legendary.
+Even from within the Unix world, Unix has seemed to be teetering
+on the brink of universality for so long as to raise the suspicion
+that it will never actually get there. A skeptical outside observer's
+conclusion might be that Unix is too useful to die but too awkward to
+break out of the back room; a perpetual niche operating system.
+What confounds the skeptics' case is, more than anything else,
+the rise of Linux and other open-source Unixes (such as the
+modern BSD variants).  Unix's culture proved too vital to be smothered
+even by a decade of vendor mismanagement.  Today the Unix community
+itself has taken control of the technology and marketing, and is
+rapidly and visibly solving Unix's problems (in ways we'll examine in
+more detail in Chapter 20).
+Prev
+Up
+Next
+The Durability of Unix
+Home
+What Unix Gets Wrong
+
+What Unix Gets Wrong
+What Unix Gets Wrong
+Prev Chapter 1. Philosophy
+Next
+What Unix Gets Wrong
+For a design that dates from 1969, it is remarkably difficult
+to identify design choices in Unix that are unequivocally wrong.
+There are several popular candidates, but each is still a subject of
+spirited debate not merely among Unix fans but across the wider
+community of people who think about and design operating
+systems.
+Unix files have no structure above byte level. File deletion is
+irrevocable.  The Unix security model is arguably too primitive.  Job
+control is botched.  There are too many different kinds of names for
+things.  Having a file system at all may have been the wrong choice.
+We will discuss these technical issues in Chapter 20.
+But perhaps the most enduring objections to Unix are consequences of
+a feature of its philosophy first made explicit by the designers of
+the X windowing system. X strives to provide &#8220;mechanism,
+not policy&#8221;, supporting an extremely general set of graphics
+operations and deferring decisions about toolkits and interface
+look-and-feel (the policy) up to application level. Unix's other
+system-level services display similar tendencies; final choices about
+behavior are pushed as far toward the user as possible. Unix users
+can choose among multiple shells. Unix programs normally provide many
+behavior options and sport elaborate preference facilities.
+This tendency reflects Unix's heritage as an operating system
+designed primarily for technical users, and a consequent belief that
+users know better than operating-system designers what their own needs
+are.
+This tenet was firmly established at Bell Labs by Dick
+Hamming[5] who insisted in
+the 1950s when computers were rare and expensive, that open-shop
+computing, where customers wrote their own programs, was imperative,
+because &#8220;it is better to solve the right problem the wrong way
+than the wrong problem the right way&#8221;.
+--
+Doug McIlroy
+But the cost of the mechanism-not-policy approach is that when
+the user can set policy, the user
+must set policy. Nontechnical end-users
+frequently find Unix's profusion of options and interface styles
+overwhelming and retreat to systems that at least pretend to offer
+them simplicity.
+In the short term, Unix's laissez-faire approach may lose it a
+good many nontechnical users. In the long term, however, it may turn
+out that this &#8216;mistake&#8217; confers a critical advantage
+&#8212; because policy tends to have a short lifetime, mechanism a
+long one. Today's fashion in interface look-and-feel too often becomes
+tomorrow's evolutionary dead end (as people using obsolete X toolkits
+will tell you with some feeling!). So the flip side of the flip side
+is that the &#8220;mechanism, not policy&#8221; philosophy may enable
+Unix to renew its relevance long after competitors more tied to one
+set of policy or interface choices have faded from
+view.[6]
+[5] Yes, the Hamming of &#8216;Hamming distance&#8217;
+and &#8216;Hamming code&#8217;.
+[6] Jim Gettys, one of the architects of X (and a
+contributor to this book), has meditated in depth on how X's
+laissez-faire style might be productively carried forward in
+The Two-Edged Sword [Gettys].  This essay is well worth reading,
+both for its specific proposals and for its expression of the Unix
+mindset.
+Prev
+Up
+Next
+The Case against Learning Unix Culture
+Home
+What Unix Gets Right
+
+What Unix Gets Right
+What Unix Gets Right
+Prev Chapter 1. Philosophy
+Next
+What Unix Gets Right
+The explosive recent growth of Linux, and the increasing importance
+of the Internet, give us good reasons to suppose that the skeptics'
+case is wrong. But even supposing the skeptical assessment is true,
+Unix culture is worth learning because there are some things that Unix
+and its surrounding culture clearly do better than any
+competitors.
+Open-Source Software
+Though the term &#8220;open
+source&#8221;
+and the Open Source Definition were not invented until 1998,
+peer-review-intensive development of freely shared source code was a key
+feature of the Unix culture from its beginnings.
+For its first ten years
+AT&T's original
+Unix, and its primary variant Berkeley Unix, were normally distributed
+with source code.  This enabled most of the other good things that
+follow here.
+Cross-Platform Portability and Open Standards
+Unix is still the only operating system that can present a
+consistent, documented application programming interface (API) across
+a heterogeneous mix of computers, vendors, and special-purpose
+hardware. It is the only operating system that can scale from embedded
+chips and handhelds, up through desktop machines, through servers, and
+all the way to special-purpose number-crunching behemoths and database
+back ends.
+The Unix API is the closest thing to a hardware-independent
+standard for writing truly portable software that exists. It is no
+accident that what the IEEE originally called the Portable
+Operating System Standard quickly got a suffix added to
+its acronym and became
+POSIX.  A
+Unix-equivalent API was the only credible model for such a
+standard.
+Binary-only applications for other operating systems die with
+their birth environments, but Unix sources are forever. Forever, at
+least, given a Unix technical culture that polishes and maintains
+them across decades.
+The Internet and the World Wide Web
+The Defense Department's contract for the first production
+TCP/IP stack went to a
+Unix development group because the Unix in question was largely open
+source.  Besides
+TCP/IP, Unix has
+become the one indispensable core technology of the Internet Service
+Provider industry. Ever since the demise of the TOPS family of operating
+systems in the
+mid-1980s, most Internet server machines (and effectively all above
+the PC level) have relied on Unix.
+Not even
+Microsoft's awesome
+marketing clout has been able to dent Unix's lock on the
+Internet. While the
+TCP/IP standards (on
+which the Internet is based) evolved under
+TOPS-10 and
+are theoretically separable from Unix, attempts to make them work on
+other operating systems have been bedeviled by incompatibilities,
+instabilities, and bugs. The theory and specifications are available
+to anyone, but the engineering tradition to make them into a solid and
+working reality exists only in the Unix world.[7]
+The Internet technical culture and the Unix culture began to
+merge in the early 1980s, and are now inseparably symbiotic.  The
+design of the World Wide Web, the modern face of the Internet, owes as
+much to Unix as it does to the ancestral ARPANET.  In particular, the
+concept of the Uniform Resource Locator (URL) so central to the Web is
+a generalization of the Unix idea of one uniform file namespace
+everywhere. To function effectively as an Internet expert, an
+understanding of Unix and its culture are indispensable.
+The Open-Source Community
+The community that originally formed around the early Unix
+source distributions never went away &#8212; after the great Internet
+explosion of the early 1990s, it recruited an entire new generation of
+eager hackers on home
+machines.
+Today, that community is a powerful support group for all kinds
+of software development.  High-quality open-source development tools
+abound in the Unix world (we'll examine many in this
+book). Open-source Unix applications are usually equal to, and are
+often superior to, their proprietary equivalents [Fuzz]. Entire Unix operating systems, with complete
+toolkits and basic applications suites, are available for free over
+the Internet. Why code from scratch when you can adapt, reuse,
+recycle, and save yourself 90% of the work?
+This tradition of code-sharing depends heavily on hard-won
+expertise about how to make programs cooperative and reusable. And
+not by abstract theory, but through a lot of engineering practice
+&#8212; unobvious design rules that allow programs to function not just
+as isolated one-shot solutions but as synergistic parts of a
+toolkit.  A major purpose of this book is to elucidate those rules.
+Today, a burgeoning open-source movement is bringing new
+vitality, new technical approaches, and an entire generation of bright
+young programmers into the Unix tradition. Open-source projects
+including the Linux operating system and symbionts such as
+Apache and Mozilla
+have brought the Unix tradition an unprecedented level of mainstream
+visibility and success. The open-source movement seems on the verge of
+winning its bid to define the computing infrastructure of tomorrow
+&#8212; and the core of that infrastructure will be Unix machines
+running on the Internet.
+Flexibility All the Way Down
+Many operating systems touted as more &#8216;modern&#8217; or
+&#8216;user friendly&#8217; than Unix achieve their surface glossiness by
+locking users and developers into one interface policy, and offer
+an application-programming interface that for all its elaborateness
+is rather narrow and rigid. On such systems, tasks the designers
+have anticipated are very easy &#8212; but tasks they have not
+anticipated are often impossible or at best extremely painful.
+Unix, on the other hand, has flexibility in depth. The many ways
+Unix provides to glue together programs mean that components of its
+basic toolkit can be combined to produce useful effects that the
+designers of the individual toolkit parts never anticipated.
+Unix's support of multiple styles of program interface (often
+seen as a weakness because it increases the perceived complexity of
+the system to end users) also contributes to flexibility; no
+program that wants to be a simple piece of data plumbing is forced
+to carry the complexity overhead of an elaborate GUI.
+Unix tradition lays heavy emphasis on keeping programming
+interfaces relatively small, clean, and orthogonal &#8212; another trait
+that produces flexibility in depth. Throughout a Unix system, easy
+things are easy and hard things are at least possible.
+Unix Is Fun to Hack
+People who pontificate about Unix's technical superiority often
+don't mention what may ultimately be its most important strength,
+the one that underlies all its successes. Unix is fun to hack.
+Unix boosters seem almost ashamed to acknowledge this sometimes,
+as though admitting they're having fun might damage their
+legitimacy somehow. But it's true; Unix is fun to play with and
+develop for, and always has been.
+There are not many operating systems that anyone has ever
+described as &#8216;fun&#8217;. Indeed, the friction and labor of
+development under most other environments has been aptly compared to
+kicking a dead whale down the beach.[8] The kindest
+adjectives one normally hears are on the order of
+&#8220;tolerable&#8221; or &#8220;not too painful&#8221;. In the Unix
+world, by contrast, the operating system rewards effort rather than
+frustrating it.  People programming under Unix usually come to see
+it not as an adversary to be clubbed into doing one's bidding by main
+effort but rather as an actual positive help.
+This has real economic significance. The fun factor started a
+virtuous circle early in Unix's history. People liked Unix, so they
+built more programs for it that made it nicer to use. Today people
+build entire, production-quality open-source Unix systems as a
+hobby. To understand how remarkable this is, ask yourself when you
+last heard of anybody cloning OS/360 or VAX VMS or Microsoft
+Windows for fun.
+The &#8216;fun&#8217; factor is not trivial from a design point
+of view, either. The kind of people who become programmers and
+developers have &#8216;fun&#8217; when the effort they have to put out
+to do a task challenges them, but is just within their
+capabilities. &#8216;Fun&#8217; is therefore a sign of peak
+efficiency. Painful development environments waste labor and
+creativity; they extract huge hidden costs in time, money, and
+opportunity.
+If Unix were a failure in every other way, the Unix engineering
+culture would be worth studying for the ways it keeps the fun
+in development &#8212; because that fun is a sign that it makes
+developers efficient, effective, and productive.
+The Lessons of Unix Can Be Applied Elsewhere
+Unix programmers have accumulated decades of experience
+while pioneering operating-system features we now take for granted.
+Even non-Unix programmers can benefit from studying that Unix
+experience. Because Unix makes it relatively easy to apply good design
+principles and development methods, it is an excellent place to
+learn them.
+Other operating systems generally make good practice rather
+more difficult, but even so some of the Unix culture's lessons can
+transfer. Much Unix code (including all its filters, its major
+scripting languages, and many of its code generators) will
+port directly to any operating system supporting ANSI
+C (for the
+excellent reason that C itself was a Unix invention and the
+ANSI C library embodies a substantial chunk of Unix's
+services!).
+[7] Other
+operating systems have generally copied or cloned Unix TCP/IP
+implementations. It is their loss that they have not generally adopted
+the robust tradition of peer review that goes with it, exemplified by
+documents like RFC 1025 (TCP and IP Bake
+Off).
+[8] This was originally
+said of the IBM MVS TSO facility by Stephen C. Johnson, perhaps better
+known as the author of
+yacc.
+Prev
+Up
+Next
+What Unix Gets Wrong
+Home
+Basics of the Unix Philosophy
+
+Basics of the Unix Philosophy
+Basics of the Unix Philosophy
+Prev Chapter 1. Philosophy
+Next
+Basics of the Unix Philosophy
+The &#8216;Unix philosophy&#8217; originated with Ken
+Thompson's
+early meditations on how to design a small but capable operating
+system with a clean service interface. It grew as the Unix culture
+learned things about how to get maximum leverage out of Thompson's
+design.  It absorbed lessons from many sources along the way.
+The Unix philosophy is not a formal design method. It wasn't
+handed down from the high fastnesses of theoretical computer
+science as a way to produce theoretically perfect software. Nor is
+it that perennial executive's mirage, some way to magically extract
+innovative but reliable software on too short a deadline from
+unmotivated, badly managed, and underpaid programmers.
+The Unix philosophy (like successful folk traditions in other
+engineering disciplines) is bottom-up, not top-down. It is pragmatic
+and grounded in experience. It is not to be found in official methods
+and standards, but rather in the implicit half-reflexive knowledge, the
+expertise that the Unix culture transmits. It
+encourages a sense of proportion and skepticism &#8212; and shows both
+by having a sense of (often subversive) humor.
+Doug McIlroy, the inventor of
+Unix pipes and one of the
+founders of the Unix tradition, had this to say at the time [McIlroy78]:
+(i) Make each program do one thing well. To do a new job, build
+afresh rather than complicate old programs by adding new
+features.
+(ii) Expect the output of every program to become the input to
+another, as yet unknown, program. Don't clutter output with
+extraneous information. Avoid stringently columnar or binary input
+formats. Don't insist on interactive input.
+(iii) Design and build software, even operating systems, to be
+tried early, ideally within weeks. Don't hesitate to throw away the
+clumsy parts and rebuild them.
+(iv) Use tools in preference to unskilled help to lighten a
+programming task, even if you have to detour to build the tools and
+expect to throw some of them out after you've finished using
+them.
+He later summarized it this way (quoted in A Quarter
+Century of Unix [Salus]):
+This is the Unix philosophy: Write programs that do one
+thing and do it well. Write programs to work together. Write
+programs to handle text streams, because that is a universal
+interface.
+Rob Pike, who
+became one of the great masters of C, offers a slightly different angle
+in Notes on C Programming [Pike]:
+Rule 1. You can't tell where a program is going to spend its
+time. Bottlenecks occur in surprising places, so don't try to second
+guess and put in a speed hack until you've proven that's where the
+bottleneck
+is.
+Rule 2. Measure. Don't tune for speed until you've measured, and
+even then don't unless one part of the code overwhelms the
+rest.
+Rule 3. Fancy algorithms are slow when n is small, and n is usually small. Fancy algorithms have big
+constants. Until you know that n is
+frequently going to be big, don't get fancy. (Even if n does get big, use Rule 2 first.)
+Rule 4. Fancy algorithms are buggier than simple ones, and
+they're much harder to implement. Use simple algorithms as well as
+simple data structures.
+Rule 5. Data dominates. If you've chosen the right data
+structures and organized things well, the algorithms will almost
+always be self-evident. Data structures, not algorithms, are central
+to programming.[9]
+Rule 6. There is no Rule 6.
+Ken Thompson, the man who designed and implemented the
+first Unix, reinforced Pike's rule 4 with a gnomic maxim worthy of a
+Zen patriarch:
+When in doubt, use brute force.
+More of the Unix philosophy was implied not by what these elders
+said but by what they did and the example Unix itself set. Looking
+at the whole, we can abstract the following ideas:
+Rule of Modularity: Write simple parts connected by clean interfaces.
+Rule of Clarity: Clarity is better than cleverness.
+Rule of Composition: Design programs to be connected to other programs.
+Rule of Separation: Separate policy from mechanism;
+separate interfaces from engines.
+Rule of Simplicity: Design for simplicity; add
+complexity only where you must.
+Rule of Parsimony: Write a big program only when it is
+clear by demonstration that nothing else will do.
+Rule of Transparency: Design for visibility to make
+inspection and debugging easier.
+Rule of Robustness: Robustness is the child of transparency and simplicity.
+Rule of Representation: Fold knowledge into data so program
+logic can be stupid and robust.
+Rule of Least Surprise: In interface design, always do
+the least surprising thing.
+Rule of Silence: When a program has nothing surprising
+to say, it should say nothing.
+Rule of Repair: When you must fail, fail noisily and
+as soon as possible.
+Rule of Economy: Programmer time is expensive; conserve it in
+preference to machine time.
+Rule of Generation: Avoid hand-hacking; write programs
+to write programs when you can.
+Rule of Optimization: Prototype before polishing. Get it
+working before you optimize it.
+Rule of Diversity: Distrust all claims for
+&#8220;one true way&#8221;.
+Rule of Extensibility: Design for the future, because
+it will be here sooner than you think.
+If you're new to Unix, these principles are worth some
+meditation. Software-engineering texts recommend most of them; but
+most other operating systems lack the right tools and traditions to
+turn them into practice, so most programmers can't apply them with
+any consistency. They come to accept blunt tools, bad designs,
+overwork, and bloated code as normal &#8212; and then wonder what Unix
+fans are so annoyed about.
+Rule of Modularity: Write simple parts connected by clean interfaces.
+As Brian Kernighan once observed, &#8220;Controlling complexity
+is the essence of computer programming&#8221; [Kernighan-Plauger]. Debugging dominates
+development time, and getting a working system out the door is
+usually less a result of brilliant design than it is of managing not
+to trip over your own feet too many times.
+Assemblers, compilers, flowcharting, procedural programming,
+structured programming, &#8220;artificial intelligence&#8221;,
+fourth-generation languages, object
+orientation, and software-development
+methodologies without number have been touted and sold as a cure for
+this problem. All have failed as cures, if only because they
+&#8216;succeeded&#8217; by escalating the normal level of program
+complexity to the point where (once again) human brains could barely
+cope. As Fred Brooks famously observed [Brooks], there is no silver bullet.
+The only way to write complex software that won't fall on its
+face is to hold its global complexity down &#8212; to build it out of
+simple parts connected by well-defined interfaces, so that most
+problems are local and you can have some hope of upgrading
+a part without breaking the whole.
+Rule of Clarity: Clarity is better than cleverness.
+Because maintenance is so important and so expensive, write
+programs as if the most important communication they do is not to the
+computer that executes them but to the human beings who will read and
+maintain the source code in the future (including yourself).
+In the Unix tradition, the implications of this advice go beyond
+just commenting your code.  Good Unix practice also embraces choosing
+your algorithms and implementations for future maintainability.  Buying a
+small increase in performance with a large increase in the complexity
+and obscurity of your technique is a bad trade &#8212; not merely because
+complex code is more likely to harbor bugs, but also because complex
+code will be harder to read for future maintainers.
+Code that is graceful and clear, on the other hand, is less
+likely to break &#8212; and more likely to be instantly comprehended
+by the next person to have to change it.  This is important,
+especially when that next person might be yourself some years down the
+road.
+Never struggle to decipher subtle code three times.  Once might
+be a one-shot fluke, but if you find yourself having to figure it out
+a second time &#8212; because the first was too long ago and you've
+forgotten details &#8212; it is time to comment the code so that the
+third time will be relatively painless.
+--
+Henry Spencer
+Rule of Composition: Design programs to be connected with other programs.
+It's hard to avoid programming overcomplicated monoliths if none
+of your programs can talk to each other.
+Unix tradition strongly encourages writing programs that
+read and write simple, textual, stream-oriented, device-independent
+formats.  Under classic Unix, as many programs as possible are written
+as simple filters, which take a simple text
+stream on input and process it into another simple text stream on
+output.
+Despite popular mythology, this practice is favored not because
+Unix programmers hate graphical user interfaces. It's because if you
+don't write programs that accept and emit simple text streams, it's
+much more difficult to hook the programs together.
+Text streams are to Unix tools as messages are to objects in an
+object-oriented setting. The simplicity of the text-stream interface
+enforces the encapsulation of the tools.  More elaborate forms of
+inter-process communication, such as remote procedure calls, show a
+tendency to involve programs with each others' internals too
+much.
+To make programs composable, make them independent.  A program
+on one end of a text stream should care as little as possible about
+the program on the other end.  It should be made easy to replace one
+end with a completely different implementation without disturbing the
+other.
+GUIs can be a very good thing. Complex binary data formats are
+sometimes unavoidable by any reasonable means. But before writing a
+GUI, it's wise to ask if the tricky interactive parts of your
+program can be segregated into one piece and the workhorse
+algorithms into another, with a simple command stream or
+application protocol connecting the two. Before devising a tricky
+binary format to pass data around, it's worth experimenting to see
+if you can make a simple textual format work and accept a little
+parsing overhead in return for being able to hack the data stream
+with general-purpose tools.
+When a serialized, protocol-like interface is not natural for the
+application, proper Unix design is to at least organize as many of the
+application primitives as possible into a library with a well-defined
+API.  This opens up the possibility that the application can be called
+by linkage, or that multiple interfaces can be glued on it for different tasks.
+(We discuss these issues in detail in Chapter 7.)
+Rule of Separation: Separate policy from mechanism;
+separate interfaces from engines.
+In our discussion of what Unix gets wrong, we observed that the
+designers of X made a basic decision to implement
+&#8220;mechanism, not policy&#8221;&#8212;to make X a generic
+graphics engine and leave decisions about user-interface style to
+toolkits and other levels of the system.  We justified this by
+pointing out that policy and mechanism tend to mutate on different
+timescales, with policy changing much faster than mechanism. Fashions
+in the look and feel of GUI toolkits may come and go, but raster
+operations and compositing are forever.
+Thus, hardwiring policy and mechanism together has two bad
+effects: It makes policy rigid and harder to change in response to user
+requirements, and it means that trying to change policy has a strong
+tendency to destabilize the mechanisms.
+On the other hand, by separating the two we make it possible to
+experiment with new policy without breaking mechanisms.  We also make
+it much easier to write good tests for the mechanism (policy,
+because it ages so quickly, often does not justify the investment).
+This design rule has wide application outside the GUI
+context.  In general, it implies that we should look for ways to
+separate interfaces from engines.
+One way to effect that separation is, for example, to write
+your application as a library of C service routines that are driven by an
+embedded scripting language, with the application flow of control
+written in the scripting language rather than C. A classic example of
+this pattern is the Emacs editor, which uses
+an embedded Lisp interpreter to control editing
+primitives written in C.  We discuss this style of design in Chapter 11.
+Another way is to separate your application into cooperating
+front-end and back-end processes communicating through a specialized
+application protocol over sockets; we discuss this kind of design in Chapter 5 and Chapter 7.  The front end implements policy; the
+back end, mechanism.  The global complexity of the pair will often be
+far lower than that of a single-process monolith implementing the same
+functions, reducing your vulnerability to bugs and lowering life-cycle
+costs.
+Rule of Simplicity: Design for simplicity; add complexity only where you must.
+Many pressures tend to make programs more complicated (and
+therefore more expensive and buggy). One such pressure is technical
+machismo. Programmers are bright people who are (often justly) proud
+of their ability to handle complexity and juggle abstractions. Often
+they compete with their peers to see who can build the most intricate
+and beautiful complexities. Just as often, their ability to design
+outstrips their ability to implement and debug, and the result is
+expensive failure.
+The notion of &#8220;intricate and beautiful complexities&#8221; is
+almost an oxymoron.  Unix programmers vie with each other
+for &#8220;simple and beautiful&#8221; honors &#8212; a point that's
+implicit in these rules, but is well worth making overt.
+--
+Doug McIlroy
+Even more often (at least in the commercial software world)
+excessive complexity comes from project requirements that are based on
+the marketing fad of the month rather than the reality of what
+customers want or software can actually deliver. Many a good design
+has been smothered under marketing's pile of &#8220;checklist
+features&#8221; &#8212; features that, often, no customer will ever
+use. And a vicious circle operates; the competition thinks it has to
+compete with chrome by adding more chrome. Pretty soon, massive bloat
+is the industry standard and everyone is using huge, buggy programs
+not even their developers can love.
+Either way, everybody loses in the end.
+The only way to avoid these traps is to encourage a software
+culture that knows that small is beautiful, that actively resists
+bloat and complexity: an engineering tradition that puts a high
+value on simple solutions, that looks for ways to break program systems up
+into small cooperating pieces, and that reflexively fights attempts to
+gussy up programs with a lot of chrome (or, even worse, to design
+programs around the chrome).
+That would be a culture a lot like Unix's.
+Rule of Parsimony: Write a big program only when it is
+clear by demonstration that nothing else will do.
+&#8216;Big&#8217; here has the sense both of large in volume of
+code and of internal complexity.  Allowing programs to get large
+hurts maintainability.  Because people are reluctant to throw
+away the visible product of lots of work, large programs invite
+overinvestment in approaches that are failed or suboptimal.
+(We'll examine the issue of the right size of software in more
+detail in Chapter 13.)
+Rule of Transparency: Design for visibility to make
+inspection and debugging easier.
+Because debugging often occupies three-quarters or more of
+development time, work done early to ease debugging can be a very
+good investment. A particularly effective way to ease debugging is to
+design for
+transparency and
+discoverability.
+A software system is transparent when you
+can look at it and immediately understand what it is doing and how. It
+is discoverable when it has facilities for
+monitoring and display of internal state so that your program not only
+functions well but can be seen to function
+well.
+Designing for these qualities will have implications throughout
+a project. At minimum, it implies that debugging options should not be
+minimal afterthoughts. Rather, they should be designed in from the
+beginning &#8212; from the point of view that the program should be
+able to both demonstrate its own correctness and communicate to future
+developers the original developer's mental model of the problem it
+solves.
+For a program to demonstrate its own correctness, it needs to be
+using input and output formats sufficiently simple so that the proper
+relationship between valid input and correct output is easy to
+check.
+The objective of designing for transparency and discoverability
+should also encourage simple interfaces that can easily be manipulated
+by other programs &#8212; in particular, test and monitoring harnesses
+and debugging scripts.
+Rule of Robustness: Robustness is the child of transparency and simplicity.
+Software is said to be robust when
+it performs well under unexpected conditions which stress the designer's
+assumptions, as well as under normal conditions.
+Most software is fragile and buggy because most programs are too
+complicated for a human brain to understand all at once. When you
+can't reason correctly about the guts of a program, you can't be sure
+it's correct, and you can't fix it if it's broken.
+It follows that the way to make robust programs is to make their
+internals easy for human beings to reason about. There are two main
+ways to do that:
+transparency and
+simplicity.
+For robustness, designing in tolerance for unusual or extremely
+bulky inputs is also important.  Bearing in mind the Rule of
+Composition helps; input generated by other programs is notorious for
+stress-testing software (e.g., the original Unix C compiler reportedly
+needed small upgrades to cope well with Yacc output).  The forms
+involved often seem useless to humans.  For example, accepting empty
+lists/strings/etc., even in places where a human would seldom or never
+supply an empty string, avoids having to special-case such situations when
+generating the input mechanically.
+--
+Henry Spencer
+One very important tactic for being robust under odd inputs is
+to avoid having special cases in your code.  Bugs often lurk in the
+code for handling special cases, and in the interactions among parts
+of the code intended to handle different special cases.
+We observed above that software is
+transparent when you can look at it and
+immediately see what is going on. It is simple
+when what is going on is uncomplicated enough for a human brain to
+reason about all the potential cases without strain.  The more
+your programs have both of these qualities, the more robust they will
+be.
+Modularity (simple parts, clean interfaces) is a way to organize
+programs to make them simpler. There are other ways to fight for
+simplicity. Here's another one.
+Rule of Representation: Fold knowledge into data,
+so program logic can be stupid and robust.
+Even the simplest procedural logic is hard for humans to verify,
+but quite complex data structures are fairly easy to model and reason
+about. To see this, compare the expressiveness and explanatory power
+of a diagram of (say) a fifty-node pointer tree with a flowchart of a
+fifty-line program.  Or, compare an array initializer expressing a conversion
+table with an equivalent switch statement. The difference in
+transparency and
+clarity is dramatic. See Rob Pike's Rule 5.
+Data is more tractable than program logic. It follows that where
+you see a choice between complexity in data structures and
+complexity in code, choose the former. More: in evolving a design,
+you should actively seek ways to shift complexity from code to
+data.
+The Unix community did not originate this insight, but a lot of
+Unix code displays its influence.  The
+C language's facility at
+manipulating pointers, in particular, has encouraged the use of
+dynamically-modified reference structures at all levels of coding from
+the kernel upward. Simple pointer chases in such structures frequently
+do duties that implementations in other languages would instead have
+to embody in more elaborate procedures.
+(We also cover these techniques in Chapter 9.)
+Rule of Least Surprise: In interface design, always do
+the least surprising thing.
+(This is also widely known as the Principle of Least
+Astonishment.)
+The easiest programs to use are those that demand the least new
+learning from the user &#8212; or, to put it another way, the easiest
+programs to use are those that most effectively connect to the user's
+pre-existing knowledge.
+Therefore, avoid gratuitous novelty and excessive cleverness in
+interface design.  If you're writing a calculator program,
+&#8216;+&#8217; should always mean addition! When designing an
+interface, model it on the interfaces of functionally similar or
+analogous programs with which your users are likely to be
+familiar.
+Pay attention to your expected audience.  They may be end
+users, they may be other programmers, or they may be system
+administrators.  What is least surprising can differ among these
+groups.
+Pay attention to tradition. The Unix world has rather well-developed
+conventions about things like the format of configuration and
+run-control files, command-line switches, and the like. These
+traditions exist for a good reason: to tame the learning curve.
+Learn and use them.
+(We'll cover many of these traditions in Chapter 5 and Chapter 10.)
+The flip side of the Rule of Least Surprise is to avoid
+making things superficially similar but really a little bit different.
+This is extremely treacherous because the seeming familiarity raises false
+expectations.  It's often better to make things distinctly different than
+to make them almost the same.
+--
+Henry Spencer
+Rule of Silence: When a program has nothing surprising
+to say, it should say nothing.
+One of Unix's oldest and most persistent design rules is that when a
+program has nothing interesting or surprising to say, it should
+shut up.  Well-behaved Unix programs do their jobs
+unobtrusively, with a minimum of fuss and bother.  Silence is
+golden.
+This &#8220;silence is golden&#8221; rule evolved originally
+because Unix predates video displays.  On the slow printing terminals
+of 1969, each line of unnecessary output was a serious drain on the
+user's time.  That constraint is gone, but excellent reasons for
+terseness remain.
+I think that the terseness of Unix programs is a central feature
+of the style.  When your program's output becomes another's input, it
+should be easy to pick out the needed bits.  And for people it is
+a human-factors necessity &#8212; important information should not
+be mixed in with verbosity about internal program behavior.  If all
+displayed information is important, important information is easy to
+find.
+--
+Ken Arnold
+Well-designed programs treat the user's attention and
+concentration as a precious and limited resource, only to be claimed
+when necessary.
+(We'll discuss the Rule of Silence and the reasons for it in
+more detail at the end of Chapter 11.)
+Rule of Repair: Repair what you can &#8212; but when you
+must fail, fail noisily and as soon as possible.
+Software should be
+transparent in the way that it fails, as well
+as in normal operation.  It's best when software can cope with
+unexpected conditions by adapting to them, but the worst kinds of bugs
+are those in which the repair doesn't succeed and the problem quietly
+causes corruption that doesn't show up until much later.
+Therefore, write your software to cope with incorrect inputs and
+its own execution errors as gracefully as possible.  But when it
+cannot, make it fail in a way that makes diagnosis of the problem as
+easy as possible.
+Consider also Postel's Prescription:[10]
+&#8220;Be liberal in what you accept, and conservative in what you
+send&#8221;. Postel was speaking of network service programs, but the
+underlying idea is more general.  Well-designed programs cooperate
+with other programs by making as much sense as they can from
+ill-formed inputs; they either fail noisily or pass strictly clean and
+correct data to the next program in the chain.
+However, heed also this warning:
+The original HTML documents recommended &#8220;be generous in
+what you accept&#8221;, and it has bedeviled us ever since because
+each browser accepts a different superset of the specifications.  It
+is the specifications that should be generous,
+not their interpretation.
+--
+Doug McIlroy
+McIlroy adjures us to design for
+generosity rather than compensating for inadequate standards with
+permissive implementations.  Otherwise, as he rightly points
+out, it's all too easy to end up in tag soup.
+Rule of Economy: Programmer time is expensive; conserve it in
+preference to machine time.
+In the early minicomputer days of Unix, this was still a fairly
+radical idea (machines were a great deal slower and more expensive
+then). Nowadays, with every development shop and most users (apart
+from the few modeling nuclear explosions or doing 3D movie
+animation) awash in cheap machine cycles, it may seem too obvious
+to need saying.
+Somehow, though, practice doesn't seem to have quite caught up
+with reality. If we took this maxim really seriously throughout
+software development, most applications would be written in
+higher-level languages like Perl, Tcl, Python, Java,
+Lisp and
+even shell &#8212; languages that ease the programmer's burden by
+doing their own memory management (see [Ravenbrook]).
+And indeed this is happening within the Unix world, though
+outside it most applications shops still seem stuck with the
+old-school Unix strategy of coding in C (or C++). Later in this book
+we'll discuss this strategy and its tradeoffs in detail.
+One other obvious way to conserve programmer time is to teach
+machines how to do more of the low-level work of programming. This
+leads to...
+Rule of Generation: Avoid hand-hacking; write programs to write
+programs when you can.
+Human beings are notoriously bad at sweating the details.
+Accordingly, any kind of hand-hacking of programs is a rich source of
+delays and errors. The simpler and more abstracted your program
+specification can be, the more likely it is that the human designer
+will have gotten it right. Generated code (at
+every level) is almost always cheaper and more
+reliable than hand-hacked.
+We all know this is true (it's why we have compilers and
+interpreters, after all) but we often don't think about the
+implications. High-level-language code that's repetitive and
+mind-numbing for humans to write is just as productive a target for a
+code generator as machine code. It pays to use code generators when
+they can raise the level of abstraction &#8212; that is, when the
+specification language for the generator is simpler than the generated
+code, and the code doesn't have to be hand-hacked afterwards.
+In the Unix tradition, code generators are heavily used to
+automate error-prone detail work. Parser/lexer generators are the
+classic examples; makefile generators and GUI interface builders are
+newer ones.
+(We cover these techniques in Chapter 9.)
+Rule of Optimization:
+Prototype before polishing. Get it working before you optimize
+it.
+The most basic argument for prototyping first is Kernighan &
+Plauger's; &#8220;90% of the functionality delivered now
+is better than 100% of it delivered never&#8221;. Prototyping first
+may help keep you from investing far too much time for marginal
+gains.
+For slightly different reasons, Donald
+Knuth
+(author of The Art Of Computer Programming, one
+of the field's few true classics) popularized the observation that
+&#8220;Premature optimization is the root of all
+evil&#8221;.[11]
+And he was right.
+Rushing to optimize before the bottlenecks are known may be the
+only error to have ruined more designs than feature creep. From
+tortured code to incomprehensible data layouts, the results of
+obsessing about speed or memory or disk usage at the expense of
+transparency and simplicity are everywhere. They spawn innumerable
+bugs and cost millions of man-hours &#8212; often, just to get marginal
+gains in the use of some resource much less expensive than
+debugging time.
+Disturbingly often, premature local optimization actually
+hinders global optimization (and hence reduces overall performance).
+A prematurely optimized portion of a design frequently interferes with
+changes that would have much higher payoffs across the whole design,
+so you end up with both inferior performance and excessively complex
+code.
+In the Unix world there is a long-established and very explicit
+tradition (exemplified by Rob Pike's comments above and Ken
+Thompson's
+maxim about brute force) that says: Prototype, then
+polish. Get it working before you optimize it. Or: Make it
+work first, then make it work fast. &#8216;Extreme programming' guru
+Kent Beck,
+operating in a different culture, has usefully amplified this to:
+&#8220;Make it run, then make it right, then make it
+fast&#8221;.
+The thrust of all these quotes is the same: get your design
+right with an un-optimized, slow, memory-intensive implementation
+before you try to tune. Then, tune systematically, looking for the
+places where you can buy big performance wins with the smallest
+possible increases in local complexity.
+Prototyping is important for system design as well as
+optimization &#8212; it is much easier to judge whether a prototype
+does what you want than it is to read a long specification.  I
+remember one development manager at Bellcore who fought against the
+&#8220;requirements&#8221; culture years before anybody talked about
+&#8220;rapid prototyping&#8221; or &#8220;agile development&#8221;. He
+wouldn't issue long specifications; he'd lash together some combination of
+shell scripts and awk code that did roughly what was needed, tell the
+customers to send him some clerks for a few days, and then have the
+customers come in and look at their clerks using the prototype and
+tell him whether or not they liked it.  If they did, he would say
+&#8220;you can have it industrial strength so-many-months from now at
+such-and-such cost&#8221;.  His estimates tended to be accurate, but
+he lost out in the culture to managers who believed that requirements
+writers should be in control of everything.
+--
+Mike Lesk
+Using prototyping to learn which features you don't have to
+implement helps optimization for performance; you don't have to
+optimize what you don't write. The most powerful optimization tool in
+existence may be the delete key.
+One of my most productive days was throwing away 1000 lines of
+code.
+--
+Ken Thompson
+(We'll go into a bit more depth about related ideas in Chapter 12.)
+Rule of Diversity: Distrust all claims for
+&#8220;one true way&#8221;.
+Even the best software tools tend to be limited by the
+imaginations of their designers. Nobody is smart enough to optimize
+for everything, nor to anticipate all the uses to which their software
+might be put. Designing rigid, closed software that won't talk
+to the rest of the world is an unhealthy form of arrogance.
+Therefore, the Unix tradition includes a healthy
+mistrust of &#8220;one true way&#8221; approaches to software design or
+implementation. It embraces multiple languages, open extensible
+systems, and customization hooks everywhere.
+Rule of Extensibility: Design for the future, because it
+will be here sooner than you think.
+If it is unwise to trust other people's claims for &#8220;one
+true way&#8221;, it's even more foolish to believe them about your
+own designs.  Never assume you have the final answer.  Therefore,
+leave room for your data formats and code to grow; otherwise, you
+will often find that you are locked into unwise early choices because
+you cannot change them while maintaining backward compatibility.
+When you design protocols or file formats, make them sufficiently
+self-describing to be extensible.  Always, always
+either include a version number, or compose the format from
+self-contained, self-describing clauses in such a way that new clauses
+can be readily added and old ones dropped without confusing
+format-reading code.  Unix experience tells us that the marginal
+extra overhead of making data layouts self-describing is paid back
+a thousandfold by the ability to evolve them forward without
+breaking things.
+When you design code, organize it so future developers
+will be able to plug new functions into the architecture without
+having to scrap and rebuild the
+architecture.
+This rule is not a license to add features you don't yet need; it's
+advice to write your code so that adding features later when you
+do need them is easy.
+Make the joints flexible, and put &#8220;If you ever need
+to...&#8221; comments in your code.  You owe this grace to people who
+will use and maintain your code after you.
+You'll be there in the future too, maintaining code you may have
+half forgotten under the press of more recent projects.  When you
+design for the future, the sanity you save may be your own.
+[9] Pike's original adds &#8220;(See
+Brooks p. 102.)&#8221; here. The reference is to an early edition of
+The Mythical Man-Month [Brooks]; the quote is &#8220;Show me your
+flow charts and conceal your tables and I shall continue to be
+mystified, show me your tables and I won't usually need your flow
+charts; they'll be obvious&#8221;.
+[10] Jonathan
+Postel was the first editor of the Internet RFC series of standards,
+and one of the principal architects of the Internet. A tribute page is maintained
+by the Postel Center for Experimental Networking.
+[11] In full: &#8220;We should forget about
+small efficiencies, say about 97% of the time: premature optimization
+is the root of all evil&#8221;. Knuth himself attributes the remark
+to C. A. R. Hoare.
+Prev
+Up
+Next
+What Unix Gets Right
+Home
+The Unix Philosophy in One Lesson
+
+Part I. Context
+Part I. Context
+Prev
+Next
+Context
+Table of Contents1. PhilosophyCulture? What Culture?The Durability of UnixThe Case against Learning Unix CultureWhat Unix Gets WrongWhat Unix Gets RightOpen-Source SoftwareCross-Platform Portability and Open StandardsThe Internet and the World Wide WebThe Open-Source CommunityFlexibility All the Way DownUnix Is Fun to HackThe Lessons of Unix Can Be Applied ElsewhereBasics of the Unix PhilosophyRule of Modularity: Write simple parts connected by clean interfaces.Rule of Clarity: Clarity is better than cleverness.Rule of Composition: Design programs to be connected with other programs.Rule of Separation: Separate policy from mechanism;
+separate interfaces from engines.Rule of Simplicity: Design for simplicity; add complexity only where you must.Rule of Parsimony: Write a big program only when it is
+clear by demonstration that nothing else will do.Rule of Transparency: Design for visibility to make
+inspection and debugging easier.Rule of Robustness: Robustness is the child of transparency and simplicity.Rule of Representation: Fold knowledge into data,
+so program logic can be stupid and robust.Rule of Least Surprise: In interface design, always do
+the least surprising thing.Rule of Silence: When a program has nothing surprising
+to say, it should say nothing.Rule of Repair: Repair what you can &#8212; but when you
+must fail, fail noisily and as soon as possible.Rule of Economy: Programmer time is expensive; conserve it in
+preference to machine time.Rule of Generation: Avoid hand-hacking; write programs to write
+programs when you can.Rule of Optimization:
+Prototype before polishing. Get it working before you optimize
+it.Rule of Diversity: Distrust all claims for
+one true way.Rule of Extensibility: Design for the future, because it
+will be here sooner than you think.The Unix Philosophy in One LessonApplying the Unix PhilosophyAttitude Matters Too2. HistoryOrigins and History of Unix, 1969-1995Genesis: 1969&#8211;1971Exodus: 1971&#8211;1980TCP/IP and the Unix Wars: 1980-1990Blows against the Empire: 1991-1995Origins and History of the Hackers, 1961-1995At Play in the Groves of Academe: 1961-1980Internet Fusion and the Free Software Movement: 1981-1991Linux and the Pragmatist Reaction: 1991-1998The Open-Source Movement: 1998 and OnwardThe Lessons of Unix History3. ContrastsThe Elements of Operating-System StyleWhat Is the Operating System's Unifying Idea?Multitasking CapabilityCooperating ProcessesInternal BoundariesFile Attributes and Record StructuresBinary File FormatsPreferred User Interface StyleIntended AudienceEntry Barriers to DevelopmentOperating-System ComparisonsVMSMacOSOS/2Windows NTBeOSMVSVM/CMSLinuxWhat Goes Around, Comes Around
+Prev
+Up
+Next
+Author's Acknowledgements
+Home
+Chapter 1. Philosophy
+
+Chapter 2. History
+Chapter 2. History
+Prev Part I. Context
+Next
+Chapter 2. History
+A Tale of Two Cultures
+Table of ContentsOrigins and History of Unix, 1969-1995Genesis: 1969&#8211;1971Exodus: 1971&#8211;1980TCP/IP and the Unix Wars: 1980-1990Blows against the Empire: 1991-1995Origins and History of the Hackers, 1961-1995At Play in the Groves of Academe: 1961-1980Internet Fusion and the Free Software Movement: 1981-1991Linux and the Pragmatist Reaction: 1991-1998The Open-Source Movement: 1998 and OnwardThe Lessons of Unix History
+Those who cannot remember the past are condemned to repeat it.--
+George Santayana
+The Life of Reason (1905)
+The past informs practice.  Unix has a long and colorful history,
+much of which is still live as folklore, assumptions, and (too often)
+battle scars in the collective memory of Unix programmers.  In this
+chapter we'll survey the history of Unix, with an eye to explaining
+why, in 2003, today's Unix culture looks the way it does.
+Prev
+Up
+Next
+Attitude Matters Too
+Home
+Origins and History of Unix, 1969-1995
+
+Who Should Read This Book
+Who Should Read This Book
+Prev Preface
+Next
+Who Should Read This Book
+You should read this book if you are an experienced Unix
+programmer who is often in the position of either educating novice
+programmers or debating partisans of other operating systems, and you
+find it hard to articulate the benefits of the Unix approach.
+You should read this book if you are a C, C++, or Java
+programmer with experience on other operating systems and you are
+about to start a Unix-based project.
+You should read this book if you are a Unix user with
+novice-level up to middle-level skills in the operating system, but
+little development experience, and want to learn how to design
+software effectively under Unix.
+You should read this book if you are a non-Unix programmer who
+has figured out that the Unix tradition might have something to
+teach you. We believe you're right, and that the Unix philosophy can
+be exported to other operating systems. So we will pay more
+attention to non-Unix environments (especially Microsoft operating
+systems) than is usual in a Unix book; and when tools and case
+studies are portable, we say so.
+You should read this book if you are an application architect
+considering platforms or implementation strategies for a major
+general-market or vertical application.  It will help you
+understand the strengths of Unix as a development platform, and
+of the Unix tradition of open source as a development method.
+You should not read this book if what you
+are looking for is the details of C coding or how to use the Unix
+kernel API.  There are many good books on these topics;
+Advanced Programming in the Unix Environment
+[Stevens92] is classic among explorations of the Unix
+API, and The Practice of Programming [Kernighan-Pike99] is recommended
+reading for all C programmers (indeed for all programmers in any
+language).
+Prev
+Up
+Next
+Preface
+Home
+How to Use This Book
+
+How to Use This Book
+How to Use This Book
+Prev Preface
+Next
+How to Use This Book
+This book is both practical and philosophical. Some parts are
+aphoristic and general, others will examine specific case studies in
+Unix development. We will precede or follow general principles and
+aphorisms with examples that illustrate them: examples drawn not from
+toy demonstration programs but rather from real working code that is
+in use every day.
+We have deliberately avoided filling the book with lots of code
+or specification-file examples, even though in many places this
+might have made it easier to write (and in some places perhaps
+easier to read!). Most books about programming give too many
+low-level details and examples, but fail at giving the reader a
+high-level feel for what is really going on. In this book, we
+prefer to err in the opposite direction.
+Therefore, while you will often be invited to read code and
+specification files, relatively few are actually included in the book.
+Instead, we point you at examples on the Web.
+Absorbing these examples will help solidify the principles you
+learn into semi-instinctive working knowledge. Ideally, you should
+read this book near the console of a running Unix system, with a Web
+browser handy. Any Unix will do, but the software case studies are
+more likely to be preinstalled and immediately available for
+inspection on a Linux system. The pointers in the book are invitations
+to browse and experiment. Introduction of these pointers is paced so
+that wandering off to explore for a while won't break up exposition
+that has to be continuous.
+Note: While we have made every effort to cite URLs that should
+remain stable and usable, there is no way we can guarantee this. If
+you find that a cited link has gone stale, use common sense and do
+a phrase search with your favorite Web search engine. Where possible
+we suggest ways to do this near the URLs we cite.
+Most abbreviations used in this book are expanded at first use.
+For convenience, we have also provided a glossary in an appendix.
+References are usually by author name.  Numbered footnotes are
+for URLs that would intrude on the text or that we suspect might be
+perishable; also for asides, war stories, and jokes.[2]
+To make this book more accessible to less technical readers, we
+invited some non-programmers to read it and identify terms that seemed
+both obscure and necessary to the flow of exposition.  We also use
+footnotes for definitions of elementary terms that an experienced
+programmer is unlikely to need.
+[2] This particular footnote is dedicated to Terry Pratchett, whose
+use of footnotes is quite...inspiring.
+Prev
+Up
+Next
+Who Should Read This Book
+Home
+Related References
+
+Related References
+Related References
+Prev Preface
+Next
+Related References
+Some famous papers and a few books by Unix's early developers
+have mined this territory before. Kernighan and Pike's
+The Unix Programming Environment [Kernighan-Pike84] stands out
+among these and is rightly considered a classic. But today it shows
+its age a bit; it doesn't cover the Internet, and the World Wide Web
+or the new wave of interpreted languages like Perl, Tcl, and
+Python.
+About halfway into the composition of this book, we learned of
+Mike Gancarz's The Unix Philosophy [Gancarz].  This book is excellent within its
+range, but did not attempt to cover the full spectrum of topics we
+felt needed to be addressed.  Nevertheless we are grateful to the
+author for the reminder that the very simplest Unix design patterns
+have been the most persistent and successful ones.
+The Pragmatic Programmer [Hunt-Thomas] is a witty and wise
+disquisition on good design practice pitched at a slightly
+different level of the software-design craft (more about coding, less
+about higher-level partitioning of problems) than this book. The
+authors' philosophy is an outgrowth of Unix experience, and it is an
+excellent complement to this book.
+The Practice of Programming [Kernighan-Pike99] covers some of
+the same ground as The Pragmatic Programmer
+from a position deep within the Unix tradition.
+Finally (and with admitted intent to provoke) we recommend
+Zen Flesh, Zen Bones [Reps-Senzaki], an important collection of
+Zen Buddhist primary sources.  References to Zen are scattered throughout
+this book.  They are included because Zen provides a vocabulary for
+addressing some ideas that turn out to be very important for software
+design but are otherwise very difficult to hold in the mind.  Readers
+with religious attachments are invited to consider Zen not as a
+religion but as a therapeutic form of mental discipline &#8212; which,
+in its purest non-theistic forms, is exactly what Zen is.
+Prev
+Up
+Next
+How to Use This Book
+Home
+Conventions Used in This Book
+
+Conventions Used in This Book
+Conventions Used in This Book
+Prev Preface
+Next
+Conventions Used in This Book
+The term &#8220;UNIX&#8221; is technically and legally a
+trademark of The Open Group, and should formally be used only for
+operating systems which are certified to have passed The Open Group's
+elaborate standards-conformance tests. In this book we use
+&#8220;Unix&#8221; in the looser sense widely current among
+programmers, to refer to any operating system (whether formally
+Unix-branded or not) that is either genetically descended from Bell
+Labs's ancestral Unix code or written in close imitation of its
+descendants. In particular, Linux (from which we draw most of our
+examples) is a Unix under this definition.
+This book employs the Unix manual page convention of tagging
+Unix facilities with a following manual section in parentheses,
+usually on first introduction when we want to emphasize that this is a
+Unix command.  Thus, for example, read &#8220;munger(1)&#8221; as
+&#8220;the &#8216;munger&#8217; program, which will be documented in
+section 1 (user tools) of the Unix manual pages, if it's present on
+your system&#8221;. Section 2 is C system calls, section 3 is C
+library calls, section 5 is file formats and protocols, section 8 is
+system administration tools. Other sections vary among Unixes but
+are not cited in this book.  For more, type man 1
+man at your Unix shell prompt (older System V Unixes may
+require man -s 1 man).
+Sometimes we mention a Unix application (such as
+Emacs), without a manual-section suffix and
+capitalized.  This is a clue that the name actually represents a
+well-established family of Unix programs with essentially the same
+function, and we are discussing generic properties of all of them.
+Emacs, for example, includes
+xemacs.
+At various points later in this book we refer to
+&#8216;old school&#8217; and &#8216;new school&#8217; methods.  As
+with rap music, new-school starts about 1990.  In this context, it's
+associated with the rise of scripting
+languages, GUIs, open-source Unixes, and the
+Web.  Old-school refers to the pre-1990 (and especially pre-1985)
+world of expensive (shared) computers, proprietary Unixes, scripting
+in shell, and C everywhere.  This difference is worth pointing out
+because cheaper and less memory-constrained machines have wrought some
+significant changes on the Unix programming style.
+Prev
+Up
+Next
+Related References
+Home
+Our Case Studies
+
+Our Case Studies
+Our Case Studies
+Prev Preface
+Next
+Our Case Studies
+A lot of books on programming rely on toy examples constructed
+specifically to prove a point. This one won't. Our case studies
+will be real, pre-existing pieces of software that are in
+production use every day. Here are some of the major ones:
+cdrtools/xcdroast
+These two separate projects are usually used together.
+The cdrtools package is a set of
+CLI tools for writing CD-ROMs; Web search for &#8220;cdrtools&#8221;.
+The xcdroast application is a
+GUI front end for cdrtools; see the xcdroast project site.
+fetchmail
+The fetchmail program
+retrieves mail from remote-mail servers using the POP3 or IMAP
+post-office protocols. See the fetchmail home page (or search for
+&#8220;fetchmail&#8221; on the Web).GIMP
+The GIMP (GNU Image
+Manipulation Program) is a full-featured paint, draw, and
+image-manipulation program that can edit a huge variety of graphical
+formats in sophisticated ways. Sources are available from the GIMP home page (or search for
+"GIMP" on the Web).mutt
+The
+mutt mail user agent is the current
+best-of-breed among text-based Unix electronic mail agents, with notably good
+support for MIME
+(Multipurpose Internet Mail Extensions) and the use of privacy aids
+such as PGP (Pretty Good Privacy) and GPG (GNU Privacy Guard).  Source
+code and executable binaries are available at the Mutt project site.xmlto
+The xmlto command renders
+DocBook and other XML documents in various output formats, including
+HTML and text and PostScript.  For sources and documentation, see the xmlto project site.
+To minimize the amount of code the user needs to read to
+understand the examples, we have tried to choose case studies that can
+be used more than once, ideally to illustrate several different design
+principles and practices.  For this same reason, many of the examples
+are from my projects.  No claim that these are the best possible ones
+is implied, merely that I find them sufficiently familiar to be useful
+for multiple expository purposes.
+Prev
+Up
+Next
+Conventions Used in This Book
+Home
+Author's Acknowledgements
+
+Chapter 7. Multiprogramming
+Chapter 7. Multiprogramming
+Prev Part II. Design
+Next
+Chapter 7. Multiprogramming
+Separating Processes to Separate Function
+Table of ContentsSeparating Complexity Control from Performance TuningTaxonomy of Unix IPC MethodsHanding off Tasks to Specialist ProgramsPipes, Redirection, and FiltersWrappersSecurity Wrappers and Bernstein ChainingSlave ProcessesPeer-to-Peer Inter-Process CommunicationProblems and Methods to AvoidObsolescent Unix IPC MethodsRemote Procedure CallsThreads &#8212; Threat or Menace?Process Partitioning at the Design Level
+If we believe in data structures, we must believe in independent
+(hence simultaneous) processing. For why else would we collect items
+within a structure?  Why do we tolerate languages that give us the one
+without the other?--
+Alan Perlis
+Epigrams in Programming, in ACM SIGPLAN (Vol 17 #9, 1982)
+The most characteristic program-modularization technique of Unix
+is splitting large programs into multiple cooperating processes.  This
+has usually been called &#8216;multiprocessing&#8217; in the Unix world,
+but in this book we revive the older term
+&#8216;multiprogramming&#8217; to avoid confusion with
+multiprocessor hardware implementations.
+Multiprogramming is a particularly murky area of design, one in
+which there are few guidelines to good practice.  Many programmers
+with excellent judgment about how to break up code into subroutines
+nevertheless wind up writing whole applications as monster
+single-process monoliths that founder on their own internal
+complexity.
+The Unix style of design applies the do-one-thing-well approach
+at the level of cooperating programs as well as cooperating routines
+within a program, emphasizing small programs connected by well-defined
+interprocess communication or by shared files. Accordingly, the Unix operating
+system encourages us to break our programs into simpler subprocesses,
+and to concentrate on the interfaces between these subprocesses. It
+does this in at least three fundamental ways:
+by making process-spawning cheap;
+by providing methods (shellouts, I/O redirection, pipes,
+message-passing, and sockets) that make it relatively easy for
+processes to communicate;
+by encouraging the use of simple, transparent, textual
+data formats that can be passed through
+pipes and sockets.
+Inexpensive process-spawning and easy process control are
+critical enablers for the Unix style of programming. On an operating
+system such as VAX VMS, where starting processes is expensive
+and slow and requires special privileges, one must build monster
+monoliths because one has no choice. Fortunately the trend in the Unix
+family has been toward lower
+fork(2)
+overhead rather than higher. Linux, in particular, is famously efficient
+this way, with a process-spawn faster than thread-spawning on many
+other operating systems.[65]
+Historically, many Unix programmers have been encouraged to
+think in terms of multiple cooperating processes by experience with
+shell programming.  Shell makes it relatively easy to set up groups of
+multiple processes connected by
+pipes, running either
+in background or foreground or a mix of the two.
+In the remainder of this chapter, we'll look at the
+implications of cheap process-spawning and discuss how and when to
+apply pipes, sockets, and other interprocess communication (IPC)
+methods to partition your design into cooperating processes. (In the
+next chapter, we'll apply the same separation-of-functions philosophy
+to interface design.)
+While the benefit of breaking programs up into cooperating
+processes is a reduction in global complexity, the cost is that we
+have to pay more attention to the design of the protocols which are
+used to pass information and commands between processes.  (In software
+systems of all kinds, bugs collect at interfaces.)
+In Chapter 5 we
+looked at the lower level of this design problem &#8212; how to lay
+out application protocols that are transparent, flexible and
+extensible.  But there is a second, higher level to the problem which
+we blithely ignored.  That is the problem of designing state machines
+for each side of the communication.
+It is not hard to apply good style to the syntax of application
+protocols, given models like SMTP or BEEP or XML-RPC.  The real
+challenge is not protocol syntax but protocol
+logic&#8212;designing a protocol that is both
+sufficiently expressive and deadlock-free. Almost as importantly, the
+protocol has to be seen to be expressive and
+deadlock-free; human beings attempting to model the behavior of the
+communicating programs in their heads and verify its correctness must
+be able to do so.
+In our discussion, therefore, we will focus on the kinds of
+protocol logic one naturally uses with each kind of interprocess
+communication.
+[65] See, for example, the results
+quoted in Improving Context Switching Performance of Idle
+Tasks under Linux [Appleton].
+Prev
+Up
+Next
+Designing for Maintainability
+Home
+Separating Complexity Control from Performance Tuning
+
+Chapter 4. Modularity
+Chapter 4. Modularity
+Prev Part II. Design
+Next
+Chapter 4. Modularity
+Keeping It Clean, Keeping It Simple
+Table of ContentsEncapsulation and Optimal Module SizeCompactness and OrthogonalityCompactnessOrthogonalityThe SPOT RuleCompactness and the Strong Single CenterThe Value of DetachmentSoftware Is a Many-Layered ThingTop-Down versus Bottom-UpGlue LayersCase Study: C Considered as Thin GlueLibrariesCase Study: GIMP PluginsUnix and Object-Oriented LanguagesCoding for Modularity
+There are two ways of constructing a software design.  One is to make
+it so simple that there are obviously no deficiencies; the other is to
+make it so complicated that there are no obvious deficiencies. The
+first method is far more difficult.--
+C. A. R. Hoare
+The Emperor's Old Clothes, CACM February 1981
+There is a natural hierarchy of code-partitioning methods that
+has evolved as programmers have had to manage ever-increasing levels
+of complexity.  In the beginning, everything was one big lump of
+machine code.  The earliest procedural languages brought in the notion
+of partition by subroutine.  Then we invented service libraries to
+share common utility functions among multiple programs. Next, we
+invented separated address spaces and communicating processes.  Today we
+routinely distribute program systems across multiple hosts separated
+by thousands of miles of network cable.
+The early developers of Unix were among the pioneers in software
+modularity.  Before them, the Rule of Modularity was computer-science
+theory but not engineering practice.  In Design
+Rules [Baldwin-Clark], a path-breaking
+study of the economics of modularity in engineering design, the
+authors use the development of the computer industry as a case study
+and argue that the Unix community was in fact the first to
+systematically apply modular decomposition to production software, as
+opposed to hardware.  Modularity of hardware has of course been one
+of the foundations of engineering since the adoption of standard
+screw threads in the late 1800s.
+The Rule of Modularity bears amplification here: The only way to
+write complex software that won't fall on its face is to build it out
+of simple modules connected by well-defined interfaces, so that most
+problems are local and you can have some hope of fixing or optimizing
+a part without breaking the whole.
+The tradition of being careful about modularity and of paying
+close attention to issues like
+orthogonality
+and compactness are still much deeper in the bone among Unix
+programmers than elsewhere.
+Early Unix programmers became good at modularity because they had to
+be.  An OS is one of the most complicated pieces of code around.  If
+it is not well structured, it will fall apart.  There were a couple of
+early failures at building Unix that were scrapped.  One can blame the
+early (structureless) C for this, but basically it was because the OS
+was too complicated to write.  We needed both refinements in tools (like C
+structures) and good practice in using them (like Rob Pike's rules for
+programming) before we could tame that complexity.
+--
+Ken Thompson
+Early Unix hackers struggled with this in many ways.  In the
+languages of 1970 function calls were expensive, either because call
+semantics were complicated (PL/1.  Algol) or because the compiler was
+optimizing for other things like fast inner loops at the expense of
+call time.  Thus, code tended to be written in big lumps.  Ken and
+several of the other early Unix developers knew modularity was a good
+idea, but they remembered PL/1 and were reluctant to write small
+functions lest performance go to hell.
+Dennis Ritchie encouraged modularity by telling all and sundry that
+function calls were really, really cheap in C.  Everybody started
+writing small functions and modularizing.  Years later we found out
+that function calls were still expensive on the PDP-11, and VAX code
+was often spending 50% of its time in the CALLS instruction.  Dennis
+had lied to us!  But it was too late; we were all hooked...
+--
+Steve Johnson
+All programmers today, Unix natives or not, are taught to
+modularize at the subroutine level within programs.  Some learn the
+art of doing this at the module or abstract-data-type level and call
+that &#8216;good design&#8217;.  The
+design-patterns movement is making a noble effort to
+push up a level from there and discover successful design abstractions
+that can be applied to organize the large-scale structure of
+programs.
+Getting better at all these kinds of problem partitioning is a
+worthy goal, and many excellent treatments of them are available
+elsewhere.  We shall not attempt to cover all the issues relating to
+modularity within programs in too much detail: first, because that is
+a subject for an entire volume (or several volumes) in itself; and
+second, because this is a book about the art of
+Unix programming.
+What we will do here is examine more specifically what the Unix
+tradition teaches us about how to follow the Rule of Modularity.  In
+this chapter, our examples will live within process units.  Later, in
+Chapter 7, we'll
+examine the circumstances under which partitioning programs into
+multiple cooperating processes is a good idea, and discuss more
+specific techniques for doing that partitioning.
+Prev
+Up
+Next
+Part II. Design
+Home
+Encapsulation and Optimal Module Size
+
+Chapter 5. Textuality
+Chapter 5. Textuality
+Prev Part II. Design
+Next
+Chapter 5. Textuality
+Good Protocols Make Good Practice
+Table of ContentsThe Importance of Being TextualCase Study: Unix Password File FormatCase Study: .newsrc FormatCase Study: The PNG Graphics File FormatData File MetaformatsDSV StyleRFC 822 FormatCookie-Jar FormatRecord-Jar FormatXMLWindows INI FormatUnix Textual File Format ConventionsThe Pros and Cons of File CompressionApplication Protocol DesignCase Study: SMTP, the Simple Mail Transfer ProtocolCase Study: POP3, the Post Office ProtocolCase Study: IMAP, the Internet Message Access ProtocolApplication Protocol MetaformatsThe Classical Internet Application MetaprotocolHTTP as a Universal Application ProtocolBEEP: Blocks Extensible Exchange ProtocolXML-RPC, SOAP, and Jabber
+It's a well-known fact that computing devices such as the abacus
+were invented thousands of years ago. But it's not well known that the
+first use of a common computer protocol occurred in the Old
+Testament. This, of course, was when Moses aborted the Egyptians'
+process with a control-sea.--
+Tom Galloway
+rec.arts.comics, February 1992
+In this chapter, we'll look at what the Unix tradition has to
+tell us about two different kinds of design that are closely related:
+the design of file formats for retaining application data in permanent
+storage, and the design of application protocols for passing data
+and commands between cooperating programs, possibly over a
+network.
+What unifies these two kinds of design is that they both involve
+the serialization of in-memory data structures.  For the internal
+operation of computer programs, the most convenient representation of
+a complex data structure is one in which all fields have the machine's
+native data format (e.g. two's-complement binary for integers) and all
+pointers are actual memory addresses (as opposed, say, to being named
+references).  But these representations are not well suited to storage
+and transmission; memory addresses in the data structure lose their
+meaning outside memory, and emitting raw native data formats causes
+interoperability problems passing data between machines with different
+conventions (big- vs. little-endian, say, or 32-bit vs. 64-bit).
+For transmission and storage, the traversable, quasi-spatial
+layout of data structures like linked lists needs to be flattened or
+serialized into a byte-stream representation from which the structure
+can later be recovered.  The serialization (save) operation is
+sometimes called marshaling and its inverse
+(load) operation unmarshaling.  These terms
+are usually applied with respect to objects in an
+OO
+language like C++ or Python or Java, but could be used with equal justice
+of operations like loading a graphics file into the internal storage
+of a graphics editor and saving it out after modifications.
+A significant percentage of what C and C++ programmers maintain is ad-hoc code for
+marshaling and unmarshaling operations &#8212; even when the
+serialized representation chosen is as simple as a binary structure
+dump (a common technique under non-Unix environments).  Modern
+languages like Python and Java tend to have built-in unmarshal and
+marshal functions that can be applied to any object or byte-stream
+representing an object, and that reduce this labor substantially.
+But these naïve methods are often unsatisfactory for
+various reasons, including both the machine-interoperability problems
+we mentioned above and the negative trait of being opaque to other
+tools.  When the application is a network protocol, economy may demand
+that an internal data structure (such as, say, a message with source
+and destination addresses) be serialized not into a single blob of
+data but into a series of attempted transactions or messages which the
+receiving machine may reject (so that, for example, a large message can
+be rejected if the destination address is invalid).
+Interoperability,
+transparency,
+extensibility,
+and storage or transaction economy: these are the important themes in
+designing file formats and application protocols.  Interoperability
+and transparency demand that we focus such designs on clean data
+representations, rather than putting convenience of implementation or
+highest possible performance first.  Extensibility also favors textual
+protocols, since binary ones are often harder to extend or subset
+cleanly.  Transaction economy sometimes pushes in the opposite
+direction &#8212; but we shall see that putting that criterion first
+is a form of premature
+optimization
+that it is often wise to resist.
+Finally, we must note a difference between data file formats and
+the run-control files that are often used to set the startup options
+of Unix programs.  The most basic difference is that (with sporadic
+exceptions like GNU Emacs's configuration interface) programs don't
+normally modify their own run-control files &#8212; the information
+flow is one-way, from file read at startup time to application
+settings.  Data-file formats, on the other hand, associate properties
+with named resources and are both read and written by their
+applications. Configuration files are generally hand-edited and small,
+whereas data files are program-generated and can become arbitrarily
+large.
+Historically, Unix has related but different sets of conventions
+for these two kinds of representation.  The conventions for run
+control files are surveyed in Chapter 10; only conventions for data files are
+examined in this chapter.
+Prev
+Up
+Next
+Coding for Modularity
+Home
+The Importance of Being Textual
+
+Chapter 11. Interfaces
+Chapter 11. Interfaces
+Prev Part II. Design
+Next
+Chapter 11. Interfaces
+User-Interface Design Patterns in the Unix Environment
+Table of ContentsApplying the Rule of Least SurpriseHistory of Interface Design on UnixEvaluating Interface DesignsTradeoffs between CLI and Visual InterfacesCase Study: Two Ways to Write a Calculator ProgramTransparency, Expressiveness, and ConfigurabilityUnix Interface Design PatternsThe Filter PatternThe Cantrip PatternThe Source PatternThe Sink PatternThe Compiler PatternThe ed patternThe Roguelike PatternThe &#8216;Separated Engine and Interface&#8217; PatternThe CLI Server PatternLanguage-Based Interface PatternsApplying Unix Interface-Design PatternsThe Polyvalent-Program PatternThe Web Browser as a Universal Front EndSilence Is Golden
+All our knowledge has its origins in our perceptions.--
+Leonardo Da Vinci
+The interface of a program is the sum of all the ways that it
+communicates with human users and other programs.  In Chapter 10, we discussed the use of environment
+variables, switches, run-control files and other parts of
+start-up-time interfaces. In this chapter, we'll untangle the history
+and explain the pragmatics of Unix interfaces after startup time.
+Because user-interface code normally consumes 40% or more of development
+time, knowing good design patterns is especially important here in
+order to avoid a lot of false starts and time-intensive
+rewrites.
+In the Unix tradition of interface design, we encounter two
+themes over and over again. One is anticipatory design for
+communication with other programs; the other is the Rule of Least
+Surprise.
+Unix programs can give you extra power from being used in
+synergistic combinations; we discussed various methods for hooking
+together such combinations in Chapter 7. The &#8216;other programs&#8217; part
+of Unix interface design is not an afterthought or a marginal case as
+it is under many other operating systems. Rather, it is a central
+challenge that has to be balanced and integrated carefully with the
+demands of interface design for human users.
+Much of Unix-community tradition about program interface design
+may seem odd and arbitrary &#8212; or even, in the age of the GUI,
+downright regressive &#8212; when you encounter that tradition for the
+first time.  But in spite of various blemishes and irregularities,
+that tradition has an inner logic to it which is worth learning and
+understanding. It reflects heuristics accumulated over Unix's long
+history about ways to do effective communication both with human
+beings and with other programs. And it includes a set of conventions
+which create commonalities between programs &#8212; it defines
+&#8216;least surprising&#8217; alternatives for a wide range of common
+interface-design problems.
+After startup, programs normally get input or commands from the
+following sources:
+Data and commands presented on the program's standard
+input.
+Inputs passed through IPC, such as X server events and
+network messages.
+Files and devices in known locations (such as a data file name
+passed to or computed by the program).
+Programs can emit results in all the same ways (with output
+going to standard output).
+Some Unix programs are graphical, some have screen-oriented
+character interfaces, and some use a starkly simple text-filter
+design unchanged from the days of mechanical teletypes. To the
+uninitiated, it is often far from obvious why any given program
+uses the style it does &#8212; or, indeed, why Unix supports such a
+plethora of interface styles at all.
+Unix has several competing interface styles.  All are still
+alive for a reason; they're optimized for different situations. By
+understanding the fit between task and interface style, you will learn
+how to choose the right styles for the jobs you need to do.
+Prev
+Up
+Next
+On Breaking These Rules
+Home
+Applying the Rule of Least Surprise
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Chapter 9. Generation
+Chapter 9. Generation
+Prev Part II. Design
+Next
+Chapter 9. Generation
+Pushing the Specification Level Upwards
+Table of ContentsData-Driven ProgrammingCase Study: asciiCase Study: Statistical Spam FilteringCase Study: Metaclass Hacking in fetchmailconfAd-hoc Code GenerationCase Study: Generating Code for the ascii DisplaysCase Study: Generating HTML Code for a Tabular List
+The programmer at wit's end ... can often do best by
+disentangling himself from his code, rearing back, and
+contemplating his data. Representation is the essence of
+programming.--
+Fred Brooks
+The Mythical Man-Month, Anniversary Edition (1975-1995), p. 103
+In Chapter 1 we
+observed that human beings are better at visualizing data than they
+are at reasoning about control flow.  We recapitulate: To see this,
+compare the expressiveness and explanatory power of a diagram of a
+fifty-node pointer tree with a flowchart of a fifty-line program. Or
+(better) of an array initializer expressing a conversion table with an
+equivalent switch statement. The difference in
+transparency and clarity is
+dramatic.[97]
+Data is more tractable than program logic. That's
+true whether the data is an ordinary table, a declarative markup
+language, a templating system, or a set of macros that will expand to
+program logic.  It's good practice to move as much of the complexity
+in your design as possible away from procedural code and into
+data, and good practice to pick data representations that are
+convenient for humans to maintain and manipulate.  Translating
+those representations into forms that are convenient for machines
+to process is another job for machines, not for humans.
+Another important advantage of higher-level, more declarative
+notations is that they lend themselves better to compile-time checking.
+Procedural notations inherently have complex runtime behavior which is
+difficult to analyze at compile time.  Declarative notations give the
+implementation much more leverage for finding mistakes, by permitting much
+more thorough understanding of the intended behavior.
+--
+Henry Spencer
+These insights ground in theory a set of practices that have
+always been an important part of the Unix programmer's toolkit &#8212;
+very high-level languages, data-driven programming, code generators,
+and domain-specific minilanguages.  What unifies these is that they
+are all ways of lifting the generation of code up some levels, so that
+specifications can be smaller. We've previously noted that defect
+densities tend to be nearly constant across programming languages; all
+these practices mean that whatever malign forces generate our bugs
+will get fewer lines to wreak their havoc on.
+In Chapter 8 we
+discussed the uses of domain-specific minilanguages. In Chapter 14 we'll make the argument for
+very-high-level languages.  In this chapter we'll look at some
+design studies in data-driven programming and a few examples of ad-hoc
+code generation; we'll look at some code-generation tools in Chapter 15.  As with minilanguages, these methods can
+enable you to drastically cut the line count of your programs, and
+correspondingly lower debugging time and maintenance costs.
+[97] For further development of this point see
+[Bentley].
+Prev
+Up
+Next
+Designing Minilanguages
+Home
+Data-Driven Programming
+
+Chapter 14. Languages
+Chapter 14. Languages
+Prev Part III. Implementation
+Next
+Chapter 14. Languages
+To C or Not To C?
+Table of ContentsUnix's Cornucopia of LanguagesWhy Not C?Interpreted Languages and Mixed StrategiesLanguage EvaluationsCC++ShellPerlTclPythonJavaEmacs LispTrends for the FutureChoosing an X Toolkit
+The limits of my language are the limits of my world.--
+Ludwig Wittgenstein
+Tractatus Logico-Philosophicus 5.6, 1918
+Prev
+Up
+Next
+Part III. Implementation
+Home
+Unix's Cornucopia of Languages
+
+Chapter 15. Tools
+Chapter 15. Tools
+Prev Part III. Implementation
+Next
+Chapter 15. Tools
+The Tactics of Development
+Table of ContentsA Developer-Friendly Operating SystemChoosing an EditorUseful Things to Know about viUseful Things to Know about EmacsThe Antireligious Choice: Using BothSpecial-Purpose Code Generatorsyacc and lexCase Study: Glademake: Automating Your RecipesBasic Theory of makemake in Non-C/C++
+DevelopmentUtility ProductionsGenerating MakefilesVersion-Control SystemsWhy Version Control?Version Control by HandAutomated Version ControlUnix Tools for Version ControlRuntime DebuggingProfilingCombining Tools with EmacsEmacs and makeEmacs and Runtime DebuggingEmacs and Version ControlEmacs and ProfilingLike an IDE, Only Better
+Unix is user-friendly &#8212; it's just choosy about who its
+friends are.--Anonymous
+Prev
+Up
+Next
+Choosing an X Toolkit
+Home
+A Developer-Friendly Operating System
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Chapter 16. Reuse
+Chapter 16. Reuse
+Prev Part III. Implementation
+Next
+Chapter 16. Reuse
+On Not Reinventing the Wheel
+Table of ContentsThe Tale of J. Random NewbieTransparency as the Key to ReuseFrom Reuse to Open SourceThe Best Things in Life Are OpenWhere to Look?Issues in Using Open-Source SoftwareLicensing IssuesWhat Qualifies as Open SourceStandard Open-Source LicensesWhen You Need a Lawyer
+When the superior man refrains from acting, his force is felt
+for a thousand miles.--
+Tao Te Ching (as popularly mistranslated)
+Reluctance to do unnecessary work is a great virtue in
+programmers. If the Chinese sage Lao-Tze were alive today and still
+teaching the way of the Tao, he would probably be mistranslated as:
+When the superior programmer refrains from coding, his force is felt
+for a thousand miles. In fact, recent translators have suggested that
+the Chinese term wu-wei that has
+traditionally been rendered as &#8220;inaction&#8221; or
+&#8220;refraining from action&#8221; should probably be read as
+&#8220;least action&#8221; or &#8220;most efficient action&#8221; or
+&#8220;action in accordance with natural law&#8221;, which is an even
+better description of good engineering practice!
+Remember the Rule of Economy.  Re-inventing fire and the wheel
+for every new project is terribly wasteful.  Thinking time is precious
+and very valuable relative to all the other inputs that go into
+software development; accordingly, it should be spent solving new
+problems rather than rehashing old ones for which known solutions
+already exist. This attitude gives the best return both in the
+&#8220;soft&#8221; terms of developing human capital and in the
+&#8220;hard&#8221; terms of economic return on development
+investment.
+Reinventing the wheel is bad not only because it
+wastes time, but because reinvented wheels are often square.  There is an
+almost irresistible temptation to economize on reinvention time by
+taking a shortcut to a crude and poorly-thought-out version, which
+in the long run often turns out to be false economy.
+--
+Henry Spencer
+The most effective way to avoid reinventing the wheel is to
+borrow someone else's design and implementation of it. In other
+words, to reuse code.
+Unix supports reuse at every level from individual library
+modules up to entire programs, which Unix helps you script and
+recombine.  Systematic reuse is one of the most important
+distinguishing behaviors of Unix programmers, and the experience of
+using Unix should teach you a habit of trying to prototype solutions
+by combining existing components with a minimum of new invention,
+rather than rushing to write standalone code that will only be used
+once.
+The virtuousness of code reuse is one of the great
+apple-pie-and-motherhood verities of software development.  But many
+developers entering the Unix community from a basis of experience in
+other operating systems have never learned (or have unlearned) the
+habit of systematic reuse.  Waste and duplicative work is rife, even
+though it seems to be against the interests both of those who pay for
+code and those who produce it.  Understanding why such dysfunctional
+behavior persists is the first step toward changing it.
+Prev
+Up
+Next
+Combining Tools with Emacs
+Home
+The Tale of J. Random Newbie
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+
+Page not found &#8211; ibiblio
+Skip to content
+The Public&#039;s Library and Digital Archive
+Browse
+Share
+Software
+Linux Archive
+Linux distributions
+Software mirrors
+Projects
+terasaur
+IPv6 Services
+Donate
+About
+Awards &#038; Recognitions
+People
+Supporters
+Open positions
+Help
+Contact
+FAQ
+Sorry, the page you requested is missing or no longer on ibiblio.
+Welcome to ibiblio!
+Home to one of the largest free information databases online, ibiblio.org has something for everyone. Visitors can browse through our eclectic collections catalog and contributors can host and share their unique collections with millions worldwide.
+Get started: BROWSE | SHARE
+What&#8217;s new?  terasaur
+ibiblio has a new project, terasaur, for distributing huge files using BitTorrent.  For those who know BitTorrent, it's not just a tracker.  terasaur.org has over 2 terabytes of files seeded from ibiblio's servers.
+ibiblio.org is a collaboration of the School of Information and Library Science, the School of Journalism and Mass Communication, and
+Information Technology Services at the University of North Carolina at Chapel Hill.
+About ibiblio |
+Contact |
+Privacy Policy |
+Help
+

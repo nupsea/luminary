@@ -124,6 +124,20 @@ def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
+# Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+# Serialize background teachback evaluations to avoid SQLite "database is locked"
+# when multiple concurrent tasks try to write (invariant I-1).
+_teachback_eval_sem = asyncio.Semaphore(1)
+
+
+def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
+    """Schedule coroutine as fire-and-forget background task with strong ref."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 _TEACHBACK_SYSTEM = (
     "You are a Socratic tutor evaluating a student's explanation. "
     "Output a JSON object with no preamble or markdown."
