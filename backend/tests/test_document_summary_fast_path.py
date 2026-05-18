@@ -32,9 +32,7 @@ _MAP_TOKEN_THRESHOLD = 8000
 _MAP_BATCH_TOKENS = 3_000
 
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -120,9 +118,7 @@ def _make_mock_llm(return_text: str = "Generated summary.") -> AsyncMock:
     return mock_llm
 
 
-# ---------------------------------------------------------------------------
 # (a) test_fast_path_used_when_section_summaries_exist
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -146,9 +142,7 @@ async def test_fast_path_used_when_section_summaries_exist(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # (b) test_slow_path_fallback_when_no_section_summaries
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -175,9 +169,7 @@ async def test_slow_path_fallback_when_no_section_summaries(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # (c) test_section_reduce_cached_as_db_row
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -207,9 +199,7 @@ async def test_section_reduce_cached_as_db_row(test_db):
     assert "Section 0" in row.content
 
 
-# ---------------------------------------------------------------------------
 # (d) test_fast_path_skipped_with_fewer_than_3_units
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

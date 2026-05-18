@@ -23,11 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { API_BASE } from "@/lib/config"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 interface TagInfo {
   id: string
@@ -46,34 +42,18 @@ interface MergeSuggestion {
 
 type RowState = "pending" | "accepting" | "accepted" | "rejecting" | "rejected" | "error"
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
+const fetchSuggestions = (): Promise<MergeSuggestion[]> =>
+  apiGet<MergeSuggestion[]>("/tags/normalization/suggestions")
 
-async function fetchSuggestions(): Promise<MergeSuggestion[]> {
-  const res = await fetch(`${API_BASE}/tags/normalization/suggestions`)
-  if (!res.ok) throw new Error(`GET /tags/normalization/suggestions failed: ${res.status}`)
-  return res.json() as Promise<MergeSuggestion[]>
-}
+const acceptSuggestion = (id: string): Promise<{ affected_notes: number }> =>
+  apiPost<{ affected_notes: number }>(
+    `/tags/normalization/suggestions/${id}/accept`,
+  )
 
-async function acceptSuggestion(id: string): Promise<{ affected_notes: number }> {
-  const res = await fetch(`${API_BASE}/tags/normalization/suggestions/${id}/accept`, {
-    method: "POST",
-  })
-  if (!res.ok) throw new Error(`Accept failed: ${res.status}`)
-  return res.json() as Promise<{ affected_notes: number }>
-}
+const rejectSuggestion = (id: string): Promise<void> =>
+  apiPost(`/tags/normalization/suggestions/${id}/reject`)
 
-async function rejectSuggestion(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/tags/normalization/suggestions/${id}/reject`, {
-    method: "POST",
-  })
-  if (!res.ok) throw new Error(`Reject failed: ${res.status}`)
-}
-
-// ---------------------------------------------------------------------------
 // SuggestionRow
-// ---------------------------------------------------------------------------
 
 interface RowMeta {
   rowState: RowState
@@ -168,10 +148,6 @@ function SuggestionRow({ suggestion, meta, onAccept, onReject }: SuggestionRowPr
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// NormalizationDrawer
-// ---------------------------------------------------------------------------
 
 interface NormalizationDrawerProps {
   open: boolean

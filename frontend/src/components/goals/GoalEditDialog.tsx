@@ -1,8 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalEditDialog (S211) -- edit title, description, and target value+unit.
-// Other immutable fields (goal_type, document_id, deck_id, collection_id)
-// follow S210 service rules and are not editable.
-// ---------------------------------------------------------------------------
+// GoalEditDialog — edits title, description, and target value+unit (goal_type and linked IDs are immutable)
 
 import { useEffect, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"

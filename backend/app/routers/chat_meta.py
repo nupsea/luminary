@@ -3,7 +3,6 @@
 import asyncio
 import logging
 
-import litellm
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,15 +10,11 @@ from sqlalchemy import select
 from app.database import get_session_factory
 from app.models import ChatSuggestionHistoryModel, DocumentModel, SectionModel
 from app.services.graph import get_graph_service
+from app.services.llm import LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-
-
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
 
 
 class SuggestionItem(BaseModel):
@@ -36,9 +31,7 @@ class ExplorationSuggestion(BaseModel):
     entity_names: list[str]
 
 
-# ---------------------------------------------------------------------------
-# Template-based suggestion generation (pure logic, no LLM) -- S187 fallback
-# ---------------------------------------------------------------------------
+# Template-based suggestion generation (fallback, no LLM)
 
 _ONBOARDING_SUGGESTIONS = [
     "Upload a document in the Learning tab to get started",
@@ -155,11 +148,6 @@ def _template_to_items(suggestions: list[str]) -> list[SuggestionItem]:
     return [SuggestionItem(id="", text=s) for s in suggestions]
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 # NOTE: POST /chat/suggestions/{id}/asked registered BEFORE any /{param} route
 @router.post("/suggestions/{suggestion_id}/asked", status_code=204)
 async def mark_suggestion_asked(
@@ -197,6 +185,7 @@ async def get_suggestions_cached(
             .order_by(ChatSuggestionHistoryModel.shown_at.desc())
             .limit(4)
         )
+        # Inline query for a custom 2-column projection not exposed by ChatRepo.
         result = await session.execute(query)
         rows = result.all()
 
@@ -212,7 +201,7 @@ async def get_suggestions(
 ) -> SuggestionResponse:
     """Return 4 contextual suggestion items using LLM with Bloom progression.
 
-    Falls back to S187 template logic when LLM is unavailable.
+    Falls back to template logic when LLM is unavailable.
     """
     from app.services.suggestion_service import get_suggestion_service  # noqa: PLC0415
 
@@ -249,13 +238,7 @@ async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-    ):
+    except LLMUnavailableError:
         return SuggestionResponse(
             suggestions=_template_to_items(_cross_document_suggestions(shared))
         )
@@ -265,6 +248,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     """Handle single-document suggestions."""
     session_factory = get_session_factory()
     async with session_factory() as session:
+        # Existence check before building suggestion context; uses the same session
+        # as the section headings query below to avoid opening a second connection.
         doc = (
             await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
@@ -274,6 +259,8 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
 
         content_type = doc.content_type or "unknown"
 
+        # Heading preview for suggestion context; must share session with doc lookup above
+        # so both reads are in the same transaction.
         sections_result = await session.execute(
             select(SectionModel.heading)
             .where(SectionModel.document_id == document_id)
@@ -313,16 +300,10 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)
                 return SuggestionResponse(suggestions=[SuggestionItem(**i) for i in items])
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-    ):
+    except LLMUnavailableError:
         logger.info("LLM unavailable, falling back to template suggestions for doc=%s", document_id)
 
-    # Fallback to S187 template logic
+    # Fallback to template logic
     if content_type == "book":
         suggestions = _book_suggestions(entities, headings)
     elif content_type in ("tech_book", "tech_article", "code"):
@@ -364,5 +345,4 @@ async def get_explorations(
             text = f"How is {display_a} related to {display_b}?"
         suggestions.append(ExplorationSuggestion(text=text, entity_names=[name_a, name_b]))
     logger.debug("explorations: doc=%s returned %d suggestions", document_id, len(suggestions))
-    return suggestions
     return suggestions

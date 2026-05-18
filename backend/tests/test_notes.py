@@ -12,9 +12,7 @@ def client():
         yield c
 
 
-# ---------------------------------------------------------------------------
 # Create
-# ---------------------------------------------------------------------------
 
 
 def test_create_note_returns_201(client):
@@ -45,9 +43,7 @@ def test_create_note_with_document_id(client):
     assert data["chunk_id"] == "chunk-1"
 
 
-# ---------------------------------------------------------------------------
 # Read / filter
-# ---------------------------------------------------------------------------
 
 
 def test_list_notes_returns_all(client):
@@ -85,9 +81,7 @@ def test_list_notes_filter_by_tag(client):
     assert all("alpha" in n["tags"] for n in data)
 
 
-# ---------------------------------------------------------------------------
 # Update
-# ---------------------------------------------------------------------------
 
 
 def test_update_note_content_and_tags(client):
@@ -108,9 +102,7 @@ def test_update_nonexistent_note_returns_404(client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Delete
-# ---------------------------------------------------------------------------
 
 
 def test_delete_note_returns_204(client):
@@ -133,9 +125,7 @@ def test_delete_nonexistent_note_returns_404(client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Groups endpoint
-# ---------------------------------------------------------------------------
 
 
 def test_groups_returns_correct_counts(client):
@@ -166,9 +156,7 @@ def test_groups_returns_correct_counts(client):
     assert tag_map.get(tag2) == 2
 
 
-# ---------------------------------------------------------------------------
 # section_id support (S106)
-# ---------------------------------------------------------------------------
 
 
 def test_create_note_with_section_id(client):

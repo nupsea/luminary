@@ -19,9 +19,7 @@ from app.services.flashcard import (
     _parse_cloze_text,
 )
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -95,9 +93,7 @@ def _make_section(section_id: str, doc_id: str, heading: str = "Generators") -> 
     )
 
 
-# ---------------------------------------------------------------------------
 # Pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_parse_cloze_text_extracts_blanks():
@@ -124,9 +120,7 @@ def test_build_cloze_question_no_markers():
     assert result == "plain text"
 
 
-# ---------------------------------------------------------------------------
 # Service tests (mocked LLM)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -201,9 +195,7 @@ async def test_generate_cloze_returns_empty_for_unknown_section(test_db):
     assert mock_llm.call_count == 0
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

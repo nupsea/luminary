@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionContentItem } from "./types"
@@ -14,7 +14,7 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
   pink: "bg-pink-200/60 dark:bg-pink-500/30",
 }
 
-// S131: Memoized individual section item in TOC to prevent full list re-renders on scroll
+// Memoized individual section item in TOC to prevent full list re-renders on scroll
 const TocItem = memo(({
   section,
   isActive,
@@ -55,7 +55,7 @@ const HeadingTag = (level: number) => {
   return "h5"
 }
 
-// S131: LazySection renders heavy Markdown content only when it is near the viewport.
+// LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
 const LazySection = memo(({ section, annotations, highlightsVisible }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
@@ -109,11 +109,8 @@ const LazySection = memo(({ section, annotations, highlightsVisible }: LazySecti
 })
 LazySection.displayName = "LazySection"
 
-async function fetchSectionContent(documentId: string): Promise<SectionContentItem[]> {
-  const res = await fetch(`${API_BASE}/sections/${documentId}/content`)
-  if (!res.ok) throw new Error("Failed to fetch section content")
-  return res.json() as Promise<SectionContentItem[]>
-}
+const fetchSectionContent = (documentId: string): Promise<SectionContentItem[]> =>
+  apiGet<SectionContentItem[]>(`/sections/${documentId}/content`)
 
 /** Normalize whitespace for fuzzy matching: collapse runs to single space, trim. */
 function normalizeWs(s: string): string {
@@ -171,7 +168,7 @@ function fuzzyIndexOf(haystack: string, needle: string): [number, number] | null
 function applyHighlights(content: string, annotations: AnnotationItem[]): string {
   if (annotations.length === 0) return content
 
-  // S131: Sort annotations by start_offset to process them in reading order.
+  // Sort annotations by start_offset to process them in reading order.
   const sorted = [...annotations].sort((a, b) => a.start_offset - b.start_offset)
 
   // Find all occurrences, handle duplicates via simple incremental search
@@ -245,7 +242,7 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
     staleTime: 60_000,
   })
 
-  // S131: Pre-group annotations by section_id to avoid O(N*M) lookups in render loops
+  // Pre-group annotations by section_id to avoid O(N*M) lookups in render loops
   const annotationsBySection = useMemo(() => {
     const map = new Map<string, AnnotationItem[]>()
     for (const ann of annotations) {

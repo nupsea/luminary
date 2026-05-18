@@ -1,4 +1,4 @@
-"""Images API router — S133.
+"""Images API router — .
 
 Endpoints:
   GET /documents/{id}/images       -- paginated image list for a document
@@ -6,6 +6,7 @@ Endpoints:
   GET /documents/{id}/enrichment   -- enrichment job list for a document
 """
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -18,6 +19,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel, ImageModel
+from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["images"])
@@ -62,7 +64,7 @@ class UploadResponse(BaseModel):
 
 @router.post("/images/notes", response_model=UploadResponse)
 async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
-    """Upload an image for a note (e.g. from paste or screenshot).
+    """Upload a note asset such as an image, SVG diagram, or Excalidraw scene.
 
     Saves to DATA_DIR/images/notes/{uuid}_{filename}.
     Returns the __LUMINARY_IMG__ prefixed path for Markdown resolution.
@@ -72,20 +74,37 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     notes_img_dir = data_dir / "images" / "notes"
     notes_img_dir.mkdir(parents=True, exist_ok=True)
 
-    # Validate file type
     content_type = file.content_type or ""
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    filename = file.filename or "asset"
+    ext = Path(filename).suffix.lower()
+    is_excalidraw_scene = (
+        content_type in {"application/json", "text/json"}
+        and filename.endswith(".excalidraw.json")
+    )
+    if not content_type.startswith("image/") and not is_excalidraw_scene:
+        raise HTTPException(
+            status_code=400,
+            detail="Only image files or Excalidraw JSON scenes are allowed",
+        )
 
-    # Generate unique filename
-    ext = Path(file.filename or "image.png").suffix or ".png"
+    if ext == ".json" and filename.endswith(".excalidraw.json"):
+        ext = ".excalidraw.json"
     unique_filename = f"{uuid.uuid4()}{ext}"
     target_path = notes_img_dir / unique_filename
 
     try:
         content = await file.read()
+        if is_excalidraw_scene:
+            try:
+                scene = json.loads(content)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+            if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
+                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
         with open(target_path, "wb") as f:
             f.write(content)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to save note image: %s", e)
         raise HTTPException(status_code=500, detail="Failed to save image file")
@@ -109,12 +128,10 @@ async def get_document_images(
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Read-only list query scoped to this document; shares the same session as the
+        # preceding get_or_404 check so both reads happen in a single connection.
         result = await session.execute(
             select(ImageModel)
             .where(ImageModel.document_id == document_id)
@@ -156,11 +173,7 @@ async def serve_image_raw(image_id: str) -> FileResponse:
     Returns 404 if image not found in DB or file missing from disk.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(ImageModel).where(ImageModel.id == image_id))
-        img = result.scalar_one_or_none()
-
-    if img is None:
-        raise HTTPException(status_code=404, detail="Image not found")
+        img = await get_or_404(session, ImageModel, image_id, name="Image")
 
     settings = get_settings()
     abs_path = Path(settings.DATA_DIR).expanduser() / img.path
@@ -180,9 +193,12 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
 
     # Detect media type from extension
     ext = filename.rsplit(".", maxsplit=1)[-1].lower()
-    media_type = (
-        f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg"] else "image/png"
-    )
+    if ext == "svg":
+        media_type = "image/svg+xml"
+    elif ext == "json":
+        media_type = "application/json"
+    else:
+        media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "image/png"
     return FileResponse(str(abs_path), media_type=media_type)
 
 
@@ -194,12 +210,9 @@ async def get_enrichment_jobs(document_id: str) -> list[EnrichmentJobItem]:
     Returns [] if no enrichment jobs have been created yet.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Read-only list query; shares the session with the get_or_404 guard above.
         result = await session.execute(
             select(EnrichmentJobModel)
             .where(EnrichmentJobModel.document_id == document_id)

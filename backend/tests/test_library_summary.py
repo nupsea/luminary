@@ -19,9 +19,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, LibrarySummaryModel, SummaryModel
 
-# ---------------------------------------------------------------------------
 # Shared helpers
-# ---------------------------------------------------------------------------
 
 
 async def _async_iter(items):
@@ -95,9 +93,7 @@ def _parse_sse_events(text: str) -> list[dict]:
     return events
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

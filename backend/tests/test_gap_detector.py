@@ -20,9 +20,7 @@ from app.services.gap_detector import _extract_json
 pytest_plugins = ["conftest_books"]
 
 
-# ---------------------------------------------------------------------------
 # Unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_extract_json_clean():
@@ -43,9 +41,7 @@ def test_extract_json_malformed_returns_empty():
     assert result == {}
 
 
-# ---------------------------------------------------------------------------
 # API integration tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -92,7 +88,7 @@ def test_detect_gaps_returns_report(client):
     mock_retriever = MagicMock()
     mock_retriever.retrieve = AsyncMock(return_value=[])
 
-    with patch("app.services.gap_detector.litellm.acompletion", AsyncMock(return_value=mock_resp)):
+    with patch("app.services.llm.litellm.acompletion", AsyncMock(return_value=mock_resp)):
         with patch("app.services.retriever.get_retriever", return_value=mock_retriever):
             resp = client.post(
                 "/notes/gap-detect",
@@ -121,7 +117,7 @@ def test_detect_gaps_malformed_llm(client):
     mock_retriever = MagicMock()
     mock_retriever.retrieve = AsyncMock(return_value=[])
 
-    with patch("app.services.gap_detector.litellm.acompletion", AsyncMock(return_value=mock_resp)):
+    with patch("app.services.llm.litellm.acompletion", AsyncMock(return_value=mock_resp)):
         with patch("app.services.retriever.get_retriever", return_value=mock_retriever):
             resp = client.post(
                 "/notes/gap-detect",
@@ -135,9 +131,7 @@ def test_detect_gaps_malformed_llm(client):
     assert data["covered"] == []
 
 
-# ---------------------------------------------------------------------------
 # Slow integration test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -172,7 +166,7 @@ def test_alice_gap_detection_slow(all_books_ingested):
         )
 
         with patch(
-            "app.services.gap_detector.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             AsyncMock(return_value=mock_resp),
         ):
             resp = c.post(

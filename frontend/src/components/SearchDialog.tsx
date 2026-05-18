@@ -12,35 +12,14 @@ import { useNavigate } from "react-router-dom"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useAppStore } from "@/store"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
-interface SearchMatch {
-  chunk_id: string
-  document_id: string
-  document_title: string
-  content_type: string
-  section_heading: string
-  page: number
-  text_excerpt: string
-  relevance_score: number
-}
+type DocumentGroup = components["schemas"]["DocumentGroup"]
+type SearchResponse = components["schemas"]["SearchResponse"]
 
-interface DocumentGroup {
-  document_id: string
-  document_title: string
-  content_type: string
-  matches: SearchMatch[]
-}
-
-interface SearchResponse {
-  results: DocumentGroup[]
-}
-
-async function fetchSearch(q: string): Promise<SearchResponse> {
-  const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}&limit=20`)
-  if (!res.ok) throw new Error("Search failed")
-  return res.json() as Promise<SearchResponse>
-}
+const fetchSearch = (q: string): Promise<SearchResponse> =>
+  apiGet<SearchResponse>("/search", { q, limit: 20 })
 
 interface SearchDialogProps {
   open: boolean

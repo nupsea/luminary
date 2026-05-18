@@ -6,8 +6,6 @@ _llm_classify_fallback    — async, calls LiteLLM when heuristic confidence < 0
 
 import logging
 
-import litellm
-
 logger = logging.getLogger(__name__)
 
 _VALID_INTENTS: frozenset[str] = frozenset(
@@ -293,7 +291,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
     Returns:
         intent string (one of the five valid intents)
     """
-    from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+    from app.services.llm import get_llm_service  # noqa: PLC0415
 
     scope_hint = (
         "The user is asking about their ENTIRE document library (all content)."
@@ -301,8 +299,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
         else "The user is asking about a SINGLE specific document."
     )
     try:
-        response = await litellm.acompletion(
-            **get_litellm_kwargs(),
+        content = await get_llm_service().complete(
             messages=[
                 {
                     "role": "system",
@@ -324,7 +321,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
             ],
             temperature=0.0,
         )
-        result = (response.choices[0].message.content or "").strip().lower()
+        result = content.strip().lower()
         if result in _VALID_INTENTS:
             logger.debug(
                 "intent LLM: %r → %s (heuristic default was %s)", question[:60], result, default

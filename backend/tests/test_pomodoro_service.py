@@ -42,9 +42,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Start / 409 invariant
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -97,9 +95,7 @@ async def test_start_invalid_surface_raises(test_db):
             await svc.start_session(surface="bogus")
 
 
-# ---------------------------------------------------------------------------
 # Pause / resume / pause_accumulated_seconds
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -143,9 +139,7 @@ async def test_pause_only_from_active(test_db):
             await svc.pause_session(row.id)
 
 
-# ---------------------------------------------------------------------------
 # Complete / abandon
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -210,9 +204,7 @@ async def test_complete_from_paused_rolls_pause_window(test_db):
     assert completed.pause_accumulated_seconds >= 10
 
 
-# ---------------------------------------------------------------------------
 # get_active_session
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -238,9 +230,7 @@ async def test_get_active_session_returns_paused_row(test_db):
     assert active.status == "paused"
 
 
-# ---------------------------------------------------------------------------
 # Stats: today_count / streak / total_completed
-# ---------------------------------------------------------------------------
 
 
 def _seed_completed(session_factory, when: datetime):

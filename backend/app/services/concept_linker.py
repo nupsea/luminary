@@ -22,13 +22,13 @@ import json
 import logging
 import re
 
-import litellm
 from sqlalchemy import select, update
 
 from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel
 from app.services.entity_disambiguator import _strip_honorifics
 from app.services.graph import get_graph_service
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +44,6 @@ _CONTRADICTION_SYSTEM = (
     " Output JSON only:"
     ' {"has_contradiction": bool, "note": str, "prefer_source": "a" or "b"}'
 )
-
-
-# ---------------------------------------------------------------------------
-# Pure functions
-# ---------------------------------------------------------------------------
 
 
 def _parse_year(text: str) -> int | None:
@@ -121,11 +116,6 @@ def _strip_json_fences(text: str) -> str:
     return cleaned.strip()
 
 
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
-
-
 class ConceptLinkerService:
     """Cross-document concept linking with contradiction detection.
 
@@ -169,24 +159,21 @@ class ConceptLinkerService:
 
         Returns a dict with keys: has_contradiction (bool), note (str), prefer_source (str).
         Returns safe defaults if LLM is unreachable or JSON parse fails.
-        Raises litellm.ServiceUnavailableError (propagates to worker caller).
+        Raises LLMUnavailableError (propagates to worker caller).
         """
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         user_prompt = (
             f'Concept: "{concept_name}"\n\n'
             f"Passage A:\n{summary_a[:600]}\n\n"
             f"Passage B:\n{summary_b[:600]}"
         )
-        response = await litellm.acompletion(
-            **get_litellm_kwargs(background=True),
+        raw = await get_llm_service().complete(
             messages=[
                 {"role": "system", "content": _CONTRADICTION_SYSTEM},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
+            background=True,
         )
-        raw = response.choices[0].message.content or ""
         cleaned = _strip_json_fences(raw)
         # Find first JSON object in response
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
@@ -314,7 +301,7 @@ class ConceptLinkerService:
                             contradiction_data = await self._detect_contradiction(
                                 src_name, summary_a, summary_b
                             )
-                    except litellm.ServiceUnavailableError:
+                    except LLMUnavailableError:
                         logger.warning(
                             "concept_linker: LLM unavailable for contradiction detection"
                             " (concept=%r) -- skipping",
@@ -406,7 +393,7 @@ async def concept_link_handler(document_id: str, job_id: str) -> None:
     """Enrichment handler for job_type='concept_link'.
 
     Called by EnrichmentQueueWorker for each concept_link job.
-    Raises litellm.ServiceUnavailableError (propagates to mark job 'failed').
+    Raises LLMUnavailableError (propagates to mark job 'failed').
     """
     logger.info("concept_link_handler: starting doc=%s job=%s", document_id, job_id)
     svc = ConceptLinkerService()

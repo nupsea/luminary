@@ -10,12 +10,15 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
+
+// These shapes stay inline: the /engagement/* endpoints
+// declare `-> dict` in the router so there is no generated schema to
+// alias against. Match the runtime payload by eye until those
+// endpoints adopt typed response models.
 
 interface XPHistoryItem {
   date: string
@@ -56,43 +59,45 @@ interface FocusStats {
   days: number
 }
 
-// ---------------------------------------------------------------------------
 // Fetchers
-// ---------------------------------------------------------------------------
+
+// Browser tz offset in minutes (positive west of UTC). Re-read per call so
+// fixtures / DST transitions get the current value rather than a stale one
+// captured at module load.
+const tzOffset = (): number => new Date().getTimezoneOffset()
 
 async function fetchXPHistory(): Promise<XPHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/engagement/xp/history?days=30`)
-  if (!res.ok) return []
-  return res.json()
+  try {
+    return await apiGet<XPHistoryItem[]>("/engagement/xp/history", {
+      days: 30,
+      tz_offset_minutes: tzOffset(),
+    })
+  } catch {
+    return []
+  }
 }
 
-async function fetchXPSummary(): Promise<XPSummary> {
-  const res = await fetch(`${API_BASE}/engagement/xp`)
-  if (!res.ok) throw new Error("xp fetch failed")
-  return res.json()
-}
+const fetchXPSummary = (): Promise<XPSummary> =>
+  apiGet<XPSummary>("/engagement/xp", { tz_offset_minutes: tzOffset() })
 
-async function fetchStreak(): Promise<StreakData> {
-  const res = await fetch(`${API_BASE}/engagement/streak`)
-  if (!res.ok) throw new Error("streak fetch failed")
-  return res.json()
-}
+const fetchStreak = (): Promise<StreakData> =>
+  apiGet<StreakData>("/engagement/streak", { tz_offset_minutes: tzOffset() })
 
 async function fetchAchievements(): Promise<Achievement[]> {
-  const res = await fetch(`${API_BASE}/engagement/achievements`)
-  if (!res.ok) return []
-  return res.json()
+  try {
+    return await apiGet<Achievement[]>("/engagement/achievements")
+  } catch {
+    return []
+  }
 }
 
-async function fetchFocusStats(): Promise<FocusStats> {
-  const res = await fetch(`${API_BASE}/engagement/focus/stats?days=7`)
-  if (!res.ok) throw new Error("focus stats failed")
-  return res.json()
-}
+const fetchFocusStats = (): Promise<FocusStats> =>
+  apiGet<FocusStats>("/engagement/focus/stats", {
+    days: 7,
+    tz_offset_minutes: tzOffset(),
+  })
 
-// ---------------------------------------------------------------------------
 // Icon map for achievements
-// ---------------------------------------------------------------------------
 
 const ICON_MAP: Record<string, typeof Trophy> = {
   flame: Flame,
@@ -102,9 +107,7 @@ const ICON_MAP: Record<string, typeof Trophy> = {
   "sticky-note": Trophy,
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export function StudyHabitsSection() {
   const { data: xpHistory, isLoading: historyLoading } = useQuery({
@@ -248,9 +251,7 @@ export function StudyHabitsSection() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Sub-components
-// ---------------------------------------------------------------------------
 
 function QuickStat({
   icon: Icon,

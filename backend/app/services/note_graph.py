@@ -13,6 +13,9 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
+
 logger = logging.getLogger(__name__)
 
 _note_graph_service: "NoteGraphService | None" = None
@@ -45,7 +48,7 @@ class NoteGraphService:
         Steps:
         1. Upsert Note node (id = note_id, preview = first 200 chars).
         2. If document_id provided and Document node exists: upsert DERIVED_FROM edge.
-        3. For each source_document_id in source_document_ids: upsert DERIVED_FROM edge (S175).
+        3. For each source_document_id in source_document_ids: upsert DERIVED_FROM edge
         4. Run GLiNER on content; for each extracted entity found in Kuzu: upsert WRITTEN_ABOUT.
         5. For each tag: if Entity with matching name exists: upsert TAG_IS_CONCEPT.
 
@@ -72,9 +75,8 @@ class NoteGraphService:
         tags: list[str],
         source_document_ids: list[str] | None = None,
     ) -> None:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        gs = get_graph_service()
+        gs = _graph_module.get_graph_service()
 
         # Run GLiNER BEFORE acquiring the lock -- inference is slow and should
         # not block other Kuzu operations (Kuzu connection is not thread-safe,
@@ -100,9 +102,8 @@ class NoteGraphService:
     ) -> list[dict]:
         """Run GLiNER extraction (slow) outside the Kuzu lock."""
         try:
-            from app.services.ner import get_entity_extractor  # noqa: PLC0415
 
-            extractor = get_entity_extractor()
+            extractor = _ner_module.get_entity_extractor()
             chunks = [{"id": note_id, "document_id": document_id or "", "text": content}]
             return extractor.extract(chunks, content_type="unknown")
         except Exception as exc:
@@ -165,7 +166,7 @@ class NoteGraphService:
                         {"nid": note_id, "did": document_id},
                     )
 
-        # 2b. S175: DERIVED_FROM edges for each NoteSourceModel row
+        # 2b. DERIVED_FROM edges for each NoteSourceModel row
         for src_doc_id in source_document_ids or []:
             # Skip if same as legacy document_id (already handled above to avoid duplicate)
             if src_doc_id == document_id:
@@ -257,7 +258,7 @@ class NoteGraphService:
                 )
 
     # ------------------------------------------------------------------
-    # LINKS_TO edges (S171)
+    # LINKS_TO edges
     # ------------------------------------------------------------------
 
     async def upsert_links_to_edge(self, source_id: str, target_id: str, link_type: str) -> None:
@@ -271,9 +272,8 @@ class NoteGraphService:
             logger.warning("upsert_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
 
     def _upsert_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        gs = get_graph_service()
+        gs = _graph_module.get_graph_service()
         with gs._lock:
             # Check both Note nodes exist
             for nid in (source_id, target_id):
@@ -302,9 +302,8 @@ class NoteGraphService:
             logger.warning("delete_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
 
     def _delete_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        gs = get_graph_service()
+        gs = _graph_module.get_graph_service()
         with gs._lock:
             gs._conn.execute(
                 "MATCH (s:Note {id: $sid})-[r:LINKS_TO]->(t:Note {id: $tid})"
@@ -324,9 +323,8 @@ class NoteGraphService:
             logger.warning("delete_note_node failed (non-fatal): %s", exc, exc_info=True)
 
     def _delete_note_node_sync(self, note_id: str) -> None:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        gs = get_graph_service()
+        gs = _graph_module.get_graph_service()
         with gs._lock:
             gs._conn.execute(  # type: ignore[union-attr]
                 "MATCH (n:Note {id: $id}) DETACH DELETE n",
@@ -345,9 +343,8 @@ class NoteGraphService:
         return await asyncio.to_thread(self._get_entities_for_note_sync, note_id)
 
     def _get_entities_for_note_sync(self, note_id: str) -> list[dict]:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        gs = get_graph_service()
+        gs = _graph_module.get_graph_service()
         entities: list[dict] = []
 
         with gs._lock:
@@ -396,9 +393,8 @@ class NoteGraphService:
         return await asyncio.to_thread(self._get_notes_for_entity_sync, entity_name)
 
     def _get_notes_for_entity_sync(self, entity_name: str) -> list[str]:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        gs = get_graph_service()
+        gs = _graph_module.get_graph_service()
         note_ids: list[str] = []
         with gs._lock:
             try:

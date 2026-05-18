@@ -1,6 +1,6 @@
 /**
  * Admin (Dev Tools) route -- developer-centric metrics dashboard.
- * Moved from Monitoring tab in S177. Accessible at /admin (not in main nav).
+ * Moved from Monitoring tab in . Accessible at /admin (not in main nav).
  *
  * Sections:
  *   1. System Status -- Ollama, Phoenix, Langfuse, Active Model
@@ -21,7 +21,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -32,63 +31,31 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+type TraceItem = components["schemas"]["TraceItem"]
+type TracesResponse = components["schemas"]["TracesResponse"]
+type MonitoringOverview = components["schemas"]["MonitoringOverview"]
+type ModelUsageItem = components["schemas"]["ModelUsageItem"]
+type PhoenixUrl = components["schemas"]["PhoenixUrlResponse"]
 
-interface TraceItem {
-  span_id: string
-  trace_id: string
-  operation_name: string
-  start_time: string
-  duration_ms: number
-  status: string
-  attributes: Record<string, unknown>
-}
-
-interface TracesResponse {
-  traces: TraceItem[]
-  message?: string | null
-}
-
-interface MonitoringOverview {
-  llm_status: string
-  phoenix_running: boolean
-  langfuse_configured: boolean
-  total_documents: number
-  total_chunks: number
-  qa_calls_today: number
-  avg_latency_ms: number | null
-}
-
-interface ModelUsageItem {
-  model: string
-  call_count: number
-  avg_latency_ms: number | null
-}
-
+// Local-only shape: the GET /settings/llm endpoint returns a different
+// shape from `LLMSettingsResponse` in api.ts (this one is the legacy
+// processing_mode/active_model view used by the Admin page).
 interface LLMSettings {
   processing_mode: string
   active_model: string
 }
 
-interface PhoenixUrl {
-  url: string
-  enabled: boolean
-}
-
+// Local-only subset of the documents list row used by Admin's
+// document-status mini-table; api.ts has the full DocumentListItem.
 interface Document {
   id: string
   title: string
   stage: string
   content_type: string
 }
-
-// ---------------------------------------------------------------------------
-// Per-section state
-// ---------------------------------------------------------------------------
 
 interface SectionState<T> {
   loading: boolean
@@ -100,52 +67,29 @@ function initSection<T>(data: T): SectionState<T> {
   return { loading: true, data, error: false }
 }
 
-// ---------------------------------------------------------------------------
 // API — throw on non-ok so catch handlers set error: true
-// ---------------------------------------------------------------------------
 
-async function fetchOverview(): Promise<MonitoringOverview> {
-  const res = await fetch(`${API_BASE}/monitoring/overview`)
-  if (!res.ok) throw new Error("overview failed")
-  return res.json() as Promise<MonitoringOverview>
-}
+const fetchOverview = (): Promise<MonitoringOverview> =>
+  apiGet<MonitoringOverview>("/monitoring/overview")
 
-async function fetchTraces(): Promise<TracesResponse> {
-  const res = await fetch(`${API_BASE}/monitoring/traces`)
-  if (!res.ok) throw new Error("traces failed")
-  return res.json() as Promise<TracesResponse>
-}
+const fetchTraces = (): Promise<TracesResponse> =>
+  apiGet<TracesResponse>("/monitoring/traces")
 
-async function fetchModelUsage(): Promise<ModelUsageItem[]> {
-  const res = await fetch(`${API_BASE}/monitoring/model-usage`)
-  if (!res.ok) throw new Error("model-usage failed")
-  return res.json() as Promise<ModelUsageItem[]>
-}
+const fetchModelUsage = (): Promise<ModelUsageItem[]> =>
+  apiGet<ModelUsageItem[]>("/monitoring/model-usage")
 
-async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("llm-settings failed")
-  return res.json() as Promise<LLMSettings>
-}
+const fetchLLMSettings = (): Promise<LLMSettings> =>
+  apiGet<LLMSettings>("/settings/llm")
 
 async function fetchDocuments(): Promise<Document[]> {
-  const res = await fetch(`${API_BASE}/documents`)
-  if (!res.ok) throw new Error("documents failed")
-  const data = (await res.json()) as { items?: Document[] } | Document[]
+  const data = await apiGet<{ items?: Document[] } | Document[]>("/documents")
   // handle both paginated and legacy list responses
   if (Array.isArray(data)) return data
   return (data as { items?: Document[] }).items ?? []
 }
 
-async function fetchPhoenixUrl(): Promise<PhoenixUrl> {
-  const res = await fetch(`${API_BASE}/monitoring/phoenix-url`)
-  if (!res.ok) throw new Error("phoenix-url failed")
-  return res.json() as Promise<PhoenixUrl>
-}
-
-// ---------------------------------------------------------------------------
-// Helper components
-// ---------------------------------------------------------------------------
+const fetchPhoenixUrl = (): Promise<PhoenixUrl> =>
+  apiGet<PhoenixUrl>("/monitoring/phoenix-url")
 
 function StatusBadge({ status }: { status: string }) {
   const isError = status === "error"
@@ -246,10 +190,6 @@ function TraceDetailPanel({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Empty / Error states
-// ---------------------------------------------------------------------------
-
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
@@ -286,9 +226,7 @@ function MetricCardSkeleton() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Model Usage — PieChart + latency BarChart
-// ---------------------------------------------------------------------------
 
 const PIE_COLORS = ["#6366f1", "#0ea5e9", "#22c55e", "#f59e0b", "#ec4899"]
 
@@ -348,9 +286,7 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Traces card — Phoenix link
-// ---------------------------------------------------------------------------
 
 function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
   const enabled = phoenix?.enabled ?? false
@@ -383,51 +319,25 @@ function TracesCard({ phoenix }: { phoenix: PhoenixUrl | null }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Mastery types and API (S145)
-// ---------------------------------------------------------------------------
+// Mastery types and API
 
-interface ConceptMasteryItem {
-  concept: string
-  mastery: number
-  card_count: number
-  due_soon: number
-  no_flashcards: boolean
-  document_ids: string[]
+type MasteryConceptsResponse = components["schemas"]["MasteryConceptsOut"]
+type MasteryHeatmapResponse = components["schemas"]["MasteryHeatmapOut"]
+
+function fetchMasteryConcepts(
+  documentIds: string[],
+): Promise<MasteryConceptsResponse> {
+  const url = new URL("https://placeholder/mastery/concepts")
+  documentIds.forEach((id) => url.searchParams.append("document_ids", id))
+  return apiGet<MasteryConceptsResponse>(
+    `/mastery/concepts?${url.searchParams.toString()}`,
+  )
 }
 
-interface HeatmapCellItem {
-  chapter: string
-  concept: string
-  mastery: number | null
-  card_count: number
-}
-
-interface MasteryConceptsResponse {
-  document_ids: string[]
-  concepts: ConceptMasteryItem[]
-}
-
-interface MasteryHeatmapResponse {
-  document_id: string
-  chapters: string[]
-  concepts: string[]
-  cells: HeatmapCellItem[]
-}
-
-async function fetchMasteryConcepts(documentIds: string[]): Promise<MasteryConceptsResponse> {
-  const params = new URLSearchParams()
-  documentIds.forEach((id) => params.append("document_ids", id))
-  const res = await fetch(`${API_BASE}/mastery/concepts?${params.toString()}`)
-  if (!res.ok) throw new Error("mastery/concepts failed")
-  return res.json() as Promise<MasteryConceptsResponse>
-}
-
-async function fetchMasteryHeatmap(documentId: string): Promise<MasteryHeatmapResponse> {
-  const res = await fetch(`${API_BASE}/mastery/heatmap?document_id=${encodeURIComponent(documentId)}`)
-  if (!res.ok) throw new Error("mastery/heatmap failed")
-  return res.json() as Promise<MasteryHeatmapResponse>
-}
+const fetchMasteryHeatmap = (
+  documentId: string,
+): Promise<MasteryHeatmapResponse> =>
+  apiGet<MasteryHeatmapResponse>("/mastery/heatmap", { document_id: documentId })
 
 function masteryColor(mastery: number | null): string {
   if (mastery === null) return "bg-gray-100 dark:bg-gray-800"
@@ -621,9 +531,7 @@ function MasteryPanel({ documents }: { documents: Document[] }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Admin (Dev Tools) page -- dev-centric panels moved from Progress tab in S177
-// ---------------------------------------------------------------------------
+// Admin — dev tools panel
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<"overview" | "mastery">("overview")

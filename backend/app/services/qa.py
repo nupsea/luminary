@@ -11,13 +11,19 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 
-import litellm
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
-from app.services.llm import get_llm_service
+from app.services.llm import (
+    LLMAPIConnectionError,
+    LLMAuthenticationError,
+    LLMNotFoundError,
+    LLMRateLimitError,
+    LLMServiceUnavailableError,
+    get_llm_service,
+)
 from app.telemetry import trace_chain
 from app.types import ScoredChunk
 
@@ -25,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 NOT_FOUND_SENTINEL = "NOT_FOUND_IN_CONTENT"
 
-# ---------------------------------------------------------------------------
 # Query rewriting — resolve vague pronouns via Kuzu entity lookup
-# ---------------------------------------------------------------------------
 
 VAGUE_REF_RE = re.compile(
     r"\b(they|he|she|it|them|the author|the speaker|the protagonist|"
@@ -344,13 +348,13 @@ class QAService:
                     "primary_strategy": None,
                     "conversation_history": conversation_history or [],
                     "image_ids": [],
-                    # Web augmentation fields (S142)
+                    # Web augmentation fields
                     "web_enabled": web_enabled,
                     "web_calls_used": 0,
                     "web_snippets": [],
-                    # S148: chunk-derived source citations (populated by synthesize_node)
+                    # chunk-derived source citations (populated by synthesize_node)
                     "source_citations": [],
-                    # S158: retrieval transparency (populated by synthesize_node)
+                    # retrieval transparency (populated by synthesize_node)
                     "transparency": None,
                     "transparency_augmented": False,
                 }
@@ -367,20 +371,20 @@ class QAService:
                     )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
-                    elif isinstance(exc, litellm.AuthenticationError):
+                    elif isinstance(exc, LLMAuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
-                    elif isinstance(exc, litellm.RateLimitError):
+                    elif isinstance(exc, LLMRateLimitError):
                         msg = (
                             "Rate limit reached. Free tier quota exhausted"
                             " — wait and retry, or switch provider."
                         )
-                    elif isinstance(exc, litellm.NotFoundError):
+                    elif isinstance(exc, LLMNotFoundError):
                         msg = (
                             f"Model not found ({type(exc).__name__})."
                             " Check the model name in Settings."
                         )
                     elif isinstance(
-                        exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)
+                        exc, (LLMServiceUnavailableError, LLMAPIConnectionError)
                     ):
                         msg = (
                             "LLM unreachable. Check your network or Settings"
@@ -399,7 +403,6 @@ class QAService:
 
                 root_span.set_attribute("qa.intent", result.get("intent") or "")
 
-                # -----------------------------------------------------------------------
                 # __card__ SSE Protocol (established in S96; used by S97, S98, S99)
                 #
                 # A graph node that produces a structured UI card sets:
@@ -416,7 +419,6 @@ class QAService:
                 # Protocol contract: this prefix and the two-event sequence must not
                 # change in S97, S98, or S99. Extend by adding new node types only.
                 # "__card__" is exactly 8 characters; raw_answer[8:] strips the prefix.
-                # -----------------------------------------------------------------------
                 raw_answer = result.get("answer") or ""
                 if raw_answer.startswith("__card__"):
                     card_json_str = raw_answer[8:]  # strip "__card__" prefix (8 chars)
@@ -497,20 +499,20 @@ class QAService:
                     )
                     if isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
-                    elif isinstance(exc, litellm.AuthenticationError):
+                    elif isinstance(exc, LLMAuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
-                    elif isinstance(exc, litellm.RateLimitError):
+                    elif isinstance(exc, LLMRateLimitError):
                         msg = (
                             "Rate limit reached. Free tier quota exhausted"
                             " — wait and retry, or switch provider."
                         )
-                    elif isinstance(exc, litellm.NotFoundError):
+                    elif isinstance(exc, LLMNotFoundError):
                         msg = (
                             f"Model not found ({type(exc).__name__})."
                             " Check the model name in Settings."
                         )
                     elif isinstance(
-                        exc, (litellm.ServiceUnavailableError, litellm.APIConnectionError)
+                        exc, (LLMServiceUnavailableError, LLMAPIConnectionError)
                     ):
                         msg = (
                             "LLM unreachable. Check your network or Settings"
@@ -570,7 +572,7 @@ class QAService:
                 citations = result.get("citations") or []
                 confidence = result.get("confidence") or "low"
 
-            # S158: emit 'transparency' SSE event before 'done' if TransparencyInfo available.
+            # emit 'transparency' SSE event before 'done' if TransparencyInfo available.
             # confidence_level is filled in here after _split_response() determines it.
             transparency = result.get("transparency")
             if transparency:
@@ -595,10 +597,10 @@ class QAService:
                 "confidence": confidence,
                 "qa_id": qa_id,
                 "image_ids": result.get("image_ids") or [],
-                # Web augmentation fields (S142) -- web_snippets not stored in DB
+                # Web augmentation fields -- web_snippets not stored in DB
                 "web_sources": result.get("web_snippets") or [],
                 "web_calls_used": result.get("web_calls_used") or 0,
-                # S148: chunk-derived source citations for trust/navigation
+                # chunk-derived source citations for trust/navigation
                 "source_citations": result.get("source_citations") or [],
             }
             yield f"data: {json.dumps(final)}\n\n"

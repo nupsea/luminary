@@ -1,5 +1,5 @@
 /**
- * EPUBViewer — Two-column chapter reader for EPUB documents (S149).
+ * EPUBViewer — Two-column chapter reader for EPUB documents
  *
  * Left panel: scrollable chapter TOC with active chapter highlighted.
  * Right panel: sanitized chapter HTML rendered in a Tailwind prose div.
@@ -14,46 +14,25 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import type { components } from "@/types/api"
 
-interface EpubTocItem {
-  chapter_index: number
-  title: string
-  word_count: number
-}
-
-interface EpubChapter {
-  chapter_index: number
-  chapter_title: string
-  html: string
-  word_count: number
-  section_ids: string[]
-}
-
-// ---------------------------------------------------------------------------
-// API fetch helpers
-// ---------------------------------------------------------------------------
+type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
+type EpubChapter = components["schemas"]["EpubChapterResponse"]
 
 async function fetchToc(documentId: string): Promise<EpubTocItem[]> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/epub/toc`)
-  if (!res.ok) throw new Error(`Failed to fetch TOC: HTTP ${res.status}`)
-  const data = (await res.json()) as { chapters: EpubTocItem[] }
+  const data = await apiGet<{ chapters: EpubTocItem[] }>(
+    `/documents/${documentId}/epub/toc`,
+  )
   return data.chapters
 }
 
-async function fetchChapter(documentId: string, chapterIndex: number): Promise<EpubChapter> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/epub/chapter/${chapterIndex}`)
-  if (!res.ok) throw new Error(`Failed to fetch chapter ${chapterIndex}: HTTP ${res.status}`)
-  return res.json() as Promise<EpubChapter>
-}
-
-// ---------------------------------------------------------------------------
-// EPUBViewer
-// ---------------------------------------------------------------------------
+const fetchChapter = (
+  documentId: string,
+  chapterIndex: number,
+): Promise<EpubChapter> =>
+  apiGet<EpubChapter>(`/documents/${documentId}/epub/chapter/${chapterIndex}`)
 
 interface EPUBViewerProps {
   documentId: string

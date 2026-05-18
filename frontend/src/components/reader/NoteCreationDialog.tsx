@@ -18,12 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { SourceRef } from "./SelectionActionBar"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import type { Note } from "@/components/NoteEditorDialog"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 interface ExistingNote {
   id: string
@@ -41,10 +37,6 @@ interface NoteCreationDialogProps {
   /** Called with the saved Note so parent can open NoteEditorDialog on it */
   onSaved: (note: Note) => void
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function buildBlockquote(text: string, sourceRef: SourceRef | null, sectionHeading?: string): string {
   const parts = [sourceRef?.documentTitle, sectionHeading].filter(Boolean)
@@ -70,10 +62,6 @@ function firstLine(content: string): string {
   const line = content.split("\n").find((l) => l.trim().length > 0) ?? ""
   return line.length > 80 ? line.slice(0, 80) + "..." : line
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function NoteCreationDialog({
   open,
@@ -109,8 +97,7 @@ export function NoteCreationDialog({
   useEffect(() => {
     if (open && sourceRef?.documentId) {
       setNotesLoading(true)
-      fetch(`${API_BASE}/notes?document_id=${sourceRef.documentId}`)
-        .then((res) => (res.ok ? (res.json() as Promise<ExistingNote[]>) : Promise.resolve([])))
+      apiGet<ExistingNote[]>("/notes", { document_id: sourceRef.documentId })
         .then((notes) => setExistingNotes(notes))
         .catch(() => setExistingNotes([]))
         .finally(() => setNotesLoading(false))
@@ -141,28 +128,18 @@ export function NoteCreationDialog({
         const existing = existingNotes.find((n) => n.id === selectedNoteId)
         if (!existing) throw new Error("Selected note not found")
         const mergedContent = existing.content + "\n\n---\n\n" + blockquote
-        const res = await fetch(`${API_BASE}/notes/${selectedNoteId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: mergedContent }),
+        result = await apiPatch<Note>(`/notes/${selectedNoteId}`, {
+          content: mergedContent,
         })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        result = (await res.json()) as Note
       } else {
         // POST new note
-        const res = await fetch(`${API_BASE}/notes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            document_id: sourceRef.documentId,
-            section_id: sourceRef.sectionId ?? null,
-            content: blockquote,
-            tags: [],
-            group_name: null,
-          }),
+        result = await apiPost<Note>("/notes", {
+          document_id: sourceRef.documentId,
+          section_id: sourceRef.sectionId ?? null,
+          content: blockquote,
+          tags: [],
+          group_name: null,
         })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        result = (await res.json()) as Note
       }
       onSaved(result)
       onClose()

@@ -27,11 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat/sessions", tags=["chat-sessions"])
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
 class SessionCreateRequest(BaseModel):
     scope: Literal["single", "all"] = "all"
     document_ids: list[str] = []
@@ -83,11 +78,6 @@ class SessionDetail(BaseModel):
     updated_at: datetime
     last_message_at: datetime
     messages: list[MessageOut]
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=SessionListItem)

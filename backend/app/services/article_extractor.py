@@ -44,7 +44,7 @@ class ArticleExtractor:
             logger.warning("cloudscraper failed for %s: %s", url, e)
 
         if not html_content:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
                 resp = await client.get(url, headers={"User-Agent": USER_AGENTS[0]})
                 resp.raise_for_status()
                 html_content = resp.text
@@ -114,7 +114,7 @@ class ArticleExtractor:
 
                 if not dest_path.exists():
                     scraper = cloudscraper.create_scraper()
-                    resp = await asyncio.to_thread(scraper.get, url, timeout=10)
+                    resp = await asyncio.to_thread(scraper.get, url, timeout=300.0)
                     if resp.status_code == 200:
                         dest_path.write_bytes(resp.content)
 

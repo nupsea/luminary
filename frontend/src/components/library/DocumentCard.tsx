@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
+import { isDocumentErrored, isDocumentProcessing } from "@/lib/documentReadiness"
 import { 
   Book, 
   BookOpen, 
@@ -36,7 +37,7 @@ import {
   relativeDate,
 } from "./utils"
 
-import { API_BASE } from "@/lib/config"
+import { apiPatch } from "@/lib/apiClient"
 
 function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   const r = (size - 4) / 2
@@ -130,6 +131,8 @@ export function DocumentCard({
   const isYouTube = isYouTubeDoc(doc)
   const isKindleSource = doc.tags.includes("kindle")
   const Icon = isYouTube ? Youtube : CONTENT_TYPE_ICONS[doc.content_type]
+  const isProcessing = isDocumentProcessing(doc)
+  const isErrored = isDocumentErrored(doc)
   const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : CONTENT_TYPE_BADGE[doc.content_type])
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
@@ -205,11 +208,7 @@ export function DocumentCard({
     setTypePopoverOpen(false)
     if (newType === doc.content_type) return
     try {
-      await fetch(`${API_BASE}/documents/${doc.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content_type: newType }),
-      })
+      await apiPatch(`/documents/${doc.id}`, { content_type: newType })
       onContentTypeChange?.(doc.id, newType)
     } catch {
       // Non-fatal — UI will revert on next query invalidation
@@ -225,8 +224,17 @@ export function DocumentCard({
         "group cursor-pointer select-none transition-all duration-200 overflow-hidden",
         "hover:shadow-lg hover:-translate-y-0.5",
         selected ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "hover:border-border/80",
+        isProcessing && "opacity-70",
+        isErrored && "border-red-200",
       )}
       onClick={handleCardClick}
+      title={
+        isProcessing
+          ? "Document is still being ingested. Open it to see live progress."
+          : isErrored
+          ? "Ingestion failed. Open the card to retry or delete."
+          : undefined
+      }
     >
       {/* Accent band */}
       <div className={cn("h-1 w-full bg-gradient-to-r", accentGradient)} />
@@ -245,10 +253,20 @@ export function DocumentCard({
           <h3 className="truncate text-sm font-semibold text-foreground">{doc.title}</h3>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
-            {STATUS_LABELS[doc.learning_status]}
-          </Badge>
-          {/* S191: Document action menu */}
+          {isProcessing ? (
+            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+              Processing…
+            </span>
+          ) : isErrored ? (
+            <span className="rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+              Failed
+            </span>
+          ) : (
+            <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
+              {STATUS_LABELS[doc.learning_status]}
+            </Badge>
+          )}
+          {/* Document action menu */}
           {onAction && !selectMode && (
             <div className="relative" ref={actionMenuRef}>
               <button
@@ -442,7 +460,7 @@ export function DocumentCard({
         </div>
       )}
 
-      {/* Objective progress ring (S143) — shown only when objectives have been extracted */}
+      {/* Objective progress ring — shown only when objectives have been extracted */}
       {doc.objective_progress_pct !== null && (
         <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           <ProgressRing pct={doc.objective_progress_pct} size={24} />
@@ -457,7 +475,10 @@ export function DocumentCard({
           onClick={(e) => e.stopPropagation()}
         >
           <p className="text-xs text-foreground mb-2">
-            Delete <span className="font-semibold">{doc.title}</span>? This cannot be undone.
+            Delete <span className="font-semibold">{doc.title}</span>?
+            {isProcessing
+              ? " The in-flight ingestion will be cancelled."
+              : " This cannot be undone."}
           </p>
           <div className="flex justify-end gap-2">
             <button

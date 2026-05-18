@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for TagTree and TagAutocomplete logic (S165).
+ * Vitest unit tests for TagTree and TagAutocomplete logic
  *
  * Tests cover:
  *   1. TagTree renders correct nesting from mock GET /tags/tree fixture
@@ -26,9 +26,7 @@ import type { TagTreeItem, AutocompleteResult } from "@/lib/tagUtils"
 
 const API_BASE = "http://localhost:7820"
 
-// ---------------------------------------------------------------------------
-// Fixtures -- mirrors GET /tags/tree response
-// ---------------------------------------------------------------------------
+// Fixtures — mirrors GET /tags/tree response
 
 const MOCK_TAG_TREE: TagTreeItem[] = [
   {
@@ -77,10 +75,6 @@ const MOCK_TAG_TREE: TagTreeItem[] = [
   },
 ]
 
-// ---------------------------------------------------------------------------
-// AC: TagTree renders correct nesting from fixture
-// ---------------------------------------------------------------------------
-
 describe("TagTree nesting from fixture", () => {
   it("counts 6 items total: 2 top-level + 3 children of programming + 1 child of science", () => {
     expect(countTagTreeItems(MOCK_TAG_TREE)).toBe(6)
@@ -125,10 +119,6 @@ describe("TagTree nesting from fixture", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// AC: TagAutocomplete fires autocomplete request
-// ---------------------------------------------------------------------------
-
 describe("TagAutocomplete request construction", () => {
   it("builds correct URL for plain query", () => {
     const url = buildAutocompleteUrl(API_BASE, "prog")
@@ -145,10 +135,6 @@ describe("TagAutocomplete request construction", () => {
     expect(url).toBe(`${API_BASE}/tags/autocomplete?q=`)
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: Tag breadcrumb parsing
-// ---------------------------------------------------------------------------
 
 describe("parseTagBreadcrumb", () => {
   it("flat tag returns root only, no rest", () => {
@@ -169,10 +155,6 @@ describe("parseTagBreadcrumb", () => {
     expect(result.rest).toBe("/physics/quantum")
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: Merge request construction
-// ---------------------------------------------------------------------------
 
 describe("buildMergeRequest", () => {
   it("returns POST method", () => {
@@ -197,10 +179,6 @@ describe("buildMergeRequest", () => {
     expect(req.headers["Content-Type"]).toBe("application/json")
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: filterMergeOptions excludes source and filters by query
-// ---------------------------------------------------------------------------
 
 describe("filterMergeOptions", () => {
   const TAGS: AutocompleteResult[] = [
@@ -243,9 +221,7 @@ describe("filterMergeOptions", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// S190: TagTree search input filters tags by substring match
-// ---------------------------------------------------------------------------
+// TagTree search input filters tags by substring match
 
 const DEEP_TAG_TREE: TagTreeItem[] = [
   {
@@ -295,7 +271,7 @@ const DEEP_TAG_TREE: TagTreeItem[] = [
   },
 ]
 
-describe("S190: filterTagTree substring match", () => {
+describe("filterTagTree substring match", () => {
   it("returns all items when query is empty", () => {
     const result = filterTagTree(DEEP_TAG_TREE, "")
     expect(result).toHaveLength(2)
@@ -335,7 +311,7 @@ describe("S190: filterTagTree substring match", () => {
   })
 })
 
-describe("S190: parent chain shown for deeply nested matching tags", () => {
+describe("parent chain shown for deeply nested matching tags", () => {
   it("genetics match includes science > biology parent chain", () => {
     const result = filterTagTree(DEEP_TAG_TREE, "genetics")
     expect(result).toHaveLength(1)
@@ -361,7 +337,7 @@ describe("S190: parent chain shown for deeply nested matching tags", () => {
   })
 })
 
-describe("S190: highlightMatch segments", () => {
+describe("highlightMatch segments", () => {
   it("highlights matching substring", () => {
     const segs = highlightMatch("genetics", "net")
     expect(segs).toHaveLength(3)

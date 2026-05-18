@@ -1,5 +1,5 @@
 /**
- * explanationDiff -- client-side sentence-level LCS diff for Feynman comparison (S159).
+ * explanationDiff -- client-side sentence-level LCS diff for Feynman comparison
  *
  * Splits text by ". " boundaries, computes LCS, classifies each sentence as:
  *   shared      -- appears in both user and model explanations

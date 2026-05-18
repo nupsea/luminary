@@ -1,5 +1,5 @@
 /**
- * FeynmanDialog -- split-pane guided explanation session (S144).
+ * FeynmanDialog -- split-pane guided explanation session
  *
  * Left pane (40%): section summary (or fallback preview)
  * Right pane (60%): SSE-streaming Socratic tutor chat
@@ -19,6 +19,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { RubricCard, type Rubric } from "@/components/RubricCard"
 import { computeExplanationDiff, splitSentences, type DiffSegment } from "@/lib/explanationDiff"
 
+import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import {
   fetchSummary,
@@ -27,23 +28,15 @@ import {
   summaryInflight,
 } from "./feynmanSummaryCache"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface ChatMessage {
   role: "tutor" | "learner"
   content: string
   gaps?: string[]
 }
 
-interface SessionHistoryItem {
-  id: string
-  concept: string
-  status: string
-  gap_count: number
-  created_at: string
-}
+import type { components } from "@/types/api"
+
+type SessionHistoryItem = components["schemas"]["FeynmanSessionListItem"]
 
 interface FeynmanDialogProps {
   documentId: string
@@ -53,10 +46,6 @@ interface FeynmanDialogProps {
 }
 
 type DialogTab = "chat" | "history"
-
-// ---------------------------------------------------------------------------
-// FeynmanDialog
-// ---------------------------------------------------------------------------
 
 export function FeynmanDialog({
   documentId,
@@ -90,7 +79,7 @@ export function FeynmanDialog({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
 
-  // S159: model explanation state
+  // model explanation state
   const [showModelExplanation, setShowModelExplanation] = useState(false)
   const [modelExplanationStreaming, setModelExplanationStreaming] = useState(false)
   const [modelExplanationText, setModelExplanationText] = useState<string | null>(null)
@@ -103,9 +92,7 @@ export function FeynmanDialog({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  // ---------------------------------------------------------------------------
   // Load section summary (left pane)
-  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false
@@ -151,9 +138,7 @@ export function FeynmanDialog({
     if (summaryContent !== null || summaryError !== null) setSummaryLoading(false)
   }, [summaryContent, summaryError])
 
-  // ---------------------------------------------------------------------------
   // Create session on mount
-  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false
@@ -161,34 +146,18 @@ export function FeynmanDialog({
       setSessionLoading(true)
       setSessionError(null)
       try {
-        const res = await fetch(`${API_BASE}/feynman/sessions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            document_id: documentId,
-            section_id: sectionId,
-            concept,
-          }),
-        })
-        if (cancelled) return
-        if (!res.ok) {
-          if (res.status === 503) {
-            setSessionError("Ollama is not running. Start it with: ollama serve")
-          } else {
-            setSessionError(`Failed to start session (HTTP ${res.status})`)
-          }
-          setSessionLoading(false)
-          return
-        }
-        const data = (await res.json()) as {
-          id: string
-          opening_message: string
-        }
+        const data = await apiPost<{ id: string; opening_message: string }>(
+          "/feynman/sessions",
+          { document_id: documentId, section_id: sectionId, concept },
+        )
         if (cancelled) return
         setSessionId(data.id)
         setMessages([{ role: "tutor", content: data.opening_message }])
-      } catch {
-        if (!cancelled) {
+      } catch (err) {
+        if (cancelled) return
+        if (err instanceof ApiError && err.status !== 503) {
+          setSessionError(`Failed to start session (HTTP ${err.status})`)
+        } else {
           setSessionError("Ollama is not running. Start it with: ollama serve")
         }
       } finally {
@@ -207,18 +176,14 @@ export function FeynmanDialog({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  // ---------------------------------------------------------------------------
   // Load session history
-  // ---------------------------------------------------------------------------
 
   function loadHistory() {
     setHistoryLoading(true)
     setHistoryError(null)
-    fetch(`${API_BASE}/feynman/sessions?document_id=${encodeURIComponent(documentId)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch session history")
-        return res.json() as Promise<SessionHistoryItem[]>
-      })
+    apiGet<SessionHistoryItem[]>("/feynman/sessions", {
+      document_id: documentId,
+    })
       .then((data) => {
         setHistory(data)
         setHistoryLoading(false)
@@ -234,9 +199,7 @@ export function FeynmanDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  // ---------------------------------------------------------------------------
   // Send message
-  // ---------------------------------------------------------------------------
 
   async function handleSend() {
     if (!sessionId || !inputText.trim() || sending) return
@@ -253,6 +216,9 @@ export function FeynmanDialog({
     setMessages((prev) => [...prev, { role: "tutor", content: "" }])
 
     try {
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -331,20 +297,22 @@ export function FeynmanDialog({
     }
   }
 
-  // ---------------------------------------------------------------------------
   // Complete session
-  // ---------------------------------------------------------------------------
 
   async function handleComplete() {
     if (!sessionId || completing) return
     setCompleting(true)
     try {
-      const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/complete`, {
-        method: "POST",
+      const data = await apiPost<{
+        gap_count: number
+        flashcard_ids: string[]
+        rubric: Rubric | null
+      }>(`/feynman/sessions/${sessionId}/complete`)
+      setCompleteResult({
+        gap_count: data.gap_count,
+        flashcard_ids: data.flashcard_ids,
+        rubric: data.rubric ?? null,
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { gap_count: number; flashcard_ids: string[]; rubric: Rubric | null }
-      setCompleteResult({ gap_count: data.gap_count, flashcard_ids: data.flashcard_ids, rubric: data.rubric ?? null })
     } catch {
       setSessionError("Could not complete session. Please try again.")
     } finally {
@@ -354,9 +322,7 @@ export function FeynmanDialog({
 
   const learnerTurnCount = messages.filter((m) => m.role === "learner").length
 
-  // ---------------------------------------------------------------------------
-  // S159: Model explanation fetch and diff computation
-  // ---------------------------------------------------------------------------
+  // Model explanation fetch and diff computation
 
   async function handleFetchModelExplanation() {
     if (!sessionId || modelExplanationStreaming) return
@@ -367,6 +333,9 @@ export function FeynmanDialog({
     setDiffSegments([])
 
     try {
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/feynman/sessions/${sessionId}/model-explanation`, {
         method: "POST",
       })
@@ -438,17 +407,12 @@ export function FeynmanDialog({
     setSavingNote(true)
     try {
       const noteContent = `## Model Explanation: ${concept}\n\n${modelExplanationText}${modelKeyPoints.length > 0 ? `\n\n**Key points:** ${modelKeyPoints.join(", ")}` : ""}\n\n_Generated by Luminary Feynman mode_`
-      const res = await fetch(`${API_BASE}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sectionId,
-          content: noteContent,
-          tags: ["feynman", "model-explanation"],
-        }),
+      await apiPost("/notes", {
+        document_id: documentId,
+        section_id: sectionId,
+        content: noteContent,
+        tags: ["feynman", "model-explanation"],
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setNoteSaved(true)
     } catch {
       setModelExplanationError("Could not save note. Please try again.")
@@ -457,9 +421,7 @@ export function FeynmanDialog({
     }
   }
 
-  // ---------------------------------------------------------------------------
   // Render
-  // ---------------------------------------------------------------------------
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -575,7 +537,7 @@ export function FeynmanDialog({
                     </p>
                   )}
 
-                  {/* S159: See model explanation button (only when concept + sectionId present) */}
+                  {/* See model explanation button (only when concept + sectionId present) */}
                   {concept && sectionId && !showModelExplanation && (
                     <button
                       onClick={() => void handleFetchModelExplanation()}
@@ -585,7 +547,7 @@ export function FeynmanDialog({
                     </button>
                   )}
 
-                  {/* S159: Model explanation panel */}
+                  {/* Model explanation panel */}
                   {showModelExplanation && (
                     <div className="mt-3 rounded-md border border-border p-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

@@ -21,9 +21,7 @@ from app.types import ChatState, NoteSearchResult
 
 pytest_plugins = ["conftest_books"]
 
-# ---------------------------------------------------------------------------
 # Heuristic tests (pure function)
-# ---------------------------------------------------------------------------
 
 
 def test_heuristic_classifies_notes_intent():
@@ -48,9 +46,7 @@ def test_heuristic_no_false_positive():
     assert intent != "notes"
 
 
-# ---------------------------------------------------------------------------
 # route_node tests
-# ---------------------------------------------------------------------------
 
 
 def _make_minimal_state(**overrides) -> ChatState:
@@ -91,9 +87,7 @@ def test_route_node_other_intents_unchanged():
         assert result != "notes_node", f"intent={intent} incorrectly routed to notes_node"
 
 
-# ---------------------------------------------------------------------------
 # notes_node tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -156,9 +150,7 @@ async def test_notes_node_multiple_results_joined():
     assert "[From your notes] second note" in ctx
 
 
-# ---------------------------------------------------------------------------
 # Slow integration test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

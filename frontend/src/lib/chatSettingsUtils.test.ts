@@ -76,7 +76,7 @@ describe("DRAWER_SECTIONS", () => {
     expect(DRAWER_SECTIONS).toContain("model")
   })
 
-  it("does NOT include scope -- scope moved to inline combobox in Chat header (S186)", () => {
+  it("does NOT include scope -- scope moved to inline combobox in Chat header", () => {
     expect(DRAWER_SECTIONS).not.toContain("scope")
   })
 

@@ -2,7 +2,7 @@ import { CheckCircle2, Loader2, XCircle, AlertTriangle } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router-dom"
 
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiPost } from "@/lib/apiClient"
 import { RubricCard, type Rubric } from "@/components/RubricCard"
 
 export interface TeachBackCardData {
@@ -14,7 +14,7 @@ export interface TeachBackCardData {
   document_id: string
   error?: string
   error_detail?: string
-  rubric?: Rubric | null  // S156: structured rubric; null for legacy rows
+  rubric?: Rubric | null  // structured rubric; null for legacy rows
 }
 
 interface TeachBackResultCardProps {
@@ -45,32 +45,34 @@ export function TeachBackResultCard({ data }: TeachBackResultCardProps) {
     setBtnState("loading")
     setErrorMsg("")
     try {
-      const res = await fetch(`${API_BASE}/flashcards/from-gaps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gaps: data.gaps, document_id: data.document_id }),
+      const body = await apiPost<{ created: number }>("/flashcards/from-gaps", {
+        gaps: data.gaps,
+        document_id: data.document_id,
       })
-      if (res.status === 503) {
-        setErrorMsg("Ollama is unavailable. Start it with: ollama serve")
-        setBtnState("error")
-        return
-      }
-      if (!res.ok) {
-        const detail = ((await res.json()) as { detail?: string }).detail ?? `HTTP ${res.status}`
-        setErrorMsg(detail)
-        setBtnState("error")
-        return
-      }
-      const body = (await res.json()) as { created: number }
       setCreatedCount(body.created)
       setBtnState("done")
-    } catch {
-      setErrorMsg("Request failed. Please try again.")
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 503) {
+          setErrorMsg("Ollama is unavailable. Start it with: ollama serve")
+        } else {
+          let detail = `HTTP ${err.status}`
+          try {
+            const parsed = JSON.parse(err.body) as { detail?: string }
+            if (parsed.detail) detail = parsed.detail
+          } catch {
+            // body wasn't JSON
+          }
+          setErrorMsg(detail)
+        }
+      } else {
+        setErrorMsg("Request failed. Please try again.")
+      }
       setBtnState("error")
     }
   }
 
-  // S156: if rubric is present, render RubricCard (primary path)
+  // if rubric is present, render RubricCard (primary path)
   if (data.rubric) {
     return (
       <div className="flex flex-col gap-3">

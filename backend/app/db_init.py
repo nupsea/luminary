@@ -21,7 +21,6 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     FeynmanSessionModel,
     FeynmanTurnModel,
     FlashcardModel,
-    GlossaryTermModel,
     GoldenDatasetModel,
     GoldenQuestionModel,
     ImageModel,
@@ -99,7 +98,7 @@ USING fts5(
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
-        # S175: note_sources may have been created with an incorrect FK on document_id
+        # note_sources may have been created with an incorrect FK on document_id
         # during an early implementation attempt. Detect and rebuild if needed.
         # Uses SQLite table-rebuild idiom (no ALTER DROP CONSTRAINT support).
         fk_rows = (await conn.execute(text("PRAGMA foreign_key_list(note_sources)"))).fetchall()
@@ -132,7 +131,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         await conn.execute(text(CHAT_MESSAGES_FTS5_DDL))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
-        # S208: Rename note_collections to collections.
+        # Rename note_collections to collections.
         # SQLite does not support RENAME TABLE if there are dependent views or triggers
         # in some versions, but usually it's fine. We'll use the table-rebuild idiom
         # to ensure the new table name is set correctly in metadata.
@@ -141,7 +140,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         except Exception:
             pass  # Already renamed or doesn't exist
 
-        # S208: Create collection_members and migrate from note_collection_members.
+        # Create collection_members and migrate from note_collection_members.
         # We check if collection_members exists; if not, create and migrate.
         try:
             # Check if old table exists
@@ -180,7 +179,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 # Drop the old table
                 await conn.execute(text("DROP TABLE note_collection_members"))
         except Exception as e:
-            logger.warning("Migration S208 failed (non-critical): %s", e)
+            logger.warning("Migration failed (non-critical): %s", e)
 
         for ddl in [
             "ALTER TABLE documents ADD COLUMN file_hash TEXT",
@@ -201,33 +200,33 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN code_signature TEXT",
             "ALTER TABLE sections ADD COLUMN admonition_type TEXT",
             "ALTER TABLE sections ADD COLUMN parent_section_id TEXT",
-            # S137: Bloom's Taxonomy flashcard type/level — nullable; generate_technical() sets them
+            # Bloom's Taxonomy flashcard type/level — nullable; generate_technical() sets them
             "ALTER TABLE flashcards ADD COLUMN flashcard_type TEXT",
             "ALTER TABLE flashcards ADD COLUMN bloom_level INTEGER",
-            # S139: prerequisite chain depth per section (set by PrereqExtractorService)
+            # prerequisite chain depth per section (set by PrereqExtractorService)
             "ALTER TABLE sections ADD COLUMN difficulty_estimate INTEGER",
-            # S141: publication year for contradiction prefer_source temporal ordering
+            # publication year for contradiction prefer_source temporal ordering
             "ALTER TABLE documents ADD COLUMN publication_year INTEGER",
-            # S146: PDF page number per chunk for PDF viewer deep-links
+            # PDF page number per chunk for PDF viewer deep-links
             "ALTER TABLE chunks ADD COLUMN pdf_page_number INTEGER",
-            # S224: canonical entity tail for index-time vocabulary bridging
+            # canonical entity tail for index-time vocabulary bridging
             "ALTER TABLE chunks ADD COLUMN entities_text TEXT",
-            # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+            # cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
-            # S156: structured rubric JSON for teachback results and feynman sessions
+            # structured rubric JSON for teachback results and feynman sessions
             "ALTER TABLE teachback_results ADD COLUMN rubric_json JSON",
             "ALTER TABLE feynman_sessions ADD COLUMN rubric_json JSON",
-            # S159: model-generated explanation and key points for diff view
+            # model-generated explanation and key points for diff view
             "ALTER TABLE feynman_sessions ADD COLUMN model_explanation_text TEXT",
             "ALTER TABLE feynman_sessions ADD COLUMN key_points_json JSON",
             # Inline highlights: page_number for PDF annotations
             "ALTER TABLE annotations ADD COLUMN page_number INTEGER",
-            # S182: YouTube channel/uploader name and canonical YouTube URL
+            # YouTube channel/uploader name and canonical YouTube URL
             "ALTER TABLE documents ADD COLUMN channel_name TEXT",
             "ALTER TABLE documents ADD COLUMN youtube_url TEXT",
-            # S192: auto-collection document linkage
+            # auto-collection document linkage
             "ALTER TABLE collections ADD COLUMN auto_document_id TEXT",
-            # S194: URL validation status for web references
+            # URL validation status for web references
             "ALTER TABLE web_references ADD COLUMN is_valid INTEGER",
             "ALTER TABLE web_references ADD COLUMN last_checked_at DATETIME",
             # Async teach-back evaluation status
@@ -238,7 +237,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE study_sessions ADD COLUMN collection_id TEXT",
             # Persist the planned queue per session so resume preserves scope
             "ALTER TABLE study_sessions ADD COLUMN planned_card_ids JSON",
-            # S210: typed learning goals replace the FSRS-readiness goal schema.
+            # typed learning goals replace the FSRS-readiness goal schema.
             # Existing databases may already have learning_goals with the old columns
             # (document_id NOT NULL, target_date). Add the new columns idempotently;
             # SQLite is permissive about NOT NULL on ALTER ADD when no rows exist.
@@ -250,7 +249,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE learning_goals ADD COLUMN collection_id TEXT",
             "ALTER TABLE learning_goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
             "ALTER TABLE learning_goals ADD COLUMN completed_at DATETIME",
-            # S213: eval_kind tag + citation_support_rate (S215) on EvalRunModel
+            # eval_kind tag + citation_support_rate on EvalRunModel
             "ALTER TABLE eval_runs ADD COLUMN eval_kind TEXT",
             "ALTER TABLE eval_runs ADD COLUMN citation_support_rate REAL",
             "ALTER TABLE eval_runs ADD COLUMN theme_coverage REAL",
@@ -268,7 +267,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             except Exception:
                 pass  # column already exists
 
-        # S210-fix: learning_goals.document_id was originally created NOT NULL.
+        # learning_goals.document_id was originally created NOT NULL.
         # Drop the constraint via table-rebuild (SQLite has no ALTER COLUMN).
         lg_cols = (await conn.execute(text("PRAGMA table_info(learning_goals)"))).fetchall()
         lg_doc_col = next((r for r in lg_cols if r[1] == "document_id"), None)
@@ -307,7 +306,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
             logger.info("Migrated learning_goals: dropped NOT NULL on document_id")
 
-        # S161: migrate distinct group_name values into collections (idempotent).
+        # migrate distinct group_name values into collections (idempotent).
         # Uses INSERT OR IGNORE so re-running on an already-migrated DB is safe.
         # The collection id is derived from the group_name to be deterministic across runs.
         await conn.execute(
@@ -332,7 +331,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S161: populate collection_members from group_name (idempotent via INSERT OR IGNORE).
+        # populate collection_members from group_name (idempotent via INSERT OR IGNORE).
         await conn.execute(
             text(
                 """
@@ -351,7 +350,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S192: index on auto_document_id for fast auto-collection lookup.
+        # index on auto_document_id for fast auto-collection lookup.
         await conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_collections_auto_doc_id "
@@ -359,7 +358,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S210: indexes for typed learning goal lookups.
+        # indexes for typed learning goal lookups.
         await conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_learning_goals_status "
@@ -373,7 +372,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S162: explicit indexes on note_tag_index for O(1) prefix lookup.
+        # explicit indexes on note_tag_index for O(1) prefix lookup.
         # CREATE INDEX IF NOT EXISTS is idempotent.
         await conn.execute(
             text(
@@ -384,7 +383,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             text("CREATE INDEX IF NOT EXISTS idx_note_tag_index_note_id ON note_tag_index(note_id)")
         )
 
-        # S162: backfill note_tag_index from existing notes.tags JSON.
+        # backfill note_tag_index from existing notes.tags JSON.
         # tag_parent set to '' for all rows; _sync_tag_index recomputes it on
         # any future note update. For hierarchical tags already in the DB, the
         # prefix-search filter only uses tag_full (not tag_parent), so filtering
@@ -434,7 +433,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S168: index on tag_merge_suggestions.status for efficient pending-suggestion queries.
+        # index on tag_merge_suggestions.status for efficient pending-suggestion queries.
         await conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_tag_merge_suggestions_status "
@@ -442,14 +441,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S169: source_content_hash column for incremental collection-based flashcard generation.
+        # source_content_hash column for incremental collection-based flashcard generation.
         # ALTER TABLE is idempotent -- column is silently ignored if it already exists.
         try:
             await conn.execute(text("ALTER TABLE flashcards ADD COLUMN source_content_hash TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
-        # S173: archived flag on notes; note_id FK on flashcards for per-note coverage tracking.
+        # archived flag on notes; note_id FK on flashcards for per-note coverage tracking.
         for ddl in [
             "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE flashcards ADD COLUMN note_id TEXT",
@@ -459,7 +458,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             except Exception:
                 pass  # Column already exists (idempotent)
 
-        # S175: note_sources pivot table for multi-document source linkage.
+        # note_sources pivot table for multi-document source linkage.
         # Base.metadata.create_all above creates note_sources if absent.
         # Migration: backfill from notes.document_id (idempotent via composite PK).
         await conn.execute(
@@ -473,25 +472,25 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S179: chunk_classification label for pre-generation classifier.
+        # chunk_classification label for pre-generation classifier.
         try:
             await conn.execute(text("ALTER TABLE flashcards ADD COLUMN chunk_classification TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
-        # S188: section_heading for source grounding display on flashcards.
+        # section_heading for source grounding display on flashcards.
         try:
             await conn.execute(text("ALTER TABLE flashcards ADD COLUMN section_heading TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
-        # S201: content_hash on notes for dedup.
+        # content_hash on notes for dedup.
         try:
             await conn.execute(text("ALTER TABLE notes ADD COLUMN content_hash TEXT"))
         except Exception:
             pass  # Column already exists (idempotent)
 
-        # S183-fix: flashcards.document_id must be nullable for note-sourced cards.
+        # flashcards.document_id must be nullable for note-sourced cards.
         # Old databases have NOT NULL on this column. Use table-rebuild idiom since
         # SQLite does not support ALTER COLUMN to drop a NOT NULL constraint.
         col_rows = (await conn.execute(text("PRAGMA table_info(flashcards)"))).fetchall()
@@ -547,7 +546,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             await conn.execute(text("DROP TABLE flashcards"))
             await conn.execute(text("ALTER TABLE flashcards_rebuild RENAME TO flashcards"))
 
-        # S206: backfill flashcards_fts from existing flashcards (idempotent).
+        # backfill flashcards_fts from existing flashcards (idempotent).
         # Uses LEFT JOIN on shadow content table to skip cards already indexed.
         await conn.execute(
             text(
@@ -561,7 +560,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
         )
 
-        # S207: Retroactive naming normalization for tags and collections.
+        # Retroactive naming normalization for tags and collections.
         # Normalizes existing tag slugs and collection names to match conventions
         # (tags: lower-case-hyphenated, collections: lower-case-hyphenated).
         # Idempotent: skips rows already in normalized form.

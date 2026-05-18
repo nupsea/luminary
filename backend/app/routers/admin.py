@@ -7,12 +7,9 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import get_db
-from app.models import NoteModel
+from app.repos.note_repo import NoteRepo, get_note_repo
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +26,7 @@ def _check_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
 @router.post("/notes/reindex")
 async def reindex_notes(
     _auth: None = Depends(_check_admin_key),
-    session: AsyncSession = Depends(get_db),
+    note_repo: NoteRepo = Depends(get_note_repo),
 ) -> dict:
     """Queue a background reindex of all notes missing embeddings in LanceDB.
 
@@ -38,9 +35,7 @@ async def reindex_notes(
     """
     from app.services.reindex_service import get_reindex_service  # noqa: PLC0415
 
-    total_notes: int = (
-        await session.execute(select(func.count()).select_from(NoteModel))
-    ).scalar_one()
+    total_notes: int = await note_repo.count_all()
 
     reindex_svc = get_reindex_service()
 

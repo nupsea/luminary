@@ -16,9 +16,7 @@ from app.services.retriever import HybridRetriever
 from app.types import ScoredChunk
 from app.workflows.ingestion import IngestionState, keyword_index_node
 
-# ---------------------------------------------------------------------------
 # Shared fixture — in-memory SQLite with FTS5
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -88,9 +86,7 @@ async def _populate_fts(engine, doc_id: str):
         )
 
 
-# ---------------------------------------------------------------------------
 # rrf_merge unit tests (no I/O)
-# ---------------------------------------------------------------------------
 
 
 def test_rrf_merge_chunk_in_both_ranks_first():
@@ -168,9 +164,7 @@ def test_rrf_merge_one_empty_list():
     assert merged[0].source == "vector"
 
 
-# ---------------------------------------------------------------------------
 # keyword_search integration tests
-# ---------------------------------------------------------------------------
 
 
 async def test_keyword_search_returns_matching_chunks(test_db):
@@ -226,9 +220,7 @@ async def test_keyword_search_filters_by_document_id(test_db):
     assert chunk_b not in {r.chunk_id for r in results}
 
 
-# ---------------------------------------------------------------------------
 # keyword_index_node integration test
-# ---------------------------------------------------------------------------
 
 
 async def test_keyword_index_node_populates_fts5(test_db):
@@ -263,9 +255,7 @@ async def test_keyword_index_node_populates_fts5(test_db):
     assert any(row.chunk_id == chunk_id for row in rows)
 
 
-# ---------------------------------------------------------------------------
 # vector_search unit test (mocked LanceDB)
-# ---------------------------------------------------------------------------
 
 
 def test_vector_search_returns_scored_chunks(monkeypatch):
@@ -331,9 +321,7 @@ def test_vector_search_filters_by_document_id(monkeypatch):
     assert "doc_abc" in where_arg
 
 
-# ---------------------------------------------------------------------------
 # _diversify unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_diversify_no_op_when_already_diverse():
@@ -404,9 +392,7 @@ def test_diversify_round_robin_visits_sections_by_relevance():
     assert result[3].chunk_id == "a1"
 
 
-# ---------------------------------------------------------------------------
 # S59 — Speaker-diversity tests
-# ---------------------------------------------------------------------------
 
 
 def _sc(chunk_id: str, speaker: str | None, score: float) -> ScoredChunk:

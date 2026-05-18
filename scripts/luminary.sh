@@ -24,9 +24,11 @@ _info() { echo -e "\033[0;33m[LUMINARY]\033[0m $*"; }
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 
-# Auto-install frontend deps if node_modules is missing
-if [ ! -d "$REPO_ROOT/frontend/node_modules" ]; then
-    _info "Installing frontend dependencies (first run)..."
+# Install or refresh frontend deps when the checked-in npm lockfile changed.
+if [ ! -d "$REPO_ROOT/frontend/node_modules" ] \
+    || [ "$REPO_ROOT/frontend/package-lock.json" -nt "$REPO_ROOT/frontend/node_modules/.package-lock.json" ] \
+    || [ "$REPO_ROOT/frontend/package.json" -nt "$REPO_ROOT/frontend/node_modules/.package-lock.json" ]; then
+    _info "Installing frontend dependencies..."
     (cd "$REPO_ROOT/frontend" && npm install)
 fi
 

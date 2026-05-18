@@ -13,9 +13,7 @@ from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 from app.services.deck_health import DeckHealthService
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture (mirrors test_flashcard_audit.py pattern)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -42,9 +40,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_doc(doc_id: str | None = None) -> DocumentModel:
@@ -119,9 +115,7 @@ def _make_card(
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 async def test_analyze_orphaned_cards(test_db):

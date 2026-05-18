@@ -10,13 +10,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import litellm
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -249,15 +249,13 @@ async def _generate_questions_for_chunk(
         f"SOURCE:\n{chunk_text[:6000]}"
     )
     settings = get_settings()
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": rules}],
-        "timeout": 120,
-    }
-    if model.startswith("ollama/"):
-        kwargs["api_base"] = settings.OLLAMA_URL
-    response = await litellm.acompletion(**kwargs)
-    content = response.choices[0].message.content or ""
+    api_base = settings.OLLAMA_URL if model.startswith("ollama/") else None
+    content = await get_llm_service().complete(
+        messages=[{"role": "user", "content": rules}],
+        model=model,
+        timeout=300,
+        api_base=api_base,
+    )
     parsed = _extract_json_object(content)
     items = parsed.get("questions", [])
     if not isinstance(items, list):

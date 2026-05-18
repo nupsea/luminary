@@ -34,9 +34,7 @@ from app.services.qa import (
 )
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -131,9 +129,7 @@ async def _async_iter(items):
         yield item
 
 
-# ---------------------------------------------------------------------------
 # _split_response — unit tests (unchanged)
-# ---------------------------------------------------------------------------
 
 
 def test_split_response_extracts_answer_and_citations():
@@ -215,9 +211,7 @@ def test_split_response_prose_with_colon_not_stripped():
     assert "main themes" in answer
 
 
-# ---------------------------------------------------------------------------
 # _build_context — unit tests (unchanged)
-# ---------------------------------------------------------------------------
 
 
 def test_build_context_includes_document_title():
@@ -242,10 +236,8 @@ def test_qa_system_prompt_mentions_citations():
     assert "citations" in QA_SYSTEM_PROMPT
 
 
-# ---------------------------------------------------------------------------
 # QAService.stream_answer — normal flow
 # V2: mock the chat graph (graph.ainvoke returns pre-built result)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -332,9 +324,7 @@ async def test_stream_stores_qa_in_database(test_db):
     assert stored.confidence == "medium"
 
 
-# ---------------------------------------------------------------------------
 # QAService.stream_answer — NOT_FOUND flow
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -384,9 +374,7 @@ async def test_not_found_no_token_events(test_db):
     assert len(token_events) == 0
 
 
-# ---------------------------------------------------------------------------
 # POST /qa — HTTP endpoint integration tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -447,9 +435,7 @@ async def test_endpoint_all_scope_produces_answer(test_db):
     assert len(done_events) >= 1
 
 
-# ---------------------------------------------------------------------------
 # QAService.stream_answer — error flows
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -633,9 +619,7 @@ async def test_qa_with_mock_llm(test_db):
     assert len(done_payload["citations"]) >= 1
 
 
-# ---------------------------------------------------------------------------
 # S61 — _enrich_citation_titles unit tests (unchanged)
-# ---------------------------------------------------------------------------
 
 
 def test_enrich_citation_titles_single_scope_clears_title():
@@ -721,9 +705,7 @@ async def test_citations_no_title_for_single_scope(test_db):
     assert all(c["document_title"] is None for c in done_payload["citations"])
 
 
-# ---------------------------------------------------------------------------
 # S71 — _should_use_summary unit tests (unchanged)
-# ---------------------------------------------------------------------------
 
 
 def test_should_use_summary_matches_keywords():

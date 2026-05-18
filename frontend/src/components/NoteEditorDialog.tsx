@@ -1,31 +1,8 @@
-/**
- * NoteEditorDialog -- focused Write + Preview dialog for note editing.
- *
- * Opens when `note` prop is non-null. Two-column layout:
- *   Left:  full-height monospace textarea (Write pane)
- *   Right: real-time MarkdownRenderer (Preview pane)
- *
- * Keyboard shortcut: Ctrl+S / Cmd+S triggers Save (only when not yet saved).
- * Tags section is editable: chips with X to remove, inline input to add.
- *
- * Collections section (S164):
- *   - Scrollable checkbox list of all collections (GET /collections/tree, flattened)
- *   - Pre-checked based on note's collection_ids
- *   - Check: POST /collections/{id}/notes immediately (no Save required)
- *   - Uncheck: DELETE /collections/{id}/notes/{note_id} immediately
- *
- * After save:
- *   - isFetchingTags=true shows 'Suggesting tags...' with Loader2
- *   - If suggest-tags returns novel tags: dashed-border chips shown
- *   - If suggest-tags returns []: 'No suggestions available' shown briefly (2s)
- *   - Dialog NEVER auto-closes -- user always closes via Done or Cancel
- *   - AbortController cancels in-flight fetch when dialog closes
- */
-
 import { useEffect, useRef, useState } from "react"
-import { Link, Loader2, Tag } from "lucide-react"
+import { GitBranch, Link, Loader2, Shapes, Tag } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { LinkAutocomplete } from "@/components/LinkAutocomplete"
 import {
@@ -38,28 +15,23 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiGet, apiPatch, apiPost, request } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { detectLinkTrigger, insertLinkAtTrigger } from "@/lib/noteLinkUtils"
+import { MERMAID_CHEAT_SHEET, MERMAID_TEMPLATES } from "@/lib/mermaidNotes"
+import { uploadNoteAsset } from "@/lib/noteAssets"
+import {
+  replaceExcalidrawDiagram,
+  type ExcalidrawNoteDiagramRef,
+} from "@/lib/noteDiagrams"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
-export interface Note {
-  id: string
-  document_id: string | null
-  chunk_id: string | null
-  content: string
-  tags: string[]
-  group_name: string | null
-  collection_ids: string[]
-  // S175: multi-document source linkage
-  source_document_ids: string[]
-  created_at: string
-  updated_at: string
-}
+import type { components } from "@/types/api"
+
+export type Note = components["schemas"]["NoteResponse"]
+type NoteLinkItem = components["schemas"]["NoteLinkItem"]
+type NoteLinksResponse = components["schemas"]["NoteLinksResponse"]
 
 interface DocumentItem {
   id: string
@@ -67,51 +39,34 @@ interface DocumentItem {
   status: string
 }
 
-interface NoteLinkItem {
-  id: string
-  note_id: string
-  preview: string
-  link_type: string
-  created_at: string
-}
-
-interface NoteLinksResponse {
-  outgoing: NoteLinkItem[]
-  incoming: NoteLinkItem[]
-}
-
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
-
-async function patchNote(
+const patchNote = (
   id: string,
-  data: { content?: string; tags?: string[]; group_name?: string; source_document_ids?: string[] },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
+  data: {
+    content?: string
+    tags?: string[]
+    group_name?: string
+    source_document_ids?: string[]
+  },
+): Promise<Note> => apiPatch<Note>(`/notes/${id}`, data)
 
 async function fetchDocuments(): Promise<DocumentItem[]> {
-  const res = await fetch(`${API_BASE}/documents`)
-  if (!res.ok) return []
-  const docs = (await res.json()) as DocumentItem[]
-  return docs.filter((d) => d.status === "ready")
+  try {
+    const docs = await apiGet<DocumentItem[]>("/documents")
+    return docs.filter((d) => d.status === "ready")
+  } catch {
+    return []
+  }
 }
 
-async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
+async function fetchSuggestedTags(
+  id: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
   try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, {
-      method: "POST",
-      signal,
-    })
-    if (!res.ok) return []
-    const data = (await res.json()) as { tags: string[] }
+    const data = await request<{ tags: string[] }>(
+      `/notes/${id}/suggest-tags`,
+      { method: "POST", signal },
+    )
     return data.tags ?? []
   } catch {
     return []
@@ -119,64 +74,54 @@ async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<str
 }
 
 async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) return []
-  return res.json() as Promise<CollectionTreeItem[]>
+  try {
+    return await apiGet<CollectionTreeItem[]>("/collections/tree")
+  } catch {
+    return []
+  }
 }
 
-async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
+const addNoteToCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiPost(`/collections/${collectionId}/members`, {
+    member_ids: [noteId],
+    member_type: "note",
   })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
-}
 
-async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
-    method: "DELETE",
-  })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
-}
+const removeNoteFromCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiDelete(`/collections/${collectionId}/members/${noteId}`)
 
 async function fetchNoteLinks(noteId: string): Promise<NoteLinksResponse> {
-  const res = await fetch(`${API_BASE}/notes/${noteId}/links`)
-  if (!res.ok) return { outgoing: [], incoming: [] }
-  return res.json() as Promise<NoteLinksResponse>
+  try {
+    return await apiGet<NoteLinksResponse>(`/notes/${noteId}/links`)
+  } catch {
+    return { outgoing: [], incoming: [] }
+  }
 }
 
-async function createNoteLink(
+const createNoteLink = (
   noteId: string,
   targetNoteId: string,
   linkType: string,
-): Promise<NoteLinkItem> {
-  const res = await fetch(`${API_BASE}/notes/${noteId}/links`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ target_note_id: targetNoteId, link_type: linkType }),
+): Promise<NoteLinkItem> =>
+  apiPost<NoteLinkItem>(`/notes/${noteId}/links`, {
+    target_note_id: targetNoteId,
+    link_type: linkType,
   })
-  if (!res.ok) throw new Error(`POST /notes/${noteId}/links failed: ${res.status}`)
-  return res.json() as Promise<NoteLinkItem>
-}
 
-async function deleteNoteLink(
+const deleteNoteLink = (
   noteId: string,
   targetNoteId: string,
   linkType: string,
-): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
-    { method: "DELETE" },
+): Promise<void> =>
+  apiDelete(
+    `/notes/${noteId}/links/${targetNoteId}?link_type=${encodeURIComponent(linkType)}`,
   )
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /notes/${noteId}/links/${targetNoteId} failed`)
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 interface NoteEditorDialogProps {
   note: Note | null
@@ -192,11 +137,12 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [noSuggestionsMsg, setNoSuggestionsMsg] = useState(false)
   const [savedNote, setSavedNote] = useState<Note | null>(null)
+  const [diagramOpen, setDiagramOpen] = useState(false)
+  const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
   // Collection IDs that this note belongs to (tracked locally for immediate UI updates).
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(
     new Set(note?.collection_ids ?? []),
   )
-  // S175: source document IDs (multi-select)
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>(
     note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []),
   )
@@ -215,7 +161,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
   })
   const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
 
-  // S175: documents list for source picker
   const { data: documents, isLoading: docsLoading } = useQuery({
     queryKey: ["documents-list"],
     queryFn: fetchDocuments,
@@ -223,7 +168,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     enabled: note !== null,
   })
 
-  // Note links query (S171)
   const { data: noteLinks, isLoading: linksLoading } = useQuery({
     queryKey: ["note-links", note?.id],
     queryFn: () => fetchNoteLinks(note!.id),
@@ -362,12 +306,42 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note, saveMut, isSaved, unchanged])
 
   function handleDone() {
     onSaved(savedNote ?? note!)
     handleClose()
+  }
+
+  function insertAtCursor(markdown: string) {
+    const start = textareaRef.current?.selectionStart ?? content.length
+    const end = textareaRef.current?.selectionEnd ?? content.length
+    const prefix = start > 0 && !content.slice(0, start).endsWith("\n") ? "\n\n" : ""
+    const suffix = content.slice(end).startsWith("\n") ? "" : "\n\n"
+    const insertion = `${prefix}${markdown}${suffix}`
+    const next = content.substring(0, start) + insertion + content.substring(end)
+    setContent(next)
+    setIsSaved(false)
+    setTimeout(() => {
+      const newPos = start + insertion.length
+      textareaRef.current?.setSelectionRange(newPos, newPos)
+      textareaRef.current?.focus()
+    }, 0)
+  }
+
+  function handleDiagramSaved(markdown: string) {
+    if (editingDiagramRef) {
+      setContent((current) => replaceExcalidrawDiagram(current, editingDiagramRef, markdown))
+      setIsSaved(false)
+      setEditingDiagramRef(null)
+      return
+    }
+    insertAtCursor(markdown)
+  }
+
+  function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
+    setEditingDiagramRef(ref)
+    setDiagramOpen(true)
   }
 
   return (
@@ -385,7 +359,44 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
           {/* Write pane */}
           <div className="flex w-1/2 flex-col border-r border-border">
             <div className="shrink-0 border-b border-border px-4 py-2">
-              <span className="text-xs font-medium text-muted-foreground">Write</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-auto text-xs font-medium text-muted-foreground">Write</span>
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <GitBranch size={10} />
+                  Mermaid:
+                </span>
+                {MERMAID_TEMPLATES.map((template) => (
+                  <button
+                    key={template.label}
+                    type="button"
+                    onClick={() => insertAtCursor(template.markdown)}
+                    className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
+                  >
+                    {template.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingDiagramRef(null)
+                    setDiagramOpen(true)
+                  }}
+                  className="flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
+                >
+                  <Shapes size={10} />
+                  Draw
+                </button>
+              </div>
+              <details className="mt-2 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+                <summary className="cursor-pointer select-none font-medium text-foreground">Mermaid cheat sheet</summary>
+                <div className="mt-2 grid grid-cols-1 gap-1">
+                  {MERMAID_CHEAT_SHEET.map((item) => (
+                    <code key={item} className="rounded bg-background px-1.5 py-1 text-[10px] text-foreground">
+                      {item}
+                    </code>
+                  ))}
+                </div>
+              </details>
             </div>
             <div className="relative flex-1 min-h-0">
               <textarea
@@ -399,17 +410,8 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                       const file = items[i].getAsFile()
                       if (!file) continue
 
-                      const formData = new FormData()
-                      formData.append("file", file)
-
                       try {
-                        const res = await fetch(`${API_BASE}/images/notes`, {
-                          method: "POST",
-                          body: formData,
-                        })
-                        if (!res.ok) throw new Error("Upload failed")
-                        const data = (await res.json()) as { path: string }
-
+                        const data = await uploadNoteAsset(file)
                         const imgMarkdown = `![Pasted Image](${data.path})`
                         const start = textareaRef.current?.selectionStart ?? content.length
                         const end = textareaRef.current?.selectionEnd ?? content.length
@@ -482,7 +484,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
               />
             </div>
 
-            {/* Source documents section (S175) */}
             <div className="shrink-0 border-t border-border px-4 py-2">
               <p className="mb-1 text-xs font-medium text-muted-foreground">Source documents</p>
               {docsLoading ? (
@@ -559,7 +560,6 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                 </div>
               )}
             </div>
-            {/* Links section (S171) */}
             <div className="shrink-0 border-t border-border px-4 py-2">
               <p className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
                 <Link size={11} />
@@ -620,6 +620,7 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
                       ? new Set(noteLinks.outgoing.map((l) => l.note_id))
                       : undefined
                   }
+                  onEditExcalidrawDiagram={openDiagramEditor}
                 >
                   {content}
                 </MarkdownRenderer>
@@ -705,6 +706,12 @@ export function NoteEditorDialog({ note, onClose, onSaved }: NoteEditorDialogPro
             </div>
           </div>
         </DialogFooter>
+        <NoteDiagramDialog
+          open={diagramOpen}
+          onOpenChange={setDiagramOpen}
+          scenePath={editingDiagramRef?.scenePath}
+          onSaved={handleDiagramSaved}
+        />
       </DialogContent>
     </Dialog>
   )

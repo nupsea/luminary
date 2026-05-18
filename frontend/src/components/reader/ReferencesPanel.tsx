@@ -1,5 +1,5 @@
 /**
- * ReferencesPanel -- S138 + S194
+ * ReferencesPanel -- 
  *
  * Shows web references for a document, grouped into three tiers:
  *  1. Verified (is_valid=true) -- green check badge
@@ -14,11 +14,13 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { ExternalLink, RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// Local types: the generated WebReferenceItem types `source_quality`
+// as plain `string` (loosened from the backend's literal), and
+// `is_valid` / `last_checked_at` as `?: T | null | undefined` rather
+// than `: T | null`. Both differences cascade into the UI's typed
+// badge map and panel state, so we keep the narrower local shape.
 
 type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
 
@@ -42,9 +44,7 @@ interface DocumentReferencesResponse {
   references: WebReferenceItem[]
 }
 
-// ---------------------------------------------------------------------------
 // Quality badge helpers
-// ---------------------------------------------------------------------------
 
 const QUALITY_LABEL: Record<SourceQuality, string> = {
   official_docs: "Official",
@@ -74,9 +74,7 @@ function QualityBadge({ quality }: { quality: SourceQuality }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Validation status badge
-// ---------------------------------------------------------------------------
 
 function ValidationBadge({ isValid, isValidating }: { isValid: boolean | null; isValidating: boolean }) {
   if (isValid === true) {
@@ -99,9 +97,7 @@ function ValidationBadge({ isValid, isValidating }: { isValid: boolean | null; i
   return null
 }
 
-// ---------------------------------------------------------------------------
 // Single reference row
-// ---------------------------------------------------------------------------
 
 function ReferenceRow({
   ref: item,
@@ -119,9 +115,8 @@ function ReferenceRow({
   async function handleRefresh() {
     if (!item.section_id) return
     try {
-      await fetch(
-        `${API_BASE}/references/sections/${item.section_id}/refresh?document_id=${documentId}`,
-        { method: "POST" },
+      await apiPost(
+        `/references/sections/${item.section_id}/refresh?document_id=${documentId}`,
       )
       void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
     } catch {
@@ -175,10 +170,6 @@ function ReferenceRow({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
-
 interface ReferencesPanelProps {
   documentId: string
 }
@@ -190,27 +181,18 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
   // Fetch all refs including invalid
   const { data, isLoading, isError } = useQuery<DocumentReferencesResponse>({
     queryKey: ["doc-references", documentId],
-    queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/references/documents/${documentId}?include_invalid=true`,
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json() as Promise<DocumentReferencesResponse>
-    },
+    queryFn: () =>
+      apiGet<DocumentReferencesResponse>(
+        `/references/documents/${documentId}?include_invalid=true`,
+      ),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   })
 
   // Validation mutation
   const validateMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/references/documents/${documentId}/validate`,
-        { method: "POST" },
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json()
-    },
+    mutationFn: () =>
+      apiPost(`/references/documents/${documentId}/validate`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
     },
@@ -218,14 +200,8 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
 
   // Refresh mutation (re-extract + validate)
   const refreshMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/references/documents/${documentId}/refresh`,
-        { method: "POST" },
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json()
-    },
+    mutationFn: () =>
+      apiPost(`/references/documents/${documentId}/refresh`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-references", documentId] })
     },

@@ -25,7 +25,7 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-# Regex for [[note_id|display text]] markers (S171 note links)
+# Regex for [[note_id|display text]] markers (note links)
 _LINK_RE = re.compile(r"\[\[([a-f0-9\-]{36})\|([^\]]+)\]\]")
 
 # Anki note model -- standard Basic model fields: Front, Back

@@ -14,9 +14,7 @@ import pytest
 
 from app.services.concept_linker import _compute_match_confidence, _parse_year
 
-# ---------------------------------------------------------------------------
 # Pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_match_confidence_exact():
@@ -101,9 +99,7 @@ def test_parse_year_out_of_range():
     assert result is None
 
 
-# ---------------------------------------------------------------------------
 # AC1: SAME_CONCEPT edge created for matching concepts
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -247,9 +243,7 @@ async def test_ac1_same_concept_edge_created(tmp_path, monkeypatch):
     assert edges_added[0]["confidence"] > 0
 
 
-# ---------------------------------------------------------------------------
 # AC2: Mock LLM contradiction response -> edge gains contradiction=True
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -306,9 +300,9 @@ async def test_ac2_contradiction_detection(monkeypatch):
     async def mock_litellm_acompletion(**kwargs):
         return MockLLMResponse()
 
-    import app.services.concept_linker as cl_module
+    import app.services.llm as llm_module
 
-    monkeypatch.setattr(cl_module.litellm, "acompletion", mock_litellm_acompletion)
+    monkeypatch.setattr(llm_module.litellm, "acompletion", mock_litellm_acompletion)
 
     mock_graph = MockGraphService()
     monkeypatch.setattr("app.services.concept_linker.get_graph_service", lambda: mock_graph)
@@ -361,9 +355,7 @@ async def test_ac2_contradiction_detection(monkeypatch):
     assert edge["prefer_source"] == "b"
 
 
-# ---------------------------------------------------------------------------
 # GET /graph/concepts/linked endpoint unit test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -387,9 +379,7 @@ async def test_get_concept_clusters_endpoint_empty(monkeypatch):
     assert data["clusters"] == []
 
 
-# ---------------------------------------------------------------------------
 # AC3: Integration test using real Kuzu DB (marked slow)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -437,9 +427,9 @@ async def test_ac3_same_concept_edge_in_real_kuzu(tmp_path, monkeypatch):
 
         choices = [_Choice()]
 
-    import app.services.concept_linker as cl_module
+    import app.services.llm as llm_module
 
-    monkeypatch.setattr(cl_module.litellm, "acompletion", lambda **kw: _FakeLLMResp())
+    monkeypatch.setattr(llm_module.litellm, "acompletion", lambda **kw: _FakeLLMResp())
 
     # Minimal mock session: returns doc_tech_b as other document
     class MockResult:

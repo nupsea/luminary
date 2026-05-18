@@ -253,6 +253,74 @@ async def test_get_enrichment_returns_empty_for_text_doc(test_db):
 
 
 @pytest.mark.asyncio
+async def test_upload_note_svg_and_serve_local(test_db):
+    """Note diagrams are stored as SVG note assets and served through local image URLs."""
+    engine, factory, tmp_path = test_db
+    svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        b'<rect width="10" height="10"/></svg>'
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upload = await client.post(
+            "/images/notes",
+            files={"file": ("diagram.svg", svg, "image/svg+xml")},
+        )
+
+    assert upload.status_code == 200
+    data = upload.json()
+    assert data["path"].startswith("__LUMINARY_IMG__/notes/")
+    assert data["filename"].endswith(".svg")
+    assert (tmp_path / "images" / "notes" / data["filename"]).exists()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        served = await client.get(f"/images/local/notes/{data['filename']}")
+
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("image/svg")
+
+
+@pytest.mark.asyncio
+async def test_upload_note_excalidraw_scene_and_serve_local(test_db):
+    """Editable Excalidraw scenes are stored beside exported SVG diagrams."""
+    engine, factory, tmp_path = test_db
+    scene = (
+        b'{"type":"excalidraw","version":2,"source":"luminary",'
+        b'"elements":[],"appState":{},"files":{}}'
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upload = await client.post(
+            "/images/notes",
+            files={"file": ("diagram.excalidraw.json", scene, "application/json")},
+        )
+
+    assert upload.status_code == 200
+    data = upload.json()
+    assert data["path"].startswith("__LUMINARY_IMG__/notes/")
+    assert data["filename"].endswith(".excalidraw.json")
+    assert (tmp_path / "images" / "notes" / data["filename"]).exists()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        served = await client.get(f"/images/local/notes/{data['filename']}")
+
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("application/json")
+
+
+@pytest.mark.asyncio
+async def test_upload_invalid_note_excalidraw_scene_returns_400(test_db):
+    """Only valid Excalidraw scene JSON is accepted as an editable diagram asset."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        upload = await client.post(
+            "/images/notes",
+            files={"file": ("diagram.excalidraw.json", b'{"not":"a scene"}', "application/json")},
+        )
+
+    assert upload.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_get_enrichment_returns_404_for_unknown_doc(test_db):
     """GET /documents/{unknown}/enrichment returns 404."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

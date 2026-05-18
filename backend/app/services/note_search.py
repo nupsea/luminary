@@ -143,7 +143,7 @@ class NoteSearchService:
 
         merged = _rrf_merge(fts_results, vector_results, k=k)
 
-        # S91: Post-filter to ensure content actually contains search terms if it
+        # Post-filter to ensure content actually contains search terms if it
         # came from a stale FTS index (secondary safety for CI flakiness).
         # We only do this for FTS-only results or if we want extra rigor.
         # Actually, let's just trust FTS if it's fresh, but here we'll verify

@@ -17,9 +17,7 @@ from app.services.flashcard import (
     _filter_chunks_by_classification,
 )
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -93,9 +91,7 @@ def _make_flashcard(doc_id: str, question: str, deck: str = "default") -> Flashc
     )
 
 
-# ---------------------------------------------------------------------------
 # Test 1: analogy chunk classified and skipped
-# ---------------------------------------------------------------------------
 
 
 def test_analogy_chunk_is_classified_and_skipped():
@@ -115,9 +111,7 @@ def test_analogy_chunk_is_classified_and_skipped():
     assert result == [], "Standalone analogy chunk must be excluded from eligible set"
 
 
-# ---------------------------------------------------------------------------
 # Test 2: concept chunk produces why/how question with chunk_classification set
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -173,9 +167,7 @@ async def test_concept_chunk_produces_why_how_question(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # Test 3: near-duplicate card skipped by embedding dedup
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

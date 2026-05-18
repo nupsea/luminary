@@ -5,11 +5,10 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
+import { apiGet, apiPatch } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface LLMSettings {
   // New DB-backed fields
@@ -40,42 +39,29 @@ interface StorageInfo {
   models_mb: number
 }
 
-// ---------------------------------------------------------------------------
 // API functions
-// ---------------------------------------------------------------------------
 
-async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("Failed to fetch LLM settings")
-  return res.json() as Promise<LLMSettings>
-}
+const fetchLLMSettings = (): Promise<LLMSettings> =>
+  apiGet<LLMSettings>("/settings/llm")
 
-async function patchLLMSettings(updates: {
+const patchLLMSettings = (updates: {
   mode?: string
   provider?: string
   model?: string
   openai_api_key?: string | null
   anthropic_api_key?: string | null
   google_api_key?: string | null
-}): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/llm`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  })
-  if (!res.ok) throw new Error("Failed to save settings")
-}
+}): Promise<void> => apiPatch("/settings/llm", updates)
 
-async function fetchStorage(): Promise<StorageInfo> {
-  const res = await fetch(`${API_BASE}/settings/storage`)
-  if (!res.ok) throw new Error("Failed to fetch storage info")
-  return res.json() as Promise<StorageInfo>
-}
+const fetchStorage = (): Promise<StorageInfo> =>
+  apiGet<StorageInfo>("/settings/storage")
 
 async function fetchModels(provider: string): Promise<ModelOption[]> {
-  const res = await fetch(`${API_BASE}/settings/llm/models?provider=${provider}`)
-  if (!res.ok) return []
-  return res.json() as Promise<ModelOption[]>
+  try {
+    return await apiGet<ModelOption[]>("/settings/llm/models", { provider })
+  } catch {
+    return []
+  }
 }
 
 function formatModelOption(m: ModelOption): string {
@@ -87,9 +73,7 @@ function formatModelOption(m: ModelOption): string {
   return label
 }
 
-// ---------------------------------------------------------------------------
 // SettingsDrawer
-// ---------------------------------------------------------------------------
 
 interface SettingsDrawerProps {
   open: boolean
@@ -183,6 +167,9 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     setPullLines([])
 
     try {
+      // SSE stream: progress lines arrive via res.body.getReader();
+      // apiClient's JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/settings/ollama/pull`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -488,7 +475,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           <div className="border-t border-border" />
 
-          {/* Section 3: Notifications (S118) */}
+          {/* Section 3: Notifications */}
           <section>
             <h3 className="mb-3 text-sm font-semibold text-foreground">Notifications</h3>
             <label className="flex cursor-pointer items-start justify-between gap-4">
@@ -530,9 +517,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // LLMModeBadge — shown in sidebar footer, populates Zustand store
-// ---------------------------------------------------------------------------
 
 interface LLMModeBadgeProps {
   onClick: () => void

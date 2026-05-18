@@ -15,7 +15,7 @@ import json
 import logging
 import math
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,10 +84,35 @@ def xp_for_next_level(total_xp: int) -> int:
 
 
 class EngagementService:
-    """Manages streaks, XP, achievements, and focus sessions."""
+    """Manages streaks, XP, achievements, and focus sessions.
 
-    def __init__(self, session: AsyncSession) -> None:
+    `tz_offset_minutes` matches JS `Date.getTimezoneOffset()` (positive
+    west of UTC; PDT=420). It controls how "today" is computed for
+    streaks, XP-today, and the daily XP/focus chart buckets so that a
+    study session at 11pm local time doesn't roll over into "tomorrow".
+    Defaults to 0 (UTC) for callers that don't propagate the offset --
+    legacy behavior, slightly wrong near UTC midnight but not data-loss.
+    """
+
+    def __init__(self, session: AsyncSession, tz_offset_minutes: int = 0) -> None:
         self._session = session
+        self._tz_offset_minutes = tz_offset_minutes
+
+    def _local_today(self) -> date:
+        """Return the user's current local date, derived from UTC + offset."""
+        return (datetime.now(UTC) - timedelta(minutes=self._tz_offset_minutes)).date()
+
+    def _local_date_sql(self, column):
+        """SQL expression: cast a UTC datetime column to the user's local date.
+
+        SQLite's `datetime(x, '<N> minutes')` modifier handles the shift; the
+        outer `date(...)` strips the time component. With tz_offset_minutes=0
+        this is equivalent to the prior `func.date(column)` behavior.
+        """
+        if self._tz_offset_minutes == 0:
+            return func.date(column)
+        modifier = f"{-self._tz_offset_minutes:+d} minutes"
+        return func.date(func.datetime(column, modifier))
 
     # ------------------------------------------------------------------
     # Streak
@@ -104,7 +129,7 @@ class EngagementService:
     async def record_study_activity(self) -> StudyStreakModel:
         """Call on any qualifying study action. Updates streak and awards streak bonus XP."""
         streak = await self._get_or_create_streak()
-        today = datetime.now(UTC).date()
+        today = self._local_today()
 
         # Reset weekly freezes on Monday
         is_monday = today.weekday() == 0
@@ -150,7 +175,7 @@ class EngagementService:
 
     async def get_streak(self) -> dict:
         streak = await self._get_or_create_streak()
-        today = datetime.now(UTC).date()
+        today = self._local_today()
         studied_today = streak.last_study_date == today
         return {
             "current_streak": streak.current_streak,
@@ -211,10 +236,11 @@ class EngagementService:
         )
         total_xp = total_result.scalar() or 0
 
-        today_str = str(datetime.now(UTC).date())
+        today_str = str(self._local_today())
+        local_date = self._local_date_sql(XPLedgerModel.created_at)
         today_result = await self._session.execute(
             select(func.coalesce(func.sum(XPLedgerModel.xp_amount), 0)).where(
-                func.date(XPLedgerModel.created_at) == today_str
+                local_date == today_str
             )
         )
         today_xp = today_result.scalar() or 0
@@ -230,23 +256,25 @@ class EngagementService:
         }
 
     async def get_xp_history(self, days: int = 30) -> list[dict]:
-        """Return daily XP totals for the last N days."""
-        start_str = str(datetime.now(UTC).date() - timedelta(days=days - 1))
+        """Return daily XP totals for the last N days, bucketed in local time."""
+        today_local = self._local_today()
+        start_str = str(today_local - timedelta(days=days - 1))
+        local_date = self._local_date_sql(XPLedgerModel.created_at)
         rows = await self._session.execute(
             select(
-                func.date(XPLedgerModel.created_at).label("day"),
+                local_date.label("day"),
                 func.sum(XPLedgerModel.xp_amount).label("xp"),
             )
-            .where(func.date(XPLedgerModel.created_at) >= start_str)
-            .group_by(func.date(XPLedgerModel.created_at))
-            .order_by(func.date(XPLedgerModel.created_at))
+            .where(local_date >= start_str)
+            .group_by(local_date)
+            .order_by(local_date)
         )
         history = {str(row.day): row.xp for row in rows}
 
         # Fill in zero-days
         result = []
         for i in range(days):
-            d = datetime.now(UTC).date() - timedelta(days=days - 1 - i)
+            d = today_local - timedelta(days=days - 1 - i)
             result.append({"date": str(d), "xp": history.get(str(d), 0)})
         return result
 
@@ -442,10 +470,11 @@ class EngagementService:
         return {"session_id": session_id, "cancelled": True}
 
     async def get_today_sessions(self) -> list[dict]:
-        today_str = str(datetime.now(UTC).date())
+        today_str = str(self._local_today())
+        local_date = self._local_date_sql(FocusSessionModel.started_at)
         result = await self._session.execute(
             select(FocusSessionModel)
-            .where(func.date(FocusSessionModel.started_at) == today_str)
+            .where(local_date == today_str)
             .order_by(FocusSessionModel.started_at.desc())
         )
         return [
@@ -463,11 +492,10 @@ class EngagementService:
         ]
 
     async def get_focus_stats(self, days: int = 7) -> dict:
-        start_str = str(datetime.now(UTC).date() - timedelta(days=days - 1))
+        start_str = str(self._local_today() - timedelta(days=days - 1))
+        local_date = self._local_date_sql(FocusSessionModel.started_at)
         result = await self._session.execute(
-            select(FocusSessionModel).where(
-                func.date(FocusSessionModel.started_at) >= start_str
-            )
+            select(FocusSessionModel).where(local_date >= start_str)
         )
         sessions = result.scalars().all()
         total = len(sessions)

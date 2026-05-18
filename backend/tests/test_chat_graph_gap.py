@@ -19,9 +19,7 @@ from app.runtime.chat_graph import notes_gap_node, route_node
 from app.services.intent import _NOTES_GAP_KWS, classify_intent_heuristic
 from app.types import ChatState
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_minimal_state(**overrides) -> ChatState:
@@ -86,9 +84,7 @@ def _mock_get_session_factory(rows: list):
     return mock_factory
 
 
-# ---------------------------------------------------------------------------
 # 1. Intent heuristic — parametrised over all _NOTES_GAP_KWS phrases
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("phrase", sorted(_NOTES_GAP_KWS))
@@ -99,9 +95,7 @@ def test_notes_gap_intent_heuristic(phrase: str):
     assert confidence == 0.95
 
 
-# ---------------------------------------------------------------------------
 # 2. route_node dispatch
-# ---------------------------------------------------------------------------
 
 
 def test_route_node_dispatches_notes_gap():
@@ -117,9 +111,7 @@ def test_route_node_notes_gap_not_dispatched_for_other_intents():
         )
 
 
-# ---------------------------------------------------------------------------
 # 3. notes_gap_node — successful gap detection
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -139,7 +131,7 @@ async def test_notes_gap_returns_gap_result_card():
         [("note-1",), ("note-2",), ("note-3",)],  # member query: 3 notes
     ]
     with (
-        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
     ):
         result = await notes_gap_node(state)
@@ -154,9 +146,7 @@ async def test_notes_gap_returns_gap_result_card():
     assert "error" not in card
 
 
-# ---------------------------------------------------------------------------
 # 4. notes_gap_node — no document selected
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -173,9 +163,7 @@ async def test_notes_gap_no_document_returns_error_card():
     assert card["covered"] == []
 
 
-# ---------------------------------------------------------------------------
 # 5. notes_gap_node — no notes linked to document
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -184,7 +172,7 @@ async def test_notes_gap_no_notes_returns_error_card():
     state = _make_minimal_state(doc_ids=["doc-abc"], question="gaps in my notes")
     # No auto-collection found (first() returns None)
     rows = [[]]  # empty first result -> first() returns None -> note_ids = []
-    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+    with patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     answer = result["answer"]
     assert answer.startswith("__card__")
@@ -194,9 +182,7 @@ async def test_notes_gap_no_notes_returns_error_card():
     assert card["gaps"] == []
 
 
-# ---------------------------------------------------------------------------
 # 6. notes_gap_node — Ollama offline
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -214,7 +200,7 @@ async def test_notes_gap_ollama_offline_returns_error_card():
         )
     )
     with (
-        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
     ):
         result = await notes_gap_node(state)
@@ -227,9 +213,7 @@ async def test_notes_gap_ollama_offline_returns_error_card():
     assert card["gaps"] == []
 
 
-# ---------------------------------------------------------------------------
 # 7. S197: notes_gap_node auto-fetches from auto-collection
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -249,7 +233,7 @@ async def test_notes_gap_auto_fetches_from_auto_collection():
         [("n1",), ("n2",), ("n3",), ("n4",)],  # 4 members
     ]
     with (
-        patch("app.database.get_session_factory", _mock_get_session_factory(rows)),
+        patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)),
         patch("app.services.gap_detector.get_gap_detector", return_value=mock_detector),
     ):
         result = await notes_gap_node(state)
@@ -261,9 +245,7 @@ async def test_notes_gap_auto_fetches_from_auto_collection():
     assert card["gaps"] == ["Missing concept A"]
 
 
-# ---------------------------------------------------------------------------
 # 8. S197: no auto-collection returns helpful card
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -272,7 +254,7 @@ async def test_notes_gap_no_auto_collection_returns_card():
     state = _make_minimal_state(doc_ids=["doc-xyz"], question="compare my notes")
     # No auto-collection: first() returns None
     rows = [[]]
-    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+    with patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     card = json.loads(result["answer"][8:])
     assert card["type"] == "gap_result"
@@ -280,9 +262,7 @@ async def test_notes_gap_no_auto_collection_returns_card():
     assert "Start taking notes" in card["error"]
 
 
-# ---------------------------------------------------------------------------
 # 9. S197: fewer than 3 notes returns count-based card
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -293,7 +273,7 @@ async def test_notes_gap_fewer_than_3_notes_returns_card():
         [("coll-1",)],  # auto-collection found
         [("n1",), ("n2",)],  # only 2 members
     ]
-    with patch("app.database.get_session_factory", _mock_get_session_factory(rows)):
+    with patch("app.runtime.chat_nodes.notes.get_session_factory", _mock_get_session_factory(rows)):
         result = await notes_gap_node(state)
     card = json.loads(result["answer"][8:])
     assert card["type"] == "gap_result"

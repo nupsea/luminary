@@ -21,12 +21,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 interface UncoveredNote {
   note_id: string
@@ -55,27 +51,13 @@ interface CollectionHealthReport {
   hotspot_tags: HotspotTag[]
 }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
+const fetchCollectionHealth = (id: string): Promise<CollectionHealthReport> =>
+  apiGet<CollectionHealthReport>(`/collections/${id}/health`)
 
-async function fetchCollectionHealth(id: string): Promise<CollectionHealthReport> {
-  const res = await fetch(`${API_BASE}/collections/${id}/health`)
-  if (!res.ok) throw new Error(`GET /collections/${id}/health failed: ${res.status}`)
-  return res.json() as Promise<CollectionHealthReport>
-}
+const archiveStaleNotes = (id: string): Promise<{ archived: number }> =>
+  apiPost<{ archived: number }>(`/collections/${id}/health/archive-stale`)
 
-async function archiveStaleNotes(id: string): Promise<{ archived: number }> {
-  const res = await fetch(`${API_BASE}/collections/${id}/health/archive-stale`, {
-    method: "POST",
-  })
-  if (!res.ok) throw new Error(`POST /collections/${id}/health/archive-stale failed: ${res.status}`)
-  return res.json() as Promise<{ archived: number }>
-}
-
-// ---------------------------------------------------------------------------
 // Cohesion pill
-// ---------------------------------------------------------------------------
 
 function CohesionPill({ score }: { score: number | null }) {
   if (score === null) {
@@ -96,10 +78,6 @@ function CohesionPill({ score }: { score: number | null }) {
     </span>
   )
 }
-
-// ---------------------------------------------------------------------------
-// CollectionHealthPanel
-// ---------------------------------------------------------------------------
 
 interface CollectionHealthPanelProps {
   open: boolean

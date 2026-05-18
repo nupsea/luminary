@@ -3,13 +3,14 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, SectionSummaryModel, SummaryModel
+from app.services.repo_helpers import get_or_404
 from app.services.summarizer import get_summarization_service
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/summarize", tags=["summarize"])
 
 
 class SummarizeRequest(BaseModel):
-    mode: Literal["one_sentence", "executive", "detailed", "conversation", "glossary"]
+    mode: Literal["one_sentence", "executive", "detailed", "conversation"]
     model: str | None = None
     force_refresh: bool = False
 
@@ -37,6 +38,8 @@ async def get_section_summaries(document_id: str) -> list[dict]:
     documents where section summarization was skipped due to Ollama being offline).
     """
     async with get_session_factory()() as session:
+        # Custom 3-column projection for this endpoint's list response; no SectionSummaryRepo
+        # method would be cleaner given the caller shapes the columns.
         rows = await session.execute(
             select(
                 SectionSummaryModel.unit_index,
@@ -59,6 +62,8 @@ async def get_cached_summaries(document_id: str) -> dict:
     a pre-loaded summary or a Generate button.
     """
     async with get_session_factory()() as session:
+        # Custom projection + dedup-by-mode fold; the caller owns the fold logic so this stays
+        # in the router rather than being wrapped in a SummaryRepo method.
         rows = await session.execute(
             select(SummaryModel.mode, SummaryModel.id, SummaryModel.content)
             .where(SummaryModel.document_id == document_id)
@@ -96,12 +101,7 @@ async def summarize_document(document_id: str, req: SummarizeRequest) -> Streami
     database without calling the LLM.  Generates and stores on cache miss.
     """
     async with get_session_factory()() as session:
-        doc = (
-            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        ).scalar_one_or_none()
-
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     svc = get_summarization_service()
     return StreamingResponse(

@@ -1,5 +1,5 @@
 /**
- * NotesReaderPanel -- S192: collection-scoped active reading sidebar.
+ * NotesReaderPanel -- collection-scoped active reading sidebar.
  *
  * Shows notes from the document's auto-collection in the right panel of DocumentReader.
  * Clicking edit / double-click opens the full NoteReaderSheet (same as Notes tab).
@@ -10,13 +10,9 @@ import { useEffect, useState, useCallback } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { Loader2, Plus, Pencil, Trash2, BookOpen } from "lucide-react"
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
+import { ApiError, apiDelete, apiGet } from "@/lib/apiClient"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 interface AutoCollection {
   id: string
@@ -24,19 +20,9 @@ interface AutoCollection {
   auto_document_id: string | null
 }
 
-interface NoteItem {
-  id: string
-  document_id: string | null
-  section_id: string | null
-  content: string
-  tags: string[]
-  collection_ids: string[]
-  source_document_ids: string[]
-  chunk_id: string | null
-  group_name: string | null
-  created_at: string
-  updated_at: string
-}
+import type { components } from "@/types/api"
+
+type NoteItem = components["schemas"]["NoteResponse"]
 
 interface SectionInfo {
   id: string
@@ -44,6 +30,7 @@ interface SectionInfo {
   section_order: number
 }
 
+// Local-only: minimal 2-field doc picker subset.
 interface DocumentItem {
   id: string
   title: string
@@ -57,50 +44,43 @@ interface NotesReaderPanelProps {
   onNoteCountKnown?: (count: number) => void
 }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
 async function fetchAutoCollection(
   documentId: string,
 ): Promise<AutoCollection | null> {
-  const res = await fetch(
-    `${API_BASE}/collections/by-document/${documentId}`,
-  )
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error("Failed to fetch auto-collection")
-  return res.json() as Promise<AutoCollection>
-}
-
-async function fetchNotes(collectionId: string): Promise<NoteItem[]> {
-  const res = await fetch(
-    `${API_BASE}/notes?collection_id=${collectionId}`,
-  )
-  if (!res.ok) throw new Error("Failed to fetch notes")
-  return res.json() as Promise<NoteItem[]>
-}
-
-async function fetchSections(
-  documentId: string,
-): Promise<SectionInfo[]> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}`)
-  if (!res.ok) return []
-  const doc = (await res.json()) as {
-    sections: SectionInfo[]
+  try {
+    return await apiGet<AutoCollection>(
+      `/collections/by-document/${documentId}`,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
   }
-  return doc.sections ?? []
+}
+
+const fetchNotes = (collectionId: string): Promise<NoteItem[]> =>
+  apiGet<NoteItem[]>("/notes", { collection_id: collectionId })
+
+async function fetchSections(documentId: string): Promise<SectionInfo[]> {
+  try {
+    const doc = await apiGet<{ sections: SectionInfo[] }>(
+      `/documents/${documentId}`,
+    )
+    return doc.sections ?? []
+  } catch {
+    return []
+  }
 }
 
 async function fetchDocuments(): Promise<DocumentItem[]> {
-  const res = await fetch(`${API_BASE}/documents?page_size=200`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocumentItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocumentItem[] }>("/documents", {
+      page_size: 200,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function NotesReaderPanel({
   documentId,
@@ -194,12 +174,7 @@ export function NotesReaderPanel({
 
   // Delete note mutation
   const deleteMut = useMutation({
-    mutationFn: async (noteId: string) => {
-      const res = await fetch(`${API_BASE}/notes/${noteId}`, {
-        method: "DELETE",
-      })
-      if (!res.ok) throw new Error("Failed to delete note")
-    },
+    mutationFn: (noteId: string) => apiDelete(`/notes/${noteId}`),
     onSuccess: () => {
       setDeleteConfirmId(null)
       void qc.invalidateQueries({

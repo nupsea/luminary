@@ -31,9 +31,7 @@ from app.services.feynman_service import (
     _strip_key_points_block,
 )
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -60,9 +58,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Pure function unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_parse_gaps_extracts_list():
@@ -91,9 +87,7 @@ def test_strip_gaps_block():
     assert "Excellent work!" in stripped
 
 
-# ---------------------------------------------------------------------------
 # AC3: complete_session() with 2 gaps generates >= 2 feynman flashcards
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -179,9 +173,7 @@ async def test_complete_session_generates_feynman_flashcards(test_db):
         assert card.deck == "feynman"
 
 
-# ---------------------------------------------------------------------------
 # AC4: tutor prompt includes section summary content
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -231,9 +223,7 @@ async def test_create_session_system_prompt_includes_section_summary(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # S159: _parse_key_points and _strip_key_points_block helpers
-# ---------------------------------------------------------------------------
 
 
 def test_parse_key_points_extracts_list():
@@ -254,9 +244,7 @@ def test_strip_key_points_block():
     assert "Good explanation." in stripped
 
 
-# ---------------------------------------------------------------------------
 # S159-AC3: generate_model_explanation stores non-null model_explanation_text
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -291,7 +279,7 @@ async def test_generate_model_explanation_stores_text(test_db):
         return _gen()
 
     svc = FeynmanService()
-    patch_target = "app.services.feynman_service.litellm.acompletion"
+    patch_target = "app.services.llm.litellm.acompletion"
     with patch(patch_target, new=AsyncMock(side_effect=_mock_stream)):
         async with factory() as session:
             events = [e async for e in svc.generate_model_explanation(session_id, session)]

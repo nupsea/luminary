@@ -23,9 +23,7 @@ from app.services.confusion_detector import ConfusionDetectorService
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
 
-# ---------------------------------------------------------------------------
 # Fixtures and helpers
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -63,9 +61,7 @@ def _entity(name: str, chunk_id: str, etype: str = "CONCEPT") -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # (a) Signal returned above threshold
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -92,9 +88,7 @@ async def test_detect_returns_signal_above_threshold(db_session):
     assert entanglement_signal["count"] == 4
 
 
-# ---------------------------------------------------------------------------
 # (b) Below threshold returns empty list
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -109,9 +103,7 @@ async def test_detect_below_threshold_returns_empty(db_session):
     assert signals == []
 
 
-# ---------------------------------------------------------------------------
 # (c) Distinct question counting -- not raw entity mention count
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -146,9 +138,7 @@ async def test_detect_counts_distinct_questions(db_session):
     assert signals[0]["count"] == 3
 
 
-# ---------------------------------------------------------------------------
 # (d) Lookback window respected
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -167,9 +157,7 @@ async def test_detect_lookback_respected(db_session):
     assert signals == []
 
 
-# ---------------------------------------------------------------------------
 # (e) GLiNER failure returns empty list gracefully
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

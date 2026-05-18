@@ -2,14 +2,14 @@
 
 Routes:
   POST /flashcards/generate                              — LLM-generate cards for a document
-  POST /flashcards/from-gaps                             — one LLM flashcard per gap string (S97)
-  POST /flashcards/cloze/{section_id}                   — generate cloze deletion cards (S154)
-  GET  /flashcards/search                               — unified search with FTS + filters (S184)
-  GET  /flashcards/audit/{document_id}                  — Bloom's coverage report (S153)
-  POST /flashcards/audit/{document_id}/fill             — fill Bloom's gaps (S153)
-  GET  /flashcards/health/{document_id}                 — deck health report (S160)
-  POST /flashcards/health/{document_id}/archive-mastered — archive mastered cards (S160)
-  POST /flashcards/health/{document_id}/fill-uncovered  — generate for uncovered sections (S160)
+  POST /flashcards/from-gaps                             — one LLM flashcard per gap string
+  POST /flashcards/cloze/{section_id}                   — generate cloze deletion cards
+  GET  /flashcards/search                               — unified search with FTS + filters
+  GET  /flashcards/audit/{document_id}                  — Bloom's coverage report
+  POST /flashcards/audit/{document_id}/fill             — fill Bloom's gaps
+  GET  /flashcards/health/{document_id}                 — deck health report
+  POST /flashcards/health/{document_id}/archive-mastered — archive mastered cards
+  POST /flashcards/health/{document_id}/fill-uncovered  — generate for uncovered sections
   GET  /flashcards/{document_id}/export/csv             — CSV download
   GET  /flashcards/{document_id}                        — list cards ordered by created_at desc
   PUT  /flashcards/{card_id}                — update question/answer, sets is_user_edited
@@ -17,28 +17,23 @@ Routes:
   POST /flashcards/bulk-delete              — delete multiple cards by ID
   DELETE /flashcards/document/{document_id} — delete all cards for a document (204)
   POST /flashcards/{card_id}/review         — FSRS review with rating
-  GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel (S155)
+  GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel
 
 NOTE: The /search, /audit, /cloze, /health routes must be registered BEFORE /{document_id}
 to prevent FastAPI from matching literal segments as document_id.
 """
 
 import asyncio
-import csv
-import io
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
 
-import litellm
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     CollectionModel,
@@ -47,7 +42,34 @@ from app.models import (
     ReviewEventModel,
     SectionModel,
 )
+from app.repos.flashcard_repo import FlashcardRepo, get_flashcard_repo
+from app.schemas.flashcards import (
+    ArchiveMasteredResponse,
+    BulkDeleteRequest,
+    BulkDeleteResponse,
+    CoverageReportResponse,
+    DeckHealthReportResponse,
+    DeckItem,
+    EntityPairPreview,
+    EntityPairsResponse,
+    FillGapsResponse,
+    FillUncoveredRequest,
+    FillUncoveredResponse,
+    FlashcardGenerateRequest,
+    FlashcardResponse,
+    FlashcardSearchResponse,
+    FlashcardUpdateRequest,
+    FromGapsRequest,
+    FromGapsResponse,
+    GenerateFromGraphRequest,
+    GenerateTechnicalRequest,
+    ReviewRequest,
+    SourceContextResponse,
+    TraceFlashcardRequest,
+)
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.deck_health import DeckHealthService, get_deck_health_service
+from app.services.engagement_service import EngagementService
 from app.services.flashcard import (
     FlashcardService,
     _delete_flashcard_fts,
@@ -55,7 +77,15 @@ from app.services.flashcard import (
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
+from app.services.flashcards_router_service import (
+    cards_to_csv as _cards_to_csv,
+)
+from app.services.flashcards_router_service import (
+    to_response as _to_response,
+)
 from app.services.fsrs_service import FSRSService, get_fsrs_service
+from app.services.llm import LLMUnavailableError
+from app.services.objective_tracker import get_objective_tracker_service
 
 logger = logging.getLogger(__name__)
 
@@ -64,201 +94,36 @@ router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 # Strong references to fire-and-forget coverage update tasks (asyncio holds only weak refs).
 _background_tasks: set[asyncio.Task] = set()
 
+# Back-compat re-exports for routers/study.py and tests that import these
+# private aliases from this module.
+__all__ = [
+    "ArchiveMasteredResponse",
+    "BulkDeleteRequest",
+    "BulkDeleteResponse",
+    "CoverageReportResponse",
+    "DeckHealthReportResponse",
+    "DeckItem",
+    "EntityPairPreview",
+    "EntityPairsResponse",
+    "FillGapsResponse",
+    "FillUncoveredRequest",
+    "FillUncoveredResponse",
+    "FlashcardGenerateRequest",
+    "FlashcardResponse",
+    "FlashcardSearchResponse",
+    "FlashcardUpdateRequest",
+    "FromGapsRequest",
+    "FromGapsResponse",
+    "GenerateFromGraphRequest",
+    "GenerateTechnicalRequest",
+    "ReviewRequest",
+    "SourceContextResponse",
+    "TraceFlashcardRequest",
+    "_cards_to_csv",
+    "_to_response",
+    "router",
+]
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
-class FlashcardGenerateRequest(BaseModel):
-    document_id: str
-    scope: Literal["full", "section"] = "full"
-    section_heading: str | None = None
-    count: int = 10
-    difficulty: Literal["easy", "medium", "hard"] = "medium"
-    context: str | None = None  # selected text from reader; used directly when provided
-
-
-class FromGapsRequest(BaseModel):
-    gaps: list[str] = Field(min_length=1)
-    document_id: str = ""
-
-
-class FromGapsResponse(BaseModel):
-    created: int
-
-
-class FlashcardUpdateRequest(BaseModel):
-    question: str | None = None
-    answer: str | None = None
-
-
-class GenerateFromGraphRequest(BaseModel):
-    document_id: str
-    k: int = Field(default=5, ge=1, le=20)
-
-
-class EntityPairPreview(BaseModel):
-    name_a: str
-    name_b: str
-    relation_label: str
-    confidence: float
-
-
-class EntityPairsResponse(BaseModel):
-    pairs: list[EntityPairPreview]
-
-
-class ReviewRequest(BaseModel):
-    rating: Literal["again", "hard", "good", "easy"]
-    session_id: str | None = None
-
-
-class GenerateTechnicalRequest(BaseModel):
-    document_id: str
-    scope: Literal["full", "section"] = "full"
-    section_heading: str | None = None
-    count: int = 10
-
-
-class FlashcardResponse(BaseModel):
-    id: str
-    document_id: str | None
-    chunk_id: str | None
-    source: str = "document"
-    question: str
-    answer: str
-    source_excerpt: str
-    difficulty: str = "medium"
-    is_user_edited: bool
-    fsrs_state: str
-    fsrs_stability: float
-    fsrs_difficulty: float
-    due_date: datetime | None
-    reps: int
-    lapses: int
-    created_at: datetime
-    # S137: Bloom's Taxonomy fields
-    flashcard_type: str | None = None
-    bloom_level: int | None = None
-    # S138: section_id derived from chunk -- populated by endpoints that do the join
-    section_id: str | None = None
-    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
-    cloze_text: str | None = None
-    # S179: chunk classifier label; null for non-document-chunk cards
-    chunk_classification: str | None = None
-    # S188: section heading for source grounding display
-    section_heading: str | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class CoverageReportResponse(BaseModel):
-    """Response schema for GET /flashcards/audit/{document_id} (S153)."""
-
-    total_cards: int
-    by_bloom_level: dict[str, int]  # JSON keys are always strings
-    by_section: dict[str, dict]  # BloomSectionStat as plain dict
-    coverage_score: float
-    gaps: list[dict]  # BloomGap as plain dict
-
-
-class FillGapsResponse(BaseModel):
-    """Response schema for POST /flashcards/audit/{document_id}/fill (S153)."""
-
-    created: int
-
-
-class DeckHealthReportResponse(BaseModel):
-    """Response schema for GET /flashcards/health/{document_id} (S160)."""
-
-    orphaned: int
-    orphaned_ids: list[str]
-    mastered: int
-    mastered_ids: list[str]
-    stale: int
-    stale_ids: list[str]
-    uncovered_sections: int
-    uncovered_section_ids: list[str]
-    hotspot_sections: list[dict]
-
-
-class ArchiveMasteredResponse(BaseModel):
-    """Response schema for POST /flashcards/health/{document_id}/archive-mastered (S160)."""
-
-    archived: int
-
-
-class FillUncoveredRequest(BaseModel):
-    """Request body for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
-
-    section_ids: list[str] = Field(min_length=1)
-
-
-class FillUncoveredResponse(BaseModel):
-    """Response schema for POST /flashcards/health/{document_id}/fill-uncovered (S160)."""
-
-    queued: int
-
-
-class SourceContextResponse(BaseModel):
-    """Response schema for GET /flashcards/{card_id}/source-context (S155)."""
-
-    section_heading: str
-    section_preview: str
-    document_title: str
-    pdf_page_number: int | None
-    section_id: str
-    document_id: str
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _to_response(card: FlashcardModel, section_id: str | None = None) -> FlashcardResponse:
-    return FlashcardResponse(
-        id=card.id,
-        document_id=card.document_id,
-        chunk_id=card.chunk_id,
-        source=card.source if card.source else "document",
-        question=card.question,
-        answer=card.answer,
-        source_excerpt=card.source_excerpt,
-        difficulty=card.difficulty,
-        is_user_edited=card.is_user_edited,
-        fsrs_state=card.fsrs_state,
-        fsrs_stability=card.fsrs_stability,
-        fsrs_difficulty=card.fsrs_difficulty,
-        due_date=card.due_date,
-        reps=card.reps,
-        lapses=card.lapses,
-        created_at=card.created_at,
-        flashcard_type=getattr(card, "flashcard_type", None),
-        bloom_level=getattr(card, "bloom_level", None),
-        section_id=section_id,
-        cloze_text=getattr(card, "cloze_text", None),
-        chunk_classification=getattr(card, "chunk_classification", None),
-        section_heading=getattr(card, "section_heading", None),
-    )
-
-
-# ---------------------------------------------------------------------------
-# S184: Search response model
-# ---------------------------------------------------------------------------
-
-
-class FlashcardSearchResponse(BaseModel):
-    items: list[FlashcardResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 # NOTE: /search is registered BEFORE /{document_id} to prevent FastAPI from
 # matching the literal segment "search" as a document_id wildcard.
@@ -274,12 +139,13 @@ async def search_flashcards(
     bloom_level_max: int | None = Query(default=None),
     fsrs_state: str | None = Query(default=None),
     flashcard_type: str | None = Query(default=None),
+    section_id: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_db),
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> FlashcardSearchResponse:
-    """Search flashcards with optional FTS query and structured filters (S184).
+    """Search flashcards with optional FTS query and structured filters
 
     All filters combine with AND. Returns paginated FlashcardResponse list.
     """
@@ -293,6 +159,7 @@ async def search_flashcards(
         bloom_level_max=bloom_level_max,
         fsrs_state=fsrs_state,
         flashcard_type=flashcard_type,
+        section_id=section_id,
         page=page,
         page_size=page_size,
     )
@@ -331,11 +198,7 @@ async def generate_flashcards(
             session=session,
             context=req.context,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -353,7 +216,7 @@ async def generate_from_gaps(
     session: AsyncSession = Depends(get_db),
     service: FlashcardService = Depends(get_flashcard_service),
 ) -> FromGapsResponse:
-    """Generate one LLM-authored flashcard per knowledge gap (S97).
+    """Generate one LLM-authored flashcard per knowledge gap
 
     Raises 422 when gaps is empty. Raises 503 when Ollama is unreachable.
     """
@@ -363,30 +226,13 @@ async def generate_from_gaps(
             document_id=req.document_id,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is unreachable. Start it with: ollama serve",
         ) from exc
     logger.info("generate_from_gaps: created %d cards", created)
     return FromGapsResponse(created=created)
-
-
-def _cards_to_csv(cards: list[FlashcardModel], document_title: str) -> str:
-    """Render flashcards as a CSV string.
-
-    Pure function — no I/O. All inputs are explicit parameters.
-    """
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["question", "answer", "source_excerpt", "document_title"])
-    for card in cards:
-        writer.writerow([card.question, card.answer, card.source_excerpt, document_title])
-    return output.getvalue()
 
 
 @router.get("/entity-pairs", response_model=EntityPairsResponse)
@@ -396,9 +242,8 @@ async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
     Uses RELATED_TO edges ordered by confidence descending; falls back to CO_OCCURS
     when no RELATED_TO edges exist.
     """
-    from app.services.graph import get_graph_service  # noqa: PLC0415
 
-    graph = get_graph_service()
+    graph = _graph_module.get_graph_service()
     raw_pairs = graph.get_related_entity_pairs_for_document(document_id, limit=10)
 
     if not raw_pairs:
@@ -437,11 +282,7 @@ async def generate_flashcards_from_graph(
             k=req.k,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -468,11 +309,7 @@ async def generate_technical_flashcards(
             count=req.count,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -482,14 +319,6 @@ async def generate_technical_flashcards(
         extra={"document_id": req.document_id, "count": len(cards)},
     )
     return [_to_response(c) for c in cards]
-
-
-class TraceFlashcardRequest(BaseModel):
-    question: str  # typically the code block (front of card)
-    answer: str  # correct output + diff explanation (back of card)
-    source_excerpt: str
-    document_id: str | None = None
-    chunk_id: str | None = None
 
 
 @router.post("/create-trace", response_model=FlashcardResponse, status_code=201)
@@ -525,8 +354,10 @@ async def create_trace_flashcard(
         flashcard_type="trace",
         bloom_level=None,
     )
+    # Card insert and FTS sync must be in the same transaction; _sync_flashcard_fts
+    # takes the live session mid-flight, so the commit must stay with the add here.
     session.add(card)
-    # S184: sync FTS index for trace flashcards
+    # sync FTS index for trace flashcards
     await _sync_flashcard_fts(card, session)
     await session.commit()
     await session.refresh(card)
@@ -534,11 +365,8 @@ async def create_trace_flashcard(
     return _to_response(card)
 
 
-# ---------------------------------------------------------------------------
-# S154: Cloze deletion flashcard generation
-# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "cloze" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# Cloze deletion flashcard generation
+# NOTE: /cloze before /{document_id} — prevents FastAPI treating "cloze" as a document_id.
 
 
 @router.post("/cloze/{section_id}", response_model=list[FlashcardResponse], status_code=201)
@@ -555,11 +383,7 @@ async def generate_cloze_flashcards(
             count=count,
             session=session,
         )
-    except (
-        litellm.exceptions.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
@@ -571,11 +395,8 @@ async def generate_cloze_flashcards(
     return [_to_response(c) for c in cards]
 
 
-# ---------------------------------------------------------------------------
-# Bloom's taxonomy coverage audit (S153)
-# NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "audit" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# Bloom's taxonomy coverage audit
+# NOTE: /audit before /{document_id} — prevents FastAPI treating "audit" as a document_id.
 
 
 @router.get("/audit/{document_id}", response_model=CoverageReportResponse)
@@ -615,11 +436,7 @@ async def fill_audit_gaps(
     try:
         report = await audit_service.analyze_coverage(document_id, session)
         created = await audit_service.fill_gaps(document_id, report["gaps"], session)
-    except (
-        litellm.ServiceUnavailableError,
-        litellm.exceptions.APIConnectionError,
-        ConnectionRefusedError,
-    ) as exc:
+    except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
             detail="Ollama is unreachable. Start it with: ollama serve",
@@ -627,11 +444,8 @@ async def fill_audit_gaps(
     return FillGapsResponse(created=created)
 
 
-# ---------------------------------------------------------------------------
-# Deck health report (S160)
-# NOTE: These routes are registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "health" as a document_id wildcard.
-# ---------------------------------------------------------------------------
+# Deck health report
+# NOTE: /health before /{document_id} — prevents FastAPI treating "health" as a document_id.
 
 
 @router.get("/health/{document_id}", response_model=DeckHealthReportResponse)
@@ -640,7 +454,7 @@ async def get_deck_health(
     session: AsyncSession = Depends(get_db),
     health_service: DeckHealthService = Depends(get_deck_health_service),
 ) -> DeckHealthReportResponse:
-    """Return a deck health report for a document's flashcard deck (S160)."""
+    """Return a deck health report for a document's flashcard deck"""
     report = await health_service.analyze(document_id, session)
     return DeckHealthReportResponse(**report)
 
@@ -651,7 +465,7 @@ async def archive_mastered_cards(
     session: AsyncSession = Depends(get_db),
     health_service: DeckHealthService = Depends(get_deck_health_service),
 ) -> ArchiveMasteredResponse:
-    """Archive all mastered cards (stability > 180) for a document (S160)."""
+    """Archive all mastered cards (stability > 180) for a document"""
     archived = await health_service.archive_mastered(document_id, session)
     return ArchiveMasteredResponse(archived=archived)
 
@@ -666,7 +480,7 @@ async def fill_uncovered_sections(
     req: FillUncoveredRequest,
     health_service: DeckHealthService = Depends(get_deck_health_service),
 ) -> FillUncoveredResponse:
-    """Queue fire-and-forget card generation for uncovered sections (S160).
+    """Queue fire-and-forget card generation for uncovered sections
 
     Returns HTTP 202 immediately. Cards are generated in the background using
     a fresh DB session to avoid sharing the request-scope session with a
@@ -674,9 +488,8 @@ async def fill_uncovered_sections(
     """
 
     async def _run() -> None:
-        from app.database import get_db as _get_db  # noqa: PLC0415
 
-        async for db in _get_db():
+        async for db in get_db():
             await health_service.generate_for_uncovered(document_id, req.section_ids, db)
             break
 
@@ -686,41 +499,32 @@ async def fill_uncovered_sections(
     return FillUncoveredResponse(queued=len(req.section_ids))
 
 
-# ---------------------------------------------------------------------------
-# Deck list (S169)
-# NOTE: This route is registered BEFORE /{document_id} to prevent FastAPI
-# from matching the literal segment "decks" as a document_id wildcard.
-# ---------------------------------------------------------------------------
-
-
-class DeckItem(BaseModel):
-    deck: str
-    source_type: str  # "document" | "collection" | "note"
-    card_count: int
-    document_id: str | None
-    collection_id: str | None
+# Deck list
+# NOTE: /decks before /{document_id} — prevents FastAPI treating "decks" as a document_id.
 
 
 @router.get("/decks", response_model=list[DeckItem])
 async def list_flashcard_decks(
     session: AsyncSession = Depends(get_db),
 ) -> list[DeckItem]:
-    """Return all distinct decks with card counts and source type (S169).
+    """Return all distinct decks with card counts and source type
 
     source_type is derived by joining deck name against CollectionModel.name:
     - "collection" when the deck matches a CollectionModel.name
     - "document" when document_id is non-null (source='document')
     - "note" otherwise (tag-scoped or note_ids-scoped)
     """
-    from sqlalchemy import func as sa_func  # noqa: PLC0415
 
+    # Custom aggregation + cross-table name lookup; this bespoke shape (GROUP BY deck,
+    # joined against CollectionModel names) lives in the router because no repo owns
+    # both FlashcardModel and CollectionModel in a single query.
     rows = (
         await session.execute(
             select(
                 FlashcardModel.deck,
                 FlashcardModel.source,
-                sa_func.count().label("card_count"),
-                sa_func.max(FlashcardModel.document_id).label("document_id"),
+                func.count().label("card_count"),
+                func.max(FlashcardModel.document_id).label("document_id"),
             ).group_by(FlashcardModel.deck)
         )
     ).all()
@@ -760,18 +564,15 @@ async def list_flashcard_decks(
 async def export_flashcards_csv(
     document_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> StreamingResponse:
     """Export all flashcards for a document as a CSV download."""
+    # Read document title for the CSV header; single-row lookup, no FlashcardRepo method needed.
     doc_result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
     doc = doc_result.scalar_one_or_none()
     document_title = doc.title if doc else ""
 
-    card_result = await session.execute(
-        select(FlashcardModel)
-        .where(FlashcardModel.document_id == document_id)
-        .order_by(FlashcardModel.created_at.desc())
-    )
-    cards = list(card_result.scalars().all())
+    cards = list(await repo.list_for_document(document_id))
 
     return StreamingResponse(
         iter([_cards_to_csv(cards, document_title)]),
@@ -785,7 +586,7 @@ async def list_flashcards(
     document_id: str,
     section_id: str | None = Query(default=None),
     bloom_level_min: int | None = Query(default=None),
-    session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> list[FlashcardResponse]:
     """List flashcards for a document ordered by created_at desc.
 
@@ -794,34 +595,12 @@ async def list_flashcards(
       bloom_level_min -- only cards with bloom_level >= this value (null bloom cards excluded)
     """
     if section_id is not None:
-        # Join through ChunkModel to filter by section
-        stmt = (
-            select(FlashcardModel, ChunkModel.section_id)
-            .join(ChunkModel, FlashcardModel.chunk_id == ChunkModel.id)
-            .where(
-                FlashcardModel.document_id == document_id,
-                ChunkModel.section_id == section_id,
-            )
+        rows = await repo.list_for_section(
+            document_id, section_id, bloom_level_min=bloom_level_min
         )
-        if bloom_level_min is not None:
-            stmt = stmt.where(
-                FlashcardModel.bloom_level.is_not(None),
-                FlashcardModel.bloom_level >= bloom_level_min,
-            )
-        stmt = stmt.order_by(FlashcardModel.created_at.desc())
-        result = await session.execute(stmt)
-        return [_to_response(row[0], section_id=row[1]) for row in result.all()]
+        return [_to_response(card, section_id=sid) for card, sid in rows]
 
-    # No section filter — preserve existing no-join path
-    stmt = select(FlashcardModel).where(FlashcardModel.document_id == document_id)
-    if bloom_level_min is not None:
-        stmt = stmt.where(
-            FlashcardModel.bloom_level.is_not(None),
-            FlashcardModel.bloom_level >= bloom_level_min,
-        )
-    stmt = stmt.order_by(FlashcardModel.created_at.desc())
-    result = await session.execute(stmt)
-    cards = result.scalars().all()
+    cards = await repo.list_for_document(document_id, bloom_level_min=bloom_level_min)
     return [_to_response(c) for c in cards]
 
 
@@ -830,12 +609,10 @@ async def update_flashcard(
     card_id: str,
     req: FlashcardUpdateRequest,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> FlashcardResponse:
     """Update a flashcard's question and/or answer. Sets is_user_edited=True."""
-    result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-    card = result.scalar_one_or_none()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    card = await repo.get_or_404(card_id)
 
     if req.question is not None:
         card.question = req.question
@@ -843,10 +620,9 @@ async def update_flashcard(
         card.answer = req.answer
     card.is_user_edited = True
 
-    # S184: keep FTS index in sync on question/answer edits
+    # keep FTS index in sync on question/answer edits
     await _sync_flashcard_fts(card, session)
-    await session.commit()
-    await session.refresh(card)
+    await repo.commit_refresh(card)
     logger.info("Updated flashcard", extra={"card_id": card_id})
     return _to_response(card)
 
@@ -855,46 +631,28 @@ async def update_flashcard(
 async def delete_flashcard(
     card_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> None:
     """Delete a flashcard by ID."""
-    result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-    card = result.scalar_one_or_none()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    await repo.get_or_404(card_id)
 
-    # S184: remove from FTS index before deleting
+    # remove from FTS index before deleting
     await _delete_flashcard_fts(card_id, session)
-    await session.execute(delete(FlashcardModel).where(FlashcardModel.id == card_id))
-    await session.commit()
+    await repo.delete_by_id(card_id)
     logger.info("Deleted flashcard", extra={"card_id": card_id})
-
-
-class BulkDeleteRequest(BaseModel):
-    ids: list[str] = Field(min_length=1)
-
-
-class BulkDeleteResponse(BaseModel):
-    deleted: int
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)
 async def bulk_delete_flashcards(
     req: BulkDeleteRequest,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> BulkDeleteResponse:
     """Delete multiple flashcards in one call. Keeps FTS index in sync per I-4."""
-    existing = (
-        await session.execute(
-            select(FlashcardModel.id).where(FlashcardModel.id.in_(req.ids))
-        )
-    ).scalars().all()
+    existing = await repo.list_existing_ids_in(req.ids)
     for card_id in existing:
         await _delete_flashcard_fts(card_id, session)
-    if existing:
-        await session.execute(
-            delete(FlashcardModel).where(FlashcardModel.id.in_(existing))
-        )
-    await session.commit()
+    await repo.delete_by_ids(existing)
     logger.info("Bulk deleted flashcards", extra={"count": len(existing)})
     return BulkDeleteResponse(deleted=len(existing))
 
@@ -903,20 +661,14 @@ async def bulk_delete_flashcards(
 async def delete_all_document_flashcards(
     document_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> None:
     """Delete all flashcards for a specific document. Keeps FTS index in sync per I-4."""
-    ids = (
-        await session.execute(
-            select(FlashcardModel.id).where(FlashcardModel.document_id == document_id)
-        )
-    ).scalars().all()
+    ids = await repo.list_ids_for_document(document_id)
     for card_id in ids:
         await _delete_flashcard_fts(card_id, session)
     if ids:
-        await session.execute(
-            delete(FlashcardModel).where(FlashcardModel.document_id == document_id)
-        )
-    await session.commit()
+        await repo.delete_for_document(document_id)
     logger.info(
         "Deleted all flashcards for document",
         extra={"document_id": document_id, "count": len(ids)},
@@ -937,6 +689,8 @@ async def review_flashcard(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     if req.session_id:
+        # Conditional audit insert; only created when session_id is present.
+        # Kept inline because it is a single-row write with no business logic.
         event = ReviewEventModel(
             id=str(uuid.uuid4()),
             session_id=req.session_id,
@@ -949,7 +703,6 @@ async def review_flashcard(
 
     # Fire-and-forget coverage update -- does not block the review response.
     if card.document_id:
-        from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
         _tracker = get_objective_tracker_service()
         _task = asyncio.create_task(_tracker.update_coverage(card.document_id))
@@ -959,13 +712,11 @@ async def review_flashcard(
     # Fire-and-forget XP award for the review.
     async def _award_review_xp() -> None:
         try:
-            from app.database import get_session_factory  # noqa: PLC0415
-            from app.services.engagement_service import EngagementService  # noqa: PLC0415
 
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)
                 await svc.award_flashcard_xp(req.rating, card_id)
-                await xp_session.commit()
+                await xp_session.commit()  # dedicated XP session; isolated from the review session
         except Exception:
             logger.warning("Failed to award XP for flashcard review", exc_info=True)
 
@@ -981,6 +732,7 @@ async def review_flashcard(
 async def get_source_context(
     card_id: str,
     session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> SourceContextResponse:
     """Return source passage for a flashcard (for SourceContextPanel on Again/Hard).
 
@@ -991,13 +743,12 @@ async def get_source_context(
       - ChunkModel.section_id is null (chunk not section-assigned)
       - SectionModel row not found for that section_id
     """
-    fc_result = await session.execute(select(FlashcardModel).where(FlashcardModel.id == card_id))
-    card = fc_result.scalar_one_or_none()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    card = await repo.get_or_404(card_id)
     if card.chunk_id is None:
         raise HTTPException(status_code=404, detail="Flashcard has no source chunk")
 
+    # Hop-by-hop join chain with 404 at each step: chunk → section → document.
+    # Sequential reads are intentional -- each result gates whether the next query runs.
     chunk_result = await session.execute(select(ChunkModel).where(ChunkModel.id == card.chunk_id))
     chunk = chunk_result.scalar_one_or_none()
     if chunk is None or chunk.section_id is None:

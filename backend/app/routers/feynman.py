@@ -1,4 +1,4 @@
-"""Feynman technique session router (S144).
+"""Feynman technique session router
 
 Routes:
   POST /feynman/sessions              -- create session, return opening message
@@ -28,11 +28,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/feynman", tags=["feynman"])
 
 
-# ---------------------------------------------------------------------------
-# Pydantic request/response models
-# ---------------------------------------------------------------------------
-
-
 class FeynmanSessionCreateRequest(BaseModel):
     document_id: str
     section_id: str | None = None
@@ -54,7 +49,7 @@ class FeynmanMessageRequest(BaseModel):
 class FeynmanCompleteResponse(BaseModel):
     gap_count: int
     flashcard_ids: list[str]
-    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric evaluation failed
+    rubric: TeachbackRubricResponse | None = None  # null when rubric evaluation failed
 
 
 class FeynmanSessionListItem(BaseModel):
@@ -64,11 +59,6 @@ class FeynmanSessionListItem(BaseModel):
     gap_count: int
     created_at: datetime
     section_id: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("/sessions", response_model=FeynmanSessionResponse, status_code=201)

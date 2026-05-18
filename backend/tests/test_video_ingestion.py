@@ -20,9 +20,7 @@ from app.main import app  # noqa: F401 (used via ASGITransport)
 from app.models import DocumentModel
 from app.workflows.ingestion import IngestionState, _classify, transcribe_node
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -45,9 +43,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_classify_returns_video_for_mp4():
@@ -63,9 +59,7 @@ def test_classify_returns_audio_for_wav_unchanged():
     assert _classify("", [], 0, "wav") == "audio"
 
 
-# ---------------------------------------------------------------------------
 # transcribe_node tests
-# ---------------------------------------------------------------------------
 
 
 async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
@@ -105,7 +99,7 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
         "_audio_chunks": None,
     }
 
-    with patch("app.workflows.ingestion.shutil.which", return_value=None):
+    with patch("app.workflows.ingestion_nodes.transcribe.shutil.which", return_value=None):
         result = await transcribe_node(state)
 
     assert result["status"] == "error"
@@ -166,7 +160,10 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
     mock_proc.wait = AsyncMock(return_value=0)
 
     with (
-        patch("app.workflows.ingestion.shutil.which", return_value="/usr/bin/ffmpeg"),
+        patch(
+            "app.workflows.ingestion_nodes.transcribe.shutil.which",
+            return_value="/usr/bin/ffmpeg",
+        ),
         patch(
             "asyncio.create_subprocess_exec",
             AsyncMock(return_value=mock_proc),
@@ -220,9 +217,7 @@ async def test_transcribe_node_passthrough_for_non_video(test_db, tmp_path):
     assert result["status"] == "classifying"
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_mp4_allowed_extension_in_ingest_endpoint(test_db, monkeypatch):

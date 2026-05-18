@@ -26,9 +26,7 @@ from app.services.export_service import (
     _slugify,
 )
 
-# ---------------------------------------------------------------------------
 # Pure unit tests (no DB)
-# ---------------------------------------------------------------------------
 
 
 def test_slugify_basic():
@@ -97,9 +95,7 @@ def test_build_yaml_frontmatter_no_doc_title():
     assert "source_document" not in frontmatter
 
 
-# ---------------------------------------------------------------------------
 # Integration tests via TestClient
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()

@@ -1,5 +1,5 @@
 /**
- * ClozeCard — fill-in-the-blank flashcard renderer (S154).
+ * ClozeCard — fill-in-the-blank flashcard renderer
  *
  * Parses cloze_text with {{term}} markers and reveals blanks progressively
  * left-to-right. Once all blanks are revealed, FSRS rating buttons appear.

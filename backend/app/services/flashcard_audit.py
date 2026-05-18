@@ -1,4 +1,4 @@
-"""FlashcardAuditService -- Bloom's taxonomy coverage analysis and gap fill (S153).
+"""FlashcardAuditService -- Bloom's taxonomy coverage analysis and gap fill
 
 Analyzes the distribution of bloom_level values across sections for a document
 and generates missing-level cards for under-covered sections.

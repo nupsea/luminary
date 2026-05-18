@@ -17,9 +17,7 @@ from app.services.web_searcher import (
     _truncate_content,
 )
 
-# ---------------------------------------------------------------------------
 # Pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_extract_domain_strips_www():
@@ -70,9 +68,7 @@ def test_detect_version_info_empty_for_no_match():
     assert _detect_version_info("") == ""
 
 
-# ---------------------------------------------------------------------------
 # WebSearcher.search() with provider=none
-# ---------------------------------------------------------------------------
 
 
 def test_search_returns_empty_when_provider_none():
@@ -148,9 +144,7 @@ async def test_search_with_provider_none_no_network():
     mock_tavily.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # GET /settings/web-search API endpoint (invariant #9: every new endpoint needs a test)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

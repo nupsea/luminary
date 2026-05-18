@@ -17,36 +17,19 @@ import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NormalizationDrawer } from "@/components/NormalizationDrawer"
 import { TagManagementPanel } from "@/components/TagManagementPanel"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 import { filterTagTree, highlightMatch } from "@/lib/tagUtils"
 import type { FilteredTagTreeItem } from "@/lib/tagUtils"
+import type { components } from "@/types/api"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
-export interface TagTreeItem {
-  id: string
-  display_name: string
-  parent_tag: string | null
-  note_count: number
-  children: TagTreeItem[]
-}
+export type TagTreeItem = components["schemas"]["TagTreeItem"]
 
-// ---------------------------------------------------------------------------
-// API helper
-// ---------------------------------------------------------------------------
+const fetchTagTree = (): Promise<TagTreeItem[]> =>
+  apiGet<TagTreeItem[]>("/tags/tree")
 
-async function fetchTagTree(): Promise<TagTreeItem[]> {
-  const res = await fetch(`${API_BASE}/tags/tree`)
-  if (!res.ok) throw new Error(`GET /tags/tree failed: ${res.status}`)
-  return res.json() as Promise<TagTreeItem[]>
-}
-
-// ---------------------------------------------------------------------------
 // Single tag row
-// ---------------------------------------------------------------------------
 
 interface TagTreeItemRowProps {
   item: FilteredTagTreeItem
@@ -145,13 +128,7 @@ function TagTreeItemRow({
   )
 }
 
-// ---------------------------------------------------------------------------
-// TagTree
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Recursive tree renderer
-// ---------------------------------------------------------------------------
 
 function TagSubtree({
   items,
@@ -200,9 +177,7 @@ function TagSubtree({
   )
 }
 
-// ---------------------------------------------------------------------------
 // Collect all matched IDs from filtered tree (for Enter key: first match)
-// ---------------------------------------------------------------------------
 
 function collectMatchedIds(items: FilteredTagTreeItem[]): string[] {
   const result: string[] = []
@@ -212,10 +187,6 @@ function collectMatchedIds(items: FilteredTagTreeItem[]): string[] {
   }
   return result
 }
-
-// ---------------------------------------------------------------------------
-// TagTree
-// ---------------------------------------------------------------------------
 
 export function TagTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -271,7 +242,9 @@ export function TagTree() {
   async function handleNormalize() {
     setScanInFlight(true)
     try {
-      await fetch(`${API_BASE}/tags/normalization/scan`, { method: "POST" })
+      await apiPost("/tags/normalization/scan")
+    } catch {
+      // best effort
     } finally {
       setScanInFlight(false)
       setNormOpen(true)

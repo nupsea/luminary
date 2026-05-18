@@ -7,9 +7,7 @@ import pytest
 import app.services.llm as llm_module
 from app.services.llm import LLMService, _init_langfuse, _log_to_langfuse
 
-# ---------------------------------------------------------------------------
 # _init_langfuse
-# ---------------------------------------------------------------------------
 
 
 def test_init_langfuse_returns_none_when_keys_missing(monkeypatch):
@@ -58,9 +56,7 @@ def test_init_langfuse_handles_import_error_gracefully(monkeypatch):
     get_settings.cache_clear()
 
 
-# ---------------------------------------------------------------------------
 # _log_to_langfuse
-# ---------------------------------------------------------------------------
 
 
 def test_log_to_langfuse_noop_when_no_client(monkeypatch):
@@ -112,9 +108,7 @@ def test_log_to_langfuse_swallows_langfuse_errors(monkeypatch):
     _log_to_langfuse("ollama/mistral", "prompt", "completion", 0, 0)
 
 
-# ---------------------------------------------------------------------------
 # LLMService.generate — Langfuse is called on non-streaming completions
-# ---------------------------------------------------------------------------
 
 
 def _make_completion_response(content: str) -> MagicMock:
@@ -161,9 +155,7 @@ async def test_generate_skips_langfuse_when_not_configured(monkeypatch):
     assert result == "result"
 
 
-# ---------------------------------------------------------------------------
 # get_langfuse singleton
-# ---------------------------------------------------------------------------
 
 
 def test_get_langfuse_returns_none_by_default(monkeypatch):

@@ -16,9 +16,7 @@ Supported relation types:
 
 import re
 
-# ---------------------------------------------------------------------------
 # Compiled patterns
-# ---------------------------------------------------------------------------
 
 _IMPLEMENTS_RE = re.compile(r"\b(\w[\w.\-]*)\s+implements\s+([\w.\-]+)", re.I)
 _EXTENDS_RE = re.compile(r"\b(\w[\w.\-]*)\s+extends\s+([\w.\-]+)", re.I)

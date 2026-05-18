@@ -1,5 +1,5 @@
 /**
- * S191: Pure utility functions for document action menu navigation.
+ * Pure utility functions for document action menu navigation.
  * Builds luminary:navigate event detail objects for each action.
  */
 

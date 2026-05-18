@@ -18,9 +18,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -91,9 +89,7 @@ def _make_chunk(doc_id: str) -> ChunkModel:
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 async def test_start_session(test_db):

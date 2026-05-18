@@ -90,7 +90,7 @@ function applyPdfHighlights(
 
   if (pageAnnotations.length === 0) return
 
-  // S111: Sort by start_offset so we find occurrences in document order.
+  // Sort by start_offset so we find occurrences in document order.
   // This is critical for the "find next occurrence" strategy to work.
   const sortedAnnotations = [...pageAnnotations].sort((a, b) => (a.start_offset || 0) - (b.start_offset || 0))
 
@@ -207,7 +207,7 @@ const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
 interface PDFViewerProps {
   documentId: string
   sections: SectionItem[]
-  initialPage?: number  // S148: navigate to this page after PDF loads (from citation deep-link)
+  initialPage?: number  // navigate to this page after PDF loads (from citation deep-link)
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
   onPageChange?: (page: number) => void
@@ -352,7 +352,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       }
     }, [documentId])
 
-    // S148: navigate to initialPage once the PDF is loaded or when initialPage changes
+    // navigate to initialPage once the PDF is loaded or when initialPage changes
     useEffect(() => {
       if (!initialPage || loadStatus !== "ready" || !totalPages) return
       if (initialPage >= 1 && initialPage <= totalPages) {
@@ -631,7 +631,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           // Set initial match index to first match if not yet set
           setGlobalMatchIndex((prev) => (prev < 0 && matches.length > 0 ? 0 : prev))
         }
-        // S131: Yield to main thread between batches to keep UI responsive
+        // Yield to main thread between batches to keep UI responsive
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
     }, [extractPageText])

@@ -6,7 +6,7 @@
  *
  * The square SDF: max(|p.x|, |p.y|) - r
  *
- * Used in Viz.tsx for Note nodes (S172: Note nodes in Viz graph).
+ * Used in Viz.tsx for Note nodes
  */
 import { NodeCircleProgram } from "sigma/rendering"
 

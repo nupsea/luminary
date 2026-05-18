@@ -51,9 +51,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_session(
@@ -80,9 +78,7 @@ def _make_session(
     )
 
 
-# ---------------------------------------------------------------------------
 # CRUD
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -199,9 +195,7 @@ async def test_archive_and_complete(test_db):
         assert completed.completed_at is not None
 
 
-# ---------------------------------------------------------------------------
 # Linking
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -243,9 +237,7 @@ async def test_link_unknown_session_raises(test_db):
             await svc.link_session(goal.id, "no-session")
 
 
-# ---------------------------------------------------------------------------
 # delete_goal sets goal_id NULL on linked sessions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -290,9 +282,66 @@ async def test_delete_unknown_goal_returns_false(test_db):
         assert ok is False
 
 
-# ---------------------------------------------------------------------------
+# compute_progress: studying
+
+
+@pytest.mark.asyncio
+async def test_progress_studying_counts_all_completed_surfaces(test_db):
+    _engine, factory = test_db
+    async with factory() as db:
+        svc = LearningGoalsService(db)
+        goal = await svc.create_goal(
+            title="Study broadly",
+            goal_type="studying",
+            target_value=100,
+            target_unit="minutes",
+            document_id="doc-1",
+            collection_id="collection-1",
+        )
+        sessions = [
+            _make_session(goal_id=goal.id, surface="read", focus_minutes=25),
+            _make_session(goal_id=goal.id, surface="write", focus_minutes=20),
+            _make_session(goal_id=goal.id, surface="recall", focus_minutes=15),
+            _make_session(goal_id=goal.id, surface="explore", focus_minutes=10),
+            _make_session(goal_id=goal.id, surface="none", focus_minutes=5),
+            _make_session(goal_id=None, surface="read", focus_minutes=99),
+            _make_session(
+                goal_id=goal.id,
+                surface="read",
+                status="abandoned",
+                focus_minutes=99,
+            ),
+        ]
+        db.add_all(sessions)
+        await db.commit()
+
+        out = await svc.compute_progress(goal.id)
+
+    assert out["minutes_focused"] == 75
+    assert out["sessions_completed"] == 5
+    assert out["surface_minutes"] == {
+        "read": 25,
+        "write": 20,
+        "recall": 15,
+        "explore": 10,
+        "none": 5,
+    }
+    assert out["surface_sessions"] == {
+        "read": 1,
+        "write": 1,
+        "recall": 1,
+        "explore": 1,
+        "none": 1,
+    }
+    assert out["metadata"] == {
+        "document_id": "doc-1",
+        "deck_id": None,
+        "collection_id": "collection-1",
+    }
+    assert out["completed_pct"] == pytest.approx(75.0)
+
+
 # compute_progress: read
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -311,8 +360,9 @@ async def test_progress_read_sums_completed_minutes(test_db):
         s2 = _make_session(goal_id=goal.id, surface="read", focus_minutes=50)
         # Unlinked completed read session: should NOT count.
         s3 = _make_session(goal_id=None, surface="read", focus_minutes=99)
-        # Linked but wrong surface: should NOT count.
-        s4 = _make_session(goal_id=goal.id, surface="write", focus_minutes=99)
+        # Linked write surface: should count because reading may happen while
+        # the learner writes notes from an external source.
+        s4 = _make_session(goal_id=goal.id, surface="write", focus_minutes=30)
         # Linked, completed, but abandoned status: should NOT count.
         s5 = _make_session(
             goal_id=goal.id,
@@ -325,15 +375,13 @@ async def test_progress_read_sums_completed_minutes(test_db):
 
         out = await svc.compute_progress(goal.id)
 
-    assert out["minutes_focused"] == 75
-    assert out["sessions_completed"] == 2
-    # 75/120 = 62.5
-    assert out["completed_pct"] == pytest.approx(62.5)
+    assert out["minutes_focused"] == 105
+    assert out["sessions_completed"] == 3
+    # 105/120 = 87.5
+    assert out["completed_pct"] == pytest.approx(87.5)
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: recall
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -456,9 +504,7 @@ async def test_progress_recall_no_sessions_returns_zero(test_db):
     assert out["sessions_completed"] == 0
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: write
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -515,9 +561,7 @@ async def test_progress_write_counts_notes_in_session_window(test_db):
     assert out["completed_pct"] == pytest.approx(60.0)
 
 
-# ---------------------------------------------------------------------------
 # compute_progress: explore
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -568,9 +612,7 @@ async def test_progress_explore_counts_qa_turns_in_session_window(test_db):
     assert out["completed_pct"] == pytest.approx(50.0)
 
 
-# ---------------------------------------------------------------------------
 # Goalless sessions remain visible to /pomodoro/stats (don't disappear).
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -20,9 +20,11 @@ import { SearchDialog } from "./components/SearchDialog"
 import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
+import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
+import { IngestionProgressPills } from "./components/IngestionProgressPills"
 // All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
 // performance. Viz and Monitoring were already lazy -- Chat, Learning, Notes, Study added in S84.
-// S177: Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
+// Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
 const Chat = lazy(() => import("./pages/Chat"))
 const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
@@ -32,39 +34,16 @@ const Quality = lazy(() => import("./pages/Quality"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Prefetch helpers
-// ---------------------------------------------------------------------------
+const prefetchDocuments = (): Promise<unknown> =>
+  apiGet("/documents", { sort: "newest", page: 1, page_size: 20 })
 
-async function prefetchDocuments(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=20`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
+const prefetchLLMSettings = (): Promise<unknown> => apiGet("/settings/llm")
 
-async function prefetchLLMSettings(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
+const prefetchDueCards = (): Promise<unknown> => apiGet("/study/due")
 
-async function prefetchDueCards(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/study/due`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
-
-async function prefetchProgressData(): Promise<unknown> {
-  const res = await fetch(`${API_BASE}/study/due-count`)
-  if (!res.ok) throw new Error("prefetch failed")
-  return res.json()
-}
-
-// ---------------------------------------------------------------------------
-// QueryClient
-// ---------------------------------------------------------------------------
+const prefetchProgressData = (): Promise<unknown> => apiGet("/study/due-count")
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -83,9 +62,7 @@ const queryClient = new QueryClient({
   },
 })
 
-// ---------------------------------------------------------------------------
 // Nav items with per-tab prefetch config
-// ---------------------------------------------------------------------------
 
 interface NavItemDef {
   to: string
@@ -99,9 +76,17 @@ const NAV_ITEMS: NavItemDef[] = [
   {
     to: "/",
     icon: BookOpen,
-    label: "Learning",
+    label: "Library",
     prefetchKey: ["documents", undefined, null, "newest", 1, 20],
     prefetchFn: prefetchDocuments,
+  },
+  { to: "/notes", icon: StickyNote, label: "Notes" },
+  {
+    to: "/study",
+    icon: BarChart2,
+    label: "Study",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchDueCards,
   },
   {
     to: "/chat",
@@ -112,26 +97,16 @@ const NAV_ITEMS: NavItemDef[] = [
   },
   { to: "/viz", icon: Network, label: "Viz" },
   {
-    to: "/study",
-    icon: BarChart2,
-    label: "Study",
-    prefetchKey: ["study-due"],
-    prefetchFn: prefetchDueCards,
-  },
-  { to: "/notes", icon: StickyNote, label: "Notes" },
-  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
-  {
     to: "/progress",
     icon: TrendingUp,
     label: "Progress",
     prefetchKey: ["study-due"],
     prefetchFn: prefetchProgressData,
   },
+  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
 ]
 
-// ---------------------------------------------------------------------------
 // Global top-of-page loading bar
-// ---------------------------------------------------------------------------
 
 function GlobalLoadingBar() {
   const isFetching = useIsFetching({
@@ -160,9 +135,7 @@ function GlobalLoadingBar() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Page skeleton (Suspense fallback for lazy routes)
-// ---------------------------------------------------------------------------
 
 function PageSkeleton() {
   return (
@@ -177,9 +150,7 @@ function PageSkeleton() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Sidebar with hover-prefetch
-// ---------------------------------------------------------------------------
 
 function Sidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -274,9 +245,7 @@ function Sidebar() {
   )
 }
 
-// ---------------------------------------------------------------------------
 // App shell with startup prefetch
-// ---------------------------------------------------------------------------
 
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -304,10 +273,10 @@ function AppShell() {
     if (!ollamaUnavailable) setOllamaWarningDismissed(false)
   }, [ollamaUnavailable])
 
-  // S118: review reminder notifications
+  // review reminder notifications
   useReviewNotification()
 
-  // S167/S176: cross-tab navigation from tag graph node click or tag chip click
+  // cross-tab navigation from tag graph node click or tag chip click
   useEffect(() => {
     function onLuminaryNavigate(e: Event) {
       const detail = (e as CustomEvent<{
@@ -319,7 +288,7 @@ function AppShell() {
         collectionId?: string
       }>).detail
       if (detail.tab === "notes") {
-        // S197: prefilled note from gap analysis "Take a note" action
+        // prefilled note from gap analysis "Take a note" action
         if (detail.prefilledContent) {
           setNotePreload({ content: detail.prefilledContent, collectionId: detail.collectionId })
         }
@@ -328,23 +297,23 @@ function AppShell() {
         setActiveTag(tagPath)
         navigate("/notes")
       } else if (detail.tab === "learning") {
-        // S176: source document subtitle click from NoteReaderSheet
+        // source document subtitle click from NoteReaderSheet
         const target = detail.documentId ? `/?doc=${detail.documentId}` : "/"
         navigate(target)
       } else if (detail.tab === "chat") {
-        // S191: document action menu -> Chat about this
+        // document action menu -> Chat about this
         // Store updates (chatSelectedDocId, chatScope) happen at dispatch site
         navigate("/chat")
       } else if (detail.tab === "study") {
-        // S183/S191: cards due pill or document action menu
+        // cards due pill or document action menu
         if (detail.documentId) setActiveDocument(detail.documentId)
         navigate("/study")
       } else if (detail.tab === "viz") {
-        // S191: document action menu -> View in graph
+        // document action menu -> View in graph
         if (detail.documentId) setActiveDocument(detail.documentId)
         navigate("/viz")
       } else if (detail.tab === "progress") {
-        // S183: avg mastery pill click from LibraryStatsBar
+        // avg mastery pill click from LibraryStatsBar
         navigate("/progress")
       }
     }
@@ -411,7 +380,7 @@ function AppShell() {
             </button>
           </div>
         )}
-        {/* S209: global focus timer pill -- visible on every tab */}
+        {/* global focus timer pill -- visible on every tab */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3">
           <FocusTimerPill />
         </div>
@@ -458,18 +427,17 @@ function AppShell() {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Root
-// ---------------------------------------------------------------------------
-
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <GlobalLoadingBar />
-      <BrowserRouter>
-        <AppShell />
-      </BrowserRouter>
-      <Toaster position="bottom-right" richColors />
+      <IngestionTrackerProvider>
+        <GlobalLoadingBar />
+        <BrowserRouter>
+          <AppShell />
+        </BrowserRouter>
+        <IngestionProgressPills />
+        <Toaster position="bottom-right" richColors />
+      </IngestionTrackerProvider>
     </QueryClientProvider>
   )
 }

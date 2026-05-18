@@ -20,9 +20,7 @@ from app.models import (
     SummaryModel,
 )
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -64,9 +62,7 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return DocumentModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # Unit tests for learning_status derivation
-# ---------------------------------------------------------------------------
 
 
 def test_derive_learning_status_not_started():
@@ -93,9 +89,7 @@ def test_derive_learning_status_studied():
     assert _derive_learning_status(1, 3, 1) == "studied"
 
 
-# ---------------------------------------------------------------------------
 # GET /documents endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_list_documents_empty(test_db):
@@ -282,9 +276,7 @@ async def test_list_documents_pagination(test_db):
     assert len(data2["items"]) == 1  # 5 docs, page 3 of size 2 → 1 item
 
 
-# ---------------------------------------------------------------------------
 # PATCH /documents/{id} endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_patch_document_title(test_db):
@@ -327,9 +319,7 @@ async def test_patch_document_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # DELETE /documents/{id} endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_delete_document_removes_doc_from_sqlite(test_db):
@@ -340,7 +330,7 @@ async def test_delete_document_removes_doc_from_sqlite(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.delete(f"/documents/{doc_id}")
     assert resp.status_code == 204
@@ -375,7 +365,7 @@ async def test_delete_document_removes_child_rows(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             await client.delete(f"/documents/{doc_id}")
 
@@ -402,7 +392,7 @@ async def test_delete_document_calls_lancedb(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.delete(f"/documents/{doc_id}")
 
@@ -421,7 +411,7 @@ async def test_delete_document_calls_graph_service(test_db):
     mock_lancedb = MagicMock()
     mock_graph = MagicMock()
     with (
-        patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb),
+        patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
         patch("app.services.graph.get_graph_service", return_value=mock_graph),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -437,9 +427,7 @@ async def test_delete_document_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # POST /documents/bulk-delete endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_bulk_delete_removes_docs(test_db):
@@ -453,7 +441,7 @@ async def test_bulk_delete_removes_docs(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post("/documents/bulk-delete", json={"ids": [id1, id2]})
 
@@ -478,7 +466,7 @@ async def test_bulk_delete_skips_missing(test_db):
         await session.commit()
 
     mock_lancedb = MagicMock()
-    with patch("app.routers.documents.get_lancedb_service", return_value=mock_lancedb):
+    with patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/bulk-delete", json={"ids": [real_id, "nonexistent-id"]}
@@ -488,9 +476,7 @@ async def test_bulk_delete_skips_missing(test_db):
     assert resp.json()["count"] == 1
 
 
-# ---------------------------------------------------------------------------
 # PATCH /documents/{id}/tags endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_patch_tags_endpoint(test_db):
@@ -519,9 +505,7 @@ async def test_patch_tags_endpoint_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # chunk_count in GET /documents
-# ---------------------------------------------------------------------------
 
 
 async def test_documents_list_includes_chunk_count(test_db):
@@ -567,9 +551,7 @@ async def test_documents_chunk_count_is_zero_for_fresh_doc(test_db):
     assert items[0]["chunk_count"] == 0
 
 
-# ---------------------------------------------------------------------------
 # GET /documents/{id}/objectives endpoint tests (S132)
-# ---------------------------------------------------------------------------
 
 
 async def test_objectives_returns_empty_for_fiction(test_db):
@@ -631,3 +613,76 @@ async def test_objectives_returns_populated_list(test_db):
     assert obj["section_id"] == section_id
     assert obj["text"] == "You will understand closures."
     assert obj["covered"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_objective_toggles_covered(test_db):
+    """PATCH /documents/{id}/objectives/{obj_id} flips covered both ways."""
+    from app.models import LearningObjectiveModel
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    section_id = str(uuid.uuid4())
+    obj_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id, content_type="tech_book"))
+        session.add(
+            LearningObjectiveModel(
+                id=obj_id,
+                document_id=doc_id,
+                section_id=section_id,
+                text="You will understand monads.",
+                covered=False,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # False -> True
+        resp = await client.patch(
+            f"/documents/{doc_id}/objectives/{obj_id}",
+            json={"covered": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["covered"] is True
+
+        # True -> False (idempotent within a value)
+        resp = await client.patch(
+            f"/documents/{doc_id}/objectives/{obj_id}",
+            json={"covered": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["covered"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_objective_404_for_wrong_document(test_db):
+    """PATCH refuses an objective that exists but belongs to a different document."""
+    from app.models import LearningObjectiveModel
+
+    _, factory, _ = test_db
+    doc_a = str(uuid.uuid4())
+    doc_b = str(uuid.uuid4())
+    obj_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_a, content_type="tech_book"))
+        session.add(_make_doc(doc_b, content_type="tech_book"))
+        session.add(
+            LearningObjectiveModel(
+                id=obj_id,
+                document_id=doc_a,
+                section_id=str(uuid.uuid4()),
+                text="Doc A only.",
+                covered=False,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(
+            f"/documents/{doc_b}/objectives/{obj_id}",
+            json={"covered": True},
+        )
+        assert resp.status_code == 404

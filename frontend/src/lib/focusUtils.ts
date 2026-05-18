@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// focusUtils -- pure helpers for the global focus timer pill (S209).
-// Surface inference and time formatting live here so they are easy to unit test.
-// ---------------------------------------------------------------------------
+// focusUtils — pure helpers for the global focus timer pill (surface inference, time formatting)
 
 export type Surface = "read" | "recall" | "write" | "explore" | "none"
 

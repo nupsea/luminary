@@ -1,4 +1,4 @@
-"""Conversation-aware chunking for speaker-formatted text (S56).
+"""Conversation-aware chunking for speaker-formatted text
 
 ConversationChunker handles three common conversation formats:
   A: Timestamp prefix  — [HH:MM] Speaker: message
@@ -20,10 +20,6 @@ class ConversationChunk:
     speaker: str
     turn_index: int  # index of first turn in this chunk
 
-
-# ---------------------------------------------------------------------------
-# Patterns
-# ---------------------------------------------------------------------------
 
 _PAT_TIMESTAMP = re.compile(r"^\[?\d{1,2}[:/]\d{2}")
 _PAT_NAME_COLON = re.compile(r"^[A-Z][a-zA-Z .]+:\s")
@@ -49,10 +45,6 @@ class _Turn:
 class ConversationChunker:
     """Detect and chunk speaker-format conversation text."""
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def detect(self, text: str) -> bool:
         """Return True if text looks like a speaker-format conversation.
 
@@ -75,9 +67,7 @@ class ConversationChunker:
             return []
         return self._build_chunks(turns)
 
-    # ------------------------------------------------------------------
     # Roster / timeline extraction
-    # ------------------------------------------------------------------
 
     def extract_roster(self, chunks: list[ConversationChunk]) -> dict:
         """Count speaker turns by parsing chunk texts and return roster metadata.
@@ -128,9 +118,7 @@ class ConversationChunker:
             return {"first_timestamp": None, "last_timestamp": None}
         return {"first_timestamp": timestamps[0], "last_timestamp": timestamps[-1]}
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _has_timestamps(self, sample: str) -> bool:
         return bool(_PAT_TIMESTAMP.search(sample))

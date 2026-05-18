@@ -16,9 +16,7 @@ from app.main import app
 from app.models import FlashcardModel, MisconceptionModel, TeachbackResultModel
 from app.routers.study import _parse_teachback_response
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -73,9 +71,7 @@ def _make_card(
     return FlashcardModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # _parse_teachback_response unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_parse_teachback_response_valid_json():
@@ -111,9 +107,7 @@ def test_parse_teachback_response_returns_empty_on_bad_json():
     assert result.get("correct_points", []) == []
 
 
-# ---------------------------------------------------------------------------
 # GET /study/gaps/{document_id} tests
-# ---------------------------------------------------------------------------
 
 
 async def test_get_gaps_returns_weak_cards_grouped(test_db):
@@ -183,9 +177,7 @@ async def test_get_gaps_sorted_by_avg_stability_asc(test_db):
     assert stabilities == sorted(stabilities)
 
 
-# ---------------------------------------------------------------------------
 # POST /study/teachback tests
-# ---------------------------------------------------------------------------
 
 
 async def test_teachback_returns_score_and_feedback(test_db):

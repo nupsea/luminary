@@ -10,9 +10,7 @@ import pytest
 
 from app.services.qa import _maybe_rewrite_query
 
-# ---------------------------------------------------------------------------
 # Helper
-# ---------------------------------------------------------------------------
 
 
 def _make_graph_service(entity_names: list[str]) -> MagicMock:
@@ -27,9 +25,7 @@ def _make_llm_service(rewritten: str) -> MagicMock:
     return svc
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

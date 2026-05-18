@@ -28,9 +28,7 @@ from app.services.diagram_extractor import (
 )
 from app.services.graph import KuzuService
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_kuzu(tmp_path: Path) -> KuzuService:
@@ -63,9 +61,7 @@ def _mock_litellm(json_text: str):
     return AsyncMock(return_value=response)
 
 
-# ---------------------------------------------------------------------------
 # Pure-function tests (no DB, no LLM)
-# ---------------------------------------------------------------------------
 
 
 def test_build_prompt_architecture_contains_component() -> None:
@@ -103,9 +99,7 @@ def test_parse_llm_response_invalid_json() -> None:
         _parse_llm_response("not json at all {")
 
 
-# ---------------------------------------------------------------------------
 # Async service tests (real Kuzu, mocked LiteLLM + SQLAlchemy)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

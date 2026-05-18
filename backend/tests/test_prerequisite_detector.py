@@ -12,9 +12,7 @@ def _chunk(text: str) -> dict:
     return {"text": text, "chunk_id": "c1"}
 
 
-# ---------------------------------------------------------------------------
 # Basic detection
-# ---------------------------------------------------------------------------
 
 
 def test_requires_understanding_of_returns_high_confidence():
@@ -73,9 +71,7 @@ def test_first_introduced_as_returns_low_confidence():
     assert conf == pytest.approx(0.5)
 
 
-# ---------------------------------------------------------------------------
 # Entity guard
-# ---------------------------------------------------------------------------
 
 
 def test_entity_not_in_known_returns_empty():
@@ -97,9 +93,7 @@ def test_only_prereq_in_known_returns_empty():
     assert result == []
 
 
-# ---------------------------------------------------------------------------
 # Deduplication
-# ---------------------------------------------------------------------------
 
 
 def test_duplicate_pairs_keep_highest_confidence():
@@ -134,9 +128,7 @@ def test_self_reference_not_returned():
     assert result == []
 
 
-# ---------------------------------------------------------------------------
 # Multiple matches in one chunk
-# ---------------------------------------------------------------------------
 
 
 def test_multiple_matches_in_one_chunk():

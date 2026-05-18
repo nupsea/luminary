@@ -33,7 +33,7 @@ export interface DocumentListItem {
   source_url: string | null
   video_title: string | null
   enrichment_status: string | null
-  // S143: null = no objectives extracted; 0 = objectives exist but none covered
+  // null = no objectives extracted; 0 = objectives exist but none covered
   objective_progress_pct: number | null
 }
 

@@ -33,7 +33,7 @@ export function buildTransparencyIconLabel(confidenceLevel: string): string {
 
 /**
  * The sections that live inside ChatSettingsDrawer (not the Chat header).
- * Scope moved to inline combobox in Chat header (S186).
+ * Scope moved to inline combobox in Chat header
  */
 export const DRAWER_SECTIONS = ["model", "web_search"] as const
 export type DrawerSection = (typeof DRAWER_SECTIONS)[number]

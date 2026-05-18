@@ -1,4 +1,4 @@
-"""S210: typed learning goals router.
+"""typed learning goals router.
 
 Endpoints (literal paths registered before parametric per FastAPI ordering rule):
 - GET /goals?status=...    list goals optionally filtered by status
@@ -13,7 +13,7 @@ Endpoints (literal paths registered before parametric per FastAPI ordering rule)
 - DELETE /goals/{id}       delete the goal; sets goal_id=NULL on linked sessions
 
 Replaces the old document-centric /goals API (FSRS readiness projection). The new
-schema uses typed goals (read|recall|write|explore) with optional document/deck/
+schema uses typed goals (studying|read|recall|write|explore) with optional document/deck/
 collection links; progress is aggregated from completed Pomodoro sessions plus
 domain-specific tables (review_events, notes, qa_history).
 """
@@ -42,12 +42,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/goals", tags=["goals"])
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
-GoalTypeLiteral = Literal["read", "recall", "write", "explore"]
+GoalTypeLiteral = Literal["studying", "read", "recall", "write", "explore"]
 TargetUnitLiteral = Literal["minutes", "pages", "cards", "notes", "turns"]
 StatusLiteral = Literal["active", "paused", "completed", "archived"]
 
@@ -135,9 +130,7 @@ def _to_response(row: LearningGoalModel) -> GoalResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints -- literal paths first, then parametric
-# ---------------------------------------------------------------------------
+# Endpoints — literal paths first, then parametric
 
 
 @router.get("", response_model=list[GoalResponse])

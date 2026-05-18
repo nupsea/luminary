@@ -10,12 +10,12 @@ import json
 import logging
 import re
 
-import litellm
 from sqlalchemy import select, update
 
 from app.database import get_session_factory
 from app.models import SectionModel, SectionSummaryModel
 from app.services.graph import get_graph_service
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -88,30 +88,27 @@ class PrereqExtractorService:
 
         Returns list of {requires, required_by, confidence} dicts with confidence >= 0.7.
         Returns [] on parse failure (non-fatal).
-        Raises litellm.ServiceUnavailableError if Ollama is unreachable (propagates to worker).
+        Raises LLMUnavailableError when the LLM is unreachable (propagates to worker).
         """
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         user_prompt = (
             f"Section summary:\n{section_content[:2000]}\n\n"
             "List all concepts this section requires the reader to already understand."
         )
-        response = await litellm.acompletion(
-            **get_litellm_kwargs(background=True),
+        raw = await get_llm_service().complete(
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
+            background=True,
         )
-        raw = response.choices[0].message.content or ""
         return _parse_prereqs(raw)
 
     async def enrich(self, document_id: str) -> int:
         """Generate PREREQUISITE_OF edges for all SectionSummaryModel rows of a document.
 
         Returns count of edges written.
-        Raises litellm.ServiceUnavailableError (propagates to worker to mark job failed).
+        Raises LLMUnavailableError (propagates to worker to mark job failed).
         """
         async with get_session_factory()() as session:
             summaries_result = await session.execute(
@@ -132,7 +129,7 @@ class PrereqExtractorService:
         for summary in summaries:
             try:
                 pairs = await self.extract(summary.content, summary.section_id or "", document_id)
-            except litellm.ServiceUnavailableError:
+            except LLMUnavailableError:
                 raise
             except Exception as exc:
                 logger.warning(
@@ -267,7 +264,7 @@ async def prereq_extract_handler(document_id: str, job_id: str) -> None:
 
     Called by EnrichmentQueueWorker for each prerequisites job.
     Delegates to PrereqExtractorService.enrich().
-    litellm.ServiceUnavailableError propagates to mark job 'failed'.
+    LLMUnavailableError propagates to mark job 'failed'.
     """
     logger.info("prereq_extract_handler: starting doc=%s job=%s", document_id, job_id)
     svc = PrereqExtractorService()

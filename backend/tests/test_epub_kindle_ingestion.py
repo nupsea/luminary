@@ -16,9 +16,7 @@ from app.models import DocumentModel
 from app.services.parser import DocumentParser
 from app.workflows.ingestion import _classify
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -41,9 +39,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # _classify() pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_classify_epub_by_extension():
@@ -72,9 +68,7 @@ def test_classify_epub_takes_priority_over_kindle_content():
     assert result == "book"
 
 
-# ---------------------------------------------------------------------------
 # EPUB parsing tests - MOCKED to avoid zip/ebooklib issues
-# ---------------------------------------------------------------------------
 
 
 def test_parse_epub_extracts_chapters(tmp_path):
@@ -105,9 +99,7 @@ def test_parse_epub_extracts_chapters(tmp_path):
         assert "Chapter 1" in result.sections[0].heading
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

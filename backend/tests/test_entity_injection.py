@@ -19,9 +19,7 @@ from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import ENTITY_TAIL_MAX, build_entity_tail
 
-# ---------------------------------------------------------------------------
 # Unit tests: build_entity_tail
-# ---------------------------------------------------------------------------
 
 
 def test_build_entity_tail_empty_input_returns_empty_string():
@@ -74,9 +72,7 @@ def test_build_entity_tail_skips_non_strings():
     assert inner.split(", ") == ["Morlock", "Weena"]
 
 
-# ---------------------------------------------------------------------------
 # Integration: FTS5 surface-form bridging
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

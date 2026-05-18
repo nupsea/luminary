@@ -19,9 +19,7 @@ from app.services.flashcard import (
     _resolve_section_heading,
 )
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -48,9 +46,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 DOC_ID = "doc-s188"
 SEC_ID = "sec-chapter12"
@@ -130,9 +126,7 @@ def _make_bloom_l3_response(count: int = 5) -> str:
     return json.dumps(cards)
 
 
-# ---------------------------------------------------------------------------
 # Tests: helper functions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -194,9 +188,7 @@ def test_resolve_section_heading_no_section():
     assert result is None
 
 
-# ---------------------------------------------------------------------------
 # Tests: generate() produces bloom_level and section_heading
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -21,9 +21,7 @@ from app.main import app
 from app.models import DocumentModel, SectionModel, SectionSummaryModel
 from app.services.section_summarizer import SectionSummarizerService
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -90,9 +88,7 @@ async def _insert_sections(
     return sections
 
 
-# ---------------------------------------------------------------------------
 # (a) test_grouping_caps_at_100_units
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -121,9 +117,7 @@ async def test_grouping_caps_at_100_units(test_db):
     assert inserted == db_count
 
 
-# ---------------------------------------------------------------------------
 # (b) test_short_sections_skipped
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -147,9 +141,7 @@ async def test_short_sections_skipped(test_db):
     assert inserted == 5, f"Expected 5 summaries (short skipped), got {inserted}"
 
 
-# ---------------------------------------------------------------------------
 # (c) test_ollama_offline_returns_zero
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -173,9 +165,7 @@ async def test_ollama_offline_returns_zero(test_db):
     assert result == 0, f"Expected 0 when Ollama offline, got {result}"
 
 
-# ---------------------------------------------------------------------------
 # (d) test_get_sections_endpoint_returns_list
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -212,9 +202,7 @@ async def test_get_sections_endpoint_returns_list(test_db):
     assert data[2]["content"] == "Summary 2"
 
 
-# ---------------------------------------------------------------------------
 # (e) test_get_sections_endpoint_empty_for_unknown_doc
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

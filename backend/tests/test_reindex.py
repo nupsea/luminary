@@ -19,9 +19,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import NoteModel, NoteTagIndexModel  # noqa: F401
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -60,9 +58,7 @@ def client(test_db):
         yield c
 
 
-# ---------------------------------------------------------------------------
 # Helper
-# ---------------------------------------------------------------------------
 
 
 def _make_note(note_id: str | None = None, content: str = "test", **kwargs) -> NoteModel:
@@ -76,9 +72,7 @@ def _make_note(note_id: str | None = None, content: str = "test", **kwargs) -> N
     )
 
 
-# ---------------------------------------------------------------------------
 # Test: dim mismatch detection triggers drop-and-recreate
-# ---------------------------------------------------------------------------
 
 
 def test_dim_mismatch_triggers_drop_and_recreate(tmp_path):
@@ -150,9 +144,7 @@ def test_correct_dim_does_not_trigger_drop(tmp_path):
     assert result is mock_table
 
 
-# ---------------------------------------------------------------------------
 # Test: reindex_notes returns correct reindexed count
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -237,9 +229,7 @@ async def test_reindex_notes_counts_failed_on_exception(test_db):
     assert report["failed"] == 2
 
 
-# ---------------------------------------------------------------------------
 # Test: admin key auth
-# ---------------------------------------------------------------------------
 
 
 def test_reindex_endpoint_wrong_key_returns_403(test_db, monkeypatch):
@@ -293,9 +283,7 @@ def test_reindex_endpoint_no_auth_when_admin_key_empty(test_db):
     assert isinstance(body["total_notes"], int)
 
 
-# ---------------------------------------------------------------------------
 # Performance test: 1,000-note tag query p95 < 100ms
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

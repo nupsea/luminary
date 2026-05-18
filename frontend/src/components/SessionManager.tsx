@@ -33,10 +33,6 @@ import {
   fetchSessions,
 } from "@/lib/studyApi"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
     month: "short",
@@ -46,9 +42,7 @@ function formatDate(iso: string): string {
   })
 }
 
-// ---------------------------------------------------------------------------
-// ActiveSessionCard -- for incomplete teach-back sessions (landing page hero)
-// ---------------------------------------------------------------------------
+// ActiveSessionCard — for incomplete teach-back sessions (landing page hero)
 
 interface ActiveSessionCardProps {
   session: StudySessionItem
@@ -174,10 +168,6 @@ function ActiveSessionCard({
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// SessionManager -- main export
-// ---------------------------------------------------------------------------
 
 interface SessionManagerProps {
   onContinueTeachback: (sessionId: string, documentId: string | null, collectionId: string | null) => void

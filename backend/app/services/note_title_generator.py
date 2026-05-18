@@ -4,8 +4,6 @@ import logging
 import re
 from functools import lru_cache
 
-import litellm
-
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
@@ -37,12 +35,11 @@ class NoteTitleGeneratorService:
         if len(content_stripped) < 20:
             return fallback_title
 
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
+        from app.services.llm import LLMUnavailableError, get_llm_service  # noqa: PLC0415
 
         prompt = _USER_TMPL.format(content=content_stripped[:1000])
         try:
-            response = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            raw = await get_llm_service().complete(
                 messages=[
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user", "content": prompt},
@@ -50,21 +47,14 @@ class NoteTitleGeneratorService:
                 temperature=0.3,
                 max_tokens=30,
             )
-            title = (response.choices[0].message.content or "").strip()
-            # Clean up any surrounding quotes or markdown
+            title = raw.strip()
             title = re.sub(r'^["\']|["\']$', "", title)
             title = re.sub(r"^(Title|title):\s*", "", title).strip()
-            
+
             if not title:
                 return fallback_title
             return title
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ):
+        except LLMUnavailableError:
             logger.warning("LLM unavailable during note title generation; returning fallback")
             return fallback_title
 

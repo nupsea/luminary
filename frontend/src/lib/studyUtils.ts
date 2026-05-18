@@ -46,9 +46,7 @@ export function getDeckDisplayName(params: {
   return docTitle ?? deckName
 }
 
-// ---------------------------------------------------------------------------
-// S184: Flashcard search constants and helpers
-// ---------------------------------------------------------------------------
+// Flashcard search constants and helpers
 
 export const FSRS_STATE_LABELS: Record<string, string> = {
   new: "New",
@@ -75,13 +73,14 @@ export interface FlashcardSearchFilters {
   bloom_level_max?: number
   fsrs_state?: string
   flashcard_type?: string
+  // filter to a specific document section. Used by the Chapter
+  // Goals "Study" link to land on the deck filtered to one section.
+  section_id?: string
   page?: number
   page_size?: number
 }
 
-// ---------------------------------------------------------------------------
-// S185: Insights accordion sections and adaptive generate params
-// ---------------------------------------------------------------------------
+// Insights accordion sections and adaptive generate params
 
 /** Load-bearing constant: InsightsAccordion uses this to enumerate its sections. */
 export const INSIGHTS_SECTIONS = ["health_report", "bloom_audit", "struggling"] as const
@@ -129,6 +128,7 @@ export function buildSearchParams(filters: FlashcardSearchFilters): URLSearchPar
   if (filters.bloom_level_max != null) params.set("bloom_level_max", String(filters.bloom_level_max))
   if (filters.fsrs_state) params.set("fsrs_state", filters.fsrs_state)
   if (filters.flashcard_type) params.set("flashcard_type", filters.flashcard_type)
+  if (filters.section_id) params.set("section_id", filters.section_id)
   if (filters.page != null) params.set("page", String(filters.page))
   if (filters.page_size != null) params.set("page_size", String(filters.page_size))
   return params

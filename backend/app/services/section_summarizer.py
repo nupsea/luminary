@@ -2,7 +2,7 @@
 
 Generates 1-2 sentence summaries for each qualifying section of a document,
 grouped into at most 100 units to bound LLM call count for large books.
-These summaries feed into the document-level summarization step (S76).
+These summaries feed into the document-level summarization step
 """
 
 import asyncio
@@ -11,11 +11,11 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-import litellm
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_session_factory
-from app.models import SectionModel, SectionSummaryModel
+from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def _is_metadata_section(heading: str, text: str) -> bool:
 
 
 class SectionSummarizerService:
-    async def generate(self, document_id: str, concurrency: int = 10) -> int:
+    async def generate(self, document_id: str, concurrency: int = 3) -> int:
         """Generate section summaries for the given document.
 
         Returns the number of SectionSummaryModel rows inserted.
@@ -67,6 +67,9 @@ class SectionSummarizerService:
         """
         # Invalidate the _section_reduce cache so pregenerate() recomputes the
         # document summary using the freshly generated section summaries.
+
+        # Circular: app.services.summarizer imports _is_metadata_section from
+        # this module, so this lookup has to stay lazy.
         from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
@@ -116,22 +119,19 @@ class SectionSummarizerService:
         total_inserted = 0
 
         async def _summarize_unit(unit_index: int, unit: dict) -> None:
-            from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
             nonlocal total_inserted
             async with semaphore:
                 try:
-                    response = await litellm.acompletion(
-                        **get_litellm_kwargs(background=True),
+                    summary_text = await get_llm_service().complete(
                         messages=[
                             {"role": "system", "content": _SYSTEM_PROMPT},
                             {"role": "user", "content": unit["text"][:TEXT_HARD_CAP]},
                         ],
                         temperature=0.0,
-                        timeout=90.0,
+                        timeout=300.0,
+                        background=True,
                     )
-                    summary_text = response.choices[0].message.content or ""
-                except litellm.ServiceUnavailableError:
+                except LLMUnavailableError:
                     raise
                 except Exception as exc:
                     logger.warning(
@@ -159,7 +159,7 @@ class SectionSummarizerService:
 
         try:
             await asyncio.gather(*[_summarize_unit(i, unit) for i, unit in enumerate(units)])
-        except litellm.ServiceUnavailableError:
+        except LLMUnavailableError:
             logger.warning(
                 "section_summarizer: LLM unavailable — skipping section summaries",
                 extra={"doc_id": document_id},
@@ -186,17 +186,14 @@ class SectionSummarizerService:
         Non-fatal: exceptions are logged and swallowed.
         """
         try:
-            from sqlalchemy import func as _func  # noqa: PLC0415
-            from sqlalchemy import select as _select  # noqa: PLC0415
 
-            from app.models import EnrichmentJobModel as _EJM  # noqa: PLC0415
 
             async with get_session_factory()() as session:
                 dup_result = await session.execute(
-                    _select(_func.count(_EJM.id)).where(
-                        _EJM.document_id == document_id,
-                        _EJM.job_type == "web_refs",
-                        _EJM.status.in_(["pending", "running"]),
+                    select(func.count(EnrichmentJobModel.id)).where(
+                        EnrichmentJobModel.document_id == document_id,
+                        EnrichmentJobModel.job_type == "web_refs",
+                        EnrichmentJobModel.status.in_(["pending", "running"]),
                     )
                 )
                 if dup_result.scalar_one() > 0:
@@ -206,7 +203,7 @@ class SectionSummarizerService:
                     )
                     return
 
-                job = _EJM(
+                job = EnrichmentJobModel(
                     id=str(uuid.uuid4()),
                     document_id=document_id,
                     job_type="web_refs",

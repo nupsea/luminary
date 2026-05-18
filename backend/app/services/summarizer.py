@@ -18,7 +18,6 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 
-import litellm
 from sqlalchemy import delete, select
 
 from app.database import get_session_factory
@@ -29,7 +28,7 @@ from app.models import (
     SectionSummaryModel,
     SummaryModel,
 )
-from app.services.llm import get_llm_service
+from app.services.llm import LLMAuthenticationError, get_llm_service
 from app.services.section_summarizer import _is_metadata_section
 
 logger = logging.getLogger(__name__)
@@ -62,11 +61,6 @@ MODE_INSTRUCTIONS: dict[str, str] = {
         '"decisions" (list of strings), '
         '"action_items" (list of objects with "owner" and "task" keys).'
     ),
-    "glossary": (
-        "Extract a glossary of domain-specific terms from the text. "
-        "For each term provide a brief one-sentence definition. "
-        "Output as Markdown with each term **bolded** followed by a colon and the definition."
-    ),
 }
 
 # Token threshold above which map-reduce is applied
@@ -81,7 +75,7 @@ _MAX_MAP_BATCHES = 8
 
 # Per-call timeout (seconds) for map-reduce batch LLM calls.
 # Keeps a stuck Ollama call from blocking pregenerate for 10 minutes.
-_MAP_CALL_TIMEOUT = 90.0
+_MAP_CALL_TIMEOUT = 300.0
 
 # Modes pre-generated at ingestion time
 PREGENERATE_MODES = ("one_sentence", "executive", "detailed")
@@ -357,7 +351,7 @@ class SummarizationService:
             )
             if isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, litellm.AuthenticationError):
+            elif isinstance(exc, LLMAuthenticationError):
                 msg = "LLM API key is invalid. Check your key in Settings."
             else:
                 msg = "LLM service unavailable. If using Ollama, run: ollama serve"
@@ -672,7 +666,7 @@ class SummarizationService:
             logger.warning("stream_library_summary failed", exc_info=exc)
             if isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
-            elif isinstance(exc, litellm.AuthenticationError):
+            elif isinstance(exc, LLMAuthenticationError):
                 msg = "LLM API key is invalid. Check your key in Settings."
             else:
                 msg = "LLM service unavailable. If using Ollama, run: ollama serve"
@@ -681,10 +675,13 @@ class SummarizationService:
 
     async def invalidate_library_cache(self) -> None:
         """Delete all LibrarySummaryModel rows so the next call regenerates."""
-        async with get_session_factory()() as session:
-            await session.execute(delete(LibrarySummaryModel))
-            await session.commit()
-        logger.info("library summary cache invalidated")
+        try:
+            async with get_session_factory()() as session:
+                await session.execute(delete(LibrarySummaryModel))
+                await session.commit()
+            logger.info("library summary cache invalidated")
+        except Exception as exc:
+            logger.warning("library summary cache invalidation failed (non-fatal): %s", exc)
 
 
 _summarization_service: SummarizationService | None = None

@@ -1,21 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
+import type { components } from "@/types/api"
 
-interface DiagnosticsResponse {
-  chunk_count: number
-  fts_count: number
-  entity_count: number
-  edge_count: number
-  vector_count: number
-}
+type DiagnosticsResponse = components["schemas"]["DocumentDiagnostics"]
 
-async function fetchDiagnostics(documentId: string): Promise<DiagnosticsResponse> {
-  const res = await fetch(`${API_BASE}/documents/${documentId}/diagnostics`)
-  if (!res.ok) throw new Error(`Diagnostics fetch failed: ${res.status}`)
-  return res.json() as Promise<DiagnosticsResponse>
-}
+const fetchDiagnostics = (documentId: string): Promise<DiagnosticsResponse> =>
+  apiGet<DiagnosticsResponse>(`/documents/${documentId}/diagnostics`)
 
 interface IngestionHealthPanelProps {
   documentId: string

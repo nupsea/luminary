@@ -1,5 +1,5 @@
 /**
- * SourceCitationChips — S157
+ * SourceCitationChips — 
  *
  * Renders clickable citation chips for chat answers.  Each chip links to the
  * exact section/page in DocumentReader.  Chips fade in after the 'sources'
@@ -18,7 +18,7 @@ export interface SourceCitation {
   section_id: string | null
   section_heading: string
   pdf_page_number: number | null
-  section_preview_snippet: string  // S157: first 150 chars of chunk text
+  section_preview_snippet: string  // first 150 chars of chunk text
 }
 
 /**

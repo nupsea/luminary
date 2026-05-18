@@ -1,4 +1,4 @@
-"""Feynman technique session service (S144).
+"""Feynman technique session service
 
 Manages guided explanation sessions where a Socratic tutor:
 1. Asks the learner to explain a concept from scratch
@@ -13,15 +13,12 @@ Usage:
   result = await svc.complete_session(session_id, db)
 """
 
-import asyncio
 import json
 import logging
-import re
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-import litellm
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,167 +29,24 @@ from app.models import (
     SectionModel,
     SectionSummaryModel,
 )
-from app.services.llm import get_llm_service
+from app.services.feynman_strategies import (
+    _FEYNMAN_OPENING_TMPL,
+    _FEYNMAN_SYSTEM_TMPL,
+    _MODEL_EXPLANATION_SYSTEM,
+    _MODEL_EXPLANATION_USER_TMPL,
+    _RUBRIC_SYSTEM,
+    _RUBRIC_USER_TMPL,
+    _SECTION_CONTEXT_CHAR_LIMIT,
+    _fire_and_forget,
+    _parse_gaps,
+    _parse_key_points,
+    _parse_rubric,
+    _strip_gaps_block,
+    _strip_key_points_block,
+)
+from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Prompt templates
-# ---------------------------------------------------------------------------
-
-_FEYNMAN_SYSTEM_TMPL = (
-    "You are a Socratic tutor using the Feynman technique. "
-    "The learner is studying the concept: {concept}. "
-    "Reference material:\n{section_context}\n\n"
-    "For each learner message: give specific feedback on what they got right, "
-    "identify misunderstandings or missing concepts, "
-    "then ask one targeted follow-up question. "
-    "NEVER give the answer directly -- guide the learner to discover it. "
-    'At the END of your response, output a line: gaps: ["gap1", "gap2"] '
-    "listing concepts the learner misunderstood or omitted in this message. "
-    "Output an empty list if the explanation was complete. "
-    "Keep the gaps list concise (1-4 items max)."
-)
-
-_FEYNMAN_OPENING_TMPL = (
-    "Start the Feynman session. Ask the learner to explain '{concept}' as if "
-    "teaching it to someone who has never heard of it. "
-    "Be encouraging and specific about what you want them to explain."
-)
-
-# S156: rubric evaluation prompts (duplicated in study.py -- same layer)
-_RUBRIC_SYSTEM = (
-    "You are an expert tutor evaluating a student explanation. "
-    "Output a JSON object only -- no preamble, no markdown fences."
-)
-
-_RUBRIC_USER_TMPL = (
-    "Source material:\n{source_context}\n\n"
-    "Student explanation:\n{explanation}\n\n"
-    "Evaluate on three dimensions. "
-    "For accuracy: score 0-100 and quote specific evidence from the source. "
-    "For completeness: score 0-100 and list missed_points as short concept phrases. "
-    "For clarity: score 0-100 and give a one-sentence comment. "
-    'Output JSON: {{"accuracy": {{"score": int, "evidence": str}}, '
-    '"completeness": {{"score": int, "missed_points": [str]}}, '
-    '"clarity": {{"score": int, "evidence": str}}}}'
-)
-
-# S159: model explanation prompt templates
-_MODEL_EXPLANATION_SYSTEM = (
-    "You are an expert educator. Your task is to generate a clear, accurate explanation "
-    "of a concept based on the provided source material."
-)
-
-_MODEL_EXPLANATION_USER_TMPL = (
-    "Concept: {concept}\n\n"
-    "Source material:\n{section_context}\n\n"
-    "Write a complete, self-contained explanation of this concept in 3-5 clear sentences. "
-    "After the explanation, output a line: "
-    'key_points: ["point1", "point2", ...] '
-    "listing the 3-5 key points as short phrases."
-)
-
-# Max chars for section context included in the system prompt
-_SECTION_CONTEXT_CHAR_LIMIT = 3000
-
-# Strong reference set for fire-and-forget background tasks
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
-    """Schedule a coroutine as a fire-and-forget background task with strong ref."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
-
-# ---------------------------------------------------------------------------
-# Gap parsing
-# ---------------------------------------------------------------------------
-
-
-def _parse_gaps(raw: str) -> list[str]:
-    """Extract the gaps JSON list from the end of a tutor response.
-
-    Looks for a line starting with 'gaps:' and parses the JSON array.
-    Returns [] if no gaps block is found or parsing fails.
-    """
-    m = re.search(r"gaps:\s*(\[.*?\])", raw, re.DOTALL)
-    if not m:
-        return []
-    try:
-        result = json.loads(m.group(1))
-        if isinstance(result, list):
-            return [str(g) for g in result if g]
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return []
-
-
-def _parse_rubric(raw: str) -> dict | None:
-    """Strip markdown fences and parse rubric JSON from LLM response. Returns None on failure."""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
-    try:
-        parsed = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Failed to parse rubric JSON: %r", raw[:200])
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    if not {"accuracy", "completeness", "clarity"}.issubset(parsed.keys()):
-        logger.warning("Rubric JSON missing required keys: %s", set(parsed.keys()))
-        return None
-    return parsed
-
-
-def _parse_key_points(raw: str) -> list[str]:
-    """Extract key_points JSON list from the end of a model explanation response.
-
-    Looks for a line starting with 'key_points:' and parses the JSON array.
-    Returns [] if no key_points block is found or parsing fails.
-    """
-    m = re.search(r"key_points:\s*(\[.*?\])", raw, re.DOTALL)
-    if not m:
-        return []
-    try:
-        result = json.loads(m.group(1))
-        if isinstance(result, list):
-            return [str(p) for p in result if p]
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return []
-
-
-def _strip_key_points_block(raw: str) -> str:
-    """Remove the trailing 'key_points: [...]' line from a model explanation for display."""
-    idx = raw.rfind("\nkey_points:")
-    if idx == -1:
-        idx = raw.rfind("key_points:")
-        if idx == 0 or (idx > 0 and raw[idx - 1] == "\n"):
-            return raw[:idx].rstrip()
-        return raw
-    return raw[:idx].rstrip()
-
-
-def _strip_gaps_block(raw: str) -> str:
-    """Remove the trailing 'gaps: [...]' line from a tutor response for display."""
-    # Find the last occurrence of 'gaps:' line and strip from there
-    idx = raw.rfind("\ngaps:")
-    if idx == -1:
-        idx = raw.rfind("gaps:")
-        if idx == 0 or (idx > 0 and raw[idx - 1] == "\n"):
-            return raw[:idx].rstrip()
-        return raw
-    return raw[:idx].rstrip()
-
-
-# ---------------------------------------------------------------------------
-# FeynmanService
-# ---------------------------------------------------------------------------
 
 
 class FeynmanService:
@@ -259,13 +113,7 @@ class FeynmanService:
                 system=system_prompt,
                 stream=False,
             )
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ) as exc:
+        except LLMUnavailableError as exc:
             raise HTTPException(
                 status_code=503,
                 detail="LLM unavailable. Check Settings — if using Ollama, run: ollama serve",
@@ -370,34 +218,18 @@ class FeynmanService:
         db_session.add(learner_turn)
         await db_session.commit()  # Commit learner turn to release write locks during LLM stream
 
-        # Stream LLM response
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         accumulated = ""
 
         try:
-            stream_resp = await litellm.acompletion(
-                **get_litellm_kwargs(),
-                messages=messages,
-                stream=True,
-            )
-            async for chunk in stream_resp:
-                delta = chunk.choices[0].delta.content or ""
+            stream = await get_llm_service().stream_messages(messages=messages)
+            async for delta in stream:
                 if delta:
                     accumulated += delta
-                    # Stream tokens but suppress the gaps: block once it starts
                     if "\ngaps:" not in accumulated and "gaps:" not in accumulated[-20:]:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ) as exc:
+        except LLMUnavailableError as exc:
             logger.warning("Feynman stream_turn: LLM unavailable: %s", exc)
-            # Learner turn was flushed but not committed; roll back so no orphan row
             await db_session.rollback()
             error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
@@ -479,13 +311,7 @@ class FeynmanService:
                     document_id=feynman_session.document_id,
                     session=db_session,
                 )
-            except (
-                litellm.ServiceUnavailableError,
-                litellm.APIConnectionError,
-                litellm.NotFoundError,
-                litellm.RateLimitError,
-                litellm.AuthenticationError,
-            ):
+            except LLMUnavailableError:
                 logger.warning(
                     "Feynman complete_session: LLM unavailable; skipping flashcard generation"
                 )
@@ -496,7 +322,7 @@ class FeynmanService:
         tracker = get_objective_tracker_service()
         _fire_and_forget(tracker.update_coverage(feynman_session.document_id))
 
-        # S156: rubric evaluation using full learner transcript as explanation
+        # rubric evaluation using full learner transcript as explanation
         rubric_dict: dict | None = None
         try:
             learner_texts = [t.content for t in learner_turns if t.content]
@@ -564,36 +390,24 @@ class FeynmanService:
 
         await db_session.commit()  # Release read locks to prevent WAL deadlocks during LLM stream
 
-        from app.services.settings_service import get_litellm_kwargs  # noqa: PLC0415
-
         accumulated = ""
 
         try:
-            stream_resp = await litellm.acompletion(
-                **get_litellm_kwargs(),
+            stream = await get_llm_service().stream_messages(
                 messages=[
                     {"role": "system", "content": _MODEL_EXPLANATION_SYSTEM},
                     {"role": "user", "content": prompt},
                 ],
-                stream=True,
             )
-            async for chunk in stream_resp:
-                delta = chunk.choices[0].delta.content or ""
+            async for delta in stream:
                 if delta:
                     accumulated += delta
-                    # Suppress key_points: block once it starts
                     tail = accumulated[-20:]
                     kp_started = "\nkey_points:" in accumulated or "key_points:" in tail
                     if not kp_started:
                         yield f"data: {json.dumps({'token': delta})}\n\n"
 
-        except (
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.NotFoundError,
-            litellm.RateLimitError,
-            litellm.AuthenticationError,
-        ) as exc:
+        except LLMUnavailableError as exc:
             logger.warning("generate_model_explanation: LLM unavailable: %s", exc)
             await db_session.rollback()
             error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"

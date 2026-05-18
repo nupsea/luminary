@@ -14,9 +14,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import FlashcardModel
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture (same pattern as test_flashcards.py)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -70,9 +68,7 @@ def _make_flashcard(
     return FlashcardModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # AC8: GET /flashcards/search with query param returns matching cards via FTS5
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -104,9 +100,7 @@ async def test_search_by_query(test_db):
         assert card.id in ids
 
 
-# ---------------------------------------------------------------------------
 # AC9: GET /flashcards/search with bloom_level_min=3 returns only L3+ cards
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -149,9 +143,7 @@ async def test_search_bloom_level_min(test_db):
         assert card_high.id in ids
 
 
-# ---------------------------------------------------------------------------
 # AC10: flashcards_fts table is populated on card creation (via service)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -185,9 +177,7 @@ async def test_fts_populated_on_create(test_db):
         assert match_row[0] == card.id
 
 
-# ---------------------------------------------------------------------------
 # Additional: search with no params returns 200 + empty or all
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -204,9 +194,7 @@ async def test_search_no_params(test_db):
         assert "page" in data
 
 
-# ---------------------------------------------------------------------------
 # Additional: search by fsrs_state filter
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -24,9 +24,7 @@ from app.models import (
 )
 from app.services.mastery_service import MasteryService
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -97,9 +95,7 @@ def _make_card(
     )
 
 
-# ---------------------------------------------------------------------------
 # Pure function unit tests: _compute_weighted_mastery
-# ---------------------------------------------------------------------------
 
 
 def test_compute_weighted_mastery_bloom_high_vs_low(test_db):
@@ -151,9 +147,7 @@ def test_compute_weighted_mastery_capped(test_db):
     assert svc._compute_weighted_mastery(cards) == pytest.approx(1.0)
 
 
-# ---------------------------------------------------------------------------
 # Integration tests: compute_mastery against real SQLite
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -302,7 +296,7 @@ async def test_gap_report_weak_field(test_db):
 
     with (
         patch(
-            "app.services.gap_detector.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             side_effect=fake_acompletion,
         ),
         patch("app.services.mastery_service.get_graph_service") as mock_graph_factory,

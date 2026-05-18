@@ -25,9 +25,7 @@ _SKIP_STABILITY_THRESHOLD = 14.0  # days -- avg fsrs_stability >= this means "sk
 _MASTERY_FULL_STABILITY = 21.0  # days -- stability >= this = mastery 1.0
 
 
-# ---------------------------------------------------------------------------
-# Pure functions (no I/O, all inputs explicit)
-# ---------------------------------------------------------------------------
+# Pure functions (no I/O)
 
 
 def compute_mastery(stability_values: list[float]) -> float:
@@ -46,11 +44,6 @@ def should_skip(avg_stability_days: float, threshold: float = _SKIP_STABILITY_TH
 def build_skip_reason(avg_stability_days: float) -> str:
     """Format the reason string for a skip decision."""
     return f"avg_stability={avg_stability_days:.0f}d"
-
-
-# ---------------------------------------------------------------------------
-# StudyPathService
-# ---------------------------------------------------------------------------
 
 
 class StudyPathService:

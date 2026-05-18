@@ -9,7 +9,7 @@ import { useState } from "react"
 import type { HighlightInfo } from "@/components/FloatingToolbar"
 import type { AnnotationItem } from "./types"
 
-import { API_BASE } from "@/lib/config"
+import { apiPost } from "@/lib/apiClient"
 
 const COLORS: { id: "yellow" | "green" | "blue" | "pink"; bg: string; label: string }[] = [
   { id: "yellow", bg: "bg-yellow-300", label: "Yellow" },
@@ -44,22 +44,16 @@ export function AnnotationPopover({
     setSaving(true)
     setError(null)
     try {
-      const resp = await fetch(`${API_BASE}/annotations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: info.sectionId,
-          chunk_id: null,
-          selected_text: info.text,
-          start_offset: info.startOffset,
-          end_offset: info.endOffset,
-          color: selectedColor,
-          note_text: noteText.trim() || null,
-        }),
+      const annotation = await apiPost<AnnotationItem>("/annotations", {
+        document_id: documentId,
+        section_id: info.sectionId,
+        chunk_id: null,
+        selected_text: info.text,
+        start_offset: info.startOffset,
+        end_offset: info.endOffset,
+        color: selectedColor,
+        note_text: noteText.trim() || null,
       })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const annotation = (await resp.json()) as AnnotationItem
       onSaved(annotation)
     } catch {
       setError("Failed to save highlight. Please try again.")

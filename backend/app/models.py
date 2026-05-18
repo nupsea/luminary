@@ -77,7 +77,7 @@ class SectionModel(Base):
     # Tech section detection fields (set by tech_book/tech_article content type)
     admonition_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parent_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Prerequisite chain depth (number of hops from root to this section's concepts; S139)
+    # Prerequisite chain depth (number of hops from root to this section's concepts)
     difficulty_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
@@ -92,14 +92,14 @@ class ChunkModel(Base):
     page_number: Mapped[int] = mapped_column(Integer, default=0)
     speaker: Mapped[str | None] = mapped_column(String, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    # S146: PDF page number (1-based) for chunks from PDF documents.
+    # PDF page number (1-based) for chunks from PDF documents.
     # Null for non-PDF content types (txt, docx, epub, audio, code, etc.).
     pdf_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Code-aware chunking fields (set by tech_book/tech_article content type)
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     code_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # S224: canonical entity tail injected at index time for vocabulary bridging
+    # canonical entity tail injected at index time for vocabulary bridging
     # ("[Entities: A, B, C]"); concatenated into FTS5 text and embedding input,
     # not into the displayed text.
     entities_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -125,7 +125,7 @@ class FlashcardModel(Base):
     chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # 'document' for book-chunk cards, 'note' for note-sourced cards, 'gap' for gap-bridge cards
     source: Mapped[str] = mapped_column(String, nullable=False, default="document")
-    # Logical deck name; 'gaps' for cards created via POST /flashcards/from-gaps (S97)
+    # Logical deck name; 'gaps' for cards created via POST /flashcards/from-gaps
     deck: Mapped[str] = mapped_column(String, nullable=False, default="default")
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
@@ -139,20 +139,20 @@ class FlashcardModel(Base):
     reps: Mapped[int] = mapped_column(Integer, default=0)
     lapses: Mapped[int] = mapped_column(Integer, default=0)
     last_review: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # S137: Bloom's Taxonomy fields — set by generate_technical(); null for non-tech cards
+    # Bloom's Taxonomy fields — set by generate_technical(); null for non-tech cards
     flashcard_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     bloom_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # S154: cloze deletion text with {{term}} markers; null for non-cloze cards
+    # cloze deletion text with {{term}} markers; null for non-cloze cards
     cloze_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # S169: 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
+    # 16-char hex SHA-256 prefix of note.content[:500]; enables content-hash deduplication
     # for collection-based generation. Null for non-collection cards.
     source_content_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    # S173: note_id FK for note-sourced cards; enables per-note coverage tracking
+    # note_id FK for note-sourced cards; enables per-note coverage tracking
     note_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S179: chunk classifier label (concept/definition/example/analogy/narrative/transition);
+    # chunk classifier label (concept/definition/example/analogy/narrative/transition);
     # null for note/gap/context-sourced cards that bypass the classifier
     chunk_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # S188: section heading denormalized at generation time for source grounding display
+    # section heading denormalized at generation time for source grounding display
     section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -197,7 +197,7 @@ class TeachbackResultModel(Base):
     correct_points: Mapped[list] = mapped_column(JSON, default=list)
     missing_points: Mapped[list] = mapped_column(JSON, default=list)
     misconceptions: Mapped[list] = mapped_column(JSON, default=list)
-    # S156: structured rubric JSON; null when rubric LLM call fails or for legacy rows
+    # structured rubric JSON; null when rubric LLM call fails or for legacy rows
     rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Async evaluation: "pending" | "complete" | "error"
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
@@ -229,9 +229,9 @@ class NoteModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S201: short hash of content for dedup (sha256[:16])
+    # short hash of content for dedup (sha256[:16])
     content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S173: archived flag -- excluded from default GET /notes list; set by archive-stale
+    # archived flag -- excluded from default GET /notes list; set by archive-stale
     archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
@@ -295,7 +295,7 @@ class EvalRunModel(Base):
     context_precision: Mapped[float | None] = mapped_column(Float, nullable=True)
     context_recall: Mapped[float | None] = mapped_column(Float, nullable=True)
     model_used: Mapped[str] = mapped_column(String, nullable=False)
-    # S213: tags the kind of eval -- 'retrieval', 'generation', 'classifier',
+    # tags the kind of eval -- 'retrieval', 'generation', 'classifier',
     # 'summary', 'flashcard', 'citation'. Nullable for legacy rows.
     eval_kind: Mapped[str | None] = mapped_column(String, nullable=True, default="retrieval")
     citation_support_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -374,7 +374,7 @@ class ReadingProgressModel(Base):
 
 
 class LearningGoalModel(Base):
-    """S210: typed learning goal (read|recall|write|explore).
+    """typed learning goal (studying|read|recall|write|explore).
 
     Replaces the older document-centric goal/FSRS-readiness schema. Sessions in
     pomodoro_sessions can attribute progress via the nullable goal_id column;
@@ -387,7 +387,7 @@ class LearningGoalModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # read|recall|write|explore
+    # studying|read|recall|write|explore
     goal_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     # minutes|pages|cards|notes|turns -- nullable for goals with no quantitative target
     target_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -462,9 +462,9 @@ class FeynmanSessionModel(Base):
     concept: Mapped[str] = mapped_column(String(300), nullable=False)
     # active|complete
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    # S156: structured rubric JSON written at complete_session(); null until completion
+    # structured rubric JSON written at complete_session(); null until completion
     rubric_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # S159: model-generated explanation and key points (null until POST /model-explanation)
+    # model-generated explanation and key points (null until POST /model-explanation)
     model_explanation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     key_points_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
@@ -522,12 +522,12 @@ class EnrichmentJobModel(Base):
     """Async enrichment job queue entry.
 
     job_type values registered so far:
-      image_extract    -- S133: PDF/EPUB image extraction
-      image_analyze    -- S134: vision LLM image description
-      diagram_extract  -- S136: diagram-type routing and COMPONENT node extraction
-      prerequisites    -- S139: prerequisite graph extraction
-      web_refs         -- S138: web reference resolution
-      concept_link     -- S141: cross-document concept linking
+      image_extract    -- PDF/EPUB image extraction
+      image_analyze    -- vision LLM image description
+      diagram_extract  -- diagram-type routing and COMPONENT node extraction
+      prerequisites    -- prerequisite graph extraction
+      web_refs         -- web reference resolution
+      concept_link     -- cross-document concept linking
 
     status values:
       pending  -- queued, not yet started
@@ -556,7 +556,7 @@ class ImageModel(Base):
 
     chunk_id is the nearest preceding prose chunk by page/index (set during
     extraction; null if no prose chunk precedes the image on the same page).
-    image_type and description are null until S134 (vision analysis) runs.
+    image_type and description are null until  (vision analysis) runs.
 
     Note: any new delete path in documents.py must also delete these rows.
     """
@@ -572,9 +572,9 @@ class ImageModel(Base):
     width: Mapped[int] = mapped_column(Integer, nullable=False)
     height: Mapped[int] = mapped_column(Integer, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
-    # null until S134 vision analysis populates it
+    # null until vision analysis populates it
     image_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    # null until S134 vision analysis populates it
+    # null until vision analysis populates it
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -607,7 +607,7 @@ class WebReferenceModel(Base):
     # official_docs | spec | wiki | tutorial | blog | unknown
     source_quality: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
     is_llm_suggested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # S194: URL validation status — None = unchecked, True = reachable, False = dead link
+    # URL validation status — None = unchecked, True = reachable, False = dead link
     is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
@@ -693,7 +693,7 @@ class CollectionModel(Base):
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Self-FK for 2-level hierarchy; null = top-level collection
     parent_collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # S192: auto-collection for a document (one per document, nullable for manual collections)
+    # auto-collection for a document (one per document, nullable for manual collections)
     auto_document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
@@ -805,7 +805,7 @@ class ClusterSuggestionModel(Base):
 
 
 class NoteLinkModel(Base):
-    """Explicit note-to-note Zettelkasten-style link (S171).
+    """Explicit note-to-note Zettelkasten-style link
 
     Each row represents a directed typed connection from source_note_id to target_note_id.
     Bidirectionality is achieved by querying both directions in GET /notes/{id}/links.
@@ -878,7 +878,7 @@ class PredictionEventModel(Base):
 
 
 class ChatSuggestionHistoryModel(Base):
-    """Tracks shown/asked chat suggestion pills for Bloom-progressive dedup (S195)."""
+    """Tracks shown/asked chat suggestion pills for Bloom-progressive dedup"""
 
     __tablename__ = "chat_suggestion_history"
 
@@ -893,31 +893,8 @@ class ChatSuggestionHistoryModel(Base):
     session_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
-class GlossaryTermModel(Base):
-    """Persistent glossary term extracted from a document via LLM."""
 
-    __tablename__ = "glossary_terms"
-    __table_args__ = (UniqueConstraint("document_id", "term", name="uq_glossary_doc_term"),)
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(
-        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    term: Mapped[str] = mapped_column(String, nullable=False)
-    definition: Mapped[str] = mapped_column(Text, nullable=False)
-    first_mention_section_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
-    )
-
-
-# ---------------------------------------------------------------------------
-# Engagement: Streaks, XP, Achievements, Focus Sessions (Phase 7)
-# ---------------------------------------------------------------------------
+# Engagement: Streaks, XP, Achievements, Focus Sessions
 
 
 class StudyStreakModel(Base):
@@ -994,10 +971,10 @@ class FocusSessionModel(Base):
 
 
 class PomodoroSessionModel(Base):
-    """S208: a Pomodoro focus interval owned by the global header timer.
+    """a Pomodoro focus interval owned by the global header timer.
 
     Status state machine: active -> paused -> active -> completed | abandoned.
-    goal_id is a free-form string until S210 adds the learning_goals FK.
+    goal_id is a free-form string until adds the learning_goals FK.
     """
 
     __tablename__ = "pomodoro_sessions"

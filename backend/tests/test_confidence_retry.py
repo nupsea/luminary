@@ -14,9 +14,7 @@ from app.runtime.chat_graph import (
     confidence_gate_node,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_state(**overrides) -> dict:
@@ -42,9 +40,7 @@ def _make_state(**overrides) -> dict:
     return base
 
 
-# ---------------------------------------------------------------------------
 # confidence_gate_node and routing
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -85,9 +81,7 @@ def test_no_double_retry():
     assert _route_after_confidence_gate(state) == END
 
 
-# ---------------------------------------------------------------------------
 # augment_node
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -95,7 +89,7 @@ async def test_augment_node_sets_retry_attempted():
     """augment_node always sets retry_attempted=True in its return dict."""
     state = _make_state(primary_strategy="search_node")
 
-    with patch("app.runtime.chat_graph.get_retriever"):
+    with patch("app.runtime.chat_nodes.confidence.get_retriever"):
         # For search_node strategy, augment uses Kuzu (no retriever call for search)
         # Mock graph service to raise so we fall through non-fatally
         with patch("app.services.graph.get_graph_service", side_effect=Exception("no graph")):
@@ -133,7 +127,7 @@ async def test_augment_appends_chunks():
     mock_retriever = AsyncMock()
     mock_retriever.retrieve = AsyncMock(return_value=[new_chunk])
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
         result = await augment_node(state)
 
     combined = result.get("chunks", [])
@@ -147,7 +141,8 @@ async def test_augment_non_fatal():
     """augment_node catches all exceptions and returns {retry_attempted: True}."""
     state = _make_state(primary_strategy="graph_node")
 
-    with patch("app.runtime.chat_graph.get_retriever", side_effect=Exception("retriever down")):
+    patch_target = "app.runtime.chat_nodes.confidence.get_retriever"
+    with patch(patch_target, side_effect=Exception("retriever down")):
         result = await augment_node(state)
 
     assert result.get("retry_attempted") is True

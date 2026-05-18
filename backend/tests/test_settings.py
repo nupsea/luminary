@@ -23,9 +23,7 @@ from app.services.settings_service import (
     update_llm_settings,
 )
 
-# ---------------------------------------------------------------------------
 # In-memory keyring backend for tests
-# ---------------------------------------------------------------------------
 
 
 class _InMemoryKeyring(keyring.backend.KeyringBackend):
@@ -49,9 +47,7 @@ class _InMemoryKeyring(keyring.backend.KeyringBackend):
         del self._store[key]
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -94,9 +90,7 @@ def in_memory_keyring():
     keyring.core._keyring_backend = None  # noqa: SLF001
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 async def test_default_mode_is_private(test_db):

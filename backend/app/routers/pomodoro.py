@@ -1,4 +1,4 @@
-"""S208: /pomodoro/* endpoints for the global focus timer.
+"""/pomodoro/* endpoints for the global focus timer.
 
 Thin layer over PomodoroService -- validation in pydantic, transitions in service.
 """
@@ -24,11 +24,6 @@ from app.services.pomodoro_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pomodoro", tags=["pomodoro"])
-
-
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
 
 
 SurfaceLiteral = Literal["read", "recall", "write", "explore", "none"]
@@ -84,9 +79,7 @@ def _to_response(row: PomodoroSessionModel) -> SessionResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints -- order matters: /active and /stats before /{session_id}/...
-# ---------------------------------------------------------------------------
+# Endpoints — /active and /stats must come before /{session_id}/...
 
 
 @router.get("/active")

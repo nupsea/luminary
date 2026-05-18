@@ -10,10 +10,6 @@ import {
   selectSmartMode,
 } from "./studyUtils"
 
-// ---------------------------------------------------------------------------
-// selectSmartMode
-// ---------------------------------------------------------------------------
-
 describe("selectSmartMode", () => {
   it("returns basic when mastery is 0%", () => {
     expect(selectSmartMode(0)).toBe("basic")
@@ -43,10 +39,6 @@ describe("selectSmartMode", () => {
     expect(selectSmartMode(100)).toBe("cloze")
   })
 })
-
-// ---------------------------------------------------------------------------
-// computeMasteryPct
-// ---------------------------------------------------------------------------
 
 describe("computeMasteryPct", () => {
   it("returns 0 for empty card list", () => {
@@ -88,10 +80,6 @@ describe("computeMasteryPct", () => {
     expect(computeMasteryPct(cards)).toBe(25)
   })
 })
-
-// ---------------------------------------------------------------------------
-// getDeckDisplayName
-// ---------------------------------------------------------------------------
 
 describe("getDeckDisplayName", () => {
   it("returns deck name unchanged when it is not 'default'", () => {
@@ -150,10 +138,6 @@ describe("getDeckDisplayName", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// S185: buildSmartGenerateParams (AC8)
-// ---------------------------------------------------------------------------
-
 describe("buildSmartGenerateParams", () => {
   it("returns basic smart_mode when mastery < 30%", () => {
     const params = buildSmartGenerateParams(15, "doc-1")
@@ -184,10 +168,6 @@ describe("buildSmartGenerateParams", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// S185: INSIGHTS_SECTIONS (AC9)
-// ---------------------------------------------------------------------------
-
 describe("INSIGHTS_SECTIONS", () => {
   it("has exactly 3 sections: health_report, bloom_audit, struggling", () => {
     expect(INSIGHTS_SECTIONS).toHaveLength(3)
@@ -196,10 +176,6 @@ describe("INSIGHTS_SECTIONS", () => {
     expect(INSIGHTS_SECTIONS).toContain("struggling")
   })
 })
-
-// ---------------------------------------------------------------------------
-// S184: buildSearchParams
-// ---------------------------------------------------------------------------
 
 describe("buildSearchParams", () => {
   it("returns empty params when no filters are set", () => {
@@ -232,10 +208,6 @@ describe("buildSearchParams", () => {
     expect(params.toString()).toBe("")
   })
 })
-
-// ---------------------------------------------------------------------------
-// S184: Constants
-// ---------------------------------------------------------------------------
 
 describe("FSRS_STATE_LABELS", () => {
   it("has entries for all four FSRS states", () => {

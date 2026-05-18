@@ -1,5 +1,5 @@
 /**
- * Vitest unit tests for tag graph utility functions (S167).
+ * Vitest unit tests for tag graph utility functions
  *
  * Node environment (no DOM) -- tests pure functions from tagGraphUtils.ts.
  * Tests cover:
@@ -19,10 +19,6 @@ import {
   edgeWidthFromWeight,
   TAG_GRAPH_PALETTE,
 } from "@/lib/tagGraphUtils"
-
-// ---------------------------------------------------------------------------
-// AC: buildNavigateEvent constructs correct navigation event
-// ---------------------------------------------------------------------------
 
 describe("buildNavigateEvent", () => {
   it("returns a CustomEvent instance", () => {
@@ -50,10 +46,6 @@ describe("buildNavigateEvent", () => {
     expect(ev.detail.tagFilter).toBe("science/biology/genetics")
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: colorFromParentTag is deterministic
-// ---------------------------------------------------------------------------
 
 describe("colorFromParentTag", () => {
   it("returns a string starting with #", () => {
@@ -98,10 +90,6 @@ describe("colorFromParentTag", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// AC: nodeSizeFromCount returns sqrt-proportional value
-// ---------------------------------------------------------------------------
-
 describe("nodeSizeFromCount", () => {
   it("returns a number >= 4", () => {
     expect(nodeSizeFromCount(0)).toBeGreaterThanOrEqual(4)
@@ -120,10 +108,6 @@ describe("nodeSizeFromCount", () => {
     expect(nodeSizeFromCount(0)).toBe(4)
   })
 })
-
-// ---------------------------------------------------------------------------
-// AC: edgeWidthFromWeight scales proportionally
-// ---------------------------------------------------------------------------
 
 describe("edgeWidthFromWeight", () => {
   it("returns minimum 0.5 when maxWeight is 0", () => {

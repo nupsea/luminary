@@ -1,4 +1,4 @@
-import { API_BASE } from "@/lib/config"
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 
 export interface ChatSessionListItem {
   id: string
@@ -41,64 +41,29 @@ export interface AppendMessageInput {
   extra?: Record<string, any> | null
 }
 
-const BASE = `${API_BASE}/chat/sessions`
+const PATH = "/chat/sessions"
 
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    throw new Error(`Request failed: ${res.status} ${body || res.statusText}`)
-  }
-  return (await res.json()) as T
-}
+export const listChatSessions = (q?: string): Promise<ChatSessionListItem[]> =>
+  apiGet<ChatSessionListItem[]>(PATH, { q: q?.trim() || undefined })
 
-export async function listChatSessions(q?: string): Promise<ChatSessionListItem[]> {
-  const url = q && q.trim() ? `${BASE}?q=${encodeURIComponent(q.trim())}` : BASE
-  return jsonOrThrow<ChatSessionListItem[]>(await fetch(url))
-}
+export const createChatSession = (
+  input: CreateSessionInput,
+): Promise<ChatSessionListItem> => apiPost<ChatSessionListItem>(PATH, input)
 
-export async function createChatSession(input: CreateSessionInput): Promise<ChatSessionListItem> {
-  return jsonOrThrow<ChatSessionListItem>(
-    await fetch(BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  )
-}
+export const getChatSession = (id: string): Promise<ChatSessionDetail> =>
+  apiGet<ChatSessionDetail>(`${PATH}/${id}`)
 
-export async function getChatSession(id: string): Promise<ChatSessionDetail> {
-  return jsonOrThrow<ChatSessionDetail>(await fetch(`${BASE}/${id}`))
-}
-
-export async function renameChatSession(
+export const renameChatSession = (
   id: string,
   body: { title?: string; auto_from_message?: string },
-): Promise<ChatSessionListItem> {
-  return jsonOrThrow<ChatSessionListItem>(
-    await fetch(`${BASE}/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  )
-}
+): Promise<ChatSessionListItem> =>
+  apiPatch<ChatSessionListItem>(`${PATH}/${id}`, body)
 
-export async function deleteChatSession(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/${id}`, { method: "DELETE" })
-  if (!res.ok) {
-    throw new Error(`Delete failed: ${res.status}`)
-  }
-}
+export const deleteChatSession = (id: string): Promise<void> =>
+  apiDelete(`${PATH}/${id}`)
 
-export async function appendChatMessage(
+export const appendChatMessage = (
   sessionId: string,
   input: AppendMessageInput,
-): Promise<PersistedMessage> {
-  return jsonOrThrow<PersistedMessage>(
-    await fetch(`${BASE}/${sessionId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  )
-}
+): Promise<PersistedMessage> =>
+  apiPost<PersistedMessage>(`${PATH}/${sessionId}/messages`, input)

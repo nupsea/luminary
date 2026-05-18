@@ -6,7 +6,7 @@
  *   2. Study activity chart: cards reviewed per day (last 30 days) + streak
  *   3. Notes over time chart: notes created per month
  *   4. Documents ingested count
- *   5. GoalsPanel (moved from Study tab in S177)
+ *   5. GoalsPanel (moved from Study tab in )
  *
  * Empty state: "Start studying to see your progress here" when no study history.
  */
@@ -25,95 +25,56 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { StudyHabitsSection } from "@/components/StudyHabitsSection"
 import { logger } from "@/lib/logger"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { GoalsList } from "@/components/goals/GoalsList"
 import type { DocListItem } from "./Study"
+import type { components } from "@/types/api"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
+type DueCountResponse = components["schemas"]["DueCountResponse"]
+type SessionListResponse = components["schemas"]["SessionListResponse"]
 
-interface DailyHistoryItem {
-  date: string
-  cards_reviewed: number
-  study_time_minutes: number
-}
-
-interface DueCountResponse {
-  due_today: number
-}
-
+// Local-only: minimal subset of /monitoring/overview consumed by the
+// summary stats bar; the full MonitoringOverview has many more fields.
 interface MonitoringOverview {
   total_documents: number
   total_chunks: number
 }
 
-interface Note {
-  id: string
-  created_at: string
-}
+type Note = components["schemas"]["NoteResponse"]
 
-interface NoteListResponse {
-  items: Note[]
-  total: number
-}
+const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
+  apiGet<DailyHistoryItem[]>("/study/history", {
+    days,
+    tz_offset_minutes: new Date().getTimezoneOffset(),
+  })
 
-interface SessionListItem {
-  id: string
-  accuracy_pct: number | null
-  cards_reviewed: number
-  cards_correct: number
-}
+const fetchDueCount = (): Promise<DueCountResponse> =>
+  apiGet<DueCountResponse>("/study/due-count")
 
-interface SessionListResponse {
-  items: SessionListItem[]
-  total: number
-}
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
-async function fetchStudyHistory(days: number): Promise<DailyHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/study/history?days=${days}`)
-  if (!res.ok) throw new Error("study/history failed")
-  return res.json() as Promise<DailyHistoryItem[]>
-}
-
-async function fetchDueCount(): Promise<DueCountResponse> {
-  const res = await fetch(`${API_BASE}/study/due-count`)
-  if (!res.ok) throw new Error("study/due-count failed")
-  return res.json() as Promise<DueCountResponse>
-}
-
-async function fetchOverview(): Promise<MonitoringOverview> {
-  const res = await fetch(`${API_BASE}/monitoring/overview`)
-  if (!res.ok) throw new Error("monitoring/overview failed")
-  return res.json() as Promise<MonitoringOverview>
-}
+const fetchOverview = (): Promise<MonitoringOverview> =>
+  apiGet<MonitoringOverview>("/monitoring/overview")
 
 async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+      sort: "newest",
+      page: 1,
+      page_size: 100,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
-async function fetchRecentNotes(): Promise<NoteListResponse> {
-  const res = await fetch(`${API_BASE}/notes?page=1&page_size=100`)
-  if (!res.ok) throw new Error("notes failed")
-  return res.json() as Promise<NoteListResponse>
-}
+const fetchRecentNotes = (): Promise<Note[]> =>
+  apiGet<Note[]>("/notes", { page: 1, page_size: 100 })
 
-async function fetchSessions(): Promise<SessionListResponse> {
-  const res = await fetch(`${API_BASE}/study/sessions?page=1&page_size=50`)
-  if (!res.ok) throw new Error("study/sessions failed")
-  return res.json() as Promise<SessionListResponse>
-}
+const fetchSessions = (): Promise<SessionListResponse> =>
+  apiGet<SessionListResponse>("/study/sessions", { page: 1, page_size: 50 })
 
-// ---------------------------------------------------------------------------
-// Helper: build notes-over-time chart data (group by month)
-// ---------------------------------------------------------------------------
+// Notes-over-time chart data builder (groups by month)
 
 function buildNotesOverTimeData(notes: Note[]): { month: string; count: number }[] {
   const counts: Record<string, number> = {}
@@ -127,10 +88,6 @@ function buildNotesOverTimeData(notes: Note[]): { month: string; count: number }
     .slice(-12)
     .map(([month, count]) => ({ month, count }))
 }
-
-// ---------------------------------------------------------------------------
-// Skeleton / Error helpers
-// ---------------------------------------------------------------------------
 
 function SectionSkeleton({ rows = 3 }: { rows?: number }) {
   return (
@@ -150,10 +107,6 @@ function SectionError({ name }: { name: string }) {
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// StatCard
-// ---------------------------------------------------------------------------
 
 function StatCard({
   label,
@@ -215,9 +168,7 @@ function StatCard({
   )
 }
 
-// ---------------------------------------------------------------------------
-// KnowledgeGapScanner (Added in Phase 4)
-// ---------------------------------------------------------------------------
+// KnowledgeGapScanner
 
 function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
   const [selectedDoc, setSelectedDoc] = useState<string>("")
@@ -231,8 +182,9 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
       setSections([])
       return
     }
-    fetch(`${API_BASE}/documents/${selectedDoc}`)
-      .then(r => r.json())
+    apiGet<{ sections?: { id: string; heading: string }[] }>(
+      `/documents/${selectedDoc}`,
+    )
       .then(d => {
         setSections(d.sections || [])
         if (d.sections && d.sections.length > 0) {
@@ -247,17 +199,11 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
     setAnalyzing(true)
     setGaps(null)
     try {
-      const res = await fetch(`${API_BASE}/notes/gap-detect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_id: selectedDoc, section_id: selectedSec })
+      const data = await apiPost<{ gaps: string[] }>("/notes/gap-detect", {
+        document_id: selectedDoc,
+        section_id: selectedSec,
       })
-      if (res.ok) {
-        const data = await res.json()
-        setGaps(data.gaps)
-      } else {
-        setGaps([])
-      }
+      setGaps(data.gaps)
     } catch {
       setGaps([])
     } finally {
@@ -346,10 +292,6 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Progress page
-// ---------------------------------------------------------------------------
-
 export default function Progress() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
@@ -422,7 +364,7 @@ export default function Progress() {
     fetchRecentNotes()
       .then((d) => {
         if (!cancelled) {
-          setNotes(d.items ?? [])
+          setNotes(d ?? [])
           setNotesLoading(false)
         }
       })
@@ -591,7 +533,7 @@ export default function Progress() {
         )}
       </section>
 
-      {/* Study Habits: streaks, XP, achievements (Phase 7) */}
+      {/* Study Habits: streaks, XP, achievements */}
       <StudyHabitsSection />
 
       {/* Notes over time chart */}
@@ -614,20 +556,27 @@ export default function Progress() {
         </section>
       )}
 
-      {/* Knowledge Gap Scanner (Added in Phase 4) */}
+      {/* Knowledge Gap Scanner */}
       {!docsLoading && docList.length > 0 && (
          <KnowledgeGapScanner docs={docList} />
       )}
 
-      {/* Learning Goals -- now shared with Study tab; replaced legacy GoalsPanel in S211 */}
+      {/* Learning Goals -- now shared with Study tab; replaced legacy GoalsPanel in  */}
       <GoalsList />
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
+/**
+ * Format a Date as a local-time YYYY-MM-DD key (not UTC). Matches the
+ * backend's `/study/history` bucketing when called with tz_offset_minutes.
+ */
+function localDateKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
 
 function computeStreak(history: DailyHistoryItem[]): number {
   if (history.length === 0) return 0
@@ -637,8 +586,7 @@ function computeStreak(history: DailyHistoryItem[]): number {
   const cursor = new Date(today)
   const histSet = new Set(history.filter((h) => h.cards_reviewed > 0).map((h) => h.date))
   while (true) {
-    const key = cursor.toISOString().slice(0, 10)
-    if (!histSet.has(key)) break
+    if (!histSet.has(localDateKey(cursor))) break
     streak++
     cursor.setDate(cursor.getDate() - 1)
   }
@@ -656,7 +604,7 @@ function buildActivityData(
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(cursor)
     d.setDate(d.getDate() - i)
-    const key = d.toISOString().slice(0, 10)
+    const key = localDateKey(d)
     result.push({ date: key.slice(5), cards_reviewed: map.get(key) ?? 0 })
   }
   return result

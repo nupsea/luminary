@@ -16,9 +16,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import EvalRunModel
 
-# ---------------------------------------------------------------------------
 # Isolated DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -72,9 +70,7 @@ def _make_run(
     )
 
 
-# ---------------------------------------------------------------------------
 # GET /evals/runs
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -167,9 +163,7 @@ async def test_get_eval_runs_empty(test_db):
     assert resp.json() == []
 
 
-# ---------------------------------------------------------------------------
 # GET /evals/golden/{name}
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -251,9 +245,7 @@ async def test_get_golden_file_rejects_dotdot_name(golden_dir):
     assert resp.status_code in (400, 404, 422)
 
 
-# ---------------------------------------------------------------------------
 # POST /evals/run -- extended body fields
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio

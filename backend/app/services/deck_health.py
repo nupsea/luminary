@@ -1,4 +1,4 @@
-"""DeckHealthService -- deck health analysis and one-click remediation (S160).
+"""DeckHealthService -- deck health analysis and one-click remediation
 
 Identifies orphaned cards (source section deleted), mastered cards (stability > 180 days),
 stale cards (not reviewed in 90+ days with low stability), uncovered sections (no cards),

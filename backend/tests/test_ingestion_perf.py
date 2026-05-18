@@ -22,9 +22,7 @@ from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel, SummaryModel
 from app.workflows.ingestion import IngestionState, chunk_node, embed_node, summarize_node
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -64,9 +62,7 @@ async def _insert_document(factory, doc_id: str, tmp_path: Path) -> None:
         await session.commit()
 
 
-# ---------------------------------------------------------------------------
 # 1. Embedding batch test
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -116,9 +112,7 @@ async def test_embedding_called_in_batch(test_db):
     assert encode_calls[0] == [c["text"] for c in chunks]
 
 
-# ---------------------------------------------------------------------------
 # 2. Summarization is fire-and-forget
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -164,9 +158,7 @@ async def test_summarization_is_fire_and_forget(test_db):
     await asyncio.sleep(0)  # let the cancelled task settle
 
 
-# ---------------------------------------------------------------------------
 # 3. Chunks written in batch (add_all)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import json
 import logging
 import re
 import shutil
@@ -11,36 +10,94 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from sqlalchemy import case, delete, func, select, text
+from sqlalchemy import case, func, select, text
 
 from app.config import Settings, get_settings
 from app.database import get_session_factory
 from app.models import (
-    AnnotationModel,
     ChunkModel,
-    ClipModel,
     CodeSnippetModel,
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
-    ImageModel,
-    LearningGoalModel,
     LearningObjectiveModel,
-    MisconceptionModel,
-    NoteModel,
-    QAHistoryModel,
     ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
     StudySessionModel,
     SummaryModel,
-    WebReferenceModel,
 )
+from app.repos.document_repo import DocumentRepo
+from app.schemas.documents import (
+    BulkDeleteRequest,
+    ChapterProgressItem,
+    ChunkItem,
+    CodeSnippetItem,
+    DocumentDetail,
+    DocumentDiagnostics,
+    DocumentListItem,
+    DocumentListResponse,
+    DocumentProgressResponse,
+    DocumentSectionSearchResult,
+    EpubChapterResponse,
+    EpubChapterTocItem,
+    EpubTocResponse,
+    KindleIngestResponse,
+    LearningObjectiveItem,
+    LearningObjectivesResponse,
+    LearningObjectiveUpdate,
+    PatchDocumentRequest,
+    PatchTagsRequest,
+    PDFMetaResponse,
+    ReadingPositionResponse,
+    SavePositionRequest,
+    SectionItem,
+    UrlIngestRequest,
+    YouTubeIngestRequest,
+)
+from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
+
+# indirect: tests patch `app.services.youtube_downloader.{check_ytdlp_available,
+# check_ffmpeg_available, fetch_metadata, download_audio}`.
+from app.services import youtube_downloader as _yt_module
+from app.services.article_extractor import get_article_extractor
+from app.services.document_deletion_service import get_document_deletion_service
+from app.services.document_search import get_document_search_service
+from app.services.documents_service import (
+    delete_raw_file as _delete_raw_file,
+)
+from app.services.documents_service import (
+    derive_learning_status as _derive_learning_status,
+)
+from app.services.documents_service import (
+    parsed_to_dict as _parsed_to_dict,
+)
+from app.services.documents_service import (
+    safe_tags as _safe_tags,
+)
+from app.services.documents_service import (
+    section_to_dict as _section_to_dict,
+)
+from app.services.epub_service import (
+    get_chapter_async,
+    get_epub_service,
+    get_toc_async,
+)
+from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.naming import normalize_tag_slug
+from app.services.objective_tracker import get_objective_tracker_service
 from app.services.parser import DocumentParser
+from app.services.repo_helpers import get_or_404
+from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
-from app.types import ParsedDocument, Section
-from app.workflows.ingestion import STAGE_PROGRESS, ContentType, run_ingestion
+from app.services.youtube_downloader import is_youtube_url
+from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
+from app.workflows.ingestion import (
+    STAGE_PROGRESS,
+    ContentType,
+    _background_tasks,
+    run_ingestion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,239 +110,40 @@ _ALLOWED_EXTENSIONS = frozenset(
 )
 
 
-def _delete_raw_file(document_id: str) -> None:
-    """Remove any raw uploaded file matching ~/.luminary/raw/{doc_id}.*"""
-    settings = get_settings()
-    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
-    for match in raw_dir.glob(f"{document_id}.*"):
-        try:
-            match.unlink()
-            logger.info("Deleted raw file %s", match)
-        except OSError:
-            logger.warning("Failed to delete raw file %s", match)
-
-
-def _safe_tags(raw: object) -> list[str]:
-    """Deserialize tags regardless of how they were stored.
-
-    SQLite's JSON column occasionally surfaces the raw JSON text string instead
-    of a Python list (e.g. when rows were written by a different code path).
-    This helper normalises all three cases: already-a-list, JSON string, or
-    None.
-    """
-    if raw is None:
-        return []
-    if isinstance(raw, list):
-        return [str(t) for t in raw]
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                return [str(t) for t in parsed]
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return []
-
-
-# ---------------------------------------------------------------------------
-# Pydantic response / request models
-# ---------------------------------------------------------------------------
-
-
-class DocumentListItem(BaseModel):
-    id: str
-    title: str
-    format: str
-    content_type: str
-    word_count: int
-    page_count: int
-    stage: str
-    tags: list[str]
-    created_at: datetime
-    last_accessed_at: datetime
-    summary_one_sentence: str | None
-    flashcard_count: int
-    learning_status: Literal["not_started", "summarized", "flashcards_generated", "studied"]
-    chapter_count: int | None
-    chunk_count: int
-    reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
-    audio_duration_seconds: float | None
-    source_url: str | None = None
-    video_title: str | None = None
-    channel_name: str | None = None
-    youtube_url: str | None = None
-    enrichment_status: str | None = None  # None if no enrichment job; else latest job status
-    # S143: None = no objectives extracted; 0.0 = objectives exist but none covered
-    objective_progress_pct: float | None = None
-
-
-class DocumentListResponse(BaseModel):
-    items: list[DocumentListItem]
-    total: int
-    page: int
-    page_size: int
-
-
-class BulkDeleteRequest(BaseModel):
-    ids: list[str]
-
-
-class PatchTagsRequest(BaseModel):
-    tags: list[str]
-
-
-class PatchDocumentRequest(BaseModel):
-    title: str | None = None
-    tags: list[str] | None = None
-    content_type: ContentType | None = None
-
-
-class SectionItem(BaseModel):
-    id: str
-    heading: str
-    level: int
-    page_start: int
-    page_end: int
-    section_order: int
-    preview: str
-    admonition_type: str | None = None
-    parent_section_id: str | None = None
-
-
-class DocumentDiagnostics(BaseModel):
-    chunk_count: int
-    fts_count: int
-    entity_count: int
-    edge_count: int
-    vector_count: int
-
-
-class DocumentDetail(BaseModel):
-    id: str
-    title: str
-    format: str
-    content_type: str
-    word_count: int
-    page_count: int
-    stage: str
-    tags: list[str]
-    created_at: datetime
-    last_accessed_at: datetime
-    sections: list[SectionItem]
-    reading_progress_pct: float  # 0.0 to 1.0; 0.0 when no sections read
-    audio_duration_seconds: float | None = None
-    source_url: str | None = None
-    video_title: str | None = None
-    channel_name: str | None = None
-    youtube_url: str | None = None
-
-
-class ChunkItem(BaseModel):
-    id: str
-    chunk_index: int
-    text: str
-    section_id: str | None = None
-    speaker: str | None = None
-    start_time: float | None = None  # seconds from start; null if not available
-
-
-class UrlIngestRequest(BaseModel):
-    url: str
-
-
-class YouTubeIngestRequest(BaseModel):
-    url: str
-
-
-class KindleIngestResponse(BaseModel):
-    document_ids: list[str]
-    book_count: int
-
-
-class CodeSnippetItem(BaseModel):
-    id: str
-    chunk_id: str
-    section_id: str | None
-    language: str | None
-    signature: str | None
-    content: str
-
-
-class PDFMetaResponse(BaseModel):
-    page_count: int
-    has_toc: bool
-
-
-class EpubChapterTocItem(BaseModel):
-    chapter_index: int
-    title: str
-    word_count: int
-
-
-class EpubTocResponse(BaseModel):
-    document_id: str
-    chapters: list[EpubChapterTocItem]
-
-
-class EpubChapterResponse(BaseModel):
-    chapter_index: int
-    chapter_title: str
-    html: str
-    word_count: int
-    section_ids: list[str]
-
-
-# S151: in-document FTS5 search response model
-class DocumentSectionSearchResult(BaseModel):
-    section_id: str
-    section_heading: str
-    match_count: int
-    snippet: str  # FTS5 snippet() output with <mark> tags wrapping matched terms
-
-
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
-
-def _section_to_dict(s: Section) -> dict:
-    return {
-        "heading": s.heading,
-        "level": s.level,
-        "text": s.text,
-        "page_start": s.page_start,
-        "page_end": s.page_end,
-    }
-
-
-def _parsed_to_dict(p: ParsedDocument) -> dict:
-    return {
-        "title": p.title,
-        "format": p.format,
-        "pages": p.pages,
-        "word_count": p.word_count,
-        "sections": [_section_to_dict(s) for s in p.sections],
-        "raw_text": p.raw_text,
-    }
-
-
-def _derive_learning_status(
-    study_session_count: int,
-    flashcard_count: int,
-    summary_count: int,
-) -> str:
-    if study_session_count > 0:
-        return "studied"
-    if flashcard_count > 0:
-        return "flashcards_generated"
-    if summary_count > 0:
-        return "summarized"
-    return "not_started"
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+# Back-compat re-exports for tests and routers/study.py that import these
+# private aliases from this module.
+__all__ = [
+    "BulkDeleteRequest",
+    "ChapterProgressItem",
+    "ChunkItem",
+    "CodeSnippetItem",
+    "DocumentDetail",
+    "DocumentDiagnostics",
+    "DocumentListItem",
+    "DocumentListResponse",
+    "DocumentProgressResponse",
+    "DocumentSectionSearchResult",
+    "EpubChapterResponse",
+    "EpubChapterTocItem",
+    "EpubTocResponse",
+    "KindleIngestResponse",
+    "LearningObjectiveItem",
+    "LearningObjectivesResponse",
+    "PDFMetaResponse",
+    "PatchDocumentRequest",
+    "PatchTagsRequest",
+    "ReadingPositionResponse",
+    "SavePositionRequest",
+    "SectionItem",
+    "UrlIngestRequest",
+    "YouTubeIngestRequest",
+    "_delete_raw_file",
+    "_derive_learning_status",
+    "_parsed_to_dict",
+    "_safe_tags",
+    "_section_to_dict",
+    "router",
+]
 
 
 _LEARNING_STATUS_ORDER = {
@@ -359,7 +217,7 @@ async def list_documents(
             select(EnrichmentJobModel.status)
             .where(EnrichmentJobModel.document_id == DocumentModel.id)
             .order_by(
-                # Prioritize image-related jobs for the status display (S134)
+                # Prioritize image-related jobs for the status display
                 case(
                     (EnrichmentJobModel.job_type == "image_analyze", 1),
                     (EnrichmentJobModel.job_type == "image_extract", 2),
@@ -401,6 +259,9 @@ async def list_documents(
             objectives_covered_sq.label("objectives_covered"),
         )
 
+        # Correlated 10-subquery select; the aggregation shape (flashcards, sections,
+        # study sessions, objectives) is this endpoint's bespoke projection and has
+        # no equivalent DocumentRepo method.
         result = await session.execute(stmt)
         rows = result.all()
 
@@ -526,9 +387,7 @@ async def ingest_document(
 
     async with get_session_factory()() as session:
         # Deduplication: look for an existing document with the same file hash.
-        existing = (
-            await session.execute(select(DocumentModel).where(DocumentModel.file_hash == file_hash))
-        ).scalar_one_or_none()
+        existing = await DocumentRepo(session).find_by_file_hash(file_hash)
 
         if existing is not None:
             if existing.stage == "complete":
@@ -536,9 +395,6 @@ async def ingest_document(
                 # But backfill any missing pre-generated summaries in the background
                 # (handles docs ingested before summarization was added, or where the
                 # background task was GC'd before completing all modes).
-                from app.services.summarizer import (  # noqa: PLC0415
-                    PREGENERATE_MODES,
-                )
 
                 async with get_session_factory()() as _s:
                     existing_modes = set(
@@ -553,12 +409,8 @@ async def ingest_document(
                     )
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
-                    from app.workflows.ingestion import (  # noqa: PLC0415
-                        _background_tasks,
-                        _run_pregenerate,
-                    )
 
-                    task = asyncio.create_task(_run_pregenerate(existing.id))
+                    task = asyncio.create_task(_ingestion_module._run_pregenerate(existing.id))
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
                     logger.info(
@@ -577,9 +429,11 @@ async def ingest_document(
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
                 existing.content_type = content_type
+                # commit stage reset before the background job polls document.stage
                 await session.commit()
-                asyncio.create_task(
-                    run_ingestion(existing.id, existing.file_path, existing.format, content_type)
+                get_ingestion_jobs().launch(
+                    existing.id,
+                    run_ingestion(existing.id, existing.file_path, existing.format, content_type),
                 )
                 logger.info(
                     "Retrying failed ingestion on existing doc",
@@ -625,10 +479,14 @@ async def ingest_document(
             file_hash=file_hash,
             stage="parsing",
         )
+        # Document row must exist in SQLite before the background ingestion job starts;
+        # the job uses document_id as its primary key.
         session.add(doc)
         await session.commit()
 
-    asyncio.create_task(run_ingestion(doc_id, str(dest), fmt, content_type))
+    get_ingestion_jobs().launch(
+        doc_id, run_ingestion(doc_id, str(dest), fmt, content_type)
+    )
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -689,14 +547,13 @@ async def ingest_kindle(
                 stage="parsing",
                 tags=["kindle"],
             )
+            # Document row must exist in SQLite before the background ingestion job starts.
             session.add(doc)
             await session.commit()
 
-        from app.workflows.ingestion import _background_tasks  # noqa: PLC0415
-
-        _task = asyncio.create_task(run_ingestion(doc_id, str(dest), "txt", "kindle_clippings"))
-        _background_tasks.add(_task)
-        _task.add_done_callback(_background_tasks.discard)
+        get_ingestion_jobs().launch(
+            doc_id, run_ingestion(doc_id, str(dest), "txt", "kindle_clippings")
+        )
         document_ids.append(doc_id)
         logger.info(
             "Kindle book ingestion started",
@@ -717,17 +574,9 @@ async def ingest_url(
     settings: Settings = Depends(get_settings),
 ):
     """Ingest a YouTube URL (yt-dlp) or a general web article (Trafilatura)."""
-    from app.services.youtube_downloader import (  # noqa: PLC0415
-        check_ffmpeg_available,
-        check_ytdlp_available,
-        download_audio,
-        fetch_metadata,
-        is_youtube_url,
-    )
 
     # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
     if not is_youtube_url(body.url):
-        from app.services.article_extractor import get_article_extractor  # noqa: PLC0415
 
         try:
             extractor = get_article_extractor()
@@ -756,6 +605,7 @@ async def ingest_url(
                 stage="parsing",
                 source_url=body.url,
             )
+            # Document row must exist in SQLite before the background ingestion job starts.
             session.add(doc)
             await session.commit()
 
@@ -771,12 +621,8 @@ async def ingest_url(
             for s in parsed.sections
         ]
 
-        from app.workflows.ingestion import (
-            _background_tasks,  # noqa: PLC0415
-            run_ingestion,  # noqa: PLC0415
-        )
-
-        _task = asyncio.create_task(
+        get_ingestion_jobs().launch(
+            doc_id,
             run_ingestion(
                 doc_id,
                 str(dest),
@@ -790,15 +636,13 @@ async def ingest_url(
                     "sections": parsed_sections,
                     "raw_text": parsed.raw_text,
                 },
-            )
+            ),
         )
-        _background_tasks.add(_task)
-        _task.add_done_callback(_background_tasks.discard)
         logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
         return {"document_id": doc_id, "status": "processing"}
 
     # 2. YouTube: Existing logic
-    if not check_ytdlp_available():
+    if not _yt_module.check_ytdlp_available():
         raise HTTPException(
             status_code=503,
             detail=(
@@ -807,7 +651,7 @@ async def ingest_url(
             ),
         )
 
-    if not check_ffmpeg_available():
+    if not _yt_module.check_ffmpeg_available():
         raise HTTPException(
             status_code=503,
             detail=(
@@ -817,7 +661,7 @@ async def ingest_url(
         )
 
     try:
-        meta = await fetch_metadata(body.url)
+        meta = await _yt_module.fetch_metadata(body.url)
     except RuntimeError as exc:
         logger.warning("yt-dlp metadata fetch failed: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -832,7 +676,7 @@ async def ingest_url(
     dest_stem = raw_dir / doc_id  # yt-dlp appends .wav
 
     try:
-        await download_audio(body.url, dest_stem)
+        await _yt_module.download_audio(body.url, dest_stem)
     except RuntimeError as exc:
         logger.error("yt-dlp download failed: %s", exc)
         raise HTTPException(
@@ -860,19 +704,13 @@ async def ingest_url(
             channel_name=channel_name,
             youtube_url=body.url,
         )
+        # Document row must exist in SQLite before the background ingestion job starts.
         session.add(doc)
         await session.commit()
 
-    from app.workflows.ingestion import (
-        _background_tasks,  # noqa: PLC0415
-        run_ingestion,  # noqa: PLC0415
+    get_ingestion_jobs().launch(
+        doc_id, run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
     )
-
-    _task = asyncio.create_task(
-        run_ingestion(doc_id, str(dest), "wav", "audio", parsed_document=None)
-    )
-    _background_tasks.add(_task)
-    _task.add_done_callback(_background_tasks.discard)
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -881,22 +719,10 @@ async def ingest_url(
 async def get_document(document_id: str):
     """Return document detail with sections list."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-
-        sections_result = await session.execute(
-            select(SectionModel)
-            .where(SectionModel.document_id == document_id)
-            .order_by(SectionModel.section_order)
-        )
-        sections = sections_result.scalars().all()
-
-        read_count_result = await session.execute(
-            select(func.count()).where(ReadingProgressModel.document_id == document_id)
-        )
-        read_count = read_count_result.scalar_one() or 0
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
+        sections = list(await repo.sections_for_document(document_id))
+        read_count = await repo.read_section_count(document_id)
 
     section_count = len(sections)
     reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
@@ -943,17 +769,9 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
     Used by the YouTube transcript viewer and any other chunk-level consumer.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-
-        chunks_result = await session.execute(
-            select(ChunkModel)
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.chunk_index)
-        )
-        chunks = chunks_result.scalars().all()
+        repo = DocumentRepo(session)
+        await repo.get_or_404(document_id)
+        chunks = list(await repo.chunks_for_document(document_id))
 
     return [
         ChunkItem(
@@ -972,10 +790,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
 async def serve_audio_file(document_id: str) -> FileResponse:
     """Stream the raw audio file for audio documents (used by the mini-player)."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     if doc.content_type != "audio":
         raise HTTPException(status_code=400, detail="Not an audio document")
     fp = Path(doc.file_path)
@@ -991,10 +806,7 @@ async def serve_audio_file(document_id: str) -> FileResponse:
 async def serve_video_file(document_id: str) -> FileResponse:
     """Stream the raw video file for video documents (used by the HTML5 video player)."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     if doc.content_type != "video":
         raise HTTPException(status_code=400, detail="Not a video document")
     fp = Path(doc.file_path)
@@ -1007,15 +819,12 @@ async def serve_video_file(document_id: str) -> FileResponse:
 async def serve_document_file(document_id: str) -> FileResponse:
     """Serve the raw uploaded file for a document.
 
-    Used by the PDF.js viewer (S146) to stream PDF bytes.
+    Used by the PDF.js viewer to stream PDF bytes.
     Returns 404 if the document does not exist or the file is not found on disk.
     Returns the file with the appropriate Content-Type based on document format.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     fp = Path(doc.file_path)
     if not fp.exists():
         raise HTTPException(status_code=404, detail="Document file not found on disk")
@@ -1038,15 +847,13 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     Returns 400 if the document is not a PDF (format != 'pdf').
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         if doc.format.lower() != "pdf":
             raise HTTPException(
                 status_code=400,
                 detail=f"Document is not a PDF (format={doc.format})",
             )
+        # Shares session with the get_or_404 check above; single-table count.
         section_count_result = await session.execute(
             select(func.count(SectionModel.id)).where(SectionModel.document_id == document_id)
         )
@@ -1058,9 +865,7 @@ async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# S149: EPUB chapter viewer endpoints
-# ---------------------------------------------------------------------------
+# EPUB chapter viewer endpoints
 
 
 @router.get("/{document_id}/epub/toc", response_model=EpubTocResponse)
@@ -1071,13 +876,9 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     Returns 400 if the document is not an EPUB (format != 'epub').
     Returns 404 if the raw EPUB file is not found on disk.
     """
-    from app.services.epub_service import get_toc_async  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     if doc.format.lower() != "epub":
         raise HTTPException(
             status_code=400,
@@ -1110,16 +911,12 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     Returns 400 if the document is not an EPUB.
     Returns 404 if chapter_index is out of range.
     """
-    from app.services.epub_service import get_chapter_async, get_epub_service  # noqa: PLC0415
 
     if chapter_index < 0:
         raise HTTPException(status_code=400, detail="chapter_index must be >= 0")
 
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
         if doc.format.lower() != "epub":
             raise HTTPException(
                 status_code=400,
@@ -1129,7 +926,8 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         if not fp.exists():
             raise HTTPException(status_code=404, detail="EPUB file not found on disk")
 
-        # Fetch all section IDs ordered by section_order for proportional assignment
+        # Section IDs needed to map chapter index to section IDs; shares session with
+        # the get_or_404 check above.
         sections_result = await session.execute(
             select(SectionModel.id)
             .where(SectionModel.document_id == document_id)
@@ -1139,9 +937,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
 
     # Compute total chapters first (needed to slice sections)
     try:
-        from app.services.epub_service import get_toc_async as _get_toc  # noqa: PLC0415
-
-        toc = await _get_toc(str(fp))
+        toc = await get_toc_async(str(fp))
         total_chapters = len(toc)
     except Exception:
         total_chapters = max(1, len(all_section_ids))
@@ -1173,68 +969,23 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
 @router.post("/bulk-delete", status_code=200)
 async def bulk_delete_documents(body: BulkDeleteRequest):
     """Delete multiple documents and their derived data by ID list."""
+    svc = get_document_deletion_service()
     deleted = []
     for document_id in body.ids:
         async with get_session_factory()() as session:
+            # Existence check + cascade delete share one session per document;
+            # delete_sqlite_cascade uses the session directly for multi-table cleanup.
             result = await session.execute(
                 select(DocumentModel).where(DocumentModel.id == document_id)
             )
             doc = result.scalar_one_or_none()
             if doc is None:
                 continue
-            await session.execute(
-                text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
-                {"doc_id": document_id},
-            )
-            await session.execute(
-                text("DELETE FROM images_fts WHERE document_id = :doc_id"),
-                {"doc_id": document_id},
-            )
-            for model in (
-                EnrichmentJobModel,
-                ImageModel,
-                LearningObjectiveModel,
-                CodeSnippetModel,
-                WebReferenceModel,
-                ChunkModel,
-                SectionModel,
-                SummaryModel,
-                FlashcardModel,
-                MisconceptionModel,
-                NoteModel,
-                QAHistoryModel,
-                ReadingProgressModel,
-                AnnotationModel,
-                LearningGoalModel,
-                ClipModel,
-            ):
-                await session.execute(
-                    delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
-                )
-            await session.execute(
-                delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-            )
-            await session.execute(
-                delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
-            )
-            await session.delete(doc)
+            await svc.delete_sqlite_cascade(session, doc)
             await session.commit()
-        try:
-            get_lancedb_service().delete_document(document_id)
-        except Exception:
-            logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
-        try:
-            from app.services.graph import get_graph_service  # noqa: PLC0415
-
-            get_graph_service().delete_document(document_id)
-        except Exception:
-            logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
-        # Remove extracted images directory
-        settings = get_settings()
-        images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
-        if images_dir.exists():
-            shutil.rmtree(images_dir, ignore_errors=True)
-        _delete_raw_file(document_id)
+        svc.delete_lancedb_vectors(document_id)
+        svc.delete_kuzu_nodes(document_id)
+        svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
     return {"deleted": deleted, "count": len(deleted)}
@@ -1243,19 +994,16 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
 @router.patch("/{document_id}")
 async def patch_document(document_id: str, body: PatchDocumentRequest):
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
-            from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
             doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         if body.content_type is not None:
             doc.content_type = body.content_type
-        await session.commit()
+        await repo.commit()
     logger.info("Patched document", extra={"document_id": document_id})
     response: dict = {"document_id": document_id, "updated": True}
     if body.content_type is not None:
@@ -1267,15 +1015,12 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
 async def patch_document_tags(document_id: str, body: PatchTagsRequest):
     """Replace the tag list for a document."""
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-        from app.services.naming import normalize_tag_slug  # noqa: PLC0415
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
 
         normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         doc.tags = normalized
-        await session.commit()
+        await repo.commit()
     logger.info(
         "Patched document tags",
         extra={"document_id": document_id, "tag_count": len(normalized)},
@@ -1285,82 +1030,33 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
 
 @router.delete("/{document_id}", status_code=204)
 async def delete_document(document_id: str):
+    # Cancel any in-flight ingestion task before tearing down rows. The workflow
+    # writes to chunks / sections / embeddings as it progresses; if we delete
+    # while it is mid-stage, SQLite holds locks and the workflow can also write
+    # orphan rows back to tables we just emptied.
+    cancelled = await get_ingestion_jobs().cancel(document_id)
+    if cancelled:
+        logger.info(
+            "Cancelled in-flight ingestion before delete",
+            extra={"document_id": document_id},
+        )
+
+    svc = get_document_deletion_service()
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+        await svc.delete_sqlite_cascade(session, doc)
+        await session.commit()  # cascade service took the session; commit completes the transaction
 
-        # Delete child rows from all related tables (no FK CASCADE in SQLite without FK pragma)
-        await session.execute(
-            text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
-        await session.execute(
-            text("DELETE FROM images_fts WHERE document_id = :doc_id"),
-            {"doc_id": document_id},
-        )
-        for model in (
-            EnrichmentJobModel,
-            ImageModel,
-            LearningObjectiveModel,
-            CodeSnippetModel,
-            WebReferenceModel,
-            ChunkModel,
-            SectionModel,
-            SummaryModel,
-            FlashcardModel,
-            MisconceptionModel,
-            NoteModel,
-            QAHistoryModel,
-            ReadingProgressModel,
-            AnnotationModel,
-            LearningGoalModel,
-            ClipModel,
-        ):
-            await session.execute(
-                delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
-            )
-        await session.execute(
-            delete(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
-        )
-        await session.execute(
-            delete(StudySessionModel).where(StudySessionModel.document_id == document_id)
-        )
-        await session.delete(doc)
-        await session.commit()
-
-    # Remove vectors from LanceDB
-    try:
-        get_lancedb_service().delete_document(document_id)
-    except Exception:
-        logger.warning("Failed to delete LanceDB vectors for document %s", document_id)
-
-    # Remove graph nodes and edges from Kuzu
-    try:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
-
-        get_graph_service().delete_document(document_id)
-    except Exception:
-        logger.warning("Failed to delete Kuzu graph nodes for document %s", document_id)
-
-    # Remove extracted images directory
-    settings = get_settings()
-    images_dir = Path(settings.DATA_DIR).expanduser() / "images" / document_id
-    if images_dir.exists():
-        shutil.rmtree(images_dir, ignore_errors=True)
-
-    _delete_raw_file(document_id)
+    svc.delete_lancedb_vectors(document_id)
+    svc.delete_kuzu_nodes(document_id)
+    svc.delete_filesystem_assets(document_id)
     logger.info("Deleted document %s", document_id)
 
 
 @router.get("/{document_id}/status")
 async def get_document_status(document_id: str):
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
     stage = doc.stage
     progress_pct = STAGE_PROGRESS.get(stage, 0)
     logger.debug("Status polled", extra={"document_id": document_id, "stage": stage})
@@ -1383,13 +1079,10 @@ async def get_document_diagnostics(document_id: str):
     All other counts are 0 if the store is unavailable or empty.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
-        # SQLite chunk count
+        # Two counts share a session with the get_or_404 guard; FTS5 virtual table
+        # requires raw SQL so both stay here rather than going through a repo.
         chunk_result = await session.execute(
             select(func.count(ChunkModel.id)).where(ChunkModel.document_id == document_id)
         )
@@ -1410,9 +1103,8 @@ async def get_document_diagnostics(document_id: str):
 
     # Kuzu entity and edge counts (0 if graph unavailable)
     try:
-        from app.services.graph import get_graph_service  # noqa: PLC0415
 
-        entity_count, edge_count = get_graph_service().count_for_document(document_id)
+        entity_count, edge_count = _graph_module.get_graph_service().count_for_document(document_id)
     except Exception:
         entity_count = 0
         edge_count = 0
@@ -1426,9 +1118,7 @@ async def get_document_diagnostics(document_id: str):
     )
 
 
-# ---------------------------------------------------------------------------
-# S151: In-document FTS5 search endpoint
-# ---------------------------------------------------------------------------
+# In-document FTS5 search
 
 
 @router.get("/{document_id}/search", response_model=list[DocumentSectionSearchResult])
@@ -1442,17 +1132,12 @@ async def search_document_sections(
     Returns [] for empty/whitespace-only query (not an error).
     Returns 404 if document does not exist.
     """
-    from app.services.document_search import get_document_search_service  # noqa: PLC0415
 
     if not q or not q.strip():
         return []
 
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     svc = get_document_search_service()
     results = await svc.search(document_id, q, limit=50)
@@ -1472,11 +1157,8 @@ async def get_conversation_metadata(document_id: str) -> dict:
     Returns 404 if not found, 400 if content_type != 'conversation'.
     """
     async with get_session_factory()() as session:
-        result = await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
-        doc = result.scalar_one_or_none()
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
     if doc.content_type != "conversation":
         raise HTTPException(
             status_code=400,
@@ -1501,12 +1183,9 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_result = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Shares session with get_or_404; simple document-scoped read-only list.
         snippets_result = await session.execute(
             select(CodeSnippetModel)
             .where(CodeSnippetModel.document_id == document_id)
@@ -1527,18 +1206,6 @@ async def get_code_snippets(document_id: str) -> list[CodeSnippetItem]:
     ]
 
 
-class LearningObjectiveItem(BaseModel):
-    id: str
-    section_id: str
-    text: str
-    covered: bool
-
-
-class LearningObjectivesResponse(BaseModel):
-    document_id: str
-    objectives: list[LearningObjectiveItem]
-
-
 @router.get("/{document_id}/objectives", response_model=LearningObjectivesResponse)
 async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     """Return extracted learning objectives for a document.
@@ -1547,12 +1214,9 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Shares session with get_or_404; simple document-scoped read-only list.
         result = await session.execute(
             select(LearningObjectiveModel)
             .where(LearningObjectiveModel.document_id == document_id)
@@ -1574,25 +1238,47 @@ async def get_objectives(document_id: str) -> LearningObjectivesResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# S143: Document learning progress endpoints
-# ---------------------------------------------------------------------------
+@router.patch(
+    "/{document_id}/objectives/{objective_id}",
+    response_model=LearningObjectiveItem,
+)
+async def update_objective(
+    document_id: str,
+    objective_id: str,
+    payload: LearningObjectiveUpdate,
+) -> LearningObjectiveItem:
+    """Manually toggle a learning objective's covered flag.
+
+    Independent of the auto-tracker (objective_tracker.update_coverage),
+    which only flips covered to True when avg FSRS stability passes the
+    threshold. This route lets the learner mark an objective done by
+    judgment, e.g. after reading the section without reviewing cards yet,
+    or untoggle one that was auto-marked but they don't actually feel
+    confident on.
+
+    Returns the updated objective. 404 when document or objective is
+    missing, or when the objective belongs to a different document
+    (blocks cross-document tampering by id-guess).
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+        obj = await get_or_404(
+            session, LearningObjectiveModel, objective_id, name="Objective"
+        )
+        if obj.document_id != document_id:
+            raise HTTPException(status_code=404, detail="Objective not found in document")
+        obj.covered = payload.covered
+        await session.commit()  # single field update; session flows through get_or_404 above
+        await session.refresh(obj)
+        return LearningObjectiveItem(
+            id=obj.id,
+            section_id=obj.section_id,
+            text=obj.text,
+            covered=obj.covered,
+        )
 
 
-class ChapterProgressItem(BaseModel):
-    section_id: str
-    heading: str
-    total_objectives: int
-    covered_objectives: int
-    progress_pct: float  # 0.0-100.0
-
-
-class DocumentProgressResponse(BaseModel):
-    document_id: str
-    total_objectives: int
-    covered_objectives: int
-    progress_pct: float  # 0.0-100.0
-    by_chapter: list[ChapterProgressItem]
+# Document learning progress
 
 
 @router.get("/{document_id}/progress", response_model=DocumentProgressResponse)
@@ -1602,14 +1288,9 @@ async def get_document_progress(document_id: str) -> DocumentProgressResponse:
     Returns zeros (not 404) when the document has no objectives.
     Returns 404 when the document does not exist.
     """
-    from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     tracker = get_objective_tracker_service()
     data = await tracker.get_progress(document_id)
@@ -1628,14 +1309,9 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
 
     Returns 404 when the document does not exist.
     """
-    from app.services.objective_tracker import get_objective_tracker_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
     tracker = get_objective_tracker_service()
     await tracker.update_coverage(document_id)
@@ -1649,24 +1325,7 @@ async def refresh_document_progress(document_id: str) -> DocumentProgressRespons
     )
 
 
-# ---------------------------------------------------------------------------
-# S152: Reading position persistence -- resume-where-you-left-off
-# ---------------------------------------------------------------------------
-
-
-class SavePositionRequest(BaseModel):
-    last_section_id: str | None = None
-    last_section_heading: str | None = None
-    last_pdf_page: int | None = None
-    last_epub_chapter_index: int | None = None
-
-
-class ReadingPositionResponse(BaseModel):
-    document_id: str
-    last_section_id: str | None
-    last_section_heading: str | None
-    last_pdf_page: int | None
-    last_epub_chapter_index: int | None
+# Reading position persistence — resume where you left off
 
 
 @router.post("/{document_id}/position", response_model=ReadingPositionResponse, status_code=200)
@@ -1680,12 +1339,10 @@ async def save_reading_position(
     Returns 404 if the document does not exist.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Upsert: read then insert-or-update in one session to avoid a second connection;
+        # ReadingPositionModel is keyed by document_id (one row per doc).
         result = await session.execute(
             select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
         )
@@ -1726,12 +1383,9 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
     Returns 404 if the document does not exist or has no saved position yet.
     """
     async with get_session_factory()() as session:
-        doc_check = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.id == document_id)
-        )
-        if doc_check.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="Document not found")
+        await get_or_404(session, DocumentModel, document_id, name="Document")
 
+        # Shares session with get_or_404; single-row read.
         result = await session.execute(
             select(ReadingPositionModel).where(ReadingPositionModel.document_id == document_id)
         )

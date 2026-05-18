@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { ALL_ENTITY_TYPES } from "./lib/vizUtils"
 
-// ---------------------------------------------------------------------------
-// vizStore unit tests (S181)
-// Run in Vitest node environment -- localStorage must be stubbed.
-// ---------------------------------------------------------------------------
+// vizStore unit tests — runs in Vitest node environment, localStorage must be stubbed
 
 // Minimal localStorage stub before the store module is imported
 const localStorageData: Record<string, string> = {}

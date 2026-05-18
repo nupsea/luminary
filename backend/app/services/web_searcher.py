@@ -1,4 +1,4 @@
-"""Web search service for optional per-conversation web augmentation (S142).
+"""Web search service for optional per-conversation web augmentation
 
 Dispatches to the configured provider (none/brave/tavily/duckduckgo).
 Privacy invariant: web snippets are NEVER stored in the database.
@@ -14,9 +14,7 @@ from app.types import WebSnippet
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Pure helper functions (no I/O)
-# ---------------------------------------------------------------------------
 
 _VERSION_RE = re.compile(
     r"\b(Python\s+\d+\.\d+|React\s+\d+|Node\.js\s+\d+|"
@@ -99,11 +97,6 @@ def _classify_source_quality(url: str, title: str) -> str:
     return "unknown"
 
 
-# ---------------------------------------------------------------------------
-# WebSearcher service
-# ---------------------------------------------------------------------------
-
-
 class WebSearcher:
     """Dispatch web search to the configured provider.
 
@@ -113,7 +106,7 @@ class WebSearcher:
     provider='duckduckgo' -- uses duckduckgo_search library (no key required)
 
     All provider failures are caught and logged; returns [] on any error.
-    Content is NOT stored in the database per privacy invariant (S142).
+    Content is NOT stored in the database per privacy invariant
     """
 
     async def search(self, query: str, k: int = 3) -> list[WebSnippet]:
@@ -262,10 +255,6 @@ class WebSearcher:
             logger.warning("web_searcher: tavily search failed", exc_info=True)
             return []
 
-
-# ---------------------------------------------------------------------------
-# Singleton factory
-# ---------------------------------------------------------------------------
 
 _web_searcher: WebSearcher | None = None
 

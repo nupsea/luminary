@@ -17,9 +17,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.services.naming import normalize_collection_name, normalize_tag_slug
 
-# ---------------------------------------------------------------------------
 # Pure unit tests: normalize_collection_name
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeCollectionName:
@@ -58,9 +56,7 @@ class TestNormalizeCollectionName:
         assert normalize_collection_name("cafe latte") == "CAFE-LATTE"
 
 
-# ---------------------------------------------------------------------------
 # Pure unit tests: normalize_tag_slug
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeTagSlug:
@@ -100,9 +96,7 @@ class TestNormalizeTagSlug:
         assert normalize_tag_slug("machine-learning") == "machine-learning"
 
 
-# ---------------------------------------------------------------------------
 # Integration test fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -129,9 +123,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Integration tests: POST endpoints normalize before insert
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -183,9 +175,7 @@ async def test_autocomplete_normalizes_query(test_db):
         assert any(r["id"] == "machine-learning" for r in results)
 
 
-# ---------------------------------------------------------------------------
 # Integration tests: migration endpoints
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

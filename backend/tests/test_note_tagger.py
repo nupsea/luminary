@@ -16,9 +16,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.note_tagger import NoteTaggerService, _parse_tag_list
 
-# ---------------------------------------------------------------------------
 # _parse_tag_list pure function tests
-# ---------------------------------------------------------------------------
 
 
 def test_parse_tag_list_valid_json():
@@ -58,9 +56,7 @@ def test_parse_tag_list_array_inside_prose():
     assert result == ["history", "science"]
 
 
-# ---------------------------------------------------------------------------
 # NoteTaggerService.suggest_tags unit tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -108,9 +104,7 @@ async def test_suggest_tags_returns_list():
     assert result == ["history", "time travel"]
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()

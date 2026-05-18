@@ -55,7 +55,7 @@ async def search(
     """Hybrid search across all documents. Returns results grouped by document.
 
     When ``document_id`` is supplied, retrieval is scoped to that single
-    document. Eval pipelines (S212) need this to measure per-document
+    document. Eval pipelines need this to measure per-document
     retrieval quality without having the target document drowned out by
     the rest of the corpus in global ranking.
 
@@ -65,13 +65,13 @@ async def search(
 
     When ``graph_expand`` is true (default), entities detected in the query
     are resolved to canonical labels via Kuzu's alias graph and appended to
-    the query. Deterministic and local-first per I-16; pairs with S224
+    the query. Deterministic and local-first per I-16; pairs with 
     index-time entity injection.
 
     When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
     cross-encoder and the top-N returned. Adds ~100-300ms per query (CPU)
     but recovers answer chunks whose vocabulary diverges from the
-    question's surface form -- the remaining S212 failure mode after
+    question's surface form -- the remaining failure mode after
     HyDE. Local-first per I-16. Fails soft on any reranker error.
     """
     # Resolve document_ids for content_type filter
@@ -81,6 +81,8 @@ async def search(
     elif content_types:
         type_list = [t.strip() for t in content_types.split(",") if t.strip()]
         if type_list:
+            # Input-dependent filter: content_type list comes from query param, so the
+            # lookup must happen here before retrieval is dispatched.
             result = await session.execute(
                 select(DocumentModel.id).where(DocumentModel.content_type.in_(type_list))
             )
@@ -102,7 +104,8 @@ async def search(
     if not scored_chunks:
         return SearchResponse(results=[])
 
-    # Fetch document metadata for all matching document IDs
+    # Fetch document metadata for all matching document IDs; the set of IDs is only
+    # known after retrieval returns, so this join cannot be pre-computed in a repo.
     doc_ids = list({c.document_id for c in scored_chunks})
     doc_result = await session.execute(
         select(

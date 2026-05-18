@@ -7,10 +7,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist"
 import { resolveDestPage } from "./pdfTocUtils"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface PdfLinkService {
   externalLinkTarget: number
   externalLinkRel: string
@@ -25,10 +21,6 @@ export interface PdfLinkService {
   goToDestination: (dest: unknown) => Promise<void>
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /** Protocols that should open externally (new tab / default handler). */
 const EXTERNAL_PROTOCOLS = ["http:", "https:", "mailto:", "tel:"]
 
@@ -37,10 +29,6 @@ function isExternalUrl(url: string): boolean {
   if (!url || url.startsWith("#")) return false
   return EXTERNAL_PROTOCOLS.some((p) => url.startsWith(p))
 }
-
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
 
 /**
  * Create a pdfjs-compatible link service that resolves internal destinations

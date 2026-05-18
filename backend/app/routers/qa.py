@@ -26,7 +26,7 @@ class QARequest(BaseModel):
     scope: Literal["single", "all"] = "all"
     model: str | None = None
     messages: list[ConversationMessage] | None = None  # sliding-window history
-    web_enabled: bool = False  # optional web augmentation (S142)
+    web_enabled: bool = False  # optional web augmentation
 
 
 class ClassifyOnlyResponse(BaseModel):

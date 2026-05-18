@@ -61,7 +61,5 @@ def isolated_data_dir(tmp_path_factory):
     _gs.cache_clear()
 
 
-# ---------------------------------------------------------------------------
 # Deterministic service stubs live in tests/stubs.py (Belief #25)
-# ---------------------------------------------------------------------------
 # Test files import directly: from stubs import MockLLMService

@@ -14,9 +14,7 @@ from app.main import app
 from app.models import FlashcardModel
 from app.services.fsrs_service import FSRSService
 
-# ---------------------------------------------------------------------------
 # Shared test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -71,9 +69,7 @@ def _make_card(
     return FlashcardModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # FSRSService unit tests
-# ---------------------------------------------------------------------------
 
 
 async def test_schedule_good_sets_future_due_date_and_positive_stability(test_db):
@@ -165,9 +161,7 @@ async def test_schedule_easy_sets_review_state(test_db):
     assert updated.fsrs_stability > 0
 
 
-# ---------------------------------------------------------------------------
 # GET /study/due endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_get_due_cards_returns_only_past_due(test_db):
@@ -214,9 +208,7 @@ async def test_get_due_cards_filtered_by_document(test_db):
     assert card_b.id not in ids
 
 
-# ---------------------------------------------------------------------------
 # POST /flashcards/{id}/review endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_review_endpoint_good_rating(test_db):
@@ -264,9 +256,7 @@ async def test_review_endpoint_404_for_missing_card(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Study session endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_start_session_creates_row(test_db):
@@ -320,6 +310,10 @@ async def test_end_session_sets_ended_at(test_db):
 
 async def test_end_session_tallies_review_events(test_db):
     """POST /study/sessions/{id}/end counts correct/incorrect from review events."""
+    import asyncio as _asyncio
+
+    import app.routers.flashcards as _fc_module
+
     _, factory, _ = test_db
     card1 = _make_card()
     card2 = _make_card()
@@ -334,15 +328,27 @@ async def test_end_session_tallies_review_events(test_db):
         start_resp = await client.post("/study/sessions/start", json={"mode": "flashcard"})
         session_id = start_resp.json()["id"]
 
-        # Review cards with this session_id
-        await client.post(
+        # Review card1; drain background tasks (XP + coverage) before next review.
+        # The review endpoint fires fire-and-forget tasks that open their own sessions
+        # on the shared StaticPool connection; if they run concurrently with the next
+        # review's session.commit(), the DB can report one event missing.
+        r1 = await client.post(
             f"/flashcards/{card1.id}/review",
             json={"rating": "good", "session_id": session_id},
         )
-        await client.post(
+        assert r1.status_code == 200
+        pending = list(_fc_module._background_tasks)
+        if pending:
+            await _asyncio.gather(*pending, return_exceptions=True)
+
+        r2 = await client.post(
             f"/flashcards/{card2.id}/review",
             json={"rating": "again", "session_id": session_id},
         )
+        assert r2.status_code == 200
+        pending = list(_fc_module._background_tasks)
+        if pending:
+            await _asyncio.gather(*pending, return_exceptions=True)
 
         # End session
         end_resp = await client.post(f"/study/sessions/{session_id}/end")

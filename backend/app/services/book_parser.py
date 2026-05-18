@@ -35,10 +35,6 @@ from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared regex patterns
-# ---------------------------------------------------------------------------
-
 # Gutenberg delimiters
 _RE_PG_START = re.compile(
     r"\*{3}\s*START OF (?:THE |THIS )?PROJECT GUTENBERG EBOOK[^\n]*\*{3}",
@@ -349,7 +345,7 @@ class BookParser:
         # Extract per-page text to enable page number assignment after segmentation
         page_texts = [page.get_text() for page in doc]
         total_pages = len(doc)
-        # S146: Join pages with \f (form feed) so we can map chunks back to physical
+        # Join pages with \f (form feed) so we can map chunks back to physical
         # page numbers even after Gutenberg/metadata stripping alters string offsets.
         all_text = "\f".join(page_texts)
         clean_text, _ = self._strip_gutenberg(all_text)

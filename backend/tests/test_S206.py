@@ -15,9 +15,7 @@ from app.main import app
 from app.models import FlashcardModel
 from app.services.flashcard import _sanitize_fts5_query, _sync_flashcard_fts
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -71,9 +69,7 @@ def _make_flashcard(
     return FlashcardModel(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # AC1: keyword in question returns flashcard
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -98,9 +94,7 @@ async def test_search_keyword_in_question(test_db):
         assert card.id in ids
 
 
-# ---------------------------------------------------------------------------
 # AC2: keyword in answer returns flashcard
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -125,9 +119,7 @@ async def test_search_keyword_in_answer(test_db):
         assert card.id in ids
 
 
-# ---------------------------------------------------------------------------
 # AC3: multi-word search with AND semantics
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -160,9 +152,7 @@ async def test_search_multiword_and_semantics(test_db):
         assert card_partial.id not in ids
 
 
-# ---------------------------------------------------------------------------
 # AC7: special characters do not cause FTS5 syntax errors
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -176,9 +166,7 @@ async def test_search_special_characters_no_error(test_db):
             assert resp.status_code == 200, f"Failed for query: {q}"
 
 
-# ---------------------------------------------------------------------------
 # AC4: newly created flashcards immediately searchable
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -208,9 +196,7 @@ async def test_newly_created_card_searchable(test_db):
         assert match_row[0] == card.id
 
 
-# ---------------------------------------------------------------------------
 # AC5: updated flashcard content reflected in search
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -252,9 +238,7 @@ async def test_updated_card_searchable(test_db):
         assert card.id in ids_new
 
 
-# ---------------------------------------------------------------------------
 # AC6: deleted flashcard not in search
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -285,9 +269,7 @@ async def test_deleted_card_not_searchable(test_db):
         assert card.id not in [item["id"] for item in resp2.json()["items"]]
 
 
-# ---------------------------------------------------------------------------
 # Unit: _sanitize_fts5_query
-# ---------------------------------------------------------------------------
 
 
 def test_sanitize_fts5_simple():
@@ -310,9 +292,7 @@ def test_sanitize_fts5_single_word():
     assert _sanitize_fts5_query("mitochondria") == '"mitochondria"'
 
 
-# ---------------------------------------------------------------------------
 # AC9: existing filters work with search query
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

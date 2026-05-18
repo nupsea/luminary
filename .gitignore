@@ -17,6 +17,7 @@ node_modules/
 scripts/ralph/flowchart/node_modules/
 dist/
 .parcel-cache/
+.vite/
 
 # Environment
 .env
@@ -26,6 +27,24 @@ dist/
 # Data directories (project-local runtime data)
 .luminary/
 .lance/
+
+# Local SQLite databases
+backend/app.db
+backend/*.db
+
+# Test-run junk: when a test mocks Settings, the GLiNER downloader
+# materialises the str(MagicMock) path as a real directory tree.
+backend/MagicMock/
+
+# Personal corpus (only shared fixtures under DATA/books/ are tracked)
+DATA/books/frankenstein.txt
+DATA/code/
+DATA/conversations/
+DATA/notes/
+DATA/papers/
+
+# Claude Code local config
+.claude/
 
 # OS
 .DS_Store

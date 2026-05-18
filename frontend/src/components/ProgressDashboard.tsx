@@ -25,61 +25,34 @@ import {
 } from "recharts"
 import { Loader2 } from "lucide-react"
 
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import type { components } from "@/types/api"
 
-interface CardStabilityItem {
-  card_id: string
-  stability: number
-  due_date: string | null
-}
-
-interface SectionStabilityItem {
-  section_heading: string | null
-  avg_stability: number
-  card_count: number
-}
-
-interface StudyStats {
-  total_cards: number
-  cards_mastered: number
-  avg_retention: number
-  current_streak: number
-  total_study_time_minutes: number
-  per_section_stability: SectionStabilityItem[]
-  all_card_stabilities: CardStabilityItem[]
-}
-
-interface HistoryItem {
-  date: string
-  cards_reviewed: number
-  study_time_minutes: number
-}
-
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
+type CardStabilityItem = components["schemas"]["CardStabilityItem"]
+type StudyStats = components["schemas"]["StudyStatsResponse"]
+type HistoryItem = components["schemas"]["DailyHistoryItem"]
 
 async function fetchStats(documentId: string): Promise<StudyStats | null> {
-  const res = await fetch(`${API_BASE}/study/stats/${documentId}`)
-  if (!res.ok) return null
-  return res.json() as Promise<StudyStats>
+  try {
+    return await apiGet<StudyStats>(`/study/stats/${documentId}`)
+  } catch {
+    return null
+  }
 }
 
 async function fetchHistory(documentId: string): Promise<HistoryItem[]> {
-  const res = await fetch(
-    `${API_BASE}/study/history?document_id=${documentId}&days=90`,
-  )
-  if (!res.ok) return []
-  return res.json() as Promise<HistoryItem[]>
+  try {
+    return await apiGet<HistoryItem[]>("/study/history", {
+      document_id: documentId,
+      days: 90,
+    })
+  } catch {
+    return []
+  }
 }
 
-// ---------------------------------------------------------------------------
 // Retention curve helpers
-// ---------------------------------------------------------------------------
 
 function buildRetentionCurveData(
   cardStabilities: CardStabilityItem[],
@@ -94,9 +67,7 @@ function buildRetentionCurveData(
   })
 }
 
-// ---------------------------------------------------------------------------
 // Color helpers
-// ---------------------------------------------------------------------------
 
 function stabilityColor(avg: number): string {
   if (avg < 1) return "bg-red-200"
@@ -113,9 +84,7 @@ function streakCellColor(cards: number): string {
   return "bg-green-600"
 }
 
-// ---------------------------------------------------------------------------
 // SummaryCard
-// ---------------------------------------------------------------------------
 
 function SummaryCard({
   label,
@@ -131,10 +100,6 @@ function SummaryCard({
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// ProgressDashboard
-// ---------------------------------------------------------------------------
 
 interface ProgressDashboardProps {
   documentId: string

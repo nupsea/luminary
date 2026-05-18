@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { useAppStore } from "@/store"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
@@ -37,43 +38,25 @@ import { CollectionHealthPanel } from "@/components/CollectionHealthPanel"
 export type { CollectionTreeItem }
 export { flattenCollectionTree }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
+const fetchCollectionTree = (): Promise<CollectionTreeItem[]> =>
+  apiGet<CollectionTreeItem[]>("/collections/tree")
 
-async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) throw new Error(`GET /collections/tree failed: ${res.status}`)
-  return res.json() as Promise<CollectionTreeItem[]>
-}
+const renameCollection = (id: string, name: string): Promise<void> =>
+  apiPut(`/collections/${id}`, { name })
 
-async function renameCollection(id: string, name: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+const deleteCollection = (id: string): Promise<void> =>
+  apiDelete(`/collections/${id}`)
+
+const addNoteToCollection = (
+  collectionId: string,
+  noteId: string,
+): Promise<void> =>
+  apiPost(`/collections/${collectionId}/members`, {
+    member_ids: [noteId],
+    member_type: "note",
   })
-  if (!res.ok) throw new Error(`PUT /collections/${id} failed: ${res.status}`)
-}
 
-async function deleteCollection(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${id} failed: ${res.status}`)
-}
-
-async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
-  })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed: ${res.status}`)
-}
-
-// ---------------------------------------------------------------------------
 // Single tree item row
-// ---------------------------------------------------------------------------
 
 interface CollectionTreeItemRowProps {
   item: CollectionTreeItem
@@ -154,6 +137,9 @@ function CollectionTreeItemRow({
     )
     try {
       const url = `${API_BASE}/collections/${item.id}/export?format=${format}`
+      // Binary download: we need res.blob() + res.headers.get("content-disposition")
+      // for the filename; apiClient's JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(url)
       if (!res.ok) throw new Error(`Export failed: ${res.status}`)
       const blob = await res.blob()
@@ -390,9 +376,7 @@ function CollectionTreeItemRow({
   )
 }
 
-// ---------------------------------------------------------------------------
-// CollectionTree
-// ---------------------------------------------------------------------------
+
 
 export function CollectionTree() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())

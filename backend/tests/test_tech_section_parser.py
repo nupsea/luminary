@@ -10,9 +10,7 @@ from app.services.tech_section_parser import (
     is_objective_candidate,
 )
 
-# ---------------------------------------------------------------------------
 # AC1: Numbered hierarchy levels and parent chain
-# ---------------------------------------------------------------------------
 
 
 def test_classify_section_level_part():
@@ -85,9 +83,7 @@ def test_assign_parent_headings_dicts_resets_deeper_on_new_part():
     assert result[4]["parent_heading"] == "Part II"
 
 
-# ---------------------------------------------------------------------------
 # AC2 + AC3: Admonition detection
-# ---------------------------------------------------------------------------
 
 
 def test_detect_admonition_note_upper():
@@ -134,9 +130,7 @@ def test_detect_admonition_ignores_deep_content():
     assert detect_admonition(text) is None
 
 
-# ---------------------------------------------------------------------------
 # AC4: Objective candidate detection
-# ---------------------------------------------------------------------------
 
 
 def test_objective_candidate_true_by_end_of():

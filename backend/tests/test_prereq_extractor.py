@@ -24,9 +24,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.services.prereq_extractor import _parse_prereqs
 
-# ---------------------------------------------------------------------------
 # Pure function tests (AC2)
-# ---------------------------------------------------------------------------
 
 
 def test_parse_prereqs_valid():
@@ -97,9 +95,7 @@ def test_parse_prereqs_missing_fields():
     assert result == []
 
 
-# ---------------------------------------------------------------------------
 # Integration test: enrich() writes Kuzu edges (AC4)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -169,7 +165,7 @@ async def test_prereq_edges_written_after_enrich(tmp_path):
 
     from app.services.prereq_extractor import PrereqExtractorService
 
-    patch_target = "app.services.prereq_extractor.litellm.acompletion"
+    patch_target = "app.services.llm.litellm.acompletion"
     with patch(patch_target, new=AsyncMock(return_value=mock_response)):
         svc = PrereqExtractorService()
         count = await svc.enrich(doc_id)

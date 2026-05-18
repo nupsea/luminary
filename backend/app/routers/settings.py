@@ -19,11 +19,6 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 _OLLAMA_TIMEOUT = 3.0
 
 
-# ---------------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------------
-
-
 class LLMSettingsResponse(BaseModel):
     # DB-backed new fields
     mode: str
@@ -48,11 +43,6 @@ class LLMSettingsPatch(BaseModel):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 async def _fetch_ollama_models(ollama_url: str) -> list[str]:
@@ -111,11 +101,6 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.get("/llm", response_model=LLMSettingsResponse)
 async def get_llm_settings_endpoint(
     db: AsyncSession = Depends(get_db),
@@ -146,9 +131,7 @@ async def patch_llm_settings(
     return await _build_response(data, cfg.OLLAMA_URL)
 
 
-# ---------------------------------------------------------------------------
-# Model list endpoint — fetches available models from each provider
-# ---------------------------------------------------------------------------
+# Model list — fetches available models from each provider
 
 # Hardcoded cost metadata (USD per 1M tokens, input/output).
 # Values are approximate list prices; free-tier notes where applicable.
@@ -293,9 +276,7 @@ async def list_llm_models(
     return []
 
 
-# ---------------------------------------------------------------------------
-# Web search settings (S142)
-# ---------------------------------------------------------------------------
+# Web search settings
 
 
 class WebSearchSettingsResponse(BaseModel):

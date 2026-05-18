@@ -19,9 +19,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -39,9 +37,7 @@ def _create_note(client, content: str, source_document_ids: list[str] | None = N
     return resp.json()
 
 
-# ---------------------------------------------------------------------------
 # Test: POST /notes creates NoteSourceModel rows
-# ---------------------------------------------------------------------------
 
 
 def test_create_note_with_source_document_ids(client):
@@ -70,9 +66,7 @@ def test_create_note_without_source_document_ids_returns_empty(client):
     assert note["source_document_ids"] == []
 
 
-# ---------------------------------------------------------------------------
 # Test: GET /notes/{id} response includes source_document_ids
-# ---------------------------------------------------------------------------
 
 
 def test_get_note_includes_source_document_ids(client):
@@ -91,9 +85,7 @@ def test_get_note_includes_source_document_ids(client):
     assert doc_id_1 in data["source_document_ids"]
 
 
-# ---------------------------------------------------------------------------
 # Test: GET /notes?document_id= returns notes linked via NoteSourceModel
-# ---------------------------------------------------------------------------
 
 
 def test_list_notes_by_document_id_via_pivot(client):
@@ -138,9 +130,7 @@ def test_list_notes_by_document_id_legacy_and_pivot(client):
     assert pivot_note["id"] in ids
 
 
-# ---------------------------------------------------------------------------
 # Test: PATCH syncs NoteSourceModel rows
-# ---------------------------------------------------------------------------
 
 
 def test_patch_note_syncs_source_document_ids(client):
@@ -191,9 +181,7 @@ def test_patch_note_without_source_document_ids_does_not_change_pivot(client):
     assert doc_id_1 in data["source_document_ids"]
 
 
-# ---------------------------------------------------------------------------
 # Test: upsert_note_node emits DERIVED_FROM for each source_document_id
-# ---------------------------------------------------------------------------
 
 
 def test_upsert_note_node_emits_derived_from_for_each_source(tmp_path):
@@ -247,9 +235,7 @@ def test_upsert_note_node_emits_derived_from_for_each_source(tmp_path):
     assert r2.has_next(), "DERIVED_FROM edge to doc_id_2 not found"
 
 
-# ---------------------------------------------------------------------------
 # Test: migration backfills NoteSourceModel from notes.document_id
-# ---------------------------------------------------------------------------
 
 
 def test_migration_backfills_note_sources(client):

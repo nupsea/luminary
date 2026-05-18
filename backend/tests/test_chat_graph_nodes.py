@@ -46,9 +46,7 @@ from app.runtime.chat_graph import (
 )
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Shared fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +58,7 @@ def mock_llm_calls():
             new=AsyncMock(side_effect=lambda q, d, **kwargs: d),
         ),
         patch(
-            "app.runtime.chat_graph._decompose_comparison",
+            "app.runtime.chat_nodes.comparative._decompose_comparison",
             new=AsyncMock(return_value={"sides": ["side_a", "side_b"], "topic": "comparison"}),
         ),
     ):
@@ -134,9 +132,7 @@ async def _insert_doc(factory, doc_id: str, title: str = "Test Doc") -> None:
         await session.commit()
 
 
-# ---------------------------------------------------------------------------
 # (a) test_summary_node_returns_executive_summary
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -168,9 +164,7 @@ async def test_summary_node_sets_answer_directly(test_db):
     assert summary_content in result.get("section_context", "")
 
 
-# ---------------------------------------------------------------------------
 # (b) test_summary_node_falls_through_when_no_summary
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -183,9 +177,7 @@ async def test_summary_node_falls_through_when_no_summary(test_db):
     assert "section_context" not in result or result.get("section_context") is None
 
 
-# ---------------------------------------------------------------------------
 # (c) test_graph_node_falls_through_on_kuzu_error
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -204,9 +196,7 @@ async def test_graph_node_falls_through_on_kuzu_error(test_db):
     assert result.get("intent") == "factual"
 
 
-# ---------------------------------------------------------------------------
 # (d) test_search_node_augments_chunks_with_section_summaries
-# ---------------------------------------------------------------------------
 
 
 def _make_scored_chunk(
@@ -250,7 +240,7 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db):
     mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
     mock_retriever.retrieve_with_images = AsyncMock(return_value=([mock_chunk], []))
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever):
         state = _make_state(
             question="What happens in the beginning?",
             doc_ids=[doc_id],
@@ -267,9 +257,7 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db):
     assert mock_chunk.text in augmented_text
 
 
-# ---------------------------------------------------------------------------
 # (e) test_comparative_node_interleaves_results
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -298,7 +286,7 @@ async def test_comparative_node_interleaves_results(test_db):
     # Return side_a for first call, side_b for second
     mock_retriever.retrieve = AsyncMock(side_effect=[side_a, side_b])
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever):
         state = _make_state(
             question="Compare side_a versus side_b",
             intent="comparative",
@@ -316,9 +304,7 @@ async def test_comparative_node_interleaves_results(test_db):
     assert texts[3].startswith("side_b")
 
 
-# ---------------------------------------------------------------------------
 # (f) test_synthesize_node_calls_litellm
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -361,9 +347,7 @@ async def test_synthesize_node_prepares_llm_prompt(test_db):
     assert not result.get("not_found")
 
 
-# ---------------------------------------------------------------------------
 # test_summary_intent_end_to_end — S78 AC
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -432,9 +416,7 @@ async def test_summary_intent_end_to_end(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # test_synthesize_node_collects_citations_deduplicated — S148 AC
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -563,9 +545,7 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
     assert first_cit["section_preview_snippet"] == "text1"
 
 
-# ---------------------------------------------------------------------------
 # S158 AC: synthesize_node emits transparency event; augment_node sets augmented
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -703,7 +683,7 @@ async def test_augment_node_sets_transparency_augmented(test_db):
         retry_attempted=False,
     )
 
-    with patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever):
+    with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
         result = await augment_node(state)
 
     assert result.get("transparency_augmented") is True, (

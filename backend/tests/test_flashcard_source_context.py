@@ -13,9 +13,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import ChunkModel, DocumentModel, FlashcardModel, SectionModel
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -42,9 +40,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Fixtures / helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_doc(doc_id: str | None = None, title: str = "Test Doc") -> DocumentModel:
@@ -123,9 +119,7 @@ def _make_flashcard(
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

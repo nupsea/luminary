@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalCreateDialog (S211) -- dialog for creating a new typed learning goal.
-// Submits to POST /goals via createGoal helper.
-// ---------------------------------------------------------------------------
+// GoalCreateDialog — dialog for creating a new typed learning goal, submits to POST /goals
 
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -20,7 +17,7 @@ import {
   createGoal,
 } from "@/lib/goalsApi"
 import { defaultTargetUnitForGoalType, GOAL_TYPE_LABEL } from "./goalTypeMeta"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 interface DocItem {
   id: string
@@ -38,18 +35,22 @@ interface CollectionOption {
 }
 
 async function fetchDocs(): Promise<DocItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=newest&page=1&page_size=200`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocItem[] }
-  return data.items ?? []
+  try {
+    const data = await apiGet<{ items: DocItem[] }>("/documents", {
+      sort: "newest",
+      page: 1,
+      page_size: 200,
+    })
+    return data.items ?? []
+  } catch {
+    return []
+  }
 }
 
 async function fetchDecks(): Promise<DeckOption[]> {
   // Decks come from /flashcards/decks; the deck name doubles as its id.
   try {
-    const res = await fetch(`${API_BASE}/flashcards/decks`)
-    if (!res.ok) return []
-    const data = (await res.json()) as Array<{ deck: string }>
+    const data = await apiGet<Array<{ deck: string }>>("/flashcards/decks")
     const seen = new Set<string>()
     const out: DeckOption[] = []
     for (const d of data) {
@@ -65,13 +66,11 @@ async function fetchDecks(): Promise<DeckOption[]> {
 
 async function fetchCollections(): Promise<CollectionOption[]> {
   try {
-    const res = await fetch(`${API_BASE}/collections/tree`)
-    if (!res.ok) return []
-    const tree = (await res.json()) as Array<{
+    const tree = await apiGet<Array<{
       id: string
       name: string
       children?: unknown[]
-    }>
+    }>>("/collections/tree")
     const out: CollectionOption[] = []
     const walk = (items: typeof tree) => {
       for (const it of items) {
@@ -96,7 +95,7 @@ const TARGET_UNITS: TargetUnit[] = [
   "turns",
 ]
 
-const GOAL_TYPES: GoalType[] = ["read", "recall", "write", "explore"]
+const GOAL_TYPES: GoalType[] = ["studying", "read", "recall", "write", "explore"]
 
 interface Props {
   open: boolean
@@ -107,10 +106,10 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
   const qc = useQueryClient()
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [goalType, setGoalType] = useState<GoalType>("read")
+  const [goalType, setGoalType] = useState<GoalType>("studying")
   const [targetValue, setTargetValue] = useState<string>("")
   const [targetUnit, setTargetUnit] = useState<TargetUnit>(
-    defaultTargetUnitForGoalType("read"),
+    defaultTargetUnitForGoalType("studying"),
   )
   const [documentId, setDocumentId] = useState<string>("")
   const [deckId, setDeckId] = useState<string>("")
@@ -141,9 +140,9 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
     if (open) {
       setTitle("")
       setDescription("")
-      setGoalType("read")
+      setGoalType("studying")
       setTargetValue("")
-      setTargetUnit(defaultTargetUnitForGoalType("read"))
+      setTargetUnit(defaultTargetUnitForGoalType("studying"))
       setDocumentId("")
       setDeckId("")
       setCollectionId("")
@@ -203,7 +202,7 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle>New Goal</DialogTitle>
           <DialogDescription>
-            Set a typed learning goal and track progress as you focus.
+            Set a learning goal and track progress as you focus.
           </DialogDescription>
         </DialogHeader>
 
@@ -274,7 +273,7 @@ export function GoalCreateDialog({ open, onOpenChange }: Props) {
 
           <div className="grid grid-cols-1 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted-foreground">Document (optional)</span>
+              <span className="text-muted-foreground">Book/document (optional)</span>
               <select
                 value={documentId}
                 onChange={(e) => setDocumentId(e.target.value)}

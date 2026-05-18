@@ -7,9 +7,7 @@ def _chunk(text: str, chunk_id: str = "c1", doc_id: str = "d1") -> dict:
     return {"id": chunk_id, "document_id": doc_id, "text": text}
 
 
-# ---------------------------------------------------------------------------
 # AC2: 'numpy implements ndarray' -> IMPLEMENTS edge
-# ---------------------------------------------------------------------------
 
 
 def test_implements_pattern_ac2():
@@ -27,9 +25,7 @@ def test_implements_case_insensitive():
     assert ("sqlalchemy", "orm", "IMPLEMENTS") in result
 
 
-# ---------------------------------------------------------------------------
 # EXTENDS pattern
-# ---------------------------------------------------------------------------
 
 
 def test_extends_pattern():
@@ -39,9 +35,7 @@ def test_extends_pattern():
     assert ("usermodel", "basemodel", "EXTENDS") in result
 
 
-# ---------------------------------------------------------------------------
 # USES pattern
-# ---------------------------------------------------------------------------
 
 
 def test_uses_pattern():
@@ -51,9 +45,7 @@ def test_uses_pattern():
     assert ("fastapi", "pydantic", "USES") in result
 
 
-# ---------------------------------------------------------------------------
 # DEPENDS_ON pattern — 'requires' and 'depends on' sub-patterns
-# ---------------------------------------------------------------------------
 
 
 def test_depends_on_requires_pattern():
@@ -70,9 +62,7 @@ def test_depends_on_depends_pattern():
     assert ("celery", "redis", "DEPENDS_ON") in result
 
 
-# ---------------------------------------------------------------------------
 # REPLACES pattern
-# ---------------------------------------------------------------------------
 
 
 def test_replaces_pattern():
@@ -82,9 +72,7 @@ def test_replaces_pattern():
     assert ("asyncio", "threading", "REPLACES") in result
 
 
-# ---------------------------------------------------------------------------
 # IMPORT pattern -> USES edge
-# ---------------------------------------------------------------------------
 
 
 def test_import_pattern_creates_uses():
@@ -107,9 +95,7 @@ def test_from_import_pattern():
     assert any(r[2] == "USES" for r in result)
 
 
-# ---------------------------------------------------------------------------
 # Guard: no edge when one entity is unknown
-# ---------------------------------------------------------------------------
 
 
 def test_no_relation_for_unknown_entity():
@@ -126,9 +112,7 @@ def test_no_relation_empty_known():
     assert result == []
 
 
-# ---------------------------------------------------------------------------
 # Deduplication
-# ---------------------------------------------------------------------------
 
 
 def test_duplicate_relations_deduplicated():
@@ -143,9 +127,7 @@ def test_duplicate_relations_deduplicated():
     assert count == 1
 
 
-# ---------------------------------------------------------------------------
 # Edge case: empty chunks
-# ---------------------------------------------------------------------------
 
 
 def test_empty_chunks():

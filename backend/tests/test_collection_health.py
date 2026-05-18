@@ -16,9 +16,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.collection_health import _compute_cohesion
 
-# ---------------------------------------------------------------------------
 # Pure unit tests -- no DB required
-# ---------------------------------------------------------------------------
 
 
 def test_cohesion_identical_vectors():
@@ -52,9 +50,7 @@ def test_cohesion_fewer_than_6_returns_none():
     assert _compute_cohesion([]) is None
 
 
-# ---------------------------------------------------------------------------
 # Integration tests via TestClient
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -86,9 +82,7 @@ def _add_note_to_collection(client, collection_id: str, note_id: str):
     assert resp.status_code == 201
 
 
-# ---------------------------------------------------------------------------
 # GET /collections/{id}/health
-# ---------------------------------------------------------------------------
 
 
 def test_health_returns_expected_shape(client):
@@ -224,9 +218,7 @@ def test_recent_note_not_stale(client):
     assert note["id"] not in stale_ids
 
 
-# ---------------------------------------------------------------------------
 # POST /collections/{id}/health/archive-stale
-# ---------------------------------------------------------------------------
 
 
 def test_archive_stale_sets_archived_and_excludes_from_list(client):

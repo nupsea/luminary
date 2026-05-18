@@ -13,9 +13,7 @@ import pytest
 from app.services.graph import KuzuService
 from app.services.note_graph import NoteGraphService
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -67,9 +65,7 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-# ---------------------------------------------------------------------------
 # Test: upsert_note_node -- WRITTEN_ABOUT edge for known entity
-# ---------------------------------------------------------------------------
 
 
 def test_written_about_edge_created_for_known_entity(note_graph_svc, tmp_path):
@@ -115,9 +111,7 @@ def test_absent_entity_skipped_without_exception(note_graph_svc):
     assert result.has_next(), "Note node should be created even when entity is absent"
 
 
-# ---------------------------------------------------------------------------
 # Test: DERIVED_FROM edge when note has document_id and Document node exists
-# ---------------------------------------------------------------------------
 
 
 def test_derived_from_edge_created(note_graph_svc):
@@ -155,9 +149,7 @@ def test_derived_from_edge_skipped_when_doc_absent(note_graph_svc):
     assert not result.has_next(), "No DERIVED_FROM edge when Document node absent"
 
 
-# ---------------------------------------------------------------------------
 # Test: TAG_IS_CONCEPT edge when tag matches Entity.name (case-insensitive)
-# ---------------------------------------------------------------------------
 
 
 def test_tag_is_concept_edge_created(note_graph_svc):
@@ -178,9 +170,7 @@ def test_tag_is_concept_edge_created(note_graph_svc):
     assert result.has_next(), "TAG_IS_CONCEPT edge should exist for matching tag"
 
 
-# ---------------------------------------------------------------------------
 # Test: delete_note_node removes Note; get_entities_for_note returns []
-# ---------------------------------------------------------------------------
 
 
 def test_delete_note_node_and_verify_entities_empty(note_graph_svc):
@@ -215,9 +205,7 @@ def test_delete_note_node_and_verify_entities_empty(note_graph_svc):
     assert entities == [], "get_entities_for_note should return [] for deleted note"
 
 
-# ---------------------------------------------------------------------------
 # Test: get_notes_for_entity returns correct note_id
-# ---------------------------------------------------------------------------
 
 
 def test_get_notes_for_entity(note_graph_svc):
@@ -237,9 +225,7 @@ def test_get_notes_for_entity(note_graph_svc):
     assert note_id in note_ids
 
 
-# ---------------------------------------------------------------------------
 # Test: GET /notes/{note_id}/entities endpoint returns correct shape
-# ---------------------------------------------------------------------------
 
 
 def test_get_note_entities_endpoint(tmp_path):

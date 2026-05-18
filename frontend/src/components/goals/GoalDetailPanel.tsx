@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// GoalDetailPanel (S211) -- side sheet showing a single goal's progress,
-// linked sessions, and Edit / Archive / Complete / Delete actions.
-// ---------------------------------------------------------------------------
+// GoalDetailPanel — side sheet showing goal progress, linked sessions, and Edit/Archive/Complete/Delete actions
 
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -202,6 +199,17 @@ export function GoalDetailPanel({ goalId, open, onOpenChange }: Props) {
                             progressQuery.data.metrics.avg_retention * 100
                           ).toFixed(0)}
                           %
+                        </span>
+                      </div>
+                    )}
+                  {progressQuery.data.metrics.surface_minutes &&
+                    Object.keys(progressQuery.data.metrics.surface_minutes).length > 0 && (
+                      <div className="col-span-2">
+                        Activity mix:{" "}
+                        <span className="font-mono text-foreground">
+                          {Object.entries(progressQuery.data.metrics.surface_minutes)
+                            .map(([surface, minutes]) => `${surface}:${minutes}m`)
+                            .join(" ")}
                         </span>
                       </div>
                     )}

@@ -13,9 +13,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.services.llm import LLMService, get_llm_service
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture for /settings/llm tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -48,9 +46,7 @@ async def settings_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_completion_response(content: str) -> MagicMock:
@@ -80,9 +76,7 @@ async def _async_iter(items):
         yield item
 
 
-# ---------------------------------------------------------------------------
 # LLMService.generate — non-streaming
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -124,9 +118,7 @@ async def test_generate_non_stream_empty_system_omits_system_message():
     assert messages[0]["role"] == "user"
 
 
-# ---------------------------------------------------------------------------
 # LLMService.generate — streaming
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -163,9 +155,7 @@ async def test_generate_stream_yields_strings():
     assert all(isinstance(t, str) for t in tokens)
 
 
-# ---------------------------------------------------------------------------
 # Model routing — api_base / api_key forwarded correctly
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -237,9 +227,7 @@ async def test_gemini_prefix_sets_api_key(monkeypatch):
     get_settings.cache_clear()
 
 
-# ---------------------------------------------------------------------------
 # GET /settings/llm endpoint
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -295,9 +283,7 @@ async def test_llm_settings_cloud_when_no_ollama_but_api_key(settings_db):
     assert openai_provider["available"] is True
 
 
-# ---------------------------------------------------------------------------
 # Singleton
-# ---------------------------------------------------------------------------
 
 
 def test_get_llm_service_returns_same_instance():

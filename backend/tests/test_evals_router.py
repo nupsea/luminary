@@ -20,9 +20,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
 
-# ---------------------------------------------------------------------------
 # Shared fixture — in-memory SQLite DB
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -51,9 +49,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

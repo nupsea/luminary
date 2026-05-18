@@ -21,9 +21,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel, SectionModel
 from app.workflows.ingestion import IngestionState, _chunk_book
 
-# ---------------------------------------------------------------------------
 # Shared fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -103,9 +101,7 @@ def _make_pdf_sections(num_pages: int) -> list[dict]:
     ]
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 async def test_pdf_chunks_have_page_numbers(test_db):

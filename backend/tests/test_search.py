@@ -10,9 +10,7 @@ from app.main import app
 from app.services.retriever import get_retriever
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_chunk(chunk_id: str, document_id: str, score: float = 0.8) -> ScoredChunk:
@@ -58,9 +56,7 @@ def _retriever_override(retriever: MagicMock):
     return lambda: retriever
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -70,9 +66,7 @@ def clear_overrides():
     app.dependency_overrides.clear()
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 def test_search_returns_grouped_results():

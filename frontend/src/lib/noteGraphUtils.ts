@@ -1,5 +1,5 @@
 /**
- * Pure utility functions for Note node graph behavior (S172).
+ * Pure utility functions for Note node graph behavior
  *
  * These functions have no React/Zustand imports so they can be tested
  * in vitest "node" environment (per patterns.md).

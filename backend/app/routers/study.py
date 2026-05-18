@@ -19,12 +19,9 @@ import logging
 import math
 import uuid
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 from sqlalchemy import case, func, or_, select
-from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, get_session_factory
@@ -42,21 +39,90 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
+from app.repos.study_repo import StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
+from app.schemas.study import (
+    CardStabilityItem,
+    CollectionSource,
+    CollectionSubEnclave,
+    CollectionTopic,
+    DailyHistoryItem,
+    DueCountResponse,
+    GapResult,
+    RubricCompletenessResponse,
+    RubricDimensionResponse,
+    SectionHeatmapItem,
+    SectionHeatmapResponse,
+    SectionStabilityItem,
+    SessionCardDetail,
+    SessionCardResponse,
+    SessionListItem,
+    SessionListResponse,
+    SessionPlanItem,
+    SessionPlanResponse,
+    SessionRemainingResponse,
+    SessionResponse,
+    SessionReviewRequest,
+    SessionReviewResponse,
+    SessionStartResponse,
+    SessionSummary,
+    StartConceptItemResponse,
+    StartConceptsAPIResponse,
+    StartSessionRequest,
+    StrugglingCardItem,
+    StudyCollectionDashboardResponse,
+    StudyPathAPIResponse,
+    StudyPathItemResponse,
+    StudyStatsResponse,
+    TeachbackRequest,
+    TeachbackResponse,
+    TeachbackResultItem,
+    TeachbackResultsBatchResponse,
+    TeachbackRubricResponse,
+    TeachbackSubmitResponse,
+)
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.study_path_service import StudyPathService
+from app.services.study_session_service import (
+    build_session_plan as _build_session_plan,
+)
+from app.services.study_session_service import (
+    compute_gaps as _compute_gaps,
+)
+from app.services.study_session_service import (
+    compute_section_heatmap as _compute_section_heatmap,
+)
 
 logger = logging.getLogger(__name__)
 
+# Back-compat re-exports for tests and feynman.py that import these here.
+__all__ = [
+    "SectionHeatmapItem",
+    "SessionPlanItem",
+    "_build_session_plan",
+    "_compute_gaps",
+    "_compute_section_heatmap",
+    "router",
+]
+
 router = APIRouter(prefix="/study", tags=["study"])
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+# Gap-detection thresholds live in repos/study_repo.py.
 
-_GAP_STABILITY_THRESHOLD = 2.0
-_GAP_MIN_REPS = 1
+# Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+# Serialize background teachback evaluations to avoid SQLite "database is locked"
+# when multiple concurrent tasks try to write (invariant I-1).
+_teachback_eval_sem = asyncio.Semaphore(1)
+
+
+def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
+    """Schedule coroutine as fire-and-forget background task with strong ref."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 # Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
@@ -99,7 +165,7 @@ _CORRECTION_USER_TMPL = (
     'Output JSON: {{"question": str, "answer": str, "source_excerpt": str}}'
 )
 
-# S156: rubric evaluation prompts (duplicated in feynman_service.py -- same layer)
+# rubric evaluation prompts (duplicated in feynman_service.py -- same layer)
 _RUBRIC_SYSTEM = (
     "You are an expert tutor evaluating a student explanation. "
     "Output a JSON object only -- no preamble, no markdown fences."
@@ -118,392 +184,9 @@ _RUBRIC_USER_TMPL = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-
-class StartSessionRequest(BaseModel):
-    document_id: str | None = None
-    collection_id: str | None = None
-    mode: str = "flashcard"
-    planned_card_ids: list[str] | None = None
-
-
-class SessionResponse(BaseModel):
-    id: str
-    document_id: str | None
-    collection_id: str | None = None
-    started_at: datetime
-    ended_at: datetime | None
-    cards_reviewed: int
-    cards_correct: int
-    mode: str
-
-    model_config = {"from_attributes": True}
-
-
-class SessionSummary(BaseModel):
-    session_id: str
-    cards_reviewed: int
-    cards_correct: int
-    accuracy_pct: float
-    ended_at: datetime
-
-
-class SessionListItem(BaseModel):
-    id: str
-    started_at: datetime
-    ended_at: datetime | None
-    duration_minutes: float | None
-    cards_reviewed: int
-    cards_correct: int
-    accuracy_pct: float | None
-    document_id: str | None
-    document_title: str | None
-    collection_id: str | None = None
-    collection_name: str | None = None
-    mode: str
-    has_pending_evaluations: bool = False
-
-    model_config = {"from_attributes": True}
-
-
-class SessionListResponse(BaseModel):
-    items: list[SessionListItem]
-    total: int
-    page: int
-    page_size: int
-
-
-class SessionCardDetail(BaseModel):
-    flashcard_id: str
-    question: str
-    rating: str
-    is_correct: bool
-    reviewed_at: datetime
-
-
-class GapResult(BaseModel):
-    section_heading: str | None
-    weak_card_count: int
-    avg_stability: float
-    sample_questions: list[str]
-
-
-def _compute_gaps(
-    weak_cards: list[FlashcardModel],
-    chunk_to_section: dict[str, str | None],
-) -> list[GapResult]:
-    """Group weak cards by section, compute avg stability, return sorted results.
-
-    Pure function — no I/O. All inputs are explicit parameters.
-    """
-    groups: dict[str | None, list[FlashcardModel]] = {}
-    for card in weak_cards:
-        heading = chunk_to_section.get(card.chunk_id)
-        groups.setdefault(heading, []).append(card)
-
-    results: list[GapResult] = []
-    for heading, group_cards in groups.items():
-        avg_stab = sum(c.fsrs_stability for c in group_cards) / len(group_cards)
-        sample = [c.question for c in group_cards[:3]]
-        results.append(
-            GapResult(
-                section_heading=heading,
-                weak_card_count=len(group_cards),
-                avg_stability=round(avg_stab, 4),
-                sample_questions=sample,
-            )
-        )
-
-    results.sort(key=lambda r: r.avg_stability)
-    return results
-
-
-class TeachbackRequest(BaseModel):
-    flashcard_id: str
-    user_explanation: str
-    session_id: str | None = None
-
-
-class RubricDimensionResponse(BaseModel):
-    score: int
-    evidence: str
-
-
-class RubricCompletenessResponse(BaseModel):
-    score: int
-    missed_points: list[str]
-
-
-class TeachbackRubricResponse(BaseModel):
-    accuracy: RubricDimensionResponse
-    completeness: RubricCompletenessResponse
-    clarity: RubricDimensionResponse
-
-
-class TeachbackResponse(BaseModel):
-    score: int
-    correct_points: list[str]
-    missing_points: list[str]
-    misconceptions: list[str]
-    correction_flashcard_id: str | None = None
-    rubric: TeachbackRubricResponse | None = None  # S156: null when rubric LLM call fails
-
-
-class TeachbackSubmitResponse(BaseModel):
-    """Returned by POST /study/teachback/async -- evaluation runs in background."""
-
-    id: str
-
-
-class TeachbackResultItem(BaseModel):
-    """Single item in batch-poll response."""
-
-    id: str
-    status: str  # "pending" | "complete" | "error"
-    flashcard_id: str
-    question: str = ""
-    expected_answer: str = ""
-    score: int | None = None
-    correct_points: list[str] = []
-    missing_points: list[str] = []
-    misconceptions: list[str] = []
-    correction_flashcard_id: str | None = None
-    rubric: TeachbackRubricResponse | None = None
-    user_explanation: str | None = None
-
-
-class TeachbackResultsBatchResponse(BaseModel):
-    results: list[TeachbackResultItem]
-
-
-class SectionStabilityItem(BaseModel):
-    section_heading: str | None
-    avg_stability: float
-    card_count: int
-
-
-class CardStabilityItem(BaseModel):
-    card_id: str
-    stability: float
-    due_date: str | None
-
-
-class StudyStatsResponse(BaseModel):
-    total_cards: int
-    cards_mastered: int
-    avg_retention: float
-    current_streak: int
-    total_study_time_minutes: float
-    due_today: int
-    new_today: int
-    mastery_pct: float
-    per_section_stability: list[SectionStabilityItem]
-    all_card_stabilities: list[CardStabilityItem]
-
-
-class DailyHistoryItem(BaseModel):
-    date: str  # YYYY-MM-DD
-    cards_reviewed: int
-    study_time_minutes: float
-
-
-class StrugglingCardItem(BaseModel):
-    flashcard_id: str
-    document_id: str | None
-    question: str
-    again_count: int
-    source_section_id: str | None
-
-
-class SectionHeatmapItem(BaseModel):
-    section_id: str
-    fragility_score: float | None
-    due_card_count: int
-    avg_retention_pct: float | None
-
-
-class SectionHeatmapResponse(BaseModel):
-    heatmap: dict[str, SectionHeatmapItem]
-
-
-class DueCountResponse(BaseModel):
-    due_today: int
-
-
-class CollectionTopic(BaseModel):
-    tag: str
-    card_count: int
-    note_count: int
-
-
-class CollectionSource(BaseModel):
-    id: str
-    title: str
-    type: str  # "document" | "note"
-
-
-class CollectionSubEnclave(BaseModel):
-    id: str
-    name: str
-    card_count: int
-
-
-class StudyCollectionDashboardResponse(BaseModel):
-    collection_id: str
-    collection_name: str
-    due_today: int
-    new_today: int
-    mastery_pct: float
-    topics: list[CollectionTopic]
-    sources: list[CollectionSource]
-    sub_collections: list[CollectionSubEnclave] = []
-
-
-def _compute_section_heatmap(
-    cards: list[FlashcardModel],
-    chunk_to_section: dict[str, str | None],
-    now: datetime,
-) -> dict[str, SectionHeatmapItem]:
-    """Aggregate FSRS retrievability per section.
-
-    fragility_score = 1 - avg_retrievability where retrievability = exp(-t/S).
-    Sections with no cards are absent from the returned dict.
-    Pure function -- no I/O.
-    """
-    groups: dict[str, list[FlashcardModel]] = {}
-    for card in cards:
-        if not card.chunk_id:
-            continue
-        section_id = chunk_to_section.get(card.chunk_id)
-        if section_id is None:
-            continue
-        groups.setdefault(section_id, []).append(card)
-
-    result: dict[str, SectionHeatmapItem] = {}
-    for section_id, group in groups.items():
-        retrievabilities: list[float] = []
-        for card in group:
-            if card.fsrs_stability <= 0 or card.last_review is None:
-                retrievabilities.append(0.0)
-            else:
-                last_review_aware = card.last_review.replace(tzinfo=UTC)
-                days_since = (now - last_review_aware).total_seconds() / 86400
-                retrievabilities.append(math.exp(-days_since / card.fsrs_stability))
-
-        avg_ret = sum(retrievabilities) / len(retrievabilities)
-        fragility = round(max(0.0, min(1.0, 1.0 - avg_ret)), 4)
-        due_count = sum(
-            1 for card in group if card.due_date and card.due_date.replace(tzinfo=UTC) <= now
-        )
-        result[section_id] = SectionHeatmapItem(
-            section_id=section_id,
-            fragility_score=fragility,
-            due_card_count=due_count,
-            avg_retention_pct=round(avg_ret * 100, 1),
-        )
-    return result
-
-
-class SessionCardResponse(BaseModel):
-    card_id: str
-    question: str
-    answer: str
-    cards_remaining: int
-
-
-class SessionStartResponse(BaseModel):
-    card_id: str
-    question: str
-    answer: str
-    cards_remaining: int
-
-
-class SessionReviewRequest(BaseModel):
-    card_id: str
-    rating: int  # 1=again 2=hard 3=good 4=easy
-
-
-class SessionReviewResponse(BaseModel):
-    done: bool
-    next_card: SessionCardResponse | None = None
 
 
 _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
-
-
-# ---------------------------------------------------------------------------
-# Session plan models and pure builder
-# ---------------------------------------------------------------------------
-
-
-class SessionPlanItem(BaseModel):
-    type: Literal["review", "gap", "read"]
-    title: str
-    minutes: int
-    action_label: str
-    action_target: str
-
-
-class SessionPlanResponse(BaseModel):
-    total_minutes: int
-    items: list[SessionPlanItem]
-
-
-def _build_session_plan(
-    due_count: int,
-    gap_areas: list[str],
-    recent_doc_titles: list[tuple[str, str]],
-    budget_minutes: int,
-) -> list[SessionPlanItem]:
-    """Assemble a prioritized study agenda from available data.
-
-    Pure function -- no I/O. All inputs are explicit parameters.
-    """
-    items: list[SessionPlanItem] = []
-
-    if due_count > 0:
-        items.append(
-            SessionPlanItem(
-                type="review",
-                title=f"{due_count} flashcards due for review",
-                minutes=min(10, max(5, due_count // 2)),
-                action_label="Start Review",
-                action_target="/study",
-            )
-        )
-
-    for gap_area in gap_areas[:2]:
-        items.append(
-            SessionPlanItem(
-                type="gap",
-                title=f"Weak area: {gap_area}",
-                minutes=5,
-                action_label="Study Gaps",
-                action_target="/study",
-            )
-        )
-
-    if recent_doc_titles:
-        doc_id, doc_title = recent_doc_titles[0]
-        items.append(
-            SessionPlanItem(
-                type="read",
-                title=f"Continue: {doc_title}",
-                minutes=5,
-                action_label="Open Document",
-                action_target=f"/learning?document_id={doc_id}",
-            )
-        )
-
-    return items[:5]
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/due-count", response_model=DueCountResponse)
@@ -524,7 +207,9 @@ async def get_due_count(
     if note_ids:
         stmt = stmt.where(FlashcardModel.note_id.in_(note_ids))
 
-    # Combined collection logic
+    # Combined collection logic -- inline queries resolve the collection hierarchy and
+    # tag membership before the main count. The filter set is determined at request
+    # time so the queries cannot be pre-built in a repo method.
     if collection_id and not (document_ids or note_ids):
         # Resolve all doc/note IDs in hierarchy
         c_doc_ids, c_note_ids = await _resolve_collection_members(collection_id, session)
@@ -610,6 +295,7 @@ async def get_due_cards(
     if note_ids:
         stmt = stmt.where(FlashcardModel.note_id.in_(note_ids))
 
+    # Collection/tag filter branches -- inline for the same reason as get_due_count.
     if collection_id and not (used_document_ids or note_ids):
         # Resolve all doc/note IDs in hierarchy
         c_doc_ids, c_note_ids = await _resolve_collection_members(collection_id, session)
@@ -669,15 +355,11 @@ async def get_due_cards(
     result = await session.execute(stmt)
     cards = list(result.scalars().all())
 
-    # Build chunk_id -> section_id map for S138 SourcePanel
-    chunk_ids = [c.chunk_id for c in cards if c.chunk_id]
-    chunk_to_section: dict[str, str | None] = {}
-    if chunk_ids:
-        chunk_result = await session.execute(
-            select(ChunkModel.id, ChunkModel.section_id).where(ChunkModel.id.in_(chunk_ids))
-        )
-        for cid, sid in chunk_result:
-            chunk_to_section[cid] = sid
+    # Build chunk_id -> section_id map for SourcePanel
+    repo = StudyRepo(session)
+    chunk_to_section = await repo.chunk_section_id_map(
+        [c.chunk_id for c in cards if c.chunk_id]
+    )
 
     return [_to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in cards]
 
@@ -686,6 +368,7 @@ async def get_due_cards(
 async def get_session_plan(
     minutes: int = Query(default=20, ge=5, le=120),
     session: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionPlanResponse:
     """Return a prioritized study agenda for the given time budget.
 
@@ -694,36 +377,28 @@ async def get_session_plan(
     """
     now = datetime.now(UTC)
 
-    # (a) Count all due flashcards (no document filter)
-    due_stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
-    due_result = await session.execute(due_stmt)
-    due_count = len(due_result.scalars().all())
-
-    # (b) Fetch gap area titles across all documents (max 2 distinct non-null headings)
-    weak_stmt = (
-        select(FlashcardModel)
-        .where(FlashcardModel.fsrs_stability < _GAP_STABILITY_THRESHOLD)
-        .where(FlashcardModel.reps > _GAP_MIN_REPS)
+    # (a) Count all due flashcards (no document filter). Inline because
+    # this is a single-purpose count -- no shared shape with /due-count.
+    due_stmt = select(func.count()).select_from(FlashcardModel).where(
+        FlashcardModel.due_date <= now
     )
-    weak_result = await session.execute(weak_stmt)
-    weak_cards = list(weak_result.scalars().all())
+    due_count = (await session.execute(due_stmt)).scalar_one()
 
+    # (b) Gap area titles across all documents (max 2 distinct non-null headings)
+    weak_cards = list(await repo.list_weak_flashcards())
     gap_area_titles: list[str] = []
     if weak_cards:
-        chunk_ids = [c.chunk_id for c in weak_cards]
-        chunk_stmt = (
-            select(ChunkModel, SectionModel.heading)
-            .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
-            .where(ChunkModel.id.in_(chunk_ids))
+        chunk_to_section = await repo.chunk_section_headings(
+            [c.chunk_id for c in weak_cards if c.chunk_id]
         )
-        chunk_rows = await session.execute(chunk_stmt)
         seen: set[str] = set()
-        for _chunk, heading in chunk_rows:
+        for heading in chunk_to_section.values():
             if heading and heading not in seen and len(gap_area_titles) < 2:
                 seen.add(heading)
                 gap_area_titles.append(heading)
 
-    # (c) Fetch recently accessed complete documents
+    # (c) Fetch recently accessed complete documents. Inline -- this select
+    # shape isn't reused; no value in a repo method for one caller.
     docs_stmt = (
         select(DocumentModel)
         .where(DocumentModel.stage == "complete")
@@ -748,31 +423,15 @@ async def get_session_plan(
 @router.get("/gaps/{document_id}", response_model=list[GapResult])
 async def get_gaps(
     document_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> list[GapResult]:
     """Return sections with weak (seen but fragile) flashcards, ordered by avg stability."""
-    weak_stmt = (
-        select(FlashcardModel)
-        .where(FlashcardModel.document_id == document_id)
-        .where(FlashcardModel.fsrs_stability < _GAP_STABILITY_THRESHOLD)
-        .where(FlashcardModel.reps > _GAP_MIN_REPS)
-    )
-    weak_result = await session.execute(weak_stmt)
-    weak_cards = list(weak_result.scalars().all())
-
+    weak_cards = list(await repo.list_weak_flashcards(document_id=document_id))
     if not weak_cards:
         return []
-
-    chunk_ids = [c.chunk_id for c in weak_cards]
-    chunk_stmt = (
-        select(ChunkModel, SectionModel.heading)
-        .outerjoin(SectionModel, ChunkModel.section_id == SectionModel.id)
-        .where(ChunkModel.id.in_(chunk_ids))
+    chunk_to_section = await repo.chunk_section_headings(
+        [c.chunk_id for c in weak_cards if c.chunk_id]
     )
-    chunk_rows = await session.execute(chunk_stmt)
-
-    chunk_to_section: dict[str, str | None] = {chunk.id: heading for chunk, heading in chunk_rows}
-
     return _compute_gaps(weak_cards, chunk_to_section)
 
 
@@ -781,7 +440,7 @@ async def get_open_session(
     mode: str,
     document_id: str | None = None,
     collection_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionResponse:
     """Return the most recent still-open session matching this scope.
 
@@ -789,21 +448,11 @@ async def get_open_session(
     a duplicate when the user clicks Start. Scope match is exact: a null
     document_id only matches sessions with null document_id.
     """
-    stmt = select(StudySessionModel).where(
-        StudySessionModel.ended_at.is_(None),
-        StudySessionModel.mode == mode,
+    sess = await repo.find_open_session(
+        mode=mode,
+        document_id=document_id,
+        collection_id=collection_id,
     )
-    if document_id is not None:
-        stmt = stmt.where(StudySessionModel.document_id == document_id)
-    else:
-        stmt = stmt.where(StudySessionModel.document_id.is_(None))
-    if collection_id is not None:
-        stmt = stmt.where(StudySessionModel.collection_id == collection_id)
-    else:
-        stmt = stmt.where(StudySessionModel.collection_id.is_(None))
-    stmt = stmt.order_by(StudySessionModel.started_at.desc()).limit(1)
-    result = await db.execute(stmt)
-    sess = result.scalar_one_or_none()
     if sess is None:
         raise HTTPException(status_code=404, detail="No open session")
     return SessionResponse.model_validate(sess)
@@ -812,22 +461,15 @@ async def get_open_session(
 @router.post("/sessions/start", response_model=SessionResponse, status_code=201)
 async def start_session(
     req: StartSessionRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionResponse:
     """Create a new study session row and return its ID."""
-    sess = StudySessionModel(
-        id=str(uuid.uuid4()),
+    sess = await repo.create_session(
         document_id=req.document_id,
         collection_id=req.collection_id,
-        started_at=datetime.now(UTC),
-        cards_reviewed=0,
-        cards_correct=0,
         mode=req.mode,
-        planned_card_ids=req.planned_card_ids or None,
+        planned_card_ids=req.planned_card_ids,
     )
-    session.add(sess)
-    await session.commit()
-    await session.refresh(sess)
     logger.info(
         "Study session started",
         extra={
@@ -843,30 +485,18 @@ async def start_session(
 @router.post("/sessions/{session_id}/end", response_model=SessionSummary)
 async def end_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> SessionSummary:
     """Close a study session, tally review events, and return the summary."""
-    result = await db.execute(select(StudySessionModel).where(StudySessionModel.id == session_id))
-    sess = result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    events_result = await db.execute(
-        select(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
-    )
-    events = events_result.scalars().all()
+    sess = await repo.get_session_or_404(session_id)
+    events = await repo.list_review_events(session_id)
 
     # Pull all teach-back rows (pending + complete). Pending rows mean the
     # background evaluator has not yet scored the answer -- we still count them
     # toward cards_reviewed (the user did answer) but leave accuracy provisional
     # until the last evaluation lands. _evaluate_teachback_bg finalizes the
     # tally when the last pending row flips to "complete".
-    tb_all_result = await db.execute(
-        select(TeachbackResultModel).where(
-            TeachbackResultModel.session_id == session_id,
-        )
-    )
-    tb_rows = tb_all_result.scalars().all()
+    tb_rows = await repo.list_teachback_results(session_id)
     tb_complete = [tb for tb in tb_rows if tb.status == "complete"]
     tb_pending_count = sum(1 for tb in tb_rows if tb.status == "pending")
 
@@ -889,8 +519,7 @@ async def end_session(
     sess.cards_reviewed = cards_reviewed
     sess.cards_correct = cards_correct
     sess.accuracy_pct = accuracy_pct
-    await db.commit()
-    await db.refresh(sess)
+    await repo.commit_session(sess)
 
     logger.info(
         "Study session ended",
@@ -914,49 +543,28 @@ async def end_session(
 @router.post("/sessions/{session_id}/reopen", status_code=204)
 async def reopen_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> None:
     """Clear ended_at on a session so the user can Continue adding answers.
 
     Tallies are reset; _finalize_session_tally_if_ready recomputes them the
     next time the session is ended and all evaluations are complete.
     """
-    result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.id == session_id)
-    )
-    sess = result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    sess = await repo.get_session_or_404(session_id)
     sess.ended_at = None
     sess.cards_correct = 0
     sess.accuracy_pct = None
-    await db.commit()
+    await repo.commit_session(sess)
     logger.info("Study session reopened", extra={"session_id": session_id})
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    repo: StudyRepo = Depends(get_study_repo),
 ) -> None:
     """Delete a study session and all associated review events and teachback results."""
-    result = await db.execute(
-        select(StudySessionModel).where(StudySessionModel.id == session_id)
-    )
-    sess = result.scalar_one_or_none()
-    if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    await db.execute(
-        sa_delete(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
-    )
-    await db.execute(
-        sa_delete(TeachbackResultModel).where(
-            TeachbackResultModel.session_id == session_id
-        )
-    )
-    await db.delete(sess)
-    await db.commit()
+    await repo.delete_session_cascade(session_id)
     logger.info("Study session deleted", extra={"session_id": session_id})
 
 
@@ -997,7 +605,7 @@ async def get_collection_study_dashboard(
     collection_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> StudyCollectionDashboardResponse:
-    """Return a summary of study status for all material in a collection (S192).
+    """Return a summary of study status for all material in a collection
 
     Rewritten to use SQL aggregates and a small fixed number of queries regardless
     of tag count, sub-enclave count, or tree depth. Previously this endpoint could
@@ -1007,7 +615,8 @@ async def get_collection_study_dashboard(
 
     from app.routers.documents import _safe_tags
 
-    # 1. Fetch collection name
+    # All queries in this endpoint share a session; the comment above the function
+    # explains why the selects are inline (bespoke aggregation, flat query count).
     coll_result = await session.execute(
         select(CollectionModel.name).where(CollectionModel.id == collection_id)
     )
@@ -1435,10 +1044,6 @@ async def get_session_cards(
     ]
 
 
-class SessionRemainingResponse(BaseModel):
-    answered_count: int
-    planned_count: int
-    cards: list[FlashcardResponse]
 
 
 @router.get(
@@ -1464,6 +1069,10 @@ async def get_session_remaining_cards(
 
     planned_ids: list[str] = list(sess.planned_card_ids or [])
     if not planned_ids:
+        logger.warning(
+            "remaining-cards: session has empty planned_card_ids",
+            extra={"session_id": session_id, "ended_at": str(sess.ended_at)},
+        )
         return SessionRemainingResponse(
             answered_count=0, planned_count=0, cards=[]
         )
@@ -1512,7 +1121,8 @@ async def teachback(
     session: AsyncSession = Depends(get_db),
 ) -> TeachbackResponse:
     """Evaluate a student's teach-back explanation with LLM. Tracks misconceptions."""
-    # Load flashcard
+    # Flashcard lookup; shares session with the persist writes below so all
+    # teachback artifacts (result row, misconceptions, correction card) commit together.
     card_result = await session.execute(
         select(FlashcardModel).where(FlashcardModel.id == req.flashcard_id)
     )
@@ -1535,7 +1145,7 @@ async def teachback(
     missing_points: list[str] = parsed.get("missing_points", [])
     misconceptions: list[str] = parsed.get("misconceptions", [])
 
-    # S156: rubric evaluation (second LLM call; graceful fallback on failure)
+    # rubric evaluation (second LLM call; graceful fallback on failure)
     rubric_dict: dict | None = None
     try:
         rubric_prompt = _RUBRIC_USER_TMPL.format(
@@ -1548,7 +1158,8 @@ async def teachback(
         logger.warning("Rubric LLM call failed for flashcard=%s; null rubric", card.id)
         rubric_dict = None
 
-    # Persist teachback result
+    # Persist all teachback artifacts (result + optional misconceptions) atomically;
+    # the correction card is generated mid-session so it must land in the same tx.
     tb_result = TeachbackResultModel(
         id=str(uuid.uuid4()),
         flashcard_id=card.id,
@@ -1615,9 +1226,7 @@ async def teachback(
     )
 
 
-# ---------------------------------------------------------------------------
 # Async teach-back: submit + background evaluate + batch poll
-# ---------------------------------------------------------------------------
 
 
 def _score_to_rating(score: int) -> str:
@@ -1728,6 +1337,8 @@ async def _evaluate_teachback_bg(
     correction_card: FlashcardModel | None = None
     if score < 60 and misconceptions:
         session_factory = get_session_factory()
+        # Separate read session so the card fetch does not hold a write lock
+        # during the LLM correction card generation that follows.
         async with session_factory() as read_session:
             card_result = await read_session.execute(
                 select(FlashcardModel).where(FlashcardModel.id == card_id)
@@ -1842,7 +1453,8 @@ async def teachback_async(
     session: AsyncSession = Depends(get_db),
 ) -> TeachbackSubmitResponse:
     """Submit teach-back for background evaluation. Returns immediately."""
-    # Validate flashcard
+    # Existence check + pending row persist share one session; the bg evaluator
+    # opens its own session (invariant I-1).
     card_result = await session.execute(
         select(FlashcardModel).where(FlashcardModel.id == req.flashcard_id)
     )
@@ -1904,7 +1516,8 @@ async def get_teachback_results(
     if not id_list:
         return TeachbackResultsBatchResponse(results=[])
 
-    # Fetch results joined with flashcard for question + expected answer text
+    # Cross-table join (TeachbackResultModel + FlashcardModel) for question/answer text;
+    # no repo owns both tables, so the join lives in the router.
     stmt = (
         select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
         .join(
@@ -1959,6 +1572,7 @@ async def get_session_teachback_results(
     session: AsyncSession = Depends(get_db),
 ) -> TeachbackResultsBatchResponse:
     """Get all teach-back results for a study session."""
+    # Cross-table join for question/answer text; same pattern as get_teachback_results.
     stmt = (
         select(TeachbackResultModel, FlashcardModel.question, FlashcardModel.answer)
         .join(
@@ -2124,9 +1738,18 @@ async def get_study_stats(
 async def get_study_history(
     document_id: str | None = None,
     days: int = 90,
+    tz_offset_minutes: int = Query(
+        default=0,
+        description=(
+            "Client's timezone offset from UTC in minutes, matching JS "
+            "`Date.getTimezoneOffset()` (positive west of UTC; PDT=420). "
+            "Sessions are bucketed by the user's local date so a study "
+            "session at 11pm local doesn't appear on the next day."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[DailyHistoryItem]:
-    """Return daily study activity for the last N days."""
+    """Return daily study activity for the last N days, bucketed in local time."""
     cutoff = datetime.now(UTC) - timedelta(days=days)
     stmt = select(StudySessionModel).where(
         StudySessionModel.started_at >= cutoff,
@@ -2137,12 +1760,13 @@ async def get_study_history(
     result = await db.execute(stmt)
     sessions = result.scalars().all()
 
-    # Group by date
+    # Group by local date: shift UTC -> client-local before taking .date()
+    local_shift = timedelta(minutes=-tz_offset_minutes)
     daily: dict[date, dict] = {}
     for s in sessions:
         if not s.ended_at:
             continue
-        d = s.started_at.date()
+        d = (s.started_at + local_shift).date()
         if d not in daily:
             daily[d] = {"cards_reviewed": 0, "study_time_minutes": 0.0}
         daily[d]["cards_reviewed"] += s.cards_reviewed
@@ -2186,6 +1810,8 @@ async def get_section_heatmap(
     fragility_score ranges from 0.0 (well-retained) to 1.0 (completely forgotten).
     Sections with no flashcards are absent from the heatmap dict.
     """
+    # Two sequential reads: cards first (to get chunk_ids), then chunk→section mapping.
+    # The chunk_ids set is only known after the card query, so the second read follows here.
     cards_result = await session.execute(
         select(FlashcardModel).where(FlashcardModel.document_id == document_id)
     )
@@ -2213,35 +1839,9 @@ async def get_section_heatmap(
     return SectionHeatmapResponse(heatmap=heatmap)
 
 
-# ---------------------------------------------------------------------------
-# Study path endpoints (S139)
-# ---------------------------------------------------------------------------
+# Study path endpoints
 
 
-class StudyPathItemResponse(BaseModel):
-    concept: str
-    mastery: float
-    skip: bool
-    reason: str
-    avg_stability_days: float
-
-
-class StudyPathAPIResponse(BaseModel):
-    concept: str
-    document_id: str
-    path: list[StudyPathItemResponse]
-
-
-class StartConceptItemResponse(BaseModel):
-    concept: str
-    prereq_chain_length: int
-    flashcard_count: int
-    rationale: str
-
-
-class StartConceptsAPIResponse(BaseModel):
-    document_id: str
-    concepts: list[StartConceptItemResponse]
 
 
 @router.get("/path", response_model=StudyPathAPIResponse)
@@ -2283,11 +1883,6 @@ async def get_start_concepts(
         document_id=result["document_id"],
         concepts=[StartConceptItemResponse(**vars(item)) for item in result["concepts"]],
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _parse_rubric(raw: str) -> dict | None:
@@ -2377,6 +1972,7 @@ def _insert_correction_flashcard(
         reps=0,
         lapses=0,
     )
+    # correction card persisted in caller's session; commit is caller's responsibility
     session.add(correction)
     return new_id
 
@@ -2398,9 +1994,7 @@ async def _generate_correction_flashcard(
     return _insert_correction_flashcard(card, payload, session)
 
 
-# ---------------------------------------------------------------------------
 # Lightweight session API (stateless start + review)
-# ---------------------------------------------------------------------------
 
 
 async def _get_due_for_session(document_id: str, session: AsyncSession) -> list[FlashcardModel]:

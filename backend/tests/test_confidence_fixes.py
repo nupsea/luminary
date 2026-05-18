@@ -35,9 +35,7 @@ from app.services.context_packer import _cap_per_document
 from app.services.qa import _split_response
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Shared DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -94,9 +92,7 @@ def _make_scored_chunk(doc_id: str, text: str = "Some text content.", i: int = 0
     )
 
 
-# ---------------------------------------------------------------------------
 # (a) test_library_summary_missing_returns_medium
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -125,12 +121,12 @@ async def test_library_summary_missing_returns_medium(test_db):
 
     with (
         patch(
-            "app.runtime.chat_graph._fetch_library_executive_summary",
+            "app.runtime.chat_nodes.summary._fetch_library_executive_summary",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "app.runtime.chat_graph.asyncio.create_task",
+            "app.runtime.chat_nodes.summary.asyncio.create_task",
             side_effect=_fake_create_task,
         ) as mock_create_task,
     ):
@@ -181,9 +177,7 @@ async def test_library_summary_present_returns_high(test_db):
     )
 
 
-# ---------------------------------------------------------------------------
 # (b) test_split_response_defaults_medium_for_long_answer
-# ---------------------------------------------------------------------------
 
 
 def test_split_response_defaults_medium_for_long_answer():
@@ -201,9 +195,7 @@ def test_split_response_defaults_medium_for_long_answer():
     assert answer == long_answer
 
 
-# ---------------------------------------------------------------------------
 # (c) test_split_response_defaults_low_for_short_answer
-# ---------------------------------------------------------------------------
 
 
 def test_split_response_defaults_low_for_short_answer():
@@ -222,9 +214,7 @@ def test_split_response_empty_answer_is_low():
     assert confidence == "low"
 
 
-# ---------------------------------------------------------------------------
 # (d) test_cap_per_document_limits_chunks
-# ---------------------------------------------------------------------------
 
 
 def test_cap_per_document_limits_chunks():
@@ -261,9 +251,7 @@ def test_cap_per_document_preserves_order():
     assert result[1]["text"] == "chunk 1"
 
 
-# ---------------------------------------------------------------------------
 # (e) test_search_node_caps_multi_doc_chunks
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -285,9 +273,9 @@ async def test_search_node_caps_multi_doc_chunks(test_db):
     }
 
     with (
-        patch("app.runtime.chat_graph.get_retriever", return_value=mock_retriever),
+        patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever),
         patch(
-            "app.runtime.chat_graph._fetch_section_summaries",
+            "app.runtime.chat_nodes.search._fetch_section_summaries",
             new_callable=AsyncMock,
             return_value={},
         ),

@@ -17,9 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, DocumentModel, ImageModel
 from app.services.image_enricher import ImageEnricherService, _is_decorative
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_rgb_png(path: Path, width: int, height: int, color: tuple) -> None:
@@ -39,9 +37,7 @@ def _make_varied_png(path: Path, width: int = 200, height: int = 200) -> None:
     img.save(str(path), format="PNG")
 
 
-# ---------------------------------------------------------------------------
 # Pre-filter tests (pure function — no DB, no LLM)
-# ---------------------------------------------------------------------------
 
 
 def test_prefilter_solid_color_sets_decorative(tmp_path: Path) -> None:
@@ -76,9 +72,7 @@ def test_prefilter_varied_image_not_decorative(tmp_path: Path) -> None:
     assert _is_decorative(pil_img) is False
 
 
-# ---------------------------------------------------------------------------
 # Async fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -152,9 +146,7 @@ async def doc_and_image(session_factory, tmp_path: Path):
     return doc_id, image_id, full_img_path, tmp_path
 
 
-# ---------------------------------------------------------------------------
 # Unit tests with mocked LiteLLM
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -177,7 +169,7 @@ async def test_enrich_sets_description_and_image_type(
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion", new_callable=AsyncMock
+            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
@@ -265,7 +257,7 @@ async def test_decorative_image_skips_llm(session_factory, tmp_path: Path) -> No
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion", new_callable=AsyncMock
+            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
@@ -308,7 +300,7 @@ async def test_offline_503_propagates(doc_and_image, session_factory, tmp_path: 
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion",
+            "app.services.llm.litellm.acompletion",
             new_callable=AsyncMock,
             side_effect=_litellm.ServiceUnavailableError(
                 message="Ollama unreachable", llm_provider="ollama", model="llava"
@@ -357,7 +349,7 @@ async def test_images_fts_keyword_search(doc_and_image, session_factory, tmp_pat
 
     with (
         patch(
-            "app.services.image_enricher.litellm.acompletion", new_callable=AsyncMock
+            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
@@ -385,9 +377,7 @@ async def test_images_fts_keyword_search(doc_and_image, session_factory, tmp_pat
         assert image_id in found
 
 
-# ---------------------------------------------------------------------------
 # image_analyze_handler enqueue tail tests (S136)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -604,9 +594,7 @@ async def test_image_analyze_handler_no_qualifying_images_skips_enqueue(
     assert len(jobs) == 0
 
 
-# ---------------------------------------------------------------------------
 # Integration test — requires ollama with llava model
-# ---------------------------------------------------------------------------
 
 
 def _ollama_has_llava() -> bool:

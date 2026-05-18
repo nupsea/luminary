@@ -12,24 +12,28 @@ Routes:
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import get_db, get_session_factory
-from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel, TagAliasModel
+from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel
+from app.repos.tag_repo import TagRepo, get_tag_repo
+from app.routers.notes import _sync_tag_index
+from app.services.naming import normalize_tag_slug
+from app.services.repo_helpers import get_or_404
+from app.services.tag_graph import build_tag_graph, invalidate_tag_graph_cache
+from app.services.tag_merge_service import get_tag_merge_service
+from app.services.tag_normalizer import get_tag_normalizer_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tags", tags=["tags"])
-
-
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
 
 
 class TagResponse(BaseModel):
@@ -107,11 +111,6 @@ class TagGraphResponse(BaseModel):
     generated_at: float
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _to_response(tag: CanonicalTagModel) -> TagResponse:
     return TagResponse(
         id=tag.id,
@@ -136,11 +135,6 @@ def _compute_inclusive_count(
     return direct + child_sum
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.get("/graph", response_model=TagGraphResponse)
 async def get_tag_graph_endpoint(
     session: AsyncSession = Depends(get_db),
@@ -152,7 +146,6 @@ async def get_tag_graph_endpoint(
 
     Static path (/graph) registered before /{tag_id} to avoid route shadowing.
     """
-    from app.services.tag_graph import build_tag_graph  # noqa: PLC0415
 
     graph = await build_tag_graph(session)
     return TagGraphResponse(
@@ -173,19 +166,12 @@ async def get_tag_graph_endpoint(
 @router.get("/autocomplete", response_model=list[TagAutocompleteResult])
 async def autocomplete_tags(
     q: str = Query(default=""),
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagAutocompleteResult]:
     """Return up to 10 canonical tags matching the prefix q, sorted by note_count DESC."""
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     normalized_q = normalize_tag_slug(q) if q else ""
-    result = await session.execute(
-        select(CanonicalTagModel)
-        .where(CanonicalTagModel.id.like(f"{normalized_q}%"))
-        .order_by(CanonicalTagModel.note_count.desc())
-        .limit(10)
-    )
-    tags = result.scalars().all()
+    tags = await repo.autocomplete(normalized_q)
     return [
         TagAutocompleteResult(
             id=t.id,
@@ -199,16 +185,13 @@ async def autocomplete_tags(
 
 @router.get("/tree", response_model=list[TagTreeItem])
 async def get_tag_tree(
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagTreeItem]:
     """Return all canonical tags as a hierarchical tree.
 
     node.note_count is the inclusive count (direct notes + all descendants).
     """
-    all_tags_result = await session.execute(
-        select(CanonicalTagModel).order_by(CanonicalTagModel.id)
-    )
-    all_tags = list(all_tags_result.scalars().all())
+    all_tags = list(await repo.list_by_id())
 
     count_by_id: dict[str, int] = {t.id: t.note_count for t in all_tags}
     children_by_parent: dict[str, list[str]] = {}
@@ -250,43 +233,29 @@ async def get_tag_tree(
 
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagResponse]:
     """Return all canonical tags sorted by note_count DESC."""
-    result = await session.execute(
-        select(CanonicalTagModel).order_by(CanonicalTagModel.note_count.desc())
-    )
-    tags = result.scalars().all()
+    tags = await repo.list_by_count()
     return [_to_response(t) for t in tags]
 
 
 @router.post("", response_model=TagResponse, status_code=201)
 async def create_tag(
     req: TagCreateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> TagResponse:
     """Create a canonical tag. Returns 409 if the slug already exists."""
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     normalized_id = normalize_tag_slug(req.id)
-    existing = (
-        await session.execute(
-            select(CanonicalTagModel).where(CanonicalTagModel.id == normalized_id)
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    if await repo.find_by_id(normalized_id) is not None:
         raise HTTPException(status_code=409, detail="Tag already exists")
 
-    tag = CanonicalTagModel(
+    tag = await repo.create(
         id=normalized_id,
         display_name=req.display_name,
         parent_tag=req.parent_tag,
-        note_count=0,
-        created_at=datetime.now(UTC),
     )
-    session.add(tag)
-    await session.commit()
-    await session.refresh(tag)
     logger.info("Created canonical tag id=%r", tag.id)
     return _to_response(tag)
 
@@ -305,8 +274,6 @@ async def merge_tags(
     Then creates a TagAliasModel (source -> target) and deletes the source
     CanonicalTagModel. All changes roll back if any step fails.
     """
-    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
 
     source_id = normalize_tag_slug(req.source_tag_id)
     target_id = normalize_tag_slug(req.target_tag_id)
@@ -315,81 +282,28 @@ async def merge_tags(
         raise HTTPException(status_code=422, detail="Source and target tags must differ")
 
     # Validate both tags exist
-    source_tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
-    ).scalar_one_or_none()
-    if source_tag is None:
-        raise HTTPException(status_code=404, detail=f"Source tag '{source_id}' not found")
-
-    target_tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == target_id))
-    ).scalar_one_or_none()
-    if target_tag is None:
-        raise HTTPException(status_code=404, detail=f"Target tag '{target_id}' not found")
-
-    # Find all notes with the source tag via NoteTagIndexModel
-    note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.tag_full == source_id).distinct()
-    )
-    note_ids = [row[0] for row in note_ids_result.all()]
+    await get_or_404(session, CanonicalTagModel, source_id, name=f"Source tag '{source_id}'")
+    await get_or_404(session, CanonicalTagModel, target_id, name=f"Target tag '{target_id}'")
 
     try:
-        if note_ids:
-            # Ensure we are not using stale objects
-            session.expire_all()
-            # Load notes
-            notes_result = await session.execute(
-                select(NoteModel).where(NoteModel.id.in_(note_ids))
-            )
-            notes = list(notes_result.scalars().all())
-            logger.info(
-                "Merging tag %r -> %r in %d notes: %r", source_id, target_id, len(notes), note_ids
-            )
-
-            for note in notes:
-                current_tags: list[str] = note.tags or []
-                # Replace source with target, deduplicate, preserve order
-                new_tags: list[str] = []
-                seen: set[str] = set()
-                for tag in current_tags:
-                    replacement = target_id if tag == source_id else tag
-                    if replacement not in seen:
-                        seen.add(replacement)
-                        new_tags.append(replacement)
-
-                if new_tags != current_tags:
-                    logger.debug("Updating note %s tags: %r -> %r", note.id, current_tags, new_tags)
-                    note.tags = list(new_tags)
-                    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
-
-                    flag_modified(note, "tags")
-                    session.add(note)
-                    await session.flush()
-
-                # Always sync index even if tags didn't change (idempotent)
-                await _sync_tag_index(note.id, new_tags, session)
-
-        # Create alias: source -> target
-        alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
-        session.add(alias)
-
-        # Delete source canonical tag
-        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
-
-        await session.commit()
-        session.expire_all()
-        logger.info("Successfully merged tag %r -> %r", source_id, target_id)
+        result = await get_tag_merge_service().merge_tag(
+            session, source_id=source_id, target_id=target_id
+        )
+        logger.info(
+            "Successfully merged tag %r -> %r (affected_notes=%d)",
+            source_id,
+            target_id,
+            result.affected_notes,
+        )
     except Exception as exc:
         logger.exception("Merge failed for tag %r -> %r", source_id, target_id)
         await session.rollback()
-        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
 
-    return TagMergeResponse(affected_notes=len(note_ids))
+    return TagMergeResponse(affected_notes=result.affected_notes)
 
 
-# ---------------------------------------------------------------------------
 # Normalization schemas
-# ---------------------------------------------------------------------------
 
 
 class TagInfo(BaseModel):
@@ -416,9 +330,7 @@ class NormalizationAcceptResponse(BaseModel):
     affected_notes: int
 
 
-# ---------------------------------------------------------------------------
-# Normalization endpoints (static paths -- must come before /{tag_id})
-# ---------------------------------------------------------------------------
+# Normalization endpoints — static paths must come before /{tag_id}
 
 
 @router.post("/normalization/scan", response_model=NormalizationScanResponse)
@@ -431,7 +343,6 @@ async def scan_for_normalization(
     session closes after the response returns). Returns immediately with
     {queued: true}.
     """
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
 
@@ -452,7 +363,6 @@ async def get_normalization_suggestions(
     session: AsyncSession = Depends(get_db),
 ) -> list[TagMergeSuggestionResponse]:
     """Return pending tag merge suggestions with expanded tag info."""
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
     details = await service.get_pending_suggestions(session)
@@ -488,13 +398,11 @@ async def accept_normalization_suggestion(
 ) -> NormalizationAcceptResponse:
     """Accept a merge suggestion: merge source tag into the suggested canonical.
 
-    Merge logic lives here (not in the service layer) because _sync_tag_index is
-    a router-layer helper and Services must not import from the API/Router layer
-    (six-layer invariant).
+    Wraps TagMergeService.merge_tag() so the same cascade also runs
+    behind `POST /tags/merge`. The endpoint additionally flips the
+    suggestion's status (accepted vs rejected if a tag was deleted in
+    the meantime) inside the same transaction.
     """
-    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-    from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
     try:
@@ -504,7 +412,8 @@ async def accept_normalization_suggestion(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Validate both tags still exist
+    # Validate both tags still exist; these two checks share the session with the
+    # suggestion status update below so all three land in one transaction.
     source_tag = (
         await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
     ).scalar_one_or_none()
@@ -518,52 +427,20 @@ async def accept_normalization_suggestion(
         await session.commit()
         return NormalizationAcceptResponse(affected_notes=0)
 
-    # Find and update notes with the source tag (same logic as POST /tags/merge)
-    note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id).where(NoteTagIndexModel.tag_full == source_id).distinct()
-    )
-    note_ids = [row[0] for row in note_ids_result.all()]
-
-    affected_notes = 0
-    if note_ids:
-        notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-        notes = list(notes_result.scalars().all())
-        try:
-            for note in notes:
-                current_tags: list[str] = note.tags or []
-                new_tags: list[str] = []
-                seen: set[str] = set()
-                for tag in current_tags:
-                    replacement = target_id if tag == source_id else tag
-                    if replacement not in seen:
-                        seen.add(replacement)
-                        new_tags.append(replacement)
-                note.tags = list(new_tags)
-                from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
-
-                flag_modified(note, "tags")
-                session.add(note)
-                await _sync_tag_index(note.id, new_tags, session)
-            affected_notes = len(notes)
-        except Exception:
-            await session.rollback()
-            raise HTTPException(
-                status_code=500, detail="Merge failed during note updates -- rolled back"
-            )
-
     try:
-        alias = TagAliasModel(alias=source_id, canonical_tag_id=target_id)
-        session.add(alias)
-        await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == source_id))
+        # commit=False so the suggestion.status update lands in the same tx.
+        result = await get_tag_merge_service().merge_tag(
+            session, source_id=source_id, target_id=target_id, commit=False
+        )
         suggestion.status = "accepted"
         session.add(suggestion)
         await session.commit()
         session.expire_all()
-    except Exception:
+    except Exception as exc:
         await session.rollback()
         raise HTTPException(
-            status_code=500, detail="Merge failed during alias/cleanup -- rolled back"
-        )
+            status_code=500, detail="Merge failed -- rolled back"
+        ) from exc
 
     invalidate_tag_graph_cache()
     logger.info(
@@ -571,9 +448,9 @@ async def accept_normalization_suggestion(
         suggestion_id,
         source_id,
         target_id,
-        affected_notes,
+        result.affected_notes,
     )
-    return NormalizationAcceptResponse(affected_notes=affected_notes)
+    return NormalizationAcceptResponse(affected_notes=result.affected_notes)
 
 
 @router.post("/normalization/suggestions/{suggestion_id}/reject", status_code=204)
@@ -582,7 +459,6 @@ async def reject_normalization_suggestion(
     session: AsyncSession = Depends(get_db),
 ) -> None:
     """Reject a merge suggestion."""
-    from app.services.tag_normalizer import get_tag_normalizer_service  # noqa: PLC0415
 
     service = get_tag_normalizer_service()
     try:
@@ -602,11 +478,11 @@ async def migrate_tag_naming(
     For NoteModel.tags: normalizes the JSON tags array on each note.
     Merges duplicates that collapse to the same normalized form (keeps higher note_count).
     """
-    from app.routers.notes import _sync_tag_index  # noqa: PLC0415
-    from app.services.naming import normalize_tag_slug  # noqa: PLC0415
-    from app.services.tag_graph import invalidate_tag_graph_cache  # noqa: PLC0415
 
-    # Step 1: Load all canonical tags
+    # Bespoke multi-table normalization migration: rename/merge canonical_tags,
+    # note_tag_index, and NoteModel.tags atomically. Too many conditional writes
+    # (INSERT OR IGNORE, cascading deletes, JSON tag array updates) to express
+    # via existing repo methods.
     all_tags_result = await session.execute(select(CanonicalTagModel))
     all_tags = list(all_tags_result.scalars().all())
 
@@ -647,7 +523,6 @@ async def migrate_tag_naming(
                 segments = normalized_id.split("/")
                 new_display = segments[-1]
                 new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
-                from sqlalchemy import text as sa_text  # noqa: PLC0415
 
                 await session.execute(
                     sa_text(
@@ -679,7 +554,6 @@ async def migrate_tag_naming(
                                 seen.add(t)
                                 deduped.append(t)
                         note.tags = deduped
-                        from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
 
                         flag_modified(note, "tags")
                         session.add(note)
@@ -715,7 +589,6 @@ async def migrate_tag_naming(
             segments = normalized_id.split("/")
             new_display = segments[-1]
             new_parent = "/".join(segments[:-1]) if len(segments) > 1 else None
-            from sqlalchemy import text as sa_text  # noqa: PLC0415
 
             await session.execute(
                 sa_text(
@@ -746,7 +619,6 @@ async def migrate_tag_naming(
                             seen_tags.add(nt)
                             new_tags_list.append(nt)
                     note.tags = new_tags_list
-                    from sqlalchemy.orm.attributes import flag_modified  # noqa: PLC0415
 
                     flag_modified(note, "tags")
                     session.add(note)
@@ -767,21 +639,13 @@ async def migrate_tag_naming(
 @router.get("/{tag_id}/notes", response_model=list[NoteItem])
 async def get_notes_for_tag(
     tag_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> list[NoteItem]:
     """Return notes tagged with tag_id or any child tag (prefix match)."""
-    note_ids_result = await session.execute(
-        select(NoteTagIndexModel.note_id)
-        .where(
-            (NoteTagIndexModel.tag_full == tag_id) | NoteTagIndexModel.tag_full.like(f"{tag_id}/%")
-        )
-        .distinct()
-    )
-    note_ids = [row[0] for row in note_ids_result.all()]
+    note_ids = await repo.note_ids_with_tag(tag_id, include_descendants=True)
     if not note_ids:
         return []
-    notes_result = await session.execute(select(NoteModel).where(NoteModel.id.in_(note_ids)))
-    notes = notes_result.scalars().all()
+    notes = await repo.load_notes(note_ids)
     return [NoteItem(id=n.id, content=n.content, tags=n.tags or []) for n in notes]
 
 
@@ -789,24 +653,18 @@ async def get_notes_for_tag(
 async def update_tag(
     tag_id: str,
     req: TagUpdateRequest,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> TagResponse:
     """Rename a tag's display_name or re-parent it."""
-    tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
-    ).scalar_one_or_none()
-    if tag is None:
-        raise HTTPException(status_code=404, detail="Tag not found")
-
-    if req.display_name is not None:
-        tag.display_name = req.display_name
+    tag = await repo.get_or_404(tag_id)
     # Use model_fields_set to distinguish "not supplied" from "explicitly null".
     # Setting parent_tag=null in the request clears the tag to top-level.
-    if "parent_tag" in req.model_fields_set:
-        tag.parent_tag = req.parent_tag
-
-    await session.commit()
-    await session.refresh(tag)
+    tag = await repo.update_fields(
+        tag,
+        display_name=req.display_name,
+        parent_tag=req.parent_tag,
+        parent_tag_set="parent_tag" in req.model_fields_set,
+    )
     logger.info("Updated canonical tag id=%r", tag_id)
     return _to_response(tag)
 
@@ -814,14 +672,10 @@ async def update_tag(
 @router.delete("/{tag_id}", status_code=204)
 async def delete_tag(
     tag_id: str,
-    session: AsyncSession = Depends(get_db),
+    repo: TagRepo = Depends(get_tag_repo),
 ) -> None:
     """Delete a canonical tag. Returns 409 if the tag has notes (note_count > 0)."""
-    tag = (
-        await session.execute(select(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
-    ).scalar_one_or_none()
-    if tag is None:
-        raise HTTPException(status_code=404, detail="Tag not found")
+    tag = await repo.get_or_404(tag_id)
     if tag.note_count > 0:
         raise HTTPException(
             status_code=409,
@@ -830,9 +684,5 @@ async def delete_tag(
                 " Remove notes from this tag before deleting."
             ),
         )
-
-    # Remove any aliases pointing to this tag
-    await session.execute(delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id))
-    await session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
-    await session.commit()
+    await repo.delete_with_aliases(tag_id)
     logger.info("Deleted canonical tag id=%r", tag_id)

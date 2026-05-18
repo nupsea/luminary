@@ -13,9 +13,7 @@ from app.db_init import create_all_tables
 from app.models import CanonicalTagModel, CollectionModel, NoteTagIndexModel
 from app.services.clustering_service import ClusteringService
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -42,9 +40,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # AC12: detect_naming_violations returns suggestions for violating tag + collection
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -94,9 +90,7 @@ async def test_detect_naming_violations_tag_and_collection(test_db):
     assert coll_v["action"] == "rename"
 
 
-# ---------------------------------------------------------------------------
 # AC3: Duplicate tags that normalize to the same slug detected for merge
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -136,9 +130,7 @@ async def test_detect_naming_violations_duplicate_tags_merge(test_db):
         assert mv["suggested_name"] == "machine-learning"
 
 
-# ---------------------------------------------------------------------------
 # AC13: normalize-apply renames a tag and updates NoteTagIndexModel rows
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -218,9 +210,7 @@ async def test_apply_naming_fixes_renames_tag_and_index(test_db):
         assert alias_row[0] == "machine-learning"
 
 
-# ---------------------------------------------------------------------------
 # AC5: normalize-apply renames collection
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -267,9 +257,7 @@ async def test_apply_naming_fixes_renames_collection(test_db):
         assert row[0] == "MY-COOL-NOTES"
 
 
-# ---------------------------------------------------------------------------
 # Startup migration: tags normalized on create_all_tables
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -331,9 +319,7 @@ async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Already-normalized tags should be skipped (idempotent)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -30,9 +30,7 @@ pytest_plugins = ["tests.conftest_books"]
 pytestmark = pytest.mark.slow
 
 
-# ---------------------------------------------------------------------------
 # Async helpers
-# ---------------------------------------------------------------------------
 
 
 async def _async_iter(items):
@@ -40,9 +38,7 @@ async def _async_iter(items):
         yield item
 
 
-# ---------------------------------------------------------------------------
 # TestTimeMachineEndToEnd
-# ---------------------------------------------------------------------------
 
 
 class TestTimeMachineEndToEnd:

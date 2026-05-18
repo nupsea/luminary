@@ -64,9 +64,7 @@ def test_entity_type_boundary():
     assert triples[1][1] == "PERSON"
 
 
-# ---------------------------------------------------------------------------
 # S135: _extract_version_qualifier tests
-# ---------------------------------------------------------------------------
 
 
 def test_version_qualifier_multi_component():

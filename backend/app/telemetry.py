@@ -156,9 +156,7 @@ def get_tracer() -> trace.Tracer:
     return trace.get_tracer("luminary")
 
 
-# ---------------------------------------------------------------------------
-# Span context managers — all use OpenInference semantic conventions
-# ---------------------------------------------------------------------------
+# Span context managers
 
 
 @contextmanager

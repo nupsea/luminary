@@ -61,16 +61,34 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument:
-        # Try BookParser first (legacy regex families for classic books)
-        result = _book_parser.parse(file_path, "pdf")
-        if result is not None:
-            return result
+        # Guard: fitz can hang (not raise) on garbage bytes; fail fast here.
+        with file_path.open("rb") as _f:
+            if not _f.read(5).startswith(b"%PDF-"):
+                raise ValueError(f"Not a valid PDF (missing %PDF- header): {file_path.name}")
+
+        # If the PDF ships with an embedded TOC, prefer the TOC path below:
+        # it reads page numbers directly from PyMuPDF's resolved bookmarks,
+        # which is more reliable than BookParser's substring-search heuristic
+        # (that fails on titles split across lines or rendered in different
+        # case than the heading string, e.g. "CHAPTER 4\nOptimizing..." vs
+        # "Chapter 4. Optimizing...", causing 1-page-off matches via running
+        # headers on the next page).
+        doc = fitz.open(str(file_path))
+        has_embedded_toc = len(doc.get_toc()) >= 3
+
+        if not has_embedded_toc:
+            # No usable TOC -- try BookParser (legacy regex families for
+            # classic books, e.g. Gutenberg)
+            doc.close()
+            result = _book_parser.parse(file_path, "pdf")
+            if result is not None:
+                return result
+            doc = fitz.open(str(file_path))
 
         # Skip UniversalParser for PDFs -- the font-size heuristic below
         # leverages actual font metrics from the PDF structure and produces
         # better section boundaries than regex-based signature discovery.
         # UniversalParser is designed for plain text where font info is absent.
-        doc = fitz.open(str(file_path))
         total_pages = len(doc)
 
         all_font_sizes: list[float] = []

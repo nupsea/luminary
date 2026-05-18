@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Flame, Zap } from "lucide-react"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 interface StreakData {
@@ -17,17 +17,15 @@ interface XPData {
   today_xp: number
 }
 
-async function fetchStreak(): Promise<StreakData> {
-  const res = await fetch(`${API_BASE}/engagement/streak`)
-  if (!res.ok) throw new Error("Failed to fetch streak")
-  return res.json()
-}
+// Browser tz offset (minutes, positive west of UTC). Backend buckets
+// "today_xp" / "studied_today" by the user's local calendar date.
+const tzOffset = (): number => new Date().getTimezoneOffset()
 
-async function fetchXP(): Promise<XPData> {
-  const res = await fetch(`${API_BASE}/engagement/xp`)
-  if (!res.ok) throw new Error("Failed to fetch XP")
-  return res.json()
-}
+const fetchStreak = (): Promise<StreakData> =>
+  apiGet<StreakData>("/engagement/streak", { tz_offset_minutes: tzOffset() })
+
+const fetchXP = (): Promise<XPData> =>
+  apiGet<XPData>("/engagement/xp", { tz_offset_minutes: tzOffset() })
 
 export function StreakXPWidget() {
   const { data: streak } = useQuery({

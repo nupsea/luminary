@@ -36,9 +36,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Create / read
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -106,9 +104,7 @@ async def test_get_goal_not_found(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Patch / archive / complete
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -191,9 +187,7 @@ async def test_archive_unknown_returns_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Sessions linking + delete cleanup
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -259,9 +253,41 @@ async def test_delete_unknown_goal_returns_404(test_db):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Progress endpoint -- shapes per type
-# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_progress_studying_shape(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        goal = await c.post(
+            "/goals",
+            json={
+                "title": "Studying",
+                "goal_type": "studying",
+                "target_value": 60,
+                "target_unit": "minutes",
+                "collection_id": "collection-1",
+            },
+        )
+        gid = goal.json()["id"]
+        resp = await c.get(f"/goals/{gid}/progress")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["goal_id"] == gid
+    assert body["goal_type"] == "studying"
+    metrics = body["metrics"]
+    assert set(metrics.keys()) == {
+        "minutes_focused",
+        "sessions_completed",
+        "surface_minutes",
+        "surface_sessions",
+        "metadata",
+        "completed_pct",
+    }
+    assert metrics["minutes_focused"] == 0
+    assert metrics["sessions_completed"] == 0
+    assert metrics["surface_minutes"] == {}
+    assert metrics["metadata"]["collection_id"] == "collection-1"
 
 
 @pytest.mark.asyncio
@@ -340,9 +366,7 @@ async def test_get_progress_explore_shape(test_db):
     assert "sessions_completed" in metrics
 
 
-# ---------------------------------------------------------------------------
 # Goalless sessions still count toward /pomodoro/stats
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -361,9 +385,7 @@ async def test_goalless_session_counts_in_stats(test_db):
     assert body["streak_days"] == 1
 
 
-# ---------------------------------------------------------------------------
 # Linked sessions list
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -1,40 +1,46 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Loader2, RefreshCw, StickyNote, Check, X, Trash2, Play, Pause, Terminal, Brain, Search, ChevronUp, ChevronDown, ChevronLeft, Highlighter, ChevronRight, GitCompareArrows } from "lucide-react"
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-
+import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, Trash2, X } from "lucide-react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
-import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
-import type { ContentType } from "@/components/library/types"
+
 import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
-import type { AnnotationItem, DocumentDetail, SectionItem, SummaryMode, SummaryTabDef } from "./types"
-import { CONVERSATION_TAB, SUMMARY_TABS } from "./types"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
-import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { SelectionActionBar } from "./SelectionActionBar"
-import type { SourceRef } from "./SelectionActionBar"
-import { NoteCreationDialog } from "./NoteCreationDialog"
+import type { ContentType } from "@/components/library/types"
+import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { NoteEditorDialog, type Note } from "@/components/NoteEditorDialog"
-import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
-import { FeynmanDialog } from "./FeynmanDialog"
-import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
-import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
-import { EPUBViewer } from "./EPUBViewer"
-import { ReadView } from "./ReadView"
-import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
-import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
-import { NotesReaderPanel } from "./NotesReaderPanel"
-import { ReferencesPanel } from "./ReferencesPanel"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
+import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
-import { API_BASE } from "@/lib/config"
-import { useDebounce } from "@/hooks/useDebounce"
+import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
+import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
+import { EPUBViewer } from "./EPUBViewer"
+import { FeynmanDialog } from "./FeynmanDialog"
+import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
+import { COLOR_CLASSES } from "./HighlightsPanel"
+import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
+import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
+import { useReaderTabs } from "./hooks/useReaderTabs"
+import { useReadingProgress } from "./hooks/useReadingProgress"
+import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
+import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
+import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
+import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
+import { NoteCreationDialog } from "./NoteCreationDialog"
+import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
+import { ReadView } from "./ReadView"
+import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
+import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
+import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
+import { SelectionActionBar } from "./SelectionActionBar"
+import { SummaryPanel } from "./SummaryPanel"
+import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
+import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
-// ---------------------------------------------------------------------------
-// Error Boundary (S200)
-// ---------------------------------------------------------------------------
+// Error Boundary
 
 class DocumentReaderErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -77,103 +83,8 @@ class DocumentReaderErrorBoundary extends React.Component<
   }
 }
 
-// ---------------------------------------------------------------------------
-// FSRS fragility heatmap (S116)
-// ---------------------------------------------------------------------------
-
-interface SectionHeatmapItem {
-  section_id: string
-  fragility_score: number | null
-  due_card_count: number
-  avg_retention_pct: number | null
-}
-
-function fragilityBorderClass(score: number | null): string {
-  if (score === null) return ""
-  if (score <= 0.3) return "border-l-4 border-l-green-500"
-  if (score <= 0.6) return "border-l-4 border-l-yellow-500"
-  return "border-l-4 border-l-red-500"
-}
-
-// Render an FSRS retention chip (compact pill) showing % retained, color-coded.
-// Replaces the heavy fragility border as the primary signal in the dashboard view.
-function RetentionChip({ heatmap }: { heatmap: SectionHeatmapItem | null }) {
-  if (!heatmap || heatmap.fragility_score === null) return null
-  const retentionPct = heatmap.avg_retention_pct ?? Math.round((1 - heatmap.fragility_score) * 100)
-  const tone =
-    heatmap.fragility_score <= 0.3
-      ? "bg-green-500/15 text-green-700 dark:text-green-400"
-      : heatmap.fragility_score <= 0.6
-        ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
-        : "bg-red-500/15 text-red-700 dark:text-red-400"
-  const label = `Retention ${Math.round(retentionPct)}%`
-  return (
-    <span
-      title={`${label}${heatmap.due_card_count > 0 ? ` | ${heatmap.due_card_count} due` : ""}`}
-      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${tone}`}
-    >
-      {Math.round(retentionPct)}%
-      {heatmap.due_card_count > 0 && (
-        <span className="ml-1 opacity-70">·{heatmap.due_card_count}</span>
-      )}
-    </span>
-  )
-}
-
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ""
-  const diffMs = Date.now() - then
-  const min = Math.round(diffMs / 60_000)
-  if (min < 1) return "just now"
-  if (min < 60) return `${min}m ago`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  const d = Math.round(hr / 24)
-  if (d < 30) return `${d}d ago`
-  const mo = Math.round(d / 30)
-  if (mo < 12) return `${mo}mo ago`
-  const y = Math.round(mo / 12)
-  return `${y}y ago`
-}
-
-const ADMONITION_STYLES: Record<string, string> = {
-  note:      "border-l-4 border-l-blue-500 bg-blue-50/40",
-  warning:   "border-l-4 border-l-red-500 bg-red-50/40",
-  tip:       "border-l-4 border-l-green-500 bg-green-50/40",
-  caution:   "border-l-4 border-l-orange-500 bg-orange-50/40",
-  important: "border-l-4 border-l-purple-500 bg-purple-50/40",
-}
-
-const ADMONITION_LABEL_COLORS: Record<string, string> = {
-  note:      "#3b82f6",
-  warning:   "#ef4444",
-  tip:       "#22c55e",
-  caution:   "#f97316",
-  important: "#a855f7",
-}
-
-function admonitionClass(type: string | null): string {
-  if (!type) return ""
-  return ADMONITION_STYLES[type] ?? ""
-}
-
-function buildYouTubeTimestampUrl(sourceUrl: string, seconds: number): string {
-  const t = Math.floor(seconds)
-  return sourceUrl.includes("?") ? `${sourceUrl}&t=${t}` : `${sourceUrl}?t=${t}`
-}
-
-// ---------------------------------------------------------------------------
-
-async function fetchDocument(id: string): Promise<DocumentDetail> {
-  const res = await fetch(`${API_BASE}/documents/${id}`)
-  if (!res.ok) throw new Error("Failed to fetch document")
-  return res.json() as Promise<DocumentDetail>
-}
-
-// ---------------------------------------------------------------------------
-// Note API
-// ---------------------------------------------------------------------------
+const fetchDocument = (id: string): Promise<DocumentDetail> =>
+  apiGet<DocumentDetail>(`/documents/${id}`)
 
 // Minimal note shape used for the section indicator (section_id only)
 interface NoteEntry {
@@ -181,1780 +92,13 @@ interface NoteEntry {
   section_id: string | null
 }
 
-async function createNote(data: {
-  document_id: string
-  section_id: string | undefined
-  content: string
-  tags: string[]
-  group_name: string | null
-}): Promise<void> {
-  const res = await fetch(`${API_BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
-}
-
-// ---------------------------------------------------------------------------
-// NoteEditor (inline below a section)
-// ---------------------------------------------------------------------------
-
-interface NoteEditorProps {
-  documentId: string
-  sectionId: string
-  onSaved: () => void
-  onCancel: () => void
-}
-
-function NoteEditor({ documentId, sectionId, onSaved, onCancel }: NoteEditorProps) {
-  const [content, setContent] = useState("")
-  const [tagInput, setTagInput] = useState("")
-  const [tags, setTags] = useState<string[]>([])
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  function addTag(input: string) {
-    const t = input.trim()
-    if (t && !tags.includes(t)) setTags((prev) => [...prev, t])
-    setTagInput("")
-  }
-
-  async function handleSave() {
-    if (!content.trim()) return
-    setSaving(true)
-    setSaveError(null)
-    try {
-      await createNote({ document_id: documentId, section_id: sectionId, content, tags, group_name: null })
-      onSaved()
-    } catch {
-      setSaveError("Failed to save note. Please try again.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="mt-2 flex flex-col gap-2 rounded-md border border-primary/40 bg-background p-2">
-      {saveError && (
-        <p className="text-xs text-destructive">{saveError}</p>
-      )}
-      <textarea
-        autoFocus
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Write a note..."
-        className="min-h-[72px] w-full resize-none bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
-      />
-      {/* Tag input */}
-      <div className="flex flex-wrap items-center gap-1">
-        {tags.map((t) => (
-          <span
-            key={t}
-            className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            {t}
-            <button onClick={() => setTags((prev) => prev.filter((x) => x !== t))}>
-              <X size={9} />
-            </button>
-          </span>
-        ))}
-        <input
-          value={tagInput}
-          onChange={(e) => setTagInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === ",") {
-              e.preventDefault()
-              addTag(tagInput)
-            }
-          }}
-          onBlur={() => { if (tagInput.trim()) addTag(tagInput) }}
-          placeholder="Add tag, press Enter"
-          className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          onClick={() => void handleSave()}
-          disabled={saving || !content.trim()}
-          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Check size={11} />
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
-type SummaryMap = Partial<Record<SummaryMode, string>>
-type StreamingMap = Partial<Record<SummaryMode, boolean>>
-
-// ---------------------------------------------------------------------------
-// Glossary tab
-// ---------------------------------------------------------------------------
-
-interface GlossaryTerm {
-  id: string
-  term: string
-  definition: string
-  first_mention_section_id: string | null
-  category: string | null
-  created_at: string | null
-  updated_at: string | null
-}
-
-const CATEGORY_COLORS: Record<string, string> = {
-  character: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  place: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  concept: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-  technical: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
-  event: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  general: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-}
-
-type GlossarySortKey = "term" | "category"
-
-interface GlossaryPanelProps {
-  documentId: string
-  onScrollToSection?: (sectionId: string) => void
-}
-
-function GlossaryPanel({ documentId, onScrollToSection }: GlossaryPanelProps) {
-  const [terms, setTerms] = useState<GlossaryTerm[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [initialLoading, setInitialLoading] = useState(true)
-  const [filter, setFilter] = useState("")
-  const [sortKey, setSortKey] = useState<GlossarySortKey>("term")
-  const [error, setError] = useState("")
-
-  // Load cached terms on mount
-  useEffect(() => {
-    let cancelled = false
-    async function fetchCached() {
-      try {
-        const res = await fetch(`${API_BASE}/explain/glossary/${documentId}/cached`)
-        if (res.ok) {
-          const data = (await res.json()) as GlossaryTerm[]
-          if (!cancelled) setTerms(data.length > 0 ? data : null)
-        }
-      } catch {
-        // ignore fetch error on initial load
-      } finally {
-        if (!cancelled) setInitialLoading(false)
-      }
-    }
-    void fetchCached()
-    return () => { cancelled = true }
-  }, [documentId])
-
-  async function generateGlossary() {
-    setLoading(true)
-    setError("")
-    try {
-      const res = await fetch(`${API_BASE}/explain/glossary/${documentId}`, { method: "POST" })
-      if (res.ok) {
-        const data = (await res.json()) as GlossaryTerm[]
-        setTerms(data)
-      } else {
-        const body = await res.json().catch(() => ({ detail: "Unknown error" })) as { detail?: string }
-        if (res.status === 503) {
-          setError("Ollama unavailable -- start it to generate glossary")
-        } else if (res.status === 422) {
-          setError(body.detail ?? "Glossary generation failed -- try again")
-        } else {
-          setError(body.detail ?? `Error ${res.status}`)
-        }
-      }
-    } catch {
-      setError("Network error -- check your connection")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function deleteTerm(termId: string) {
-    try {
-      const res = await fetch(`${API_BASE}/explain/glossary/${documentId}/terms/${termId}`, { method: "DELETE" })
-      if (res.ok || res.status === 204) {
-        setTerms((prev) => prev ? prev.filter((t) => t.id !== termId) : prev)
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const filterLower = filter.toLowerCase()
-  const filtered = (terms ?? [])
-    .filter((t) =>
-      t.term.toLowerCase().includes(filterLower) ||
-      t.definition.toLowerCase().includes(filterLower),
-    )
-    .sort((a, b) => {
-      if (sortKey === "category") {
-        return (a.category ?? "general").localeCompare(b.category ?? "general") || a.term.localeCompare(b.term)
-      }
-      return a.term.localeCompare(b.term)
-    })
-
-  if (initialLoading) {
-    return (
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
-        <Skeleton className="h-4 w-2/3" />
-      </div>
-    )
-  }
-
-  const hasTerms = terms !== null && terms.length > 0
-
-  if (!hasTerms) {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm text-muted-foreground">
-          Extract domain-specific terms from this document.
-        </p>
-        <button
-          onClick={() => void generateGlossary()}
-          disabled={loading}
-          className="flex items-center gap-1.5 self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
-          {loading && <Loader2 size={14} className="animate-spin" />}
-          {loading ? "Extracting..." : "Generate Glossary"}
-        </button>
-        {error && <p className="text-sm text-red-500">{error}</p>}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Search terms and definitions..."
-          className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-        <button
-          onClick={() => void generateGlossary()}
-          disabled={loading}
-          title="Regenerate glossary"
-          className="flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-          Regenerate
-        </button>
-      </div>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>Sort:</span>
-        <button
-          onClick={() => setSortKey("term")}
-          className={cn("px-1.5 py-0.5 rounded", sortKey === "term" ? "bg-primary text-primary-foreground" : "hover:bg-muted")}
-        >
-          Term
-        </button>
-        <button
-          onClick={() => setSortKey("category")}
-          className={cn("px-1.5 py-0.5 rounded", sortKey === "category" ? "bg-primary text-primary-foreground" : "hover:bg-muted")}
-        >
-          Category
-        </button>
-      </div>
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      {filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {filter ? "No matching terms." : "No terms extracted."}
-        </p>
-      ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-border text-left text-muted-foreground">
-              <th className="pb-1.5 pr-3 font-medium">Term</th>
-              <th className="pb-1.5 pr-3 font-medium">Definition</th>
-              <th className="pb-1.5 pr-3 font-medium">Category</th>
-              <th className="pb-1.5 font-medium">Section</th>
-              <th className="pb-1.5 w-6"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filtered.map((t) => (
-              <tr key={t.id}>
-                <td className="py-1.5 pr-3 font-medium text-foreground align-top">{t.term}</td>
-                <td className="py-1.5 pr-3 text-foreground/80 align-top">{t.definition}</td>
-                <td className="py-1.5 pr-3 align-top">
-                  {t.category && (
-                    <span className={cn("inline-block rounded px-1.5 py-0.5 text-[10px] font-medium", CATEGORY_COLORS[t.category] ?? CATEGORY_COLORS.general)}>
-                      {t.category}
-                    </span>
-                  )}
-                </td>
-                <td className="py-1.5 pr-1 align-top">
-                  {t.first_mention_section_id && onScrollToSection ? (
-                    <button
-                      onClick={() => onScrollToSection(t.first_mention_section_id!)}
-                      className="text-primary hover:underline text-[10px]"
-                    >
-                      Go
-                    </button>
-                  ) : (
-                    <span className="text-muted-foreground">--</span>
-                  )}
-                </td>
-                <td className="py-1.5 align-top">
-                  <button
-                    onClick={() => void deleteTerm(t.id)}
-                    className="text-muted-foreground hover:text-red-500 transition-colors sm:opacity-0 sm:group-hover:opacity-100"
-                    title="Remove term"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Chapter Goals panel (right side, tech books only)
-// ---------------------------------------------------------------------------
-
-interface LearningObjective {
-  id: string
-  section_id: string
-  text: string
-  covered: boolean
-}
-
-interface ChapterProgressRingProps {
-  pct: number
-  size?: number
-}
-
-function ChapterProgressRing({ pct, size = 12 }: ChapterProgressRingProps) {
-  const r = (size - 2) / 2
-  const circ = 2 * Math.PI * r
-  const dashOffset = circ - (pct / 100) * circ
-  return (
-    <svg width={size} height={size} className="shrink-0" aria-label={`${Math.round(pct)}% covered`}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted/30" />
-      <circle
-        cx={size / 2} cy={size / 2} r={r}
-        fill="none" stroke="currentColor" strokeWidth={1.5}
-        strokeDasharray={circ} strokeDashoffset={dashOffset}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        className="text-primary"
-      />
-    </svg>
-  )
-}
-
-interface ChapterGoalsPanelProps {
-  documentId: string
-  sectionId?: string | null
-  onStudyClick: (sectionId: string) => void
-}
-
-function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: ChapterGoalsPanelProps) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["objectives", documentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/documents/${documentId}/objectives`)
-      if (!res.ok) throw new Error("Failed to fetch objectives")
-      return res.json() as Promise<{ objectives: LearningObjective[] }>
-    },
-    staleTime: 300_000,
-  })
-
-  if (isLoading) {
-    return (
-      <div className="mb-4 flex flex-col gap-1.5 py-2">
-        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-4 w-full" />)}
-      </div>
-    )
-  }
-
-  if (isError) {
-    return <p className="mb-4 text-xs text-destructive">Could not load chapter goals.</p>
-  }
-
-  if (!data || data.objectives.length === 0) {
-    return null
-  }
-
-  const visibleObjectives = sectionId
-    ? data.objectives.filter((o) => o.section_id === sectionId)
-    : data.objectives
-
-  if (visibleObjectives.length === 0) {
-    return (
-      <div className="mb-4 rounded-lg border border-border bg-card p-4">
-        <h3 className="mb-1 text-sm font-semibold text-foreground">Chapter Goals</h3>
-        <p className="text-xs text-muted-foreground">No learning objectives for this section.</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="mb-4 rounded-lg border border-border bg-card p-4">
-      <h3 className="mb-2 text-sm font-semibold text-foreground">Chapter Goals</h3>
-      <ul className="space-y-1.5">
-        {visibleObjectives.map((obj) => (
-          <li key={obj.id} className="flex items-start gap-2 text-xs text-foreground/80">
-            <input
-              type="checkbox"
-              checked={obj.covered}
-              readOnly
-              className="mt-0.5 shrink-0 accent-primary"
-            />
-            <span className="flex-1">{obj.text}</span>
-            {!obj.covered && (
-              <button
-                onClick={() => onStudyClick(obj.section_id)}
-                className="ml-auto shrink-0 rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground hover:bg-primary/90"
-              >
-                Study
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Summary + Glossary panel (right side)
-// ---------------------------------------------------------------------------
-
-type PanelTab = SummaryMode | "glossary" | "references" | "notes"
-
-interface SummaryPanelProps {
-  documentId: string
-  contentType: string
-  activeSectionId?: string | null
-  onScrollToSection?: (sectionId: string) => void
-  onNoteCountKnown: (count: number) => void
-}
-
-function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSection, onNoteCountKnown }: SummaryPanelProps) {
-  const summaryTabs: SummaryTabDef[] =
-    contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
-  const allTabs = [
-    { mode: "notes" as PanelTab, label: "Notes" },
-    ...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })),
-    { mode: "glossary" as PanelTab, label: "Glossary" },
-    { mode: "references" as PanelTab, label: "References" },
-  ]
-
-  const [activeTab, setActiveTab] = useState<PanelTab>("notes")
-  const defaultTabResolved = useRef(false)
-  const [summaries, setSummaries] = useState<SummaryMap>({})
-  const [streaming, setStreaming] = useState<StreamingMap>({})
-  const [summaryError, setSummaryError] = useState<string | null>(null)
-  const [cacheLoading, setCacheLoading] = useState(true)
-
-  // AC5: switch default tab to Key Points if no notes exist
-  const handleNoteCountKnown = useCallback((count: number) => {
-    onNoteCountKnown(count)
-    if (!defaultTabResolved.current) {
-      defaultTabResolved.current = true
-      if (count === 0) {
-        setActiveTab("executive")
-      }
-    }
-  }, [onNoteCountKnown])
-
-  // Load pre-generated summaries from DB on mount — no LLM call needed
-  useEffect(() => {
-    let cancelled = false
-    async function loadCached() {
-      try {
-        const res = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-        if (!res.ok || cancelled) return
-        const data = (await res.json()) as {
-          summaries: Record<string, { id: string; content: string }>
-        }
-        if (cancelled) return
-        const loaded: SummaryMap = {}
-        for (const [mode, s] of Object.entries(data.summaries)) {
-          loaded[mode as SummaryMode] = s.content
-        }
-        setSummaries(loaded)
-      } catch {
-        // cache unavailable — user can still generate manually
-      } finally {
-        if (!cancelled) setCacheLoading(false)
-      }
-    }
-    void loadCached()
-    return () => { cancelled = true }
-  }, [documentId])
-
-  async function generateSummary(mode: SummaryMode, forceRefresh = false) {
-    setSummaryError(null)
-
-    // Check cache first (skipped when forceRefresh=true)
-    if (!forceRefresh) {
-      try {
-        const cacheRes = await fetch(`${API_BASE}/summarize/${documentId}/cached`)
-        if (cacheRes.ok) {
-          const cacheData = (await cacheRes.json()) as {
-            summaries: Record<string, { id: string; content: string }>
-          }
-          if (cacheData.summaries[mode]) {
-            setSummaries((s) => ({ ...s, [mode]: cacheData.summaries[mode].content }))
-            return
-          }
-        }
-      } catch {
-        // cache check failed — fall through to streaming
-      }
-    }
-
-    setStreaming((s) => ({ ...s, [mode]: true }))
-    setSummaries((s) => ({ ...s, [mode]: "" }))
-    try {
-      const res = await fetch(`${API_BASE}/summarize/${documentId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, model: null, force_refresh: forceRefresh }),
-      })
-      if (!res.ok || !res.body) throw new Error("Summarization failed")
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
-              if (typeof payload["token"] === "string") {
-                setSummaries((s) => ({ ...s, [mode]: (s[mode] ?? "") + payload["token"] }))
-              }
-              if (payload["error"] === "llm_unavailable") {
-                setSummaryError(typeof payload["message"] === "string" ? payload["message"] : "Ollama is not running. Start it with: ollama serve")
-              }
-              if (payload["done"] === true) {
-                setStreaming((s) => ({ ...s, [mode]: false }))
-              }
-            } catch {
-              // skip malformed SSE event
-            }
-          }
-        }
-      }
-    } catch {
-      setStreaming((s) => ({ ...s, [mode]: false }))
-      setSummaryError("Ollama is not running. Start it with: ollama serve")
-    }
-  }
-
-  const isSidePanel = activeTab === "glossary" || activeTab === "references" || activeTab === "notes"
-  const currentSummary = !isSidePanel ? summaries[activeTab as SummaryMode] : undefined
-  const isStreaming = !isSidePanel ? (streaming[activeTab as SummaryMode] ?? false) : false
-
-  return (
-    <div className="flex h-full flex-col">
-      {/* Tabs */}
-      <div className="mb-4 flex flex-wrap gap-1 rounded-md bg-muted p-1">
-        {allTabs.map((tab) => (
-          <button
-            key={tab.mode}
-            onClick={() => setActiveTab(tab.mode)}
-            className={cn(
-              "flex-1 rounded py-1.5 text-xs font-medium transition-colors",
-              activeTab === tab.mode
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Content area */}
-      <div className="flex-1 overflow-auto">
-        {summaryError && activeTab !== "references" && activeTab !== "notes" && (
-          <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            {summaryError}
-          </div>
-        )}
-        {activeTab === "notes" ? (
-          <NotesReaderPanel documentId={documentId} activeSectionId={activeSectionId ?? null} onScrollToSection={onScrollToSection} onNoteCountKnown={handleNoteCountKnown} />
-        ) : activeTab === "references" ? (
-          <ReferencesPanel documentId={documentId} />
-        ) : activeTab === "glossary" ? (
-          <GlossaryPanel documentId={documentId} onScrollToSection={onScrollToSection} />
-        ) : cacheLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" />
-            Loading...
-          </div>
-        ) : isStreaming && !currentSummary ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" />
-            Summarizing...
-          </div>
-        ) : currentSummary ? (
-          <div className="space-y-2">
-            <div>
-              <MarkdownRenderer>{currentSummary}</MarkdownRenderer>
-              {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
-            </div>
-            {!isStreaming && (
-              <button
-                title="Regenerate summary (uses LLM — may take a moment)"
-                onClick={() => void generateSummary(activeTab as SummaryMode, true)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <RefreshCw size={12} />
-                Regenerate
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">No summary yet.</p>
-            <button
-              onClick={() => void generateSummary(activeTab as SummaryMode)}
-              className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Generate Summary
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Annotation highlight reconstruction (S111)
-// ---------------------------------------------------------------------------
-
-const COLOR_CLASSES: Record<string, string> = {
-  yellow: "bg-yellow-200 dark:bg-yellow-900/50",
-  green: "bg-green-200 dark:bg-green-900/50",
-  blue: "bg-blue-200 dark:bg-blue-900/50",
-  pink: "bg-pink-200 dark:bg-pink-900/50",
-}
-
-interface SectionPreviewProps {
-  preview: string
-  annotations: AnnotationItem[]
-  sectionId: string
-  searchSnippet?: string
-}
-
-function SectionPreviewWithHighlights({ preview, annotations, sectionId, searchSnippet }: SectionPreviewProps) {
-  // S151: render FTS5 snippet with <mark> tags when a search hit exists for this section
-  if (searchSnippet) {
-    return (
-      <p
-        className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview"
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: sanitizeSnippet(searchSnippet) }}
-      />
-    )
-  }
-  const sectionAnnotations = annotations
-    .filter((a) => a.section_id === sectionId)
-    .sort((a, b) => a.start_offset - b.start_offset)
-
-  if (sectionAnnotations.length === 0) {
-    return (
-      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview">{preview}</p>
-    )
-  }
-
-  // Build segments — skip overlapping annotations (keep first)
-  const segments: { text: string; annotation: AnnotationItem | null }[] = []
-  let cursor = 0
-  for (const ann of sectionAnnotations) {
-    const start = ann.start_offset
-    const end = ann.end_offset
-    // Validate offsets and skip invalid / overlapping annotations
-    if (start < cursor || end <= start || end > preview.length) continue
-    const highlightText = preview.slice(start, end)
-    // Verify text matches to avoid phantom highlights from stale data
-    if (!ann.selected_text.startsWith(highlightText.slice(0, 10))) continue
-    if (start > cursor) segments.push({ text: preview.slice(cursor, start), annotation: null })
-    segments.push({ text: highlightText, annotation: ann })
-    cursor = end
-  }
-  if (cursor < preview.length) segments.push({ text: preview.slice(cursor), annotation: null })
-
-  return (
-    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview">
-      {segments.map((seg, i) =>
-        seg.annotation ? (
-          <mark
-            key={i}
-            data-annotation-id={seg.annotation.id}
-            className={cn("rounded-sm", COLOR_CLASSES[seg.annotation.color] ?? COLOR_CLASSES.yellow)}
-            title={seg.annotation.note_text ?? undefined}
-          >
-            {seg.text}
-          </mark>
-        ) : (
-          <span key={i}>{seg.text}</span>
-        ),
-      )}
-    </p>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Highlights panel (left panel tab)
-// ---------------------------------------------------------------------------
-
-interface HighlightsPanelProps {
-  annotations: AnnotationItem[]
-  loading: boolean
-  error: boolean
-  onDelete: (id: string) => void
-}
-
-// @ts-expect-error -- HighlightsPanel is defined for upcoming highlights sidebar; not yet wired
-function HighlightsPanel({ annotations, loading, error, onDelete }: HighlightsPanelProps) {
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-
-  async function handleConfirmDelete(id: string) {
-    setDeleting(true)
-    try {
-      await fetch(`${API_BASE}/annotations/${id}`, { method: "DELETE" })
-      onDelete(id)
-      setConfirmDelete(null)
-    } catch {
-      // keep confirm open so user can retry
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2 px-6 py-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
-        ))}
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="px-6 py-3">
-        <p className="text-xs text-destructive">Could not load highlights.</p>
-      </div>
-    )
-  }
-
-  if (annotations.length === 0) {
-    return (
-      <div className="px-6 py-3">
-        <p className="text-xs text-muted-foreground">
-          No highlights yet. Select text and click Highlight.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-2 px-6 py-3">
-      {annotations.map((ann) => (
-        <div key={ann.id} className="rounded-md border border-border p-2">
-          {confirmDelete === ann.id ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-foreground">Delete this highlight?</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => void handleConfirmDelete(ann.id)}
-                  disabled={deleting}
-                  className="rounded bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
-                >
-                  {deleting ? "Deleting..." : "Yes"}
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(null)}
-                  disabled={deleting}
-                  className="rounded border border-border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
-                >
-                  No
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-start gap-2">
-              <span
-                className={cn(
-                  "mt-0.5 h-2 w-2 shrink-0 rounded-full",
-                  COLOR_CLASSES[ann.color] ?? COLOR_CLASSES.yellow,
-                )}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-foreground" title={ann.selected_text}>
-                  {ann.selected_text.length > 60
-                    ? `${ann.selected_text.slice(0, 60)}...`
-                    : ann.selected_text}
-                </p>
-                {ann.note_text && (
-                  <p className="mt-0.5 text-xs text-muted-foreground">{ann.note_text}</p>
-                )}
-              </div>
-              <button
-                onClick={() => setConfirmDelete(ann.id)}
-                title="Delete highlight"
-                className="shrink-0 text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Reading progress tracking (S110)
-// ---------------------------------------------------------------------------
-
-async function postReadingProgress(documentId: string, sectionId: string): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/reading/progress`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document_id: documentId, section_id: sectionId }),
-    })
-  } catch {
-    // Best-effort: network errors must never interrupt reading
-  }
-}
-
-function useReadingProgress(documentId: string, sectionCount: number) {
-  const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  // Track whether any progress was posted so we can invalidate the library
-  // query on unmount and keep the progress bar in sync within the same session.
-  const progressPosted = useRef(false)
-  const qc = useQueryClient()
-
-  useEffect(() => {
-    if (sectionCount === 0) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const sectionId = (entry.target as HTMLElement).dataset["sectionId"]
-          if (!sectionId) continue
-
-          if (entry.isIntersecting) {
-            if (!timers.current.has(sectionId)) {
-              const t = setTimeout(() => {
-                timers.current.delete(sectionId)
-                progressPosted.current = true
-                void postReadingProgress(documentId, sectionId)
-              }, 3000)
-              timers.current.set(sectionId, t)
-            }
-          } else {
-            const t = timers.current.get(sectionId)
-            if (t !== undefined) {
-              clearTimeout(t)
-              timers.current.delete(sectionId)
-            }
-          }
-        }
-      },
-      { threshold: 0.5 },
-    )
-
-    const elements = document.querySelectorAll("[data-section-id]")
-    for (const el of elements) observer.observe(el)
-
-    return () => {
-      observer.disconnect()
-      for (const t of timers.current.values()) clearTimeout(t)
-      timers.current.clear()
-      // Invalidate the library query so progress bars reflect this session.
-      if (progressPosted.current) {
-        void qc.invalidateQueries({ queryKey: ["documents"] })
-        progressPosted.current = false
-      }
-    }
-  }, [documentId, sectionCount, qc])
-}
-
-// ---------------------------------------------------------------------------
-// Audio mini-player (S120)
-// ---------------------------------------------------------------------------
-
-/**
- * Parse the start time (in seconds) from an audio section heading.
- * Heading format: "Segment N (XYZs-ABCs)" — produced by _chunk_audio in ingestion.py.
- * Returns null if the heading does not match the expected pattern.
- */
-function parseAudioStartTime(heading: string): number | null {
-  const m = heading.match(/\((\d+(?:\.\d+)?)s-/)
-  if (!m) return null
-  return parseFloat(m[1])
-}
-
-function formatMmSs(seconds: number): string {
-  const s = Math.floor(seconds)
-  const mm = Math.floor(s / 60).toString().padStart(2, "0")
-  const ss = (s % 60).toString().padStart(2, "0")
-  return `${mm}:${ss}`
-}
-
-interface AudioMiniPlayerProps {
-  audioRef: React.RefObject<HTMLAudioElement | null>
-  audioUrl: string
-  playing: boolean
-  currentTime: number
-  duration: number
-  onPlayPause: () => void
-  onSeek: (t: number) => void
-  onTimeUpdate: () => void
-  onLoadedMetadata: () => void
-  onEnded: () => void
-}
-
-function AudioMiniPlayer({
-  audioRef,
-  audioUrl,
-  playing,
-  currentTime,
-  duration,
-  onPlayPause,
-  onSeek,
-  onTimeUpdate,
-  onLoadedMetadata,
-  onEnded,
-}: AudioMiniPlayerProps) {
-  return (
-    <div className="flex items-center gap-3 border-t border-border bg-background px-6 py-3">
-      {/* Hidden HTML5 audio element */}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio
-        ref={audioRef}
-        src={audioUrl}
-        onTimeUpdate={onTimeUpdate}
-        onLoadedMetadata={onLoadedMetadata}
-        onEnded={onEnded}
-      />
-
-      {/* Play/Pause */}
-      <button
-        onClick={onPlayPause}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-        aria-label={playing ? "Pause" : "Play"}
-      >
-        {playing ? <Pause size={14} /> : <Play size={14} />}
-      </button>
-
-      {/* Current time */}
-      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {formatMmSs(currentTime)}
-      </span>
-
-      {/* Scrubber */}
-      <input
-        type="range"
-        min={0}
-        max={duration || 0}
-        step={0.5}
-        value={currentTime}
-        onChange={(e) => onSeek(parseFloat(e.target.value))}
-        className="flex-1 accent-primary"
-        aria-label="Audio seek"
-      />
-
-      {/* Duration */}
-      <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">
-        {formatMmSs(duration)}
-      </span>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Video player (S121)
-// ---------------------------------------------------------------------------
-
-interface VideoPlayerProps {
-  videoRef: React.RefObject<HTMLVideoElement | null>
-  videoUrl: string
-}
-
-function VideoPlayer({ videoRef, videoUrl }: VideoPlayerProps) {
-  return (
-    <div className="mb-4 overflow-hidden rounded-lg border border-border bg-black">
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video ref={videoRef} src={videoUrl} controls className="w-full" />
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// PredictPanel (S140) — Predict-then-Run for code sections
-// ---------------------------------------------------------------------------
-
-interface CodeExecuteResult {
-  stdout: string
-  stderr: string
-  exit_code: number
-  elapsed_ms: number
-  prediction_correct: boolean | null
-  prediction_diff: string | null
-}
-
-/** Detect whether a section preview contains a fenced code block.
- * Uses a tight pattern: preview must contain a newline-delimited ``` fence.
- * Avoids false positives from inline backtick sequences.
- */
-function hasCodeFence(preview: string): boolean {
-  return /^```\w*/m.test(preview) && preview.includes("\n")
-}
-
-/** Extract the first fenced code block from a preview string.
- * Falls back to the full preview if no fence is found. Limits to 2000 chars.
- */
-function extractCodeFromPreview(preview: string): string {
-  const match = /```[\w]*\n([\s\S]*?)(?:```|$)/.exec(preview)
-  const code = match ? match[1] : preview
-  return code.slice(0, 2000)
-}
-
-interface PredictPanelProps {
-  sectionId: string
-  documentId: string
-  preview: string
-}
-
-function PredictPanel({ sectionId: _sectionId, documentId, preview }: PredictPanelProps) {
-  const [predictOpen, setPredictOpen] = useState(false)
-  const [expectedOutput, setExpectedOutput] = useState("")
-  const [isRunning, setIsRunning] = useState(false)
-  const [runResult, setRunResult] = useState<CodeExecuteResult | null>(null)
-  const [runError, setRunError] = useState<string | null>(null)
-  const [createCardOpen, setCreateCardOpen] = useState(false)
-  const [createSuccess, setCreateSuccess] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const code = extractCodeFromPreview(preview)
-
-  async function handleRunAndCompare() {
-    setIsRunning(true)
-    setRunError(null)
-    setRunResult(null)
-    setCreateCardOpen(false)
-    setCreateSuccess(false)
-    setCreateError(null)
-
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    try {
-      const resp = await fetch(`${API_BASE}/code/execute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          code,
-          language: "python",
-          expected_output: expectedOutput.trim() !== "" ? expectedOutput : undefined,
-          document_id: documentId,
-        }),
-      })
-      if (!resp.ok) {
-        const body = (await resp.json()) as { detail?: string }
-        setRunError(body.detail ?? `Execution failed (HTTP ${resp.status})`)
-        return
-      }
-      const data = (await resp.json()) as CodeExecuteResult
-      setRunResult(data)
-    } catch (err) {
-      if ((err as { name?: string }).name !== "AbortError") {
-        setRunError("Execution failed. Check your connection.")
-      }
-    } finally {
-      setIsRunning(false)
-      abortRef.current = null
-    }
-  }
-
-  function handleKill() {
-    abortRef.current?.abort()
-    setIsRunning(false)
-    setRunError("Execution cancelled.")
-  }
-
-  async function handleCreateFlashcard() {
-    if (!runResult) return
-    setCreateError(null)
-    const question = `What does this code output?\n\n\`\`\`python\n${code.slice(0, 500)}\n\`\`\``
-    const answer = `Correct output:\n${runResult.stdout}${runResult.prediction_diff ? `\n\nDiff:\n${runResult.prediction_diff}` : ""}`
-    try {
-      const resp = await fetch(`${API_BASE}/flashcards/create-trace`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          answer,
-          source_excerpt: code.slice(0, 500),
-          document_id: documentId,
-        }),
-      })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      setCreateSuccess(true)
-      setCreateCardOpen(false)
-    } catch {
-      setCreateError("Failed to create flashcard. Please try again.")
-    }
-  }
-
-  if (!predictOpen) {
-    return (
-      <button
-        onClick={() => setPredictOpen(true)}
-        title="Predict the output before running"
-        className="mt-1.5 flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-primary"
-      >
-        <Terminal size={10} />
-        Predict
-      </button>
-    )
-  }
-
-  return (
-    <div className="mt-2 flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-foreground">What will this output?</span>
-        <button
-          onClick={() => { setPredictOpen(false); setRunResult(null); setRunError(null); setCreateCardOpen(false); setCreateSuccess(false) }}
-          className="text-muted-foreground hover:text-foreground"
-          aria-label="Close predict panel"
-        >
-          <X size={12} />
-        </button>
-      </div>
-
-      {/* Expected output input */}
-      <textarea
-        value={expectedOutput}
-        onChange={(e) => setExpectedOutput(e.target.value)}
-        placeholder="Type your prediction..."
-        rows={2}
-        className="w-full resize-none rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      />
-
-      {/* Run / Kill buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => void handleRunAndCompare()}
-          disabled={isRunning}
-          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          {isRunning && <Loader2 size={10} className="animate-spin" />}
-          {isRunning ? "Running..." : "Run and Compare"}
-        </button>
-        {isRunning && (
-          <button
-            onClick={handleKill}
-            className="rounded border border-destructive px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
-          >
-            Kill
-          </button>
-        )}
-      </div>
-
-      {/* Error state */}
-      {runError && (
-        <div className="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-          {runError}
-          <button
-            onClick={() => void handleRunAndCompare()}
-            className="ml-2 underline hover:no-underline"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Result panel */}
-      {runResult && (
-        <div className="flex flex-col gap-1.5">
-          {/* stdout */}
-          <div>
-            <span className="text-xs text-muted-foreground">Output:</span>
-            <pre className="mt-0.5 overflow-auto rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground">
-              {runResult.stdout || <em className="text-muted-foreground">(no output)</em>}
-            </pre>
-          </div>
-
-          {/* stderr (only if non-empty) */}
-          {runResult.stderr && (
-            <div>
-              <span className="text-xs text-muted-foreground">stderr:</span>
-              <pre className="mt-0.5 overflow-auto rounded border border-destructive/40 bg-destructive/5 px-2 py-1 font-mono text-xs text-destructive">
-                {runResult.stderr}
-              </pre>
-            </div>
-          )}
-
-          {/* Prediction result banner */}
-          {runResult.prediction_correct !== null && (
-            <>
-              {runResult.prediction_correct ? (
-                <div className="flex items-center gap-1.5 rounded border border-green-400/40 bg-green-50 px-2 py-1 text-xs text-green-700">
-                  <Check size={12} />
-                  Your prediction was correct!
-                </div>
-              ) : (
-                <div className="flex flex-col gap-1.5">
-                  <div className="rounded border border-amber-400/40 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                    Your prediction was wrong.
-                    {runResult.prediction_diff && (
-                      <pre className="mt-1 overflow-auto font-mono text-xs text-amber-900">
-                        {runResult.prediction_diff}
-                      </pre>
-                    )}
-                  </div>
-
-                  {/* Mistake-to-flashcard CTA */}
-                  {!createSuccess && (
-                    <div className="flex flex-col gap-1">
-                      {!createCardOpen ? (
-                        <button
-                          onClick={() => setCreateCardOpen(true)}
-                          className="self-start rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary"
-                        >
-                          Create flashcard from this mistake?
-                        </button>
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          {createError && (
-                            <p className="text-xs text-destructive">{createError}</p>
-                          )}
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => void handleCreateFlashcard()}
-                              className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                            >
-                              <Check size={10} />
-                              Create Flashcard
-                            </button>
-                            <button
-                              onClick={() => { setCreateCardOpen(false); setCreateError(null) }}
-                              className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {createSuccess && (
-                    <p className="text-xs text-green-700">Flashcard created!</p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Empty state: loading skeleton when no result yet and not running */}
-      {!runResult && !isRunning && !runError && (
-        <p className="text-xs text-muted-foreground">
-          Type your prediction and click "Run and Compare" to see the result.
-        </p>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// S151: In-document Cmd+F search
-// ---------------------------------------------------------------------------
-
-interface DocumentSectionSearchResult {
-  section_id: string
-  section_heading: string
-  match_count: number
-  snippet: string
-}
-
-// Allow only bare <mark> and </mark> tags in snippet HTML to prevent XSS from
-// user-uploaded content. FTS5 snippet() always produces plain <mark>/<\/mark>
-// with no attributes, so the strict match is safe and closes the attribute-injection
-// bypass present in a lookahead-only approach (e.g. <mark onmouseover="...">) .
-function sanitizeSnippet(html: string): string {
-  // Strip every HTML tag that is not an exact bare <mark> or </mark>
-  return html.replace(/<(?!\/?mark>)[^>]*>/gi, "")
-}
-
-// ---------------------------------------------------------------------------
-// S152: ResumeBanner
-// ---------------------------------------------------------------------------
-
-interface ReadingPosition {
-  document_id: string
-  last_section_id: string | null
-  last_section_heading: string | null
-  last_pdf_page: number | null
-  last_epub_chapter_index: number | null
-}
-
-interface ResumeBannerProps {
-  position: ReadingPosition
-  onResume: () => void
-  onDismiss: () => void
-}
-
-function ResumeBanner({ position, onResume, onDismiss }: ResumeBannerProps) {
-  const label = position.last_section_heading ?? "your last position"
-  const pageInfo =
-    position.last_pdf_page != null
-      ? ` (page ${position.last_pdf_page})`
-      : position.last_epub_chapter_index != null
-        ? ` (chapter ${position.last_epub_chapter_index + 1})`
-        : ""
-
-  return (
-    <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-4 py-2 text-xs">
-      <span className="flex-1 text-muted-foreground">
-        Resume at <span className="font-medium text-foreground">{label}</span>{pageInfo}?
-      </span>
-      <button
-        onClick={onResume}
-        className="rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-      >
-        Resume
-      </button>
-      <button
-        onClick={onDismiss}
-        className="text-muted-foreground hover:text-foreground"
-        aria-label="Dismiss"
-      >
-        <X size={12} />
-      </button>
-    </div>
-  )
-}
-
-interface InDocSearchBarProps {
-  documentId: string
-  onResults: (results: DocumentSectionSearchResult[]) => void
-  onClose: () => void
-  hitIndex: number
-  totalHits: number
-  onPrev: () => void
-  onNext: () => void
-}
-
-function InDocSearchBar({
-  documentId,
-  onResults,
-  onClose,
-  hitIndex,
-  totalHits,
-  onPrev,
-  onNext,
-}: InDocSearchBarProps) {
-  const [inputValue, setInputValue] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const debouncedQuery = useDebounce(inputValue, 300)
-
-  // Autofocus on mount
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
-  // Fetch results when debounced query changes
-  useEffect(() => {
-    if (!debouncedQuery.trim()) {
-      onResults([])
-      setError(null)
-      return
-    }
-    setLoading(true)
-    setError(null)
-    void (async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/documents/${encodeURIComponent(documentId)}/search?q=${encodeURIComponent(debouncedQuery)}`,
-        )
-        if (!res.ok) {
-          setError("Search failed")
-          onResults([])
-        } else {
-          const data = (await res.json()) as DocumentSectionSearchResult[]
-          onResults(data)
-        }
-      } catch {
-        setError("Search failed")
-        onResults([])
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [debouncedQuery, documentId, onResults])
-
-  return (
-    <div className="mb-3 flex flex-col gap-1">
-      <div className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1">
-        {loading ? (
-          <Loader2 size={12} className="shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <Search size={12} className="shrink-0 text-muted-foreground" />
-        )}
-        <input
-          ref={inputRef}
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          placeholder="Search in document..."
-          className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
-        />
-        {totalHits > 0 && (
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {hitIndex + 1} of {totalHits}
-          </span>
-        )}
-        {totalHits > 0 && (
-          <>
-            <button
-              onClick={onPrev}
-              title="Previous match"
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Previous match"
-            >
-              <ChevronUp size={12} />
-            </button>
-            <button
-              onClick={onNext}
-              title="Next match"
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Next match"
-            >
-              <ChevronDown size={12} />
-            </button>
-          </>
-        )}
-        <button
-          onClick={onClose}
-          title="Close search"
-          className="shrink-0 text-muted-foreground hover:text-foreground"
-          aria-label="Close search"
-        >
-          <X size={12} />
-        </button>
-      </div>
-      {error && (
-        <p className="text-xs text-destructive">{error}</p>
-      )}
-      {!loading && !error && debouncedQuery.trim() && totalHits === 0 && (
-        <p className="text-xs text-muted-foreground">No matches in this document</p>
-      )}
-    </div>
-  )
-}
-
-// S131: Individual section list item extracted and memoized to prevent re-rendering the entire
-// list of thousands of sections when unrelated state (like pdf current page) changes.
-const SectionListItem = memo(({
-  section,
-  isAudio,
-  isVideo,
-  isYouTube,
-  doc,
-  hasNote,
-  editorOpen,
-  heatmapItem,
-  searchHit,
-  searchSnippet,
-  progressPct,
-  annotations,
-  feynmanEnabled,
-  isActive,
-  lastPracticedAt,
-  childCount,
-  isCollapsed,
-  onToggleCollapsed,
-  onRead,
-  onPdfJump,
-  onMediaJump,
-  onToggleNote,
-  onSaved,
-  onCancel,
-  onFeynman,
-  onPrefetchFeynman,
-  onShowGoals
-}: {
-  section: SectionItem;
-  isAudio: boolean;
-  isVideo: boolean;
-  isYouTube: boolean;
-  doc: any;
-  hasNote: boolean;
-  editorOpen: boolean;
-  heatmapItem: any;
-  searchHit: boolean;
-  searchSnippet?: string;
-  progressPct?: number;
-  annotations: AnnotationItem[];
-  feynmanEnabled: boolean;
-  isActive: boolean;
-  lastPracticedAt?: string;
-  childCount: number;
-  isCollapsed: boolean;
-  onToggleCollapsed: (id: string) => void;
-  onRead: (id: string) => void;
-  onPdfJump: (p: number) => void;
-  onMediaJump: (t: number) => void;
-  onToggleNote: (id: string) => void;
-  onSaved: () => void;
-  onCancel: () => void;
-  onFeynman: (id: string) => void;
-  onPrefetchFeynman: (id: string) => void;
-  onShowGoals: (id: string) => void;
-}) => {
-  const fragilityClass = fragilityBorderClass(heatmapItem?.fragility_score ?? null)
-  const sectionBorderClass = section.admonition_type
-    ? admonitionClass(section.admonition_type)
-    : fragilityClass
-
-  const tooltipText = heatmapItem?.fragility_score != null
-    ? `Fragility: ${Math.round(heatmapItem.fragility_score * 100)}% | Due: ${heatmapItem.due_card_count}`
-    : section.heading
-
-  const mediaStartTime = (isAudio || isVideo || isYouTube) ? parseAudioStartTime(section.heading) : null
-
-  const headingNode = (
-    <span className="min-w-0 flex-1 truncate">
-      {section.admonition_type && (
-        <span
-          className="mr-1 rounded px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-          style={{ color: ADMONITION_LABEL_COLORS[section.admonition_type] ?? "inherit" }}
-        >
-          {section.admonition_type}
-        </span>
-      )}
-      {section.heading || "(Untitled section)"}
-    </span>
-  )
-
-  const lastPracticedLabel = lastPracticedAt ? formatRelativeTime(lastPracticedAt) : null
-
-  return (
-    <li
-      data-section-id={section.id}
-      title={tooltipText}
-      className={cn(
-        "group rounded-md border p-3 min-h-[50px] transition-colors",
-        // Active row: stronger border + tinted background; ambient otherwise.
-        isActive
-          ? "border-primary/50 bg-primary/5"
-          : "border-border hover:border-border/80 hover:bg-muted/40",
-        // Keep admonition tone when present, otherwise drop the heavy fragility
-        // border in favor of the retention chip.
-        section.admonition_type && sectionBorderClass,
-        searchHit && "ring-2 ring-primary",
-      )}
-    >
-      {/* Row 1: heading + retention chip + (optional) media timestamp */}
-      <div
-        className="flex items-center gap-2 text-sm font-semibold text-foreground"
-        style={{ paddingLeft: `${Math.max(0, section.level - 1) * 12}px` }}
-      >
-        {childCount > 0 ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleCollapsed(section.id)
-            }}
-            title={isCollapsed ? `Expand ${childCount} subsections` : "Collapse subsections"}
-            className="-ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-          </button>
-        ) : (
-          <span className="-ml-1 inline-block w-[18px] shrink-0" aria-hidden />
-        )}
-        <button
-          type="button"
-          onClick={() => onRead(section.id)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-primary"
-          title="Read this section"
-        >
-          {headingNode}
-        </button>
-        {isCollapsed && childCount > 0 && (
-          <span
-            className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
-            title={`${childCount} hidden subsections`}
-          >
-            +{childCount}
-          </span>
-        )}
-        <RetentionChip heatmap={heatmapItem} />
-        {progressPct !== undefined && (
-          <button
-            onClick={() => onShowGoals(section.id)}
-            title={`${Math.round(progressPct)}% objectives covered`}
-            className="shrink-0"
-          >
-            <ChapterProgressRing pct={progressPct} size={12} />
-          </button>
-        )}
-        {hasNote && (
-          <span title="Has note" className="shrink-0 text-primary">
-            <StickyNote size={12} />
-          </span>
-        )}
-      </div>
-
-      {/* Row 2: meta line — last-practiced + media timestamp + page anchor */}
-      {(lastPracticedLabel || mediaStartTime !== null || (doc.format === "pdf" && section.page_start > 0)) && (
-        <div
-          className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
-          style={{ paddingLeft: `${Math.max(0, section.level - 1) * 12}px` }}
-        >
-          {lastPracticedLabel && (
-            <span className="inline-flex items-center gap-1">
-              <Brain size={10} />
-              <span>Practiced {lastPracticedLabel}</span>
-            </span>
-          )}
-          {doc.format === "pdf" && section.page_start > 0 && (
-            <button
-              onClick={() => onPdfJump(section.page_start)}
-              title={`Open PDF at page ${section.page_start}`}
-              className="tabular-nums hover:text-foreground"
-            >
-              p.{section.page_start}
-            </button>
-          )}
-          {mediaStartTime !== null && (
-            isYouTube && doc?.source_url ? (
-              <a
-                href={buildYouTubeTimestampUrl(doc.source_url, mediaStartTime)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Open YouTube at ${formatMmSs(mediaStartTime)}`}
-                className="tabular-nums hover:text-foreground"
-              >
-                {formatMmSs(mediaStartTime)}
-              </a>
-            ) : (
-              <button
-                onClick={() => onMediaJump(mediaStartTime)}
-                title={`Play from ${formatMmSs(mediaStartTime)}`}
-                className="tabular-nums hover:text-foreground"
-              >
-                {formatMmSs(mediaStartTime)}
-              </button>
-            )
-          )}
-        </div>
-      )}
-
-      {/* Row 3: action chips — primary actions always visible, no hover gating */}
-      <div
-        className="mt-2 flex flex-wrap items-center gap-1.5"
-        style={{ paddingLeft: `${Math.max(0, section.level - 1) * 12}px` }}
-      >
-        <button
-          onClick={() => onRead(section.id)}
-          title="Read from this section"
-          className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground"
-        >
-          <BookOpen size={11} />
-          <span>Read</span>
-        </button>
-        {feynmanEnabled && (
-          <button
-            onClick={() => onFeynman(section.id)}
-            onMouseEnter={() => onPrefetchFeynman(section.id)}
-            onFocus={() => onPrefetchFeynman(section.id)}
-            title="Explain this section in your own words (Feynman technique)"
-            className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
-          >
-            <Brain size={11} />
-            <span>Practice</span>
-          </button>
-        )}
-        <button
-          onClick={() => onToggleNote(section.id)}
-          title={hasNote ? "Edit note" : "Add note"}
-          className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground"
-        >
-          <StickyNote size={11} />
-          <span>{hasNote ? "Note" : "Note"}</span>
-        </button>
-      </div>
-
-      {section.preview && (
-        <SectionPreviewWithHighlights
-          preview={section.preview}
-          annotations={annotations}
-          sectionId={section.id}
-          searchSnippet={searchSnippet}
-        />
-      )}
-      {section.preview && hasCodeFence(section.preview) && (
-        <PredictPanel
-          sectionId={section.id}
-          documentId={doc.id}
-          preview={section.preview}
-        />
-      )}
-      {editorOpen && (
-        <NoteEditor
-          documentId={doc.id}
-          sectionId={section.id}
-          onSaved={onSaved}
-          onCancel={onCancel}
-        />
-      )}
-    </li>
-  )
-})
-SectionListItem.displayName = "SectionListItem"
 
 interface DocumentReaderProps {
   documentId: string
   onBack: () => void
   initialSectionId?: string
   initialChunkId?: string
-  initialPage?: number  // S148: PDF page to navigate to on mount (from citation deep-link)
+  initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
 }
 
 export function DocumentReader(props: DocumentReaderProps) {
@@ -1977,11 +121,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
+
+  const {
+    leftTab,
+    setLeftTab,
+    pdfViewVisited,
+    setPdfViewVisited,
+    bookViewVisited,
+    setBookViewVisited,
+  } = useReaderTabs({ format: doc?.format })
+
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
-  const [leftTab, setLeftTab] = useState<"sections" | "pdfview" | "bookview" | "read">("sections")
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -1996,73 +149,49 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const highlightsPanelRef = useRef<HTMLDivElement>(null)
   const highlightsToggleRef = useRef<HTMLButtonElement>(null)
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
-  // S146: tracks whether the PDF View tab has been visited at least once (lazy-mount)
-  const [pdfViewVisited, setPdfViewVisited] = useState(false)
-  // S149: tracks whether the Book View tab has been visited at least once (lazy-mount)
-  const [bookViewVisited, setBookViewVisited] = useState(false)
-  // S143: tracks which section's goals are shown in ChapterGoalsPanel; null = show all
+  // tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
-  // S144: Feynman mode — section id to open dialog for; null = closed
+  // Feynman mode — section id to open dialog for; null = closed
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
   // Unified "section the user is currently focused on" — set by every section
   // action (Read, Practice, Note, PDF jump, Goals, citation deep-link). Drives
   // the sticky banner in the sections tab and the active-row visual treatment.
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
-  // In-document navigation stack: every user-initiated navigation (tab change,
-  // Read click, PDF jump, citation deep-link) pushes the current place. The
-  // Back button (and Cmd/Ctrl+[) pops it.
-  type ReaderPlace = {
-    tab: "sections" | "pdfview" | "bookview" | "read"
-    sectionId: string | null
-    pdfPage: number | null
-  }
-  const historyRef = useRef<ReaderPlace[]>([])
-  const currentPlaceRef = useRef<ReaderPlace>({ tab: "sections", sectionId: null, pdfPage: null })
-  const [historyDepth, setHistoryDepth] = useState(0)
-  // S197: noteCount for "Compare my notes" button visibility
+  // noteCount for "Compare my notes" button visibility
   const [noteCount, setNoteCount] = useState(0)
-  // S151: in-document Cmd+F search state
+  // in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
   const [searchHitIndex, setSearchHitIndex] = useState(0)
   const [listLimit, setListLimit] = useState(200)
 
-  // S152: reading position — resume banner
+  // reading position — resume banner
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
   // ref tracking the last section_id we POSTed so we only POST when it changes
   const lastPostedSectionRef = useRef<string | null>(null)
   // throttle timer: one POST per 10 seconds max
   const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // S147: SelectionActionBar dialog state
-  const [selectionNoteOpen, setSelectionNoteOpen] = useState(false)
-  const [selectionNoteText, setSelectionNoteText] = useState("")
-  const [selectionNoteSourceRef, setSelectionNoteSourceRef] = useState<SourceRef | null>(null)
-  const [selectionNoteHeading, setSelectionNoteHeading] = useState<string | undefined>(undefined)
-  const [editingCreatedNote, setEditingCreatedNote] = useState<Note | null>(null)
-  const [selectionFlashcardOpen, setSelectionFlashcardOpen] = useState(false)
-  const [selectionFlashcardText, setSelectionFlashcardText] = useState("")
-  const [selectionFlashcardSourceRef, setSelectionFlashcardSourceRef] = useState<SourceRef | null>(null)
-  const [selectionFlashcardHeading, setSelectionFlashcardHeading] = useState<string | undefined>(undefined)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
+  const navigate = useNavigate()
   const setChatPreload = useAppStore((s) => s.setChatPreload)
 
-  // Audio mini-player state (S120) — only active for audio documents
+  // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [audioPlaying, setAudioPlaying] = useState(false)
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
 
-  // Video player state (S121) — only active for video documents
+  // Video player state — only active for video documents
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   const isAudio = doc?.content_type === "audio"
   const isVideo = doc?.content_type === "video"
   const isYouTube = isYouTubeDoc(doc ?? {})
 
-  // S111: Pre-calculate section map for O(1) lookups in highlight loops
+  // Pre-calculate section map for O(1) lookups in highlight loops
   const sectionMap = useMemo(() => {
     const m = new Map<string, SectionItem>()
     if (doc?.sections) {
@@ -2071,72 +200,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [doc?.sections])
 
-  // Parent -> direct children (ids), and total-descendant count per parent.
-  // Used by the collapsible hierarchy in the sections list.
-  const sectionTree = useMemo(() => {
-    const childrenOf = new Map<string, string[]>()
-    const descendantCount = new Map<string, number>()
-    const sections = doc?.sections ?? []
-    for (const s of sections) {
-      if (!s.parent_section_id) continue
-      const arr = childrenOf.get(s.parent_section_id) ?? []
-      arr.push(s.id)
-      childrenOf.set(s.parent_section_id, arr)
-    }
-    // Walk parent chain to accumulate descendant counts.
-    for (const s of sections) {
-      let pid = s.parent_section_id
-      while (pid) {
-        descendantCount.set(pid, (descendantCount.get(pid) ?? 0) + 1)
-        pid = sectionMap.get(pid)?.parent_section_id ?? null
-      }
-    }
-    return { childrenOf, descendantCount }
-  }, [doc?.sections, sectionMap])
+  const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload })
 
-  // Sections collapsed by default: any level<=2 parent that owns level>=3
-  // descendants in a long doc. Keeps the dashboard scannable for tech books
-  // without hiding structure for short articles.
-  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set())
-  const initialCollapsedKey = doc?.id
-  const initialCollapsedRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!doc?.sections || initialCollapsedRef.current === initialCollapsedKey) return
-    initialCollapsedRef.current = initialCollapsedKey ?? null
-    if (doc.sections.length <= 30) {
-      setCollapsedParents(new Set())
-      return
-    }
-    const next = new Set<string>()
-    for (const s of doc.sections) {
-      if (s.level > 2) continue
-      const kids = sectionTree.childrenOf.get(s.id) ?? []
-      const hasDeep = kids.some((cid) => (sectionMap.get(cid)?.level ?? 0) >= 3)
-      if (hasDeep) next.add(s.id)
-    }
-    setCollapsedParents(next)
-  }, [doc?.sections, initialCollapsedKey, sectionTree, sectionMap])
-
-  const toggleCollapsed = useCallback((sid: string) => {
-    setCollapsedParents((prev) => {
-      const next = new Set(prev)
-      if (next.has(sid)) next.delete(sid)
-      else next.add(sid)
-      return next
-    })
-  }, [])
-
-  const isSectionHidden = useCallback(
-    (sec: SectionItem): boolean => {
-      let pid = sec.parent_section_id
-      while (pid) {
-        if (collapsedParents.has(pid)) return true
-        pid = sectionMap.get(pid)?.parent_section_id ?? null
-      }
-      return false
-    },
-    [collapsedParents, sectionMap],
-  )
+  const {
+    sectionTree,
+    collapsedParents,
+    setCollapsedParents,
+    toggleCollapsed,
+    isSectionHidden,
+  } = useSectionListCollapse(doc?.sections, sectionMap, doc?.id)
 
   const audioUrl = (isAudio && !isYouTube) ? `${API_BASE}/documents/${documentId}/audio` : null
   const videoUrl = isVideo ? `${API_BASE}/documents/${documentId}/video` : null
@@ -2175,7 +247,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     void el.play()
   }
 
-  // Scroll to initialSectionId once document sections are loaded (S114)
+  // Scroll to initialSectionId once document sections are loaded
   useEffect(() => {
     if (!initialSectionId || !doc) return
     // Wait a tick for DOM to update after doc is available
@@ -2188,7 +260,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return () => clearTimeout(timer)
   }, [initialSectionId, doc])
 
-  // S151: Explicit scroll when switching to Read tab via citation link
+  // Explicit scroll when switching to Read tab via citation link
   useEffect(() => {
     if (leftTab === "read" && readSectionId) {
       const timer = setTimeout(() => {
@@ -2208,25 +280,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (next) setActiveSectionId(next)
   }, [feynmanSection, readSectionId, activeSectionGoals, openNoteEditor])
 
-  // Mirror the current place into a ref so navigation handlers can read it
-  // synchronously when pushing onto the history stack.
-  useEffect(() => {
-    currentPlaceRef.current = {
-      tab: leftTab,
-      sectionId: activeSectionId,
-      pdfPage: leftTab === "pdfview" ? pdfCurrentPage : null,
-    }
-  }, [leftTab, activeSectionId, pdfCurrentPage])
-
-  // Push the current place onto the history stack. Pass an override when the
-  // caller knows the "place to return to" better than current state — e.g. a
-  // Read button click should return to the clicked section, not to whatever
-  // activeSectionId happened to be when the click fired.
-  const pushHistory = useCallback((override?: Partial<ReaderPlace>) => {
-    const base = { ...currentPlaceRef.current }
-    historyRef.current.push({ ...base, ...override })
-    setHistoryDepth(historyRef.current.length)
-  }, [])
 
   // Scroll the active section card into view inside the sections list.
   // If any ancestor is collapsed, expand the chain first so the target row
@@ -2285,10 +338,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // intended scroll target in a ref and let an effect fire it after render.
   const pendingScrollRef = useRef<string | null>(null)
 
-  const goBack = useCallback(() => {
-    const prev = historyRef.current.pop()
-    setHistoryDepth(historyRef.current.length)
-    if (!prev) return
+  const navigateToPlace = useCallback((prev: ReaderPlace) => {
     if (prev.sectionId) {
       setActiveSectionId(prev.sectionId)
       setReadSectionId(prev.sectionId)
@@ -2307,7 +357,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       setBookViewVisited(true)
     }
     setLeftTab(prev.tab)
-  }, [])
+  }, [setLeftTab, setPdfViewVisited, setBookViewVisited])
+
+  const { historyDepth, pushHistory, goBack } = useReaderHistory({
+    currentPlace: {
+      tab: leftTab,
+      sectionId: activeSectionId,
+      pdfPage: leftTab === "pdfview" ? pdfCurrentPage : null,
+    },
+    navigateTo: navigateToPlace,
+  })
 
   // Fire the pending scroll once the Sections tab has actually rendered.
   // scrollActiveSectionIntoView itself retries with RAF until the row exists
@@ -2319,18 +378,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     scrollActiveSectionIntoView(sid)
   }, [leftTab, scrollActiveSectionIntoView])
 
-  // Cmd/Ctrl+[ — Back. Cmd/Ctrl+] — Forward (not supported yet, no-op).
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey)) return
-      if (e.key === "[") {
-        e.preventDefault()
-        goBack()
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [goBack])
 
   // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
   useEffect(() => {
@@ -2348,39 +395,36 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch notes for this document so dot indicators persist across reloads (S106)
+  // Fetch notes for this document so dot indicators persist across reloads
   const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
     queryKey: ["notes-for-doc", documentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/notes?document_id=${encodeURIComponent(documentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch notes")
-      return res.json() as Promise<NoteEntry[]>
-    },
+    queryFn: () => apiGet<NoteEntry[]>("/notes", { document_id: documentId }),
     staleTime: 30_000,
   })
 
-  // Fetch annotations for highlight reconstruction and panel (S111)
+  // Fetch annotations for highlight reconstruction and panel
   const {
     data: docAnnotations,
   } = useQuery<AnnotationItem[]>({
     queryKey: ["annotations-for-doc", documentId],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/annotations?document_id=${encodeURIComponent(documentId)}`)
-      if (!res.ok) throw new Error("Failed to fetch annotations")
-      return res.json() as Promise<AnnotationItem[]>
-    },
+    queryFn: () =>
+      apiGet<AnnotationItem[]>("/annotations", { document_id: documentId }),
     staleTime: 30_000,
   })
 
-  // Fetch objective progress for mini rings on section headers (S143)
+  // Fetch objective progress for mini rings on section headers
   const { data: progressData } = useQuery<{
     by_chapter: { section_id: string; progress_pct: number }[]
   }>({
     queryKey: ["doc-progress", documentId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/documents/${documentId}/progress`)
-      if (!res.ok) return { by_chapter: [] }
-      return res.json() as Promise<{ by_chapter: { section_id: string; progress_pct: number }[] }>
+      try {
+        return await apiGet<{
+          by_chapter: { section_id: string; progress_pct: number }[]
+        }>(`/documents/${documentId}/progress`)
+      } catch {
+        return { by_chapter: [] }
+      }
     },
     staleTime: 60_000,
   })
@@ -2390,13 +434,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     [progressData],
   )
 
-  // S151: derived set of section IDs that have a search hit (O(1) lookup)
+  // derived set of section IDs that have a search hit (O(1) lookup)
   const searchHitSectionIds = useMemo(
     () => new Set(searchResults.map((r) => r.section_id)),
     [searchResults],
   )
 
-  // S131: Group annotations by section for O(1) retrieval in section list
+  // Group annotations by section for O(1) retrieval in section list
   const annotationsBySection = useMemo(() => {
     const m = new Map<string, AnnotationItem[]>()
     if (docAnnotations) {
@@ -2409,7 +453,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [docAnnotations])
 
-  // S151: Pre-calculate search snippet map for O(1) retrieval
+  // Pre-calculate search snippet map for O(1) retrieval
   const searchSnippetMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const r of searchResults) {
@@ -2418,42 +462,26 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [searchResults])
 
-  // S151: Cmd+F / Ctrl+F keydown listener — opens inline search bar
-  useEffect(() => {
-    function handleCmdF(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
-        e.preventDefault()
-        setSearchOpen(true)
-      }
-    }
-    document.addEventListener("keydown", handleCmdF)
-    return () => document.removeEventListener("keydown", handleCmdF)
+  const closeReaderSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchResults([])
+    setSearchHitIndex(0)
   }, [])
 
-  // S151: Escape closes the search bar when it is open
-  useEffect(() => {
-    if (!searchOpen) return
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setSearchOpen(false)
-        setSearchResults([])
-        setSearchHitIndex(0)
-      }
-    }
-    document.addEventListener("keydown", handleEsc)
-    return () => document.removeEventListener("keydown", handleEsc)
-  }, [searchOpen])
+  const openReaderSearch = useCallback(() => setSearchOpen(true), [])
 
-  // S151: close search bar when switching away from the sections tab
-  useEffect(() => {
-    if (leftTab !== "sections" && searchOpen) {
-      setSearchOpen(false)
-      setSearchResults([])
-      setSearchHitIndex(0)
-    }
-  }, [leftTab, searchOpen])
+  useReaderKeyboardShortcuts({
+    onBack: goBack,
+    onOpenSearch: openReaderSearch,
+    onCloseSearch: closeReaderSearch,
+    searchOpen,
+  })
 
-  // S151: scroll current hit into view when hitIndex or results change
+  useEffect(() => {
+    if (leftTab !== "sections" && searchOpen) closeReaderSearch()
+  }, [leftTab, searchOpen, closeReaderSearch])
+
+  // scroll current hit into view when hitIndex or results change
   useEffect(() => {
     if (searchResults.length === 0) return
     const targetId = searchResults[searchHitIndex]?.section_id
@@ -2465,18 +493,21 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   function handleStudyClick(sid: string) {
     setActiveDocument(documentId)
     setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
+    void navigate("/study")
   }
 
-  // Fetch FSRS fragility heatmap for section coloring (S116)
+  // Fetch FSRS fragility heatmap for section coloring
   const { data: heatmapData } = useQuery<Record<string, SectionHeatmapItem>>({
     queryKey: ["section-heatmap", documentId],
     queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/study/section-heatmap?document_id=${encodeURIComponent(documentId)}`
-      )
-      if (!res.ok) return {}
-      const data = (await res.json()) as { heatmap: Record<string, SectionHeatmapItem> }
-      return data.heatmap
+      try {
+        const data = await apiGet<{
+          heatmap: Record<string, SectionHeatmapItem>
+        }>("/study/section-heatmap", { document_id: documentId })
+        return data.heatmap
+      } catch {
+        return {}
+      }
     },
     staleTime: 60_000,
   })
@@ -2486,18 +517,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const { data: lastPracticedBySection } = useQuery<Map<string, string>>({
     queryKey: ["feynman-sessions-by-section", documentId],
     queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/feynman/sessions?document_id=${encodeURIComponent(documentId)}`
-      )
-      if (!res.ok) return new Map()
-      const sessions = (await res.json()) as Array<{ section_id: string | null; created_at: string }>
-      const byId = new Map<string, string>()
-      // Sessions are returned in created_at desc; first hit per section wins.
-      for (const s of sessions) {
-        if (!s.section_id) continue
-        if (!byId.has(s.section_id)) byId.set(s.section_id, s.created_at)
+      try {
+        const sessions = await apiGet<
+          Array<{ section_id: string | null; created_at: string }>
+        >("/feynman/sessions", { document_id: documentId })
+        const byId = new Map<string, string>()
+        // Sessions are returned in created_at desc; first hit per section wins.
+        for (const s of sessions) {
+          if (!s.section_id) continue
+          if (!byId.has(s.section_id)) byId.set(s.section_id, s.created_at)
+        }
+        return byId
+      } catch {
+        return new Map<string, string>()
       }
-      return byId
     },
     staleTime: 30_000,
   })
@@ -2511,26 +544,22 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Track reading progress via IntersectionObserver (3-second dwell per section)
   useReadingProgress(documentId, doc?.sections.length ?? 0)
 
-  // S152: fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
+  // fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
   useEffect(() => {
     if (!doc) return
     const dismissedKey = `resume-dismissed-${documentId}`
     if (sessionStorage.getItem(dismissedKey)) return
-    void fetch(`${API_BASE}/documents/${documentId}/position`)
-      .then((r) => {
-        if (r.status === 404) return null
-        if (!r.ok) return null
-        return r.json() as Promise<ReadingPosition>
-      })
+    void apiGet<ReadingPosition>(`/documents/${documentId}/position`)
       .then((pos) => {
         if (pos?.last_section_id) setResumePosition(pos)
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) return
         // banner failure is silent
       })
   }, [documentId, doc])
 
-  // S152: IntersectionObserver — track the topmost visible section and throttle-POST position
+  // IntersectionObserver — track the topmost visible section and throttle-POST position
   useEffect(() => {
     if (!doc || doc.sections.length === 0) return
     const sectionElements = Array.from(
@@ -2543,15 +572,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
       positionThrottleRef.current = setTimeout(() => {
         const section = doc!.sections.find((s) => s.id === sectionId)
-        void fetch(`${API_BASE}/documents/${documentId}/position`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            last_section_id: sectionId,
-            last_section_heading: section?.heading ?? null,
-            last_pdf_page: null,
-            last_epub_chapter_index: null,
-          }),
+        void apiPost(`/documents/${documentId}/position`, {
+          last_section_id: sectionId,
+          last_section_heading: section?.heading ?? null,
+          last_pdf_page: null,
+          last_epub_chapter_index: null,
         }).catch(() => {})
         lastPostedSectionRef.current = sectionId
       }, 10_000)
@@ -2625,68 +650,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setSheetOpen(true)
   }, [])
 
-  const handleSelectionAddToNote = useCallback((text: string, sourceRef: SourceRef) => {
-    const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
-    setSelectionNoteText(text)
-    setSelectionNoteSourceRef(sourceRef)
-    setSelectionNoteHeading(heading)
-    setSelectionNoteOpen(true)
-  }, [sectionMap])
-
-  const handleSelectionCreateFlashcard = useCallback((text: string, sourceRef: SourceRef) => {
-    const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
-    setSelectionFlashcardText(text)
-    setSelectionFlashcardSourceRef(sourceRef)
-    setSelectionFlashcardHeading(heading)
-    setSelectionFlashcardOpen(true)
-  }, [sectionMap])
-
-  const handleSelectionAskInChat = useCallback((text: string) => {
-    setChatPreload({ text: `Explain this excerpt:\n\n> ${text}`, documentId, autoSubmit: true })
-    window.dispatchEvent(new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }))
-  }, [documentId, setChatPreload])
-
-  const handleSelectionHighlight = useCallback(async (text: string, sourceRef: SourceRef, color: AnnotationItem["color"]) => {
-    try {
-      const res = await fetch(`${API_BASE}/annotations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sourceRef.sectionId,
-          selected_text: text,
-          color,
-          page_number: sourceRef.pageNumber,
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to save highlight")
-      void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
-      toast.success("Highlight saved")
-    } catch (err) {
-      toast.error("Could not save highlight")
-    }
-  }, [documentId, qc])
-
-  const handleSelectionClip = useCallback(async (text: string, sourceRef: SourceRef) => {
-    try {
-      const res = await fetch(`${API_BASE}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          document_id: documentId,
-          section_id: sourceRef.sectionId,
-          content: `> ${text}`,
-          tags: ["clipped"],
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to clip")
-      void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-      toast.success("Clipped to notes")
-    } catch (err) {
-      toast.error("Could not clip to notes")
-    }
-  }, [documentId, qc])
-
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
     pushHistory()
     if (doc?.format === "pdf" && ann.page_number) {
@@ -2703,30 +666,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const handleDeleteHighlight = useCallback(async (id: string) => {
     if (!confirm("Remove this highlight?")) return
     try {
-      const res = await fetch(`${API_BASE}/annotations/${id}`, { method: "DELETE" })
-      if (!res.ok) throw new Error("Delete failed")
+      await apiDelete(`/annotations/${id}`)
       void qc.invalidateQueries({ queryKey: ["annotations-for-doc", documentId] })
       toast.success("Highlight removed")
-    } catch (err) {
+    } catch {
       toast.error("Could not remove highlight")
     }
   }, [documentId, qc])
-
-  useEffect(() => {
-    if (leftTab === "pdfview") {
-      if (doc?.format !== "pdf") {
-        setLeftTab("sections")
-      } else {
-        setPdfViewVisited(true)
-      }
-    } else if (leftTab === "bookview") {
-      if (doc?.format !== "epub") {
-        setLeftTab("sections")
-      } else {
-        setBookViewVisited(true)
-      }
-    }
-  }, [leftTab, doc?.format])
 
   useEffect(() => {
     if (!highlightsPanelOpen) return
@@ -2742,7 +688,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [highlightsPanelOpen])
 
 
-  // S131: Use virtualization for the section list if it's very large.
+  // Use virtualization for the section list if it's very large.
   const renderedSectionItems = useMemo(() => {
     if (!doc?.sections) return null
     // Filter out sections whose ancestor is collapsed *before* slicing, so
@@ -2891,7 +837,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Back button + Compare my notes (S197) */}
+      {/* Back button + Compare my notes */}
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
           <button
@@ -2955,7 +901,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 </div>
               </div>
 
-              {/* S152: Resume banner — shown once per session when a saved position exists */}
+              {/* Resume banner — shown once per session when a saved position exists */}
               {resumePosition && (
                 <ResumeBanner
                   position={resumePosition}
@@ -3044,7 +990,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             </div>
           </div>
 
-          {/* S146: PDF View — lazy-mounted, hidden when not active to preserve page state */}
+          {/* PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (() => {
             let targetPdfPage = initialPage
             if (!targetPdfPage && initialSectionId) {
@@ -3058,7 +1004,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             )
           })()}
 
-          {/* S149: Book View — lazy-mounted for EPUB documents */}
+          {/* Book View — lazy-mounted for EPUB documents */}
           {bookViewVisited && (
             <div className={cn("flex-1 overflow-hidden", leftTab !== "bookview" && "hidden")}>
               <EPUBViewer documentId={documentId} />
@@ -3079,16 +1025,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             )}
           </div>
 
-          {/* S147: SelectionActionBar — fires on selections in both section list and PDF viewer */}
+          {/* SelectionActionBar — fires on selections in both section list and PDF viewer */}
           <SelectionActionBar
             containerRef={readerContainerRef}
             resolveSourceRef={resolveSourceRef}
             onExplain={handleExplain}
-            onAddToNote={handleSelectionAddToNote}
-            onCreateFlashcard={handleSelectionCreateFlashcard}
-            onAskInChat={handleSelectionAskInChat}
-            onHighlight={(text, sourceRef, color) => void handleSelectionHighlight(text, sourceRef, color)}
-            onClip={(text, sourceRef) => void handleSelectionClip(text, sourceRef)}
+            onAddToNote={selection.handleAddToNote}
+            onCreateFlashcard={selection.handleCreateFlashcard}
+            onAskInChat={selection.handleAskInChat}
+            onHighlight={(text, sourceRef, color) => void selection.handleHighlight(text, sourceRef, color)}
+            onClip={(text, sourceRef) => void selection.handleClip(text, sourceRef)}
           />
 
           {/* Section list */}
@@ -3135,7 +1081,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   </p>
                 )}
                 <div className="px-6 pt-3">
-                  {/* S151: Inline search bar — shown when Cmd+F is pressed */}
+                  {/* Inline search bar — shown when Cmd+F is pressed */}
                   {searchOpen && (
                     <InDocSearchBar
                       documentId={documentId}
@@ -3213,7 +1159,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
         {/* Right panel — 40%, sticky */}
         <div className="w-2/5 overflow-auto p-6">
-          {/* Video player for video documents (S121) */}
+          {/* Video player for video documents */}
           {isVideo && videoUrl && (
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
           )}
@@ -3242,7 +1188,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         </div>
       </div>
 
-      {/* Audio mini-player — sticky bottom bar, audio documents only (S120) */}
+      {/* Audio mini-player — sticky bottom bar, audio documents only */}
       {isAudio && audioUrl && (
         <AudioMiniPlayer
           audioRef={audioRef}
@@ -3262,7 +1208,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         />
       )}
 
-      {/* Feynman dialog (S144) */}
+      {/* Feynman dialog */}
       {feynmanSection && (
         <FeynmanDialog
           documentId={documentId}
@@ -3281,45 +1227,45 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         />
       )}
 
-      {/* S147: Note creation dialog — pre-filled with selected text blockquote */}
+      {/* Note creation dialog — pre-filled with selected text blockquote */}
       <NoteCreationDialog
-        open={selectionNoteOpen}
-        selectedText={selectionNoteText}
-        sourceRef={selectionNoteSourceRef}
-        sectionHeading={selectionNoteHeading}
-        onClose={() => setSelectionNoteOpen(false)}
+        open={selection.noteOpen}
+        selectedText={selection.noteText}
+        sourceRef={selection.noteSourceRef}
+        sectionHeading={selection.noteHeading}
+        onClose={selection.closeNote}
         onSaved={(note: Note) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
           void qc.invalidateQueries({ queryKey: ["reader-notes"] })
           void qc.invalidateQueries({ queryKey: ["notes"] })
           void qc.invalidateQueries({ queryKey: ["notes-groups"] })
           void qc.invalidateQueries({ queryKey: ["collections"] })
-          setEditingCreatedNote(note)
+          selection.setEditingCreatedNote(note)
         }}
       />
 
       {/* NoteEditorDialog -- opens after NoteCreationDialog saves for full editing */}
       <NoteEditorDialog
-        note={editingCreatedNote}
-        onClose={() => setEditingCreatedNote(null)}
+        note={selection.editingCreatedNote}
+        onClose={selection.clearEditingCreatedNote}
         onSaved={(_updated) => {
           void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
           void qc.invalidateQueries({ queryKey: ["reader-notes"] })
           void qc.invalidateQueries({ queryKey: ["notes"] })
           void qc.invalidateQueries({ queryKey: ["notes-groups"] })
           void qc.invalidateQueries({ queryKey: ["collections"] })
-          setEditingCreatedNote(null)
+          selection.clearEditingCreatedNote()
         }}
       />
 
-      {/* S147: Flashcard generation dialog — scoped to selected text context */}
+      {/* Flashcard generation dialog — scoped to selected text context */}
       <DocumentFlashcardDialog
-        open={selectionFlashcardOpen}
+        open={selection.flashcardOpen}
         documentId={documentId}
-        sectionId={selectionFlashcardSourceRef?.sectionId}
-        sectionHeading={selectionFlashcardHeading}
-        context={selectionFlashcardText}
-        onClose={() => setSelectionFlashcardOpen(false)}
+        sectionId={selection.flashcardSourceRef?.sectionId}
+        sectionHeading={selection.flashcardHeading}
+        context={selection.flashcardText}
+        onClose={selection.closeFlashcard}
       />
 
       {/* Explanation sheet */}

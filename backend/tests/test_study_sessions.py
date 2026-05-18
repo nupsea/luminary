@@ -13,9 +13,7 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import FlashcardModel, ReviewEventModel, StudySessionModel
 
-# ---------------------------------------------------------------------------
 # Test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -42,9 +40,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_session(
@@ -103,9 +99,7 @@ def _make_review_event(
     )
 
 
-# ---------------------------------------------------------------------------
 # GET /study/sessions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -221,9 +215,7 @@ async def test_list_sessions_accuracy_pct(test_db):
     assert items[0]["cards_correct"] == 7
 
 
-# ---------------------------------------------------------------------------
 # GET /study/sessions/{session_id}/cards
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -43,9 +43,7 @@ FIXTURES_FULL_DIR = Path(__file__).parent / "fixtures" / "full"
 pytestmark = pytest.mark.slow
 
 
-# ---------------------------------------------------------------------------
 # Isolated fixture: real SQLite file, real LanceDB, real Kuzu, real ML services
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -104,9 +102,7 @@ async def full_integration_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Helper: run full ingestion (real ML, mocked LiteLLM classify only)
-# ---------------------------------------------------------------------------
 
 
 async def _ingest_full(
@@ -161,9 +157,7 @@ async def _ingest_full(
     return doc_id
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow

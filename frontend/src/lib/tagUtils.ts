@@ -77,9 +77,7 @@ export function buildAutocompleteUrl(apiBase: string, q: string): string {
   return `${apiBase}/tags/autocomplete?q=${encodeURIComponent(q)}`
 }
 
-// ---------------------------------------------------------------------------
-// Tag tree search / filter (S190)
-// ---------------------------------------------------------------------------
+// Tag tree search / filter
 
 export interface FilteredTagTreeItem extends TagTreeItem {
   /** True if this node itself matches the search query */
@@ -147,9 +145,7 @@ export function highlightMatch(
   return segments
 }
 
-// ---------------------------------------------------------------------------
-// Naming convention normalizers (S199) -- must mirror backend naming.py exactly
-// ---------------------------------------------------------------------------
+// Naming convention normalizers — must mirror backend naming.py exactly
 
 /**
  * Normalize a collection name to UPPER-CASE with hyphen separators.

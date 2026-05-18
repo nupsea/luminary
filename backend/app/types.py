@@ -38,9 +38,7 @@ class ScoredChunk:
     speaker: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Chat Router types (V2 agentic chat — S77+)
-# ---------------------------------------------------------------------------
+# Chat Router types
 
 IntentType = Literal[
     "summary",
@@ -91,40 +89,38 @@ class ChatState(TypedDict):
     # Sliding-window conversation history (last N turns, role/content dicts)
     conversation_history: list[dict]
 
-    # Confidence-adaptive retry fields (S81)
+    # Confidence-adaptive retry fields
     # retry_attempted: True after augment_node runs — prevents a second retry loop.
     # primary_strategy: node name that handled the first-pass retrieval, used by
     #   augment_node to select the complementary strategy.
     retry_attempted: bool
     primary_strategy: str | None
 
-    # Image retrieval (S134): image_ids matched by similarity search on image descriptions.
+    # Image retrieval: image_ids matched by similarity search on image descriptions.
     # Set by search_node; included in the SSE done event so Chat.tsx can render thumbnails.
     image_ids: list[str]
 
-    # Web augmentation (S142): optional per-conversation web search.
+    # Web augmentation: optional per-conversation web search.
     # web_snippets is transient per graph invocation -- never written to DB (privacy invariant).
     web_enabled: bool
     web_calls_used: int
     web_snippets: list[dict]
 
-    # S148: chunk-derived source citations (SourceCitation dicts) collected by synthesize_node.
+    # chunk-derived source citations (SourceCitation dicts) collected by synthesize_node.
     # Separate from 'citations' (LLM-extracted prose citations) to avoid field collision.
     # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
     source_citations: list[dict]
 
-    # S158: retrieval transparency metadata set by synthesize_node.
+    # retrieval transparency metadata set by synthesize_node.
     # Emitted as a 'transparency' SSE event by stream_answer() after token streaming.
     transparency: "TransparencyInfo | None"
 
-    # S158: flag set by augment_node to indicate context was augmented after low confidence.
+    # flag set by augment_node to indicate context was augmented after low confidence.
     # Checked by synthesize_node to set transparency.augmented = True.
     transparency_augmented: bool
 
 
-# ---------------------------------------------------------------------------
-# Retrieval transparency (S158)
-# ---------------------------------------------------------------------------
+# Retrieval transparency
 
 
 class TransparencyInfo(TypedDict):
@@ -140,9 +136,7 @@ class TransparencyInfo(TypedDict):
     augmented: bool  # True if augment_node ran (context extended after low confidence)
 
 
-# ---------------------------------------------------------------------------
-# Notes search (S91)
-# ---------------------------------------------------------------------------
+# Notes search
 
 
 @dataclass
@@ -156,21 +150,17 @@ class NoteSearchResult:
     source: Literal["fts", "vector", "both"]
 
 
-# ---------------------------------------------------------------------------
-# Gap detection (S94)
-# ---------------------------------------------------------------------------
+# Gap detection
 
 
 class GapReport(TypedDict):
     gaps: list[str]
     covered: list[str]
     query_used: str
-    weak: list[str]  # S145: concepts in notes with mastery < 0.3
+    weak: list[str]  # concepts in notes with mastery < 0.3
 
 
-# ---------------------------------------------------------------------------
-# Web search (S142)
-# ---------------------------------------------------------------------------
+# Web search
 
 
 class WebSnippet(TypedDict):
@@ -182,9 +172,7 @@ class WebSnippet(TypedDict):
     domain: str  # extracted domain for [Web: domain.com] label
 
 
-# ---------------------------------------------------------------------------
-# Citation deep-links (S148)
-# ---------------------------------------------------------------------------
+# Citation deep-links
 
 
 class SourceCitation(TypedDict):
@@ -196,12 +184,10 @@ class SourceCitation(TypedDict):
     section_id: str | None
     section_heading: str
     pdf_page_number: int | None
-    section_preview_snippet: str  # S157: first 150 chars of chunk text for hover tooltip
+    section_preview_snippet: str  # first 150 chars of chunk text for hover tooltip
 
 
-# ---------------------------------------------------------------------------
-# Learning path (S117)
-# ---------------------------------------------------------------------------
+# Learning path
 
 
 @dataclass
@@ -220,9 +206,7 @@ class LearningPathResponse(TypedDict):
     edges: list[dict]  # list of {from_entity, to_entity, confidence}
 
 
-# ---------------------------------------------------------------------------
-# Study path (S139)
-# ---------------------------------------------------------------------------
+# Study path
 
 
 @dataclass
@@ -253,9 +237,7 @@ class StartConceptsResponse(TypedDict):
     concepts: list[StartConceptItem]  # up to 3, sorted by shortest chain then fewest cards
 
 
-# ---------------------------------------------------------------------------
-# Concept mastery (S145)
-# ---------------------------------------------------------------------------
+# Concept mastery
 
 
 @dataclass
@@ -288,9 +270,7 @@ class MasteryHeatmapResponse(TypedDict):
     cells: list[HeatmapCell]
 
 
-# ---------------------------------------------------------------------------
-# Flashcard coverage audit (S153)
-# ---------------------------------------------------------------------------
+# Flashcard coverage audit
 
 
 class BloomGap(TypedDict):
@@ -313,9 +293,7 @@ class CoverageReport(TypedDict):
     gaps: list[BloomGap]
 
 
-# ---------------------------------------------------------------------------
-# Teach-back rubric (S156)
-# ---------------------------------------------------------------------------
+# Teach-back rubric
 
 
 class TeachBackRubricDimension(TypedDict):
@@ -334,9 +312,7 @@ class TeachBackRubric(TypedDict):
     clarity: TeachBackRubricDimension
 
 
-# ---------------------------------------------------------------------------
-# Deck Health Report (S160)
-# ---------------------------------------------------------------------------
+# Deck health report
 
 
 class HealthSection(TypedDict):

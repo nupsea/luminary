@@ -8,7 +8,7 @@
  * - Native drag-and-drop to move notes between groups
  * - "Apply Plan" -> POST /notes/cluster/suggestions/batch-accept
  * - "Dismiss" -> reject all suggestions individually
- * - S207: "Naming Fixes" section with per-row accept/reject for tag/collection renames
+ * - "Naming Fixes" section with per-row accept/reject for tag/collection renames
  */
 
 import { useState, useCallback, useEffect } from "react"
@@ -21,11 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Check, GripVertical, X, ArrowRight } from "lucide-react"
-import { API_BASE } from "@/lib/config"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import { apiPost } from "@/lib/apiClient"
 
 interface NotePreview {
   note_id: string
@@ -75,41 +71,24 @@ interface Props {
   onNamingFixesApplied?: (result: { tags_renamed: number; collections_renamed: number; tags_merged: number }) => void
 }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
-async function batchAccept(
+const batchAccept = (
   items: { suggestion_id: string; name_override: string | null; note_ids: string[] }[],
-): Promise<{ collection_ids: string[] }> {
-  const res = await fetch(`${API_BASE}/notes/cluster/suggestions/batch-accept`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
-  })
-  if (!res.ok) throw new Error(`batch-accept failed: ${res.status}`)
-  return res.json() as Promise<{ collection_ids: string[] }>
+): Promise<{ collection_ids: string[] }> =>
+  apiPost<{ collection_ids: string[] }>(
+    "/notes/cluster/suggestions/batch-accept",
+    { items },
+  )
+
+const rejectSuggestion = (id: string): Promise<void> => {
+  // fire-and-forget like the original implementation
+  void apiPost(`/notes/cluster/suggestions/${id}/reject`).catch(() => {})
+  return Promise.resolve()
 }
 
-async function rejectSuggestion(id: string): Promise<void> {
-  await fetch(`${API_BASE}/notes/cluster/suggestions/${id}/reject`, { method: "POST" })
-}
-
-async function applyNamingFixes(
+const applyNamingFixes = (
   fixes: { type: string; id: string; current_name: string; suggested_name: string; action: string }[],
-): Promise<{ tags_renamed: number; collections_renamed: number; tags_merged: number }> {
-  const res = await fetch(`${API_BASE}/notes/cluster/normalize-apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fixes }),
-  })
-  if (!res.ok) throw new Error(`normalize-apply failed: ${res.status}`)
-  return res.json() as Promise<{ tags_renamed: number; collections_renamed: number; tags_merged: number }>
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+): Promise<{ tags_renamed: number; collections_renamed: number; tags_merged: number }> =>
+  apiPost("/notes/cluster/normalize-apply", { fixes })
 
 export function OrganizationPlanDialog({
   open,
@@ -403,10 +382,6 @@ export function OrganizationPlanDialog({
     </Dialog>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function initGroups(suggestions: ClusterSuggestion[]): GroupState[] {
   return suggestions.map((s) => ({

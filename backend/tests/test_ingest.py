@@ -12,9 +12,7 @@ from app.main import app
 from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import IngestionState, _classify, chunk_node
 
-# ---------------------------------------------------------------------------
 # Classification heuristic unit tests (pure functions, no DB)
-# ---------------------------------------------------------------------------
 
 
 def test_classify_conversation_by_speaker_pattern():
@@ -49,9 +47,7 @@ def test_classify_defaults_to_notes():
     assert _classify("some random text about everyday life", [], 100, "txt") == "notes"
 
 
-# ---------------------------------------------------------------------------
 # Test DB fixture — isolates each test with an in-memory SQLite database
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -80,9 +76,7 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # Workflow node tests
-# ---------------------------------------------------------------------------
 
 
 async def test_chunk_node_writes_to_db(test_db):
@@ -145,9 +139,7 @@ async def test_chunk_node_writes_to_db(test_db):
     assert chunks_in_db[0].document_id == doc_id
 
 
-# ---------------------------------------------------------------------------
 # HTTP endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_ingest_endpoint_returns_processing(test_db, tmp_path):

@@ -22,9 +22,7 @@ from app.models import ChunkModel, DocumentModel
 from app.services.flashcard import FlashcardService
 from app.types import ScoredChunk
 
-# ---------------------------------------------------------------------------
 # Isolated test DB fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -92,9 +90,7 @@ def _make_scored_chunk(chunk_id: str, doc_id: str) -> ScoredChunk:
     )
 
 
-# ---------------------------------------------------------------------------
 # Deterministic graph service stubs
-# ---------------------------------------------------------------------------
 
 
 class _GraphWithPairs:
@@ -137,9 +133,7 @@ class _Retriever:
         return [self._chunk]
 
 
-# ---------------------------------------------------------------------------
 # Service unit tests
-# ---------------------------------------------------------------------------
 
 
 async def test_generate_from_graph_creates_cards_for_related_pair(test_db):
@@ -238,9 +232,7 @@ async def test_generate_from_graph_uses_co_occurs_fallback(test_db):
     assert cards[0].source == "graph"
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 async def test_post_generate_from_graph_returns_201(test_db):

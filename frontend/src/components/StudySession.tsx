@@ -35,11 +35,9 @@ import {
   submitReview,
   fetchSourceContext,
 } from "@/lib/studyApi"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
-// ---------------------------------------------------------------------------
-// S155: SourceContextPanel
-// ---------------------------------------------------------------------------
+// SourceContextPanel
 
 interface SourceContextPanelProps {
   context: SourceContext
@@ -109,9 +107,12 @@ function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// S138: SourcePanel
-// ---------------------------------------------------------------------------
+// SourcePanel
+
+// Local: a 7-field projection of WebReferenceItem with `source_quality`
+// narrowed to a literal union for the QUALITY_LABEL badge map below.
+// Aliasing to the generated schema would relax that to `string` and
+// break the indexed lookup.
 
 type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
 
@@ -153,11 +154,11 @@ function SourcePanel({ card }: { card: Flashcard }) {
 
   const { data, isLoading, isError } = useQuery<SectionReferencesResponse>({
     queryKey: ["section-references", card.section_id],
-    queryFn: async () => {
-      if (!card.section_id) return { section_id: "", references: [] }
-      const res = await fetch(`${API_BASE}/references/sections/${card.section_id}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.json() as Promise<SectionReferencesResponse>
+    queryFn: () => {
+      if (!card.section_id) return Promise.resolve({ section_id: "", references: [] })
+      return apiGet<SectionReferencesResponse>(
+        `/references/sections/${card.section_id}`,
+      )
     },
     enabled: !!card.section_id,
     staleTime: 5 * 60 * 1000,
@@ -227,9 +228,7 @@ function SourcePanel({ card }: { card: Flashcard }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // Rating buttons
-// ---------------------------------------------------------------------------
 
 const RATINGS: { label: string; value: Rating; className: string }[] = [
   { label: "Again", value: "again", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200" },
@@ -238,9 +237,7 @@ const RATINGS: { label: string; value: Rating; className: string }[] = [
   { label: "Easy", value: "easy", className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" },
 ]
 
-// ---------------------------------------------------------------------------
 // Progress bar
-// ---------------------------------------------------------------------------
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100)
@@ -260,9 +257,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // FlashCard (flippable)
-// ---------------------------------------------------------------------------
 
 interface FlashCardProps {
   card: Flashcard
@@ -301,9 +296,7 @@ function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
   )
 }
 
-// ---------------------------------------------------------------------------
 // SessionComplete screen
-// ---------------------------------------------------------------------------
 
 interface SessionCompleteProps {
   reviewed: number
@@ -363,9 +356,7 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNex
   )
 }
 
-// ---------------------------------------------------------------------------
 // StudySession -- main component (flashcard-only)
-// ---------------------------------------------------------------------------
 
 interface StudySessionProps {
   initial: UseStudySessionInput["initial"]
@@ -422,8 +413,12 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
       // reschedules the card for a future session -- not that we re-queue it
       // inline here, which would inflate the session beyond the planned size.
 
-      // S155: lazy-fetch source context after "again" or "hard"
-      if (rating === "again" || rating === "hard") {
+      // Source context / SourcePanel flow only applies to regular (non-cloze) cards.
+      // Cloze cards always advance immediately — the source panels live in the else
+      // branch and are never rendered while a cloze card is active.
+      const isCloze = card.flashcard_type === "cloze"
+
+      if (!isCloze && (rating === "again" || rating === "hard")) {
         if (!dismissedSourceContextIds.current.has(card.id)) {
           setSourceContextLoading(true)
           const ctx = await fetchSourceContext(card.id)
@@ -446,7 +441,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         return
       }
 
-      // "good" / "easy": advance immediately
+      // Advance immediately: cloze cards (all ratings) + regular cards ("good"/"easy")
       const nextIdx = currentIndex + 1
       if (nextIdx >= queue.length) {
         await completeSession()
@@ -548,7 +543,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
 
       <ProgressBar done={reviewed} total={total} />
 
-      {/* S154: dispatch to ClozeCard for cloze flashcard_type */}
+      {/* dispatch to ClozeCard for cloze flashcard_type */}
       {currentCard.flashcard_type === "cloze" &&
       currentCard.cloze_text !== null &&
       /\{\{.+?\}\}/.test(currentCard.cloze_text) ? (
@@ -605,7 +600,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
             </div>
           ) : null}
 
-          {/* S155: Source context panel */}
+          {/* Source context panel */}
           {(lastRating === "again" || lastRating === "hard") && sourceContextLoading && (
             <div className="w-full max-w-2xl rounded-lg border border-border bg-muted/30 p-4">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">

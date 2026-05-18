@@ -36,9 +36,7 @@ def _base_state(**overrides) -> dict:
     return state
 
 
-# ---------------------------------------------------------------------------
 # web_augment_node -- firing conditions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -144,9 +142,7 @@ async def test_web_augment_node_accumulates_web_calls():
     assert r4 == {}  # rate-limited
 
 
-# ---------------------------------------------------------------------------
 # _route_after_confidence_gate with web_enabled
-# ---------------------------------------------------------------------------
 
 
 def test_route_after_confidence_gate_routes_to_web_augment_when_enabled():
@@ -182,9 +178,7 @@ def test_route_after_confidence_gate_routes_to_web_augment_respects_rate_limit()
     assert route == "augment_node"
 
 
-# ---------------------------------------------------------------------------
 # Version mismatch prompt extension in synthesize_node
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -218,12 +212,12 @@ async def test_version_mismatch_prompt_extension_fires_when_web_snippets_present
     # Patch pack_context and DB calls so synthesize_node can run without real DB
     with (
         patch(
-            "app.runtime.chat_graph._fetch_doc_titles_for_chunks",
+            "app.runtime.chat_nodes.synthesize._fetch_doc_titles_for_chunks",
             new_callable=AsyncMock,
             return_value={"doc1": "Python in Practice"},
         ),
         patch(
-            "app.runtime.chat_graph._fetch_contradiction_context",
+            "app.runtime.chat_nodes.synthesize._fetch_contradiction_context",
             new_callable=AsyncMock,
             return_value="",
         ),
@@ -262,12 +256,12 @@ async def test_version_mismatch_prompt_not_added_when_no_web_snippets():
 
     with (
         patch(
-            "app.runtime.chat_graph._fetch_doc_titles_for_chunks",
+            "app.runtime.chat_nodes.synthesize._fetch_doc_titles_for_chunks",
             new_callable=AsyncMock,
             return_value={"doc1": "Python in Practice"},
         ),
         patch(
-            "app.runtime.chat_graph._fetch_contradiction_context",
+            "app.runtime.chat_nodes.synthesize._fetch_contradiction_context",
             new_callable=AsyncMock,
             return_value="",
         ),

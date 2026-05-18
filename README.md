@@ -41,7 +41,7 @@ cd luminary
 make luminary
 ```
 
-`make luminary` installs frontend dependencies (first run only), starts the backend (port 7820) and frontend (port 5173), and prints a ready banner when everything is up.
+`make luminary` installs or refreshes frontend dependencies when `package.json` or `package-lock.json` changes, starts the backend (port 7820) and frontend (port 5173), and prints a ready banner when everything is up.
 
 Open **http://localhost:5173** when you see:
 
@@ -76,6 +76,11 @@ Side-by-side PDF viewer with text search, section navigation, and Key Points sum
 ### Notes -- write and search
 
 Markdown editor with live preview. Notes are indexed alongside your documents and appear in search results.
+
+Notes also support diagrams:
+- Use Mermaid fenced blocks for text-authored architecture and design diagrams.
+- Click **Draw** in the note editor to open the embedded Excalidraw editor for freeform diagrams, flowcharts, arrows, and process sketches.
+- Saving an Excalidraw diagram stores an exported SVG plus editable Excalidraw JSON in Luminary's local `.luminary/images/notes` asset directory, then inserts the SVG into the note. Use **Edit diagram** to reopen the latest editable Excalidraw scene in that note.
 
 ![Notes editor](assets/images/notes.png)
 

@@ -1,4 +1,4 @@
-"""Mastery endpoints (S145).
+"""Mastery endpoints
 
 Routes:
   GET /mastery/concepts?document_ids=id1&document_ids=id2 -- sorted concept mastery list

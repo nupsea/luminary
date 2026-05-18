@@ -29,10 +29,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 import app.services.embedder as embedder_module
+import app.services.enrichment_worker as enrichment_worker_module
 import app.services.graph as graph_module
 import app.services.ner as ner_module
 import app.services.retriever as retriever_module
+import app.services.section_summarizer as section_summarizer_module
+import app.services.summarizer as summarizer_module
 import app.services.vector_store as vs_module
+import app.workflows.ingestion as ingestion_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
@@ -40,9 +44,7 @@ from app.main import app
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
-# ---------------------------------------------------------------------------
 # Shared schema validation
-# ---------------------------------------------------------------------------
 
 
 def _assert_status_schema(body: dict) -> None:
@@ -56,9 +58,7 @@ def _assert_status_schema(body: dict) -> None:
     assert 0 <= body["progress_pct"] <= 100, f"progress_pct out of range: {body['progress_pct']}"
 
 
-# ---------------------------------------------------------------------------
 # E2E tests — require live backend + Ollama
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.e2e
@@ -172,18 +172,16 @@ async def test_status_polling_contract():
             pytest.fail(f"Ingestion did not complete within 120s. Stages seen: {seen_stages}")
 
 
-# ---------------------------------------------------------------------------
 # Mock helpers shared by integration_http tests
-# ---------------------------------------------------------------------------
 
 
 class _MockEmbeddingService:
     def encode(self, texts: list[str]) -> list[list[float]]:
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * 384 for _ in texts]
 
 
 class _MockEntityExtractor:
-    def extract(self, chunks: list[dict]) -> list[dict]:
+    def extract(self, chunks: list[dict], content_type: str | None = None) -> list[dict]:
         if not chunks:
             return []
         doc_id = chunks[0]["document_id"]
@@ -200,9 +198,7 @@ class _MockEntityExtractor:
         ]
 
 
-# ---------------------------------------------------------------------------
 # integration_http fixture
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -255,6 +251,16 @@ async def upload_db(tmp_path, monkeypatch):
     embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
     ner_module._extractor = _MockEntityExtractor()  # type: ignore[assignment]
 
+    # Reset singletons that hold references to closed engines/event loops from
+    # prior tests — same pattern as integration_db in test_integration.py.
+    orig_section_summarizer = section_summarizer_module._service
+    orig_summarizer = summarizer_module._summarization_service
+    orig_enrichment_worker = enrichment_worker_module._worker
+    section_summarizer_module._service = None
+    summarizer_module._summarization_service = None
+    enrichment_worker_module._worker = None
+    ingestion_module._background_tasks.clear()
+
     (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
 
     yield tmp_path
@@ -267,13 +273,21 @@ async def upload_db(tmp_path, monkeypatch):
     embedder_module._embedding_service = orig_embedder  # type: ignore[assignment]
     ner_module._extractor = orig_extractor
     retriever_module._retriever = orig_retriever
+    section_summarizer_module._service = orig_section_summarizer
+    summarizer_module._summarization_service = orig_summarizer
+    enrichment_worker_module._worker = orig_enrichment_worker
+    _pending = list(ingestion_module._background_tasks)
+    for _t in _pending:
+        _t.cancel()
+    if _pending:
+        import asyncio as _asyncio
+        await _asyncio.gather(*_pending, return_exceptions=True)
+    ingestion_module._background_tasks.clear()
     get_settings.cache_clear()
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # integration_http tests — included in make ci
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration_http

@@ -28,9 +28,7 @@ pytestmark = [
 ]
 
 
-# ---------------------------------------------------------------------------
 # (a) test_section_summarize_node_under_5_minutes
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -59,9 +57,7 @@ async def test_section_summarize_node_under_5_minutes(all_books_ingested):
     assert count >= 10, f"Expected >= 10 section summaries, got {count}"
 
 
-# ---------------------------------------------------------------------------
 # (b) test_pregenerate_fast_path_under_3_minutes
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

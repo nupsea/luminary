@@ -7,9 +7,7 @@ import app.services.graph as graph_module
 from app.main import app
 from app.services.graph import KuzuService
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -36,9 +34,7 @@ def client(tmp_path):
         graph_module._graph_service = orig
 
 
-# ---------------------------------------------------------------------------
 # Service unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_get_related_pairs_empty_for_no_entities(graph_svc: KuzuService):
@@ -97,9 +93,7 @@ def test_get_related_pairs_respects_limit(graph_svc: KuzuService):
     assert len(pairs) <= 3
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests
-# ---------------------------------------------------------------------------
 
 
 def test_explorations_returns_200_empty_for_unknown_doc(client):
