@@ -41,7 +41,12 @@
     "zustand": "^5.0.11"
   },
   "overrides": {
-    "tar": ">=7.5.11"
+    "tar": ">=7.5.11",
+    "@radix-ui/react-tabs": "^1.1.0",
+    "@radix-ui/react-primitive": "^2.0.0",
+    "@radix-ui/react-collection": "^1.1.0",
+    "@radix-ui/react-roving-focus": "^1.1.0",
+    "@radix-ui/react-slot": "^1.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
