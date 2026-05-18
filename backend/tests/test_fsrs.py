@@ -310,6 +310,10 @@ async def test_end_session_sets_ended_at(test_db):
 
 async def test_end_session_tallies_review_events(test_db):
     """POST /study/sessions/{id}/end counts correct/incorrect from review events."""
+    import asyncio as _asyncio
+
+    import app.routers.flashcards as _fc_module
+
     _, factory, _ = test_db
     card1 = _make_card()
     card2 = _make_card()
@@ -324,15 +328,27 @@ async def test_end_session_tallies_review_events(test_db):
         start_resp = await client.post("/study/sessions/start", json={"mode": "flashcard"})
         session_id = start_resp.json()["id"]
 
-        # Review cards with this session_id
-        await client.post(
+        # Review card1; drain background tasks (XP + coverage) before next review.
+        # The review endpoint fires fire-and-forget tasks that open their own sessions
+        # on the shared StaticPool connection; if they run concurrently with the next
+        # review's session.commit(), the DB can report one event missing.
+        r1 = await client.post(
             f"/flashcards/{card1.id}/review",
             json={"rating": "good", "session_id": session_id},
         )
-        await client.post(
+        assert r1.status_code == 200
+        pending = list(_fc_module._background_tasks)
+        if pending:
+            await _asyncio.gather(*pending, return_exceptions=True)
+
+        r2 = await client.post(
             f"/flashcards/{card2.id}/review",
             json={"rating": "again", "session_id": session_id},
         )
+        assert r2.status_code == 200
+        pending = list(_fc_module._background_tasks)
+        if pending:
+            await _asyncio.gather(*pending, return_exceptions=True)
 
         # End session
         end_resp = await client.post(f"/study/sessions/{session_id}/end")
