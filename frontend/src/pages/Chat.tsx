@@ -628,7 +628,6 @@ export default function Chat() {
           <p className="mt-1 text-xs text-muted-foreground">Enter to send · Shift+Enter for newline</p>
         </div>
       </div>
-      </div>
     </div>
   )
 }
