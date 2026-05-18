@@ -76,9 +76,17 @@ const NAV_ITEMS: NavItemDef[] = [
   {
     to: "/",
     icon: BookOpen,
-    label: "Learning",
+    label: "Library",
     prefetchKey: ["documents", undefined, null, "newest", 1, 20],
     prefetchFn: prefetchDocuments,
+  },
+  { to: "/notes", icon: StickyNote, label: "Notes" },
+  {
+    to: "/study",
+    icon: BarChart2,
+    label: "Study",
+    prefetchKey: ["study-due"],
+    prefetchFn: prefetchDueCards,
   },
   {
     to: "/chat",
@@ -89,21 +97,13 @@ const NAV_ITEMS: NavItemDef[] = [
   },
   { to: "/viz", icon: Network, label: "Viz" },
   {
-    to: "/study",
-    icon: BarChart2,
-    label: "Study",
-    prefetchKey: ["study-due"],
-    prefetchFn: prefetchDueCards,
-  },
-  { to: "/notes", icon: StickyNote, label: "Notes" },
-  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
-  {
     to: "/progress",
     icon: TrendingUp,
     label: "Progress",
     prefetchKey: ["study-due"],
     prefetchFn: prefetchProgressData,
   },
+  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
 ]
 
 // Global top-of-page loading bar
