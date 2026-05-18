@@ -110,7 +110,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # Cap NER at 500 chunks — sufficient for graph coverage, avoids multi-hour
             # runs on large documents (e.g. 2000+ chunk books).
             # Sample evenly across the document to get representative entities.
-            NER_CHUNK_LIMIT = 5000
+            NER_CHUNK_LIMIT = 500
             if len(chunks) > NER_CHUNK_LIMIT:
                 step = len(chunks) // NER_CHUNK_LIMIT
                 ner_chunks = chunks[::step][:NER_CHUNK_LIMIT]
@@ -122,10 +122,14 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 )
             else:
                 ner_chunks = chunks
-            # CPU-bound — run in thread pool to keep event loop free for status polls
+            # CPU-bound — run in thread pool to keep event loop free for status polls.
+            # Timeout guards against GLiNER hanging on pathological chunk text.
             loop = _asyncio.get_event_loop()
             content_type = state.get("content_type") or "unknown"
-            entities = await loop.run_in_executor(None, extractor.extract, ner_chunks, content_type)
+            entities = await _asyncio.wait_for(
+                loop.run_in_executor(None, extractor.extract, ner_chunks, content_type),
+                timeout=300.0,
+            )
             entity_count = len(entities)
 
             graph = _graph_module.get_graph_service()

@@ -61,6 +61,11 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument:
+        # Guard: fitz can hang (not raise) on garbage bytes; fail fast here.
+        with file_path.open("rb") as _f:
+            if not _f.read(5).startswith(b"%PDF-"):
+                raise ValueError(f"Not a valid PDF (missing %PDF- header): {file_path.name}")
+
         # If the PDF ships with an embedded TOC, prefer the TOC path below:
         # it reads page numbers directly from PyMuPDF's resolved bookmarks,
         # which is more reliable than BookParser's substring-search heuristic

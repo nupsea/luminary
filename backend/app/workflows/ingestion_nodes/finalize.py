@@ -75,16 +75,13 @@ async def section_summarize_node(state: IngestionState) -> IngestionState:
 
 
 async def summarize_node(state: IngestionState) -> IngestionState:
-    """Fire off summary pre-generation as a background task and return immediately.
+    """Pass-through: summary pre-generation is deferred to enrichment_enqueue_node.
 
-    The document is already marked complete by entity_extract_node.  Summaries
-    generate asynchronously so ingestion does not block on LLM calls.
+    Background task creation is intentionally consolidated in enrichment_enqueue_node
+    so that all async work starts AFTER _update_stage("complete") commits on the
+    shared StaticPool connection — preventing concurrent DB writes from racing with
+    the stage update.
     """
-    doc_id = state["document_id"]
-    task = asyncio.create_task(_run_pregenerate(doc_id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    logger.info("summarize_node: background task scheduled", extra={"doc_id": doc_id})
     return state
 
 
@@ -116,15 +113,18 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     """Create enrichment jobs: image_extract (PDF/EPUB only) and concept_link (always).
 
     Non-fatal: enrichment failure does not prevent document from being usable.
+
+    Job rows are written to the DB first. _update_stage("complete") is called
+    before any asyncio.create_task so that the worker's concurrent DB writes
+    do not race with the stage update (SQLite allows only one writer at a time).
     """
-
-
-
     doc_id = state["document_id"]
     fmt = state.get("format", "").lower()
     _IMAGE_FORMATS = {"pdf", "epub", "md", "markdown"}
 
-    # Image extraction: PDF, EPUB, and MD (web articles)
+    # Phase 1: write all job rows to DB (no background tasks yet).
+    needs_dispatch = False
+
     if fmt in _IMAGE_FORMATS:
         try:
             job_id = str(uuid.uuid4())
@@ -143,12 +143,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
                     .values(stage="enriching")
                 )
                 await session.commit()
-
-            worker = get_enrichment_worker()
-            task = asyncio.create_task(worker._dispatch_pending())
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
-
+            needs_dispatch = True
             logger.info(
                 "enrichment_enqueue_node: enqueued image_extract job=%s doc=%s",
                 job_id,
@@ -167,7 +162,6 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
             extra={"doc_id": doc_id},
         )
 
-    # Concept linking: always enqueue for cross-document concept comparison
     try:
         cl_job_id = str(uuid.uuid4())
         async with get_session_factory()() as session:
@@ -180,12 +174,7 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
                 )
             )
             await session.commit()
-
-        worker = get_enrichment_worker()
-        task = asyncio.create_task(worker._dispatch_pending())
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-
+        needs_dispatch = True
         logger.info(
             "enrichment_enqueue_node: enqueued concept_link job=%s doc=%s",
             cl_job_id,
@@ -198,6 +187,40 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
             extra={"doc_id": doc_id},
         )
 
+    # Phase 2: mark complete BEFORE creating background tasks.
+    # asyncio.create_task schedules work that runs at the next await; if tasks
+    # were created earlier, _dispatch_pending would race with this write for the
+    # SQLite write lock and intermittently fail (leaving stage='indexing').
     await _update_stage(doc_id, "complete")
+
+    # Phase 3: schedule all background tasks (no await between here and return,
+    # so they do not start until after this node returns to LangGraph and the
+    # stage='complete' commit is fully visible).
+    # _run_pregenerate is created here (not in summarize_node) so the shared
+    # StaticPool connection is free of concurrent writers when _update_stage runs.
+    try:
+        pregenerate_task = asyncio.create_task(_run_pregenerate(doc_id))
+        _background_tasks.add(pregenerate_task)
+        pregenerate_task.add_done_callback(_background_tasks.discard)
+    except Exception as exc:
+        logger.warning(
+            "enrichment_enqueue_node: pregenerate schedule failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+
+    if needs_dispatch:
+        try:
+            worker = get_enrichment_worker()
+            dispatch_task = asyncio.create_task(worker._dispatch_pending())
+            _background_tasks.add(dispatch_task)
+            dispatch_task.add_done_callback(_background_tasks.discard)
+        except Exception as exc:
+            logger.warning(
+                "enrichment_enqueue_node: dispatch failed (non-fatal): %s",
+                exc,
+                extra={"doc_id": doc_id},
+            )
+
     return {**state, "status": "complete"}
 

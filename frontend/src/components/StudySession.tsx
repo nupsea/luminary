@@ -413,8 +413,12 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
       // reschedules the card for a future session -- not that we re-queue it
       // inline here, which would inflate the session beyond the planned size.
 
-      // lazy-fetch source context after "again" or "hard"
-      if (rating === "again" || rating === "hard") {
+      // Source context / SourcePanel flow only applies to regular (non-cloze) cards.
+      // Cloze cards always advance immediately — the source panels live in the else
+      // branch and are never rendered while a cloze card is active.
+      const isCloze = card.flashcard_type === "cloze"
+
+      if (!isCloze && (rating === "again" || rating === "hard")) {
         if (!dismissedSourceContextIds.current.has(card.id)) {
           setSourceContextLoading(true)
           const ctx = await fetchSourceContext(card.id)
@@ -437,7 +441,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         return
       }
 
-      // "good" / "easy": advance immediately
+      // Advance immediately: cloze cards (all ratings) + regular cards ("good"/"easy")
       const nextIdx = currentIndex + 1
       if (nextIdx >= queue.length) {
         await completeSession()

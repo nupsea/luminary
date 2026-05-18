@@ -29,10 +29,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 import app.services.embedder as embedder_module
+import app.services.enrichment_worker as enrichment_worker_module
 import app.services.graph as graph_module
 import app.services.ner as ner_module
 import app.services.retriever as retriever_module
+import app.services.section_summarizer as section_summarizer_module
+import app.services.summarizer as summarizer_module
 import app.services.vector_store as vs_module
+import app.workflows.ingestion as ingestion_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
@@ -247,6 +251,16 @@ async def upload_db(tmp_path, monkeypatch):
     embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
     ner_module._extractor = _MockEntityExtractor()  # type: ignore[assignment]
 
+    # Reset singletons that hold references to closed engines/event loops from
+    # prior tests — same pattern as integration_db in test_integration.py.
+    orig_section_summarizer = section_summarizer_module._service
+    orig_summarizer = summarizer_module._summarization_service
+    orig_enrichment_worker = enrichment_worker_module._worker
+    section_summarizer_module._service = None
+    summarizer_module._summarization_service = None
+    enrichment_worker_module._worker = None
+    ingestion_module._background_tasks.clear()
+
     (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
 
     yield tmp_path
@@ -259,6 +273,16 @@ async def upload_db(tmp_path, monkeypatch):
     embedder_module._embedding_service = orig_embedder  # type: ignore[assignment]
     ner_module._extractor = orig_extractor
     retriever_module._retriever = orig_retriever
+    section_summarizer_module._service = orig_section_summarizer
+    summarizer_module._summarization_service = orig_summarizer
+    enrichment_worker_module._worker = orig_enrichment_worker
+    _pending = list(ingestion_module._background_tasks)
+    for _t in _pending:
+        _t.cancel()
+    if _pending:
+        import asyncio as _asyncio
+        await _asyncio.gather(*_pending, return_exceptions=True)
+    ingestion_module._background_tasks.clear()
     get_settings.cache_clear()
     await engine.dispose()
 

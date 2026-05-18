@@ -675,10 +675,13 @@ class SummarizationService:
 
     async def invalidate_library_cache(self) -> None:
         """Delete all LibrarySummaryModel rows so the next call regenerates."""
-        async with get_session_factory()() as session:
-            await session.execute(delete(LibrarySummaryModel))
-            await session.commit()
-        logger.info("library summary cache invalidated")
+        try:
+            async with get_session_factory()() as session:
+                await session.execute(delete(LibrarySummaryModel))
+                await session.commit()
+            logger.info("library summary cache invalidated")
+        except Exception as exc:
+            logger.warning("library summary cache invalidation failed (non-fatal): %s", exc)
 
 
 _summarization_service: SummarizationService | None = None

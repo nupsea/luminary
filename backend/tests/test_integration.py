@@ -123,8 +123,9 @@ async def integration_db(tmp_path, monkeypatch):
     summarizer_module._summarization_service = None
     enrichment_worker_module._worker = None
 
-    # Drain stale background tasks (e.g., _run_pregenerate from prior tests) whose
-    # event loops have since been closed by pytest-asyncio.
+    # Drain stale background tasks from prior tests.
+    # Tasks that survived their event loop cannot be awaited here (their loop is closed),
+    # so just discard them — they are already dead or will fail harmlessly on their own.
     ingestion_module._background_tasks.clear()
 
     # Inject fast mock services (no model downloads)
@@ -147,6 +148,15 @@ async def integration_db(tmp_path, monkeypatch):
     section_summarizer_module._service = orig_section_summarizer
     summarizer_module._summarization_service = orig_summarizer
     enrichment_worker_module._worker = orig_enrichment_worker
+    # Cancel then await background tasks so aiosqlite threads close their
+    # sessions before this event loop closes (prevents "Event loop is closed"
+    # PytestUnhandledThreadExceptionWarning in later tests).
+    _pending = list(ingestion_module._background_tasks)
+    for _t in _pending:
+        _t.cancel()
+    if _pending:
+        import asyncio as _asyncio
+        await _asyncio.gather(*_pending, return_exceptions=True)
     ingestion_module._background_tasks.clear()
     get_settings.cache_clear()
     await engine.dispose()

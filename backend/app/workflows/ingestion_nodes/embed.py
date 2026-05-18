@@ -76,12 +76,15 @@ async def embed_node(state: IngestionState) -> IngestionState:
 
             # Upsert in batches to avoid memory/spill issues in LanceDB/DataFusion
             # with very large documents (like the Bible with 9400+ chunks).
+            # Wrapped in asyncio.to_thread (I-2): LanceDB is synchronous; calling it
+            # directly in the event loop blocks it and can corrupt aiosqlite state
+            # when DataFusion's BackgroundLoop encounters errors.
             batch_size = 1000
             lancedb_svc = get_lancedb_service()
             for start_idx in range(0, len(lancedb_rows), batch_size):
                 end_idx = start_idx + batch_size
                 batch = lancedb_rows[start_idx:end_idx]
-                lancedb_svc.upsert_chunks(batch)
+                await asyncio.to_thread(lancedb_svc.upsert_chunks, batch)
                 logger.info(
                     "Upserted batch %d-%d to LanceDB",
                     start_idx,
