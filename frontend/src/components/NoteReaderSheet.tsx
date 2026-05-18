@@ -3,10 +3,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, FileText, GitBranch, LayoutGrid, Loader2, Maximize2, Minimize2, Pencil, Shapes, Tag, Trash2, Wand2 } from "lucide-react"
+import { Check, FileText, LayoutGrid, Loader2, Maximize2, Minimize2, Pencil, Tag, Trash2, Wand2 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import {
   Sheet,
@@ -16,19 +15,29 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiDelete, apiGet, apiPatch, apiPost, request } from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
-import { MERMAID_CHEAT_SHEET, MERMAID_TEMPLATES } from "@/lib/mermaidNotes"
-import { uploadNoteAsset } from "@/lib/noteAssets"
-import {
-  replaceExcalidrawDiagram,
-  type ExcalidrawNoteDiagramRef,
-} from "@/lib/noteDiagrams"
 
-import type { Note } from "@/pages/Notes/types"
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface Note {
+  id: string
+  document_id: string | null
+  chunk_id: string | null
+  content: string
+  tags: string[]
+  group_name: string | null
+  collection_ids: string[]
+  // S175: multi-document source linkage
+  source_document_ids: string[]
+  created_at: string
+  updated_at: string
+}
 
 interface DocumentItem {
   id: string
@@ -41,11 +50,17 @@ export interface NoteReaderSheetProps {
   onClose: () => void
   onSaved: (note: Note) => void
   isNew?: boolean
+  /** S197: Pre-fill content when creating a note from gap analysis. */
   initialContent?: string
+  /** S197: Pre-check a collection when creating a note from gap analysis. */
   initialCollectionId?: string
   /** When set, this collection appears checked and cannot be unchecked (reader context). */
   lockedCollectionId?: string | null
 }
+
+// ---------------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------------
 
 async function createNote(payload: {
   content: string
@@ -53,50 +68,74 @@ async function createNote(payload: {
   document_id: string | null
   source_document_ids?: string[]
 }): Promise<Note> {
-  return apiPost<Note>("/notes", payload)
+  const res = await fetch(`${API_BASE}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
+  return res.json() as Promise<Note>
 }
 
-const patchNote = (
+async function patchNote(
   id: string,
   data: { content?: string; tags?: string[]; source_document_ids?: string[] },
-): Promise<Note> => apiPatch<Note>(`/notes/${id}`, data)
-
-const deleteNote = (id: string): Promise<void> => apiDelete(`/notes/${id}`)
-
-async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  try {
-    return await apiGet<CollectionTreeItem[]>("/collections/tree")
-  } catch {
-    return []
-  }
+): Promise<Note> {
+  const res = await fetch(`${API_BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
+  return res.json() as Promise<Note>
 }
 
-const addNoteToCollection = (
-  collectionId: string,
-  noteId: string,
-): Promise<void> =>
-  apiPost(`/collections/${collectionId}/members`, {
-    member_ids: [noteId],
-    member_type: "note",
-  })
+async function deleteNote(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
+  if (!res.ok && res.status !== 204)
+    throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
+}
 
-const removeNoteFromCollection = (
-  collectionId: string,
-  noteId: string,
-): Promise<void> =>
-  apiDelete(`/collections/${collectionId}/members/${noteId}`)
+async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
+  const res = await fetch(`${API_BASE}/collections/tree`)
+  if (!res.ok) return []
+  return res.json() as Promise<CollectionTreeItem[]>
+}
+
+async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
+  })
+  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
+}
+
+async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
+    method: "DELETE",
+  })
+  if (!res.ok && res.status !== 204)
+    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
+}
 
 async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const data = await request<{ tags: string[] }>(`/notes/${id}/suggest-tags`, {
+    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, {
       method: "POST",
       signal,
     })
+    if (!res.ok) return []
+    const data = (await res.json()) as { tags: string[] }
     return data.tags ?? []
   } catch {
     return []
   }
 }
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export function NoteReaderSheet({
   note,
@@ -118,8 +157,6 @@ export function NoteReaderSheet({
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [generatedTitle, setGeneratedTitle] = useState("")
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false)
-  const [diagramOpen, setDiagramOpen] = useState(false)
-  const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -265,8 +302,13 @@ export function NoteReaderSheet({
     } else if (note && note.content) {
       if (note.content.trim().length > 20) {
         setIsGeneratingTitle(true)
-        apiPost<{ title: string }>("/notes/suggest-title", { content: note.content })
-          .then((data) => {
+        fetch(`${API_BASE}/notes/suggest-title`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: note.content }),
+        })
+          .then((res) => res.json())
+          .then((data: { title: string }) => {
             setGeneratedTitle(data.title)
             setIsGeneratingTitle(false)
           })
@@ -350,27 +392,18 @@ export function NoteReaderSheet({
   // Silence unused-var lint: adjustHeight retained for future use but no longer wired.
   void adjustHeight
 
-  // Ctrl+S / Cmd+S saves in edit mode. Guard against rapid repeats via a ref:
-  // if a save is already in flight we drop the keystroke -- without this,
-  // three Cmd+S taps before onSuccess fires would each call mutate() with
-  // isNew still true, and the backend's 5-second hash dedup window can lose
-  // the race when its auto-tagging step takes longer than the inter-press
-  // gap. We use a ref instead of `[saveMut]` in deps because saveMut is
-  // declared further down (TDZ) and because we don't want to rebind the
-  // listener on every keystroke.
-  const saveInFlightRef = useRef(false)
+  // Ctrl+S / Cmd+S saves in edit mode
   useEffect(() => {
     if (mode !== "edit") return
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault()
-        if (saveInFlightRef.current) return
         saveMut.mutate()
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode])
 
   // Collections list
   const { data: collectionTree, isLoading: collectionsLoading } = useQuery({
@@ -383,29 +416,24 @@ export function NoteReaderSheet({
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      saveInFlightRef.current = true
-      try {
-        if (isNew) {
-          const saved = await createNote({
-            content: editContent,
-            tags: editTags,
-            document_id: selectedDocIds[0] || null,
-            source_document_ids: selectedDocIds,
-          })
-          // When opened from the reader panel, auto-add to the book's collection
-          if (lockedCollectionId) {
-            await addNoteToCollection(lockedCollectionId, saved.id)
-          }
-          return saved
-        } else {
-          return patchNote(note!.id, {
-            content: editContent,
-            tags: editTags,
-            source_document_ids: selectedDocIds,
-          })
+      if (isNew) {
+        const saved = await createNote({
+          content: editContent,
+          tags: editTags,
+          document_id: selectedDocIds[0] || null,
+          source_document_ids: selectedDocIds,
+        })
+        // When opened from the reader panel, auto-add to the book's collection
+        if (lockedCollectionId) {
+          await addNoteToCollection(lockedCollectionId, saved.id)
         }
-      } finally {
-        saveInFlightRef.current = false
+        return saved
+      } else {
+        return patchNote(note!.id, {
+          content: editContent,
+          tags: editTags,
+          source_document_ids: selectedDocIds,
+        })
       }
     },
     onSuccess: (savedNote) => {
@@ -417,10 +445,13 @@ export function NoteReaderSheet({
       
       if (savedNote.content.trim().length > 20) {
         setIsGeneratingTitle(true)
-        apiPost<{ title: string }>("/notes/suggest-title", {
-          content: savedNote.content,
+        fetch(`${API_BASE}/notes/suggest-title`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: savedNote.content }),
         })
-          .then((data) => {
+          .then((res) => res.json())
+          .then((data: { title: string }) => {
             setGeneratedTitle(data.title)
             setIsGeneratingTitle(false)
           })
@@ -473,39 +504,6 @@ export function NoteReaderSheet({
     setEditContent(note?.content ?? "")
     setEditTags(note?.tags ?? [])
     setSelectedDocIds(note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []))
-  }
-
-  function insertAtCursor(markdown: string) {
-    const start = textareaRef.current?.selectionStart ?? editContent.length
-    const end = textareaRef.current?.selectionEnd ?? editContent.length
-    const prefix = start > 0 && !editContent.slice(0, start).endsWith("\n") ? "\n\n" : ""
-    const suffix = editContent.slice(end).startsWith("\n") ? "" : "\n\n"
-    const insertion = `${prefix}${markdown}${suffix}`
-    const next = editContent.substring(0, start) + insertion + editContent.substring(end)
-    setEditContent(next)
-    setTimeout(() => {
-      const newPos = start + insertion.length
-      textareaRef.current?.setSelectionRange(newPos, newPos)
-      textareaRef.current?.focus()
-    }, 0)
-  }
-
-  function handleDiagramSaved(markdown: string) {
-    if (editingDiagramRef) {
-      setEditContent((current) => replaceExcalidrawDiagram(current, editingDiagramRef, markdown))
-      setEditingDiagramRef(null)
-      return
-    }
-    insertAtCursor(markdown)
-  }
-
-  function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
-    if (note && mode === "read") {
-      setEditContent(note.content)
-      setMode("edit")
-    }
-    setEditingDiagramRef(ref)
-    setDiagramOpen(true)
   }
 
   const title = isNew
@@ -566,9 +564,7 @@ export function NoteReaderSheet({
                     <Skeleton className="h-4 w-2/3" />
                   </div>
                 ) : note.content.trim() ? (
-                  <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
-                    {note.content}
-                  </MarkdownRenderer>
+                  <MarkdownRenderer>{note.content}</MarkdownRenderer>
                 ) : (
                   <p className="text-muted-foreground italic text-sm">Start writing...</p>
                 )}
@@ -581,32 +577,7 @@ export function NoteReaderSheet({
                 <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${leftPct}%` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Editor</span>
-                    <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <GitBranch size={10} />
-                        Mermaid:
-                      </span>
-                      {MERMAID_TEMPLATES.map((template) => (
-                        <button
-                          key={template.label}
-                          type="button"
-                          onClick={() => insertAtCursor(template.markdown)}
-                          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
-                        >
-                          {template.label}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingDiagramRef(null)
-                          setDiagramOpen(true)
-                        }}
-                        className="flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
-                      >
-                        <Shapes size={10} />
-                        Draw
-                      </button>
+                    <div className="flex items-center gap-1.5">
                       <span className="text-[10px] text-muted-foreground">Image spec:</span>
                       {(["small", "medium", "large"] as const).map((size) => (
                         <button
@@ -650,16 +621,6 @@ export function NoteReaderSheet({
                       ))}
                     </div>
                   </div>
-                  <details className="rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
-                    <summary className="cursor-pointer select-none font-medium text-foreground">Mermaid cheat sheet</summary>
-                    <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
-                      {MERMAID_CHEAT_SHEET.map((item) => (
-                        <code key={item} className="rounded bg-background px-1.5 py-1 text-[10px] text-foreground">
-                          {item}
-                        </code>
-                      ))}
-                    </div>
-                  </details>
                   <textarea
                     ref={textareaRef}
                     onScroll={() => syncScroll("write")}
@@ -672,8 +633,17 @@ export function NoteReaderSheet({
                           const file = items[i].getAsFile()
                           if (!file) continue
 
+                          const formData = new FormData()
+                          formData.append("file", file)
+
                           try {
-                            const data = await uploadNoteAsset(file)
+                            const res = await fetch(`${API_BASE}/images/notes`, {
+                              method: "POST",
+                              body: formData,
+                            })
+                            if (!res.ok) throw new Error("Upload failed")
+                            const data = (await res.json()) as { path: string }
+
                             const imgMarkdown = `![Pasted Image|medium](${data.path})`
                             const start = textareaRef.current?.selectionStart ?? editContent.length
                             const end = textareaRef.current?.selectionEnd ?? editContent.length
@@ -716,9 +686,7 @@ export function NoteReaderSheet({
                     className="prose-sm flex-1 overflow-auto px-2 py-2"
                   >
                     {editContent.trim() ? (
-                      <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
-                        {editContent}
-                      </MarkdownRenderer>
+                      <MarkdownRenderer>{editContent}</MarkdownRenderer>
                     ) : (
                       <p className="text-muted-foreground italic text-sm">Preview will appear here...</p>
                     )}
@@ -989,13 +957,6 @@ export function NoteReaderSheet({
             </>
           )}
         </div>
-
-        <NoteDiagramDialog
-          open={diagramOpen}
-          onOpenChange={setDiagramOpen}
-          scenePath={editingDiagramRef?.scenePath}
-          onSaved={handleDiagramSaved}
-        />
       </SheetContent>
     </Sheet>
   )

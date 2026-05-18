@@ -2,16 +2,13 @@
  * Shared types and API functions for study sessions (Flashcard + Teach-back).
  *
  * Both FlashcardSession and TeachbackSession import from here to avoid duplication.
- * Uses the shared apiClient (#12 standardisation).
  */
 
-import {
-  ApiError,
-  apiDelete,
-  apiGet,
-  apiPost,
-  type QueryParams,
-} from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface Flashcard {
   id: string
@@ -83,14 +80,9 @@ export interface SessionListResponse {
   page_size: number
 }
 
-/** Resolves a fetch that should silently fall back on any error. */
-async function tryOr<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn()
-  } catch {
-    return fallback
-  }
-}
+// ---------------------------------------------------------------------------
+// API Functions
+// ---------------------------------------------------------------------------
 
 export async function startSession(
   documentId: string | null,
@@ -98,17 +90,19 @@ export async function startSession(
   collectionId: string | null = null,
   plannedCardIds: string[] | null = null,
 ): Promise<string> {
-  try {
-    const data = await apiPost<{ id: string }>("/study/sessions/start", {
+  const res = await fetch(`${API_BASE}/study/sessions/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       document_id: documentId,
       collection_id: collectionId,
       mode,
       planned_card_ids: plannedCardIds,
-    })
-    return data.id
-  } catch {
-    throw new Error("Failed to start session")
-  }
+    }),
+  })
+  if (!res.ok) throw new Error("Failed to start session")
+  const data = (await res.json()) as { id: string }
+  return data.id
 }
 
 export interface SessionRemainingState {
@@ -117,16 +111,15 @@ export interface SessionRemainingState {
   cards: Flashcard[]
 }
 
-export const fetchSessionRemainingCards = (
+export async function fetchSessionRemainingCards(
   sessionId: string,
-): Promise<SessionRemainingState> =>
-  tryOr(
-    () =>
-      apiGet<SessionRemainingState>(
-        `/study/sessions/${encodeURIComponent(sessionId)}/remaining-cards`,
-      ),
-    { answered_count: 0, planned_count: 0, cards: [] },
+): Promise<SessionRemainingState> {
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/remaining-cards`,
   )
+  if (!res.ok) return { answered_count: 0, planned_count: 0, cards: [] }
+  return res.json() as Promise<SessionRemainingState>
+}
 
 /** Most recent open session for this scope, or null if none. */
 export async function fetchOpenSession(params: {
@@ -134,19 +127,17 @@ export async function fetchOpenSession(params: {
   documentId: string | null
   collectionId: string | null
 }): Promise<{ id: string } | null> {
-  try {
-    const data = await apiGet<{ id: string }>("/study/sessions/open", {
-      mode: params.mode,
-      document_id: params.documentId,
-      collection_id: params.collectionId,
-    })
-    return { id: data.id }
-  } catch {
-    return null
-  }
+  const qs = new URLSearchParams({ mode: params.mode })
+  if (params.documentId) qs.set("document_id", params.documentId)
+  if (params.collectionId) qs.set("collection_id", params.collectionId)
+  const res = await fetch(`${API_BASE}/study/sessions/open?${qs.toString()}`)
+  if (res.status === 404) return null
+  if (!res.ok) return null
+  const data = (await res.json()) as { id: string }
+  return { id: data.id }
 }
 
-export const fetchDueCards = (
+export async function fetchDueCards(
   documentId: string | null,
   collectionId: string | null = null,
   filters: {
@@ -155,23 +146,22 @@ export const fetchDueCards = (
     note_ids?: string[]
     limit?: number
   } = {},
-): Promise<Flashcard[]> => {
-  const params: QueryParams = {
-    limit: filters.limit ?? 50,
-    document_id: documentId,
-    collection_id: collectionId,
-    tag: filters.tag,
+): Promise<Flashcard[]> {
+  const params = new URLSearchParams({
+    limit: String(filters.limit ?? 50),
+  })
+  if (documentId) params.set("document_id", documentId)
+  if (collectionId) params.set("collection_id", collectionId)
+  if (filters.tag) params.set("tag", filters.tag)
+  if (filters.document_ids?.length) {
+    filters.document_ids.forEach((id: string) => params.append("document_ids", id))
   }
-  // Repeated-key params (document_ids, note_ids) aren't expressible through
-  // QueryParams; build the URL manually for those.
-  const url = new URL("https://placeholder")
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== null && v !== undefined) url.searchParams.set(k, String(v))
+  if (filters.note_ids?.length) {
+    filters.note_ids.forEach((id: string) => params.append("note_ids", id))
   }
-  filters.document_ids?.forEach((id) => url.searchParams.append("document_ids", id))
-  filters.note_ids?.forEach((id) => url.searchParams.append("note_ids", id))
-  const path = `/study/due?${url.searchParams.toString()}`
-  return tryOr(() => apiGet<Flashcard[]>(path), [])
+  const res = await fetch(`${API_BASE}/study/due?${params.toString()}`)
+  if (!res.ok) return []
+  return res.json() as Promise<Flashcard[]>
 }
 
 export async function submitReview(
@@ -179,97 +169,92 @@ export async function submitReview(
   rating: Rating,
   sessionId: string,
 ): Promise<void> {
-  try {
-    await apiPost(`/flashcards/${cardId}/review`, {
-      rating,
-      session_id: sessionId,
-    })
-  } catch {
-    // Original implementation also swallowed errors here.
-  }
+  await fetch(`${API_BASE}/flashcards/${cardId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rating, session_id: sessionId }),
+  })
 }
 
 export async function endSession(sessionId: string): Promise<void> {
-  try {
-    await apiPost(`/study/sessions/${sessionId}/end`)
-  } catch {
-    // Original implementation swallowed errors here.
-  }
+  await fetch(`${API_BASE}/study/sessions/${sessionId}/end`, { method: "POST" })
 }
 
 export async function reopenSession(sessionId: string): Promise<void> {
-  try {
-    await apiPost(`/study/sessions/${encodeURIComponent(sessionId)}/reopen`)
-  } catch {
-    // Original implementation swallowed errors here.
-  }
+  await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/reopen`,
+    { method: "POST" },
+  )
 }
 
 export async function deleteStudySession(sessionId: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) throw new Error("Failed to delete session")
+}
+
+export async function fetchSourceContext(
+  cardId: string,
+): Promise<SourceContext | null> {
   try {
-    await apiDelete(`/study/sessions/${encodeURIComponent(sessionId)}`)
+    const res = await fetch(
+      `${API_BASE}/flashcards/${encodeURIComponent(cardId)}/source-context`,
+    )
+    if (!res.ok) return null
+    return res.json() as Promise<SourceContext>
   } catch {
-    throw new Error("Failed to delete session")
+    return null
   }
 }
 
-export const fetchSourceContext = (
-  cardId: string,
-): Promise<SourceContext | null> =>
-  tryOr(
-    () =>
-      apiGet<SourceContext>(
-        `/flashcards/${encodeURIComponent(cardId)}/source-context`,
-      ),
-    null,
-  )
-
+// ---------------------------------------------------------------------------
 // Teach-back API
+// ---------------------------------------------------------------------------
 
 export async function submitTeachbackAsync(
   flashcardId: string,
   userExplanation: string,
   sessionId: string | null = null,
 ): Promise<{ id: string }> {
-  try {
-    return await apiPost<{ id: string }>("/study/teachback/async", {
+  const res = await fetch(`${API_BASE}/study/teachback/async`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       flashcard_id: flashcardId,
       user_explanation: userExplanation,
       session_id: sessionId,
-    })
-  } catch {
-    throw new Error("Teachback submit failed")
-  }
+    }),
+  })
+  if (!res.ok) throw new Error("Teachback submit failed")
+  return res.json() as Promise<{ id: string }>
 }
 
 export async function fetchTeachbackResults(
   ids: string[],
 ): Promise<TeachbackResultItem[]> {
   if (ids.length === 0) return []
-  try {
-    const data = await apiGet<{ results: TeachbackResultItem[] }>(
-      `/study/teachback/results?ids=${ids.join(",")}`,
-    )
-    return data.results
-  } catch {
-    throw new Error("Failed to fetch teachback results")
-  }
+  const res = await fetch(`${API_BASE}/study/teachback/results?ids=${ids.join(",")}`)
+  if (!res.ok) throw new Error("Failed to fetch teachback results")
+  const data = (await res.json()) as { results: TeachbackResultItem[] }
+  return data.results
 }
 
-export const fetchSessionTeachbackResults = (
+export async function fetchSessionTeachbackResults(
   sessionId: string,
-): Promise<TeachbackResultItem[]> =>
-  tryOr(
-    async () => {
-      const data = await apiGet<{ results: TeachbackResultItem[] }>(
-        `/study/sessions/${encodeURIComponent(sessionId)}/teachback-results`,
-      )
-      return data.results
-    },
-    [],
+): Promise<TeachbackResultItem[]> {
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/teachback-results`,
   )
+  if (!res.ok) return []
+  const data = (await res.json()) as { results: TeachbackResultItem[] }
+  return data.results
+}
 
+// ---------------------------------------------------------------------------
 // Session listing
+// ---------------------------------------------------------------------------
 
 export async function fetchSessions(
   page: number,
@@ -281,21 +266,22 @@ export async function fetchSessions(
     documentId?: string
   } = {},
 ): Promise<SessionListResponse> {
-  try {
-    return await apiGet<SessionListResponse>("/study/sessions", {
-      page,
-      page_size: pageSize,
-      mode: opts.mode,
-      status: opts.status,
-      collection_id: opts.collectionId,
-      document_id: opts.documentId,
-    })
-  } catch {
-    throw new Error("Failed to load sessions")
-  }
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  })
+  if (opts.mode) params.set("mode", opts.mode)
+  if (opts.status) params.set("status", opts.status)
+  if (opts.collectionId) params.set("collection_id", opts.collectionId)
+  if (opts.documentId) params.set("document_id", opts.documentId)
+  const res = await fetch(`${API_BASE}/study/sessions?${params.toString()}`)
+  if (!res.ok) throw new Error("Failed to load sessions")
+  return res.json() as Promise<SessionListResponse>
 }
 
+// ---------------------------------------------------------------------------
 // Flashcard generation
+// ---------------------------------------------------------------------------
 
 export type Difficulty = "easy" | "medium" | "hard"
 
@@ -304,20 +290,24 @@ export async function generateDocumentFlashcards(
   count: number = 10,
   difficulty: Difficulty = "medium",
 ): Promise<number> {
-  try {
-    const cards = await apiPost<unknown[]>("/flashcards/generate", {
+  const res = await fetch(`${API_BASE}/flashcards/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       document_id: documentId,
       scope: "full",
       count,
       difficulty,
-    })
-    return cards.length
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 503) {
-      throw new Error("Ollama is not running. Start it with: ollama serve")
-    }
-    throw new Error("Failed to generate flashcards")
+    }),
+  })
+  if (!res.ok) {
+    const msg = res.status === 503
+      ? "Ollama is not running. Start it with: ollama serve"
+      : "Failed to generate flashcards"
+    throw new Error(msg)
   }
+  const cards = (await res.json()) as unknown[]
+  return cards.length
 }
 
 export interface CollectionGenerationResult {
@@ -345,19 +335,28 @@ export async function generateCollectionFlashcards(
   const hasNotes = sources.some((s) => s.type === "note")
   if (hasNotes) {
     try {
-      const data = await apiPost<{ created?: number; skipped?: number }>(
-        "/notes/flashcards/generate",
-        { collection_id: collectionId, count, difficulty },
-      )
-      result.noteCreated = data.created ?? 0
-      result.noteSkipped = data.skipped ?? 0
-      result.totalCreated += result.noteCreated
-    } catch (e) {
-      if (e instanceof ApiError) {
-        result.errors.push(`Notes generation failed (HTTP ${e.status})`)
+      const res = await fetch(`${API_BASE}/notes/flashcards/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collection_id: collectionId,
+          count,
+          difficulty,
+        }),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as {
+          created?: number
+          skipped?: number
+        }
+        result.noteCreated = data.created ?? 0
+        result.noteSkipped = data.skipped ?? 0
+        result.totalCreated += result.noteCreated
       } else {
-        result.errors.push(`Notes: ${e instanceof Error ? e.message : String(e)}`)
+        result.errors.push(`Notes generation failed (HTTP ${res.status})`)
       }
+    } catch (e) {
+      result.errors.push(`Notes: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -376,6 +375,10 @@ export async function generateCollectionFlashcards(
 
   return result
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 export function scoreBadgeClass(score: number): string {
   if (score >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
