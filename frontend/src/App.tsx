@@ -7,11 +7,13 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, TrendingUp, StickyNote, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
+import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
+import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
+import { getHomeRedirectTarget } from "./lib/homeRedirect"
 import { useAppStore } from "./store"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
@@ -33,6 +35,16 @@ const Viz = lazy(() => import("./pages/Viz"))
 const Quality = lazy(() => import("./pages/Quality"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
+const CollectionWorkspace = lazy(() => import("./pages/CollectionWorkspace"))
+const Hub = lazy(() => import("./pages/Hub"))
+
+// 2F.5: dev-only surfaces (Quality / Admin / Evals / Monitoring). Default
+// to enabled in any non-prod build so contributors can poke at them; allow
+// an explicit override via VITE_DEV_SURFACES=true|false for staging builds
+// that need to flip independently of Vite's mode.
+const DEV_SURFACES_ENABLED =
+  (import.meta.env.VITE_DEV_SURFACES as string | undefined) === "true"
+  || ((import.meta.env.VITE_DEV_SURFACES as string | undefined) !== "false" && import.meta.env.DEV)
 
 import { apiGet } from "@/lib/apiClient"
 
@@ -44,6 +56,8 @@ const prefetchLLMSettings = (): Promise<unknown> => apiGet("/settings/llm")
 const prefetchDueCards = (): Promise<unknown> => apiGet("/study/due")
 
 const prefetchProgressData = (): Promise<unknown> => apiGet("/study/due-count")
+
+const prefetchHomeOverview = (): Promise<unknown> => apiGet("/home/overview")
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -75,6 +89,13 @@ interface NavItemDef {
 const NAV_ITEMS: NavItemDef[] = [
   {
     to: "/",
+    icon: LuminaryGlyph,
+    label: "Luminary",
+    prefetchKey: ["home-overview"],
+    prefetchFn: prefetchHomeOverview,
+  },
+  {
+    to: "/library",
     icon: BookOpen,
     label: "Library",
     prefetchKey: ["documents", undefined, null, "newest", 1, 20],
@@ -91,11 +112,11 @@ const NAV_ITEMS: NavItemDef[] = [
   {
     to: "/chat",
     icon: MessageSquare,
-    label: "Chat",
+    label: "Ask",
     prefetchKey: ["llm-settings"],
     prefetchFn: prefetchLLMSettings,
   },
-  { to: "/viz", icon: Network, label: "Viz" },
+  { to: "/viz", icon: Network, label: "Map" },
   {
     to: "/progress",
     icon: TrendingUp,
@@ -103,7 +124,6 @@ const NAV_ITEMS: NavItemDef[] = [
     prefetchKey: ["study-due"],
     prefetchFn: prefetchProgressData,
   },
-  { to: "/quality", icon: ClipboardCheck, label: "Quality" },
 ]
 
 // Global top-of-page loading bar
@@ -181,7 +201,7 @@ function Sidebar() {
           <NavLink
             key={to}
             to={to}
-            end={to === "/"}
+            end={to === "/" || to === "/library"}
             className={({ isActive }) =>
               cn(
                 "relative flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl text-sidebar-foreground/60 transition-all duration-200 hover:bg-accent hover:text-sidebar-foreground group",
@@ -213,19 +233,38 @@ function Sidebar() {
           <StreakXPWidget />
         </div>
         <div className="flex flex-col items-center gap-2">
-          {/* Dev Tools link -- hidden from nav, accessible via this small icon at the bottom */}
-          <NavLink
-            to="/admin"
-            title="Dev Tools"
-            className={({ isActive }) =>
-              cn(
-                "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
-                isActive && "bg-accent text-sidebar-foreground",
-              )
-            }
-          >
-            <Wrench size={14} />
-          </NavLink>
+          {/* Dev surfaces are demoted from the learner nav rail and gated
+              behind VITE_DEV_SURFACES so prod bundles don't ship the link
+              (plan 2F.5). Routes are dropped too -- deep links resolve only
+              in dev/staging builds. */}
+          {DEV_SURFACES_ENABLED && (
+            <>
+              <NavLink
+                to="/quality"
+                title="Quality (dev)"
+                className={({ isActive }) =>
+                  cn(
+                    "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
+                    isActive && "bg-accent text-sidebar-foreground",
+                  )
+                }
+              >
+                <ClipboardCheck size={14} />
+              </NavLink>
+              <NavLink
+                to="/admin"
+                title="Dev Tools"
+                className={({ isActive }) =>
+                  cn(
+                    "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
+                    isActive && "bg-accent text-sidebar-foreground",
+                  )
+                }
+              >
+                <Wrench size={14} />
+              </NavLink>
+            </>
+          )}
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
           {/* Dark mode toggle */}
           <button
@@ -242,6 +281,20 @@ function Sidebar() {
       </nav>
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
+  )
+}
+
+// The Luminary home hub (2E.7). Legacy deep-link query params (?doc,
+// ?section_id, ?chunk_id, ?page, ?tag) hitting / forward to /library so
+// existing bookmarks keep working; otherwise the hub renders.
+function HomeRoute() {
+  const { search } = useLocation()
+  const target = getHomeRedirectTarget(search)
+  if (target) return <Navigate to={target} replace />
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <Hub />
+    </Suspense>
   )
 }
 
@@ -298,7 +351,7 @@ function AppShell() {
         navigate("/notes")
       } else if (detail.tab === "learning") {
         // source document subtitle click from NoteReaderSheet
-        const target = detail.documentId ? `/?doc=${detail.documentId}` : "/"
+        const target = detail.documentId ? `/library?doc=${detail.documentId}` : "/library"
         navigate(target)
       } else if (detail.tab === "chat") {
         // document action menu -> Chat about this
@@ -355,15 +408,45 @@ function AppShell() {
   }, [])
 
   useEffect(() => {
+    function isTypingTarget(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false
+      if (t.isContentEditable) return true
+      const tag = t.tagName
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+    }
+
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && e.key === "k") {
         e.preventDefault()
         setSearchOpen((prev) => !prev)
+        return
+      }
+      // 2C.1: ⌘+1..6 jumps to nav tabs. Skip when typing in an input so
+      // a numeric keystroke inside a search field doesn't navigate.
+      if (mod && !e.shiftKey && /^[1-6]$/.test(e.key) && !isTypingTarget(e.target)) {
+        const idx = parseInt(e.key, 10) - 1
+        const item = NAV_ITEMS[idx]
+        if (item) {
+          e.preventDefault()
+          navigate(item.to)
+        }
+        return
+      }
+      // 2C.2: ⌘+Shift+N opens the global capture-note flow with the
+      // currently-active doc preloaded as the source. ⌘+N is reserved
+      // by browsers for "new window," so we add Shift.
+      if (mod && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault()
+        const { activeDocumentId, setNotesDocumentId, setNotePreload } = useAppStore.getState()
+        setNotesDocumentId(activeDocumentId)
+        setNotePreload({ content: "" })
+        navigate("/notes")
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [navigate])
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
@@ -385,16 +468,22 @@ function AppShell() {
           <FocusTimerPill />
         </div>
         <Routes>
-          <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
+          <Route path="/" element={<HomeRoute />} />
+          <Route path="/library" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
           <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
           <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
           <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
           <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
-          <Route path="/quality" element={<Suspense fallback={<PageSkeleton />}><Quality /></Suspense>} />
-          <Route path="/evals" element={<Navigate to="/quality" replace />} />
           <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
-          <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
-          <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
+          <Route path="/collections/:id" element={<Suspense fallback={<PageSkeleton />}><CollectionWorkspace /></Suspense>} />
+          {DEV_SURFACES_ENABLED && (
+            <>
+              <Route path="/quality" element={<Suspense fallback={<PageSkeleton />}><Quality /></Suspense>} />
+              <Route path="/evals" element={<Navigate to="/quality" replace />} />
+              <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
+              <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
+            </>
+          )}
         </Routes>
       </main>
 

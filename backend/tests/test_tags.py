@@ -95,11 +95,14 @@ async def test_tag_filter_returns_matching_docs(test_db):
     doc_physics = str(uuid.uuid4())
     doc_history = str(uuid.uuid4())
     async with factory() as session:
-        session.add(_make_doc(doc_physics, title="Physics Book", tags=["physics"]))
-        session.add(_make_doc(doc_history, title="History Book", tags=["history"]))
+        session.add(_make_doc(doc_physics, title="Physics Book"))
+        session.add(_make_doc(doc_history, title="History Book"))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.patch(f"/documents/{doc_physics}/tags", json={"tags": ["physics"]})
+        await client.patch(f"/documents/{doc_history}/tags", json={"tags": ["history"]})
+
         resp = await client.get("/documents?tag=physics")
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -114,16 +117,44 @@ async def test_tag_filter_no_substring_collision(test_db):
     engine, factory, _ = test_db
     doc_bio = str(uuid.uuid4())
     async with factory() as session:
-        session.add(_make_doc(doc_bio, title="Biology Book", tags=["biology"]))
+        session.add(_make_doc(doc_bio, title="Biology Book"))
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.patch(f"/documents/{doc_bio}/tags", json={"tags": ["biology"]})
+
         resp = await client.get("/documents?tag=bio")
         assert resp.status_code == 200
         items = resp.json()["items"]
         ids = [i["id"] for i in items]
         # 'bio' is a substring of 'biology' but must NOT match as an element
+        # (and is not a hierarchical parent: 'biology' != 'bio/*').
         assert doc_bio not in ids
+
+
+@pytest.mark.anyio
+async def test_tag_filter_prefix_match_hierarchical(test_db):
+    """GET /documents?tag=science also returns docs tagged 'science/biology'."""
+    engine, factory, _ = test_db
+    parent_doc = str(uuid.uuid4())
+    child_doc = str(uuid.uuid4())
+    other_doc = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(parent_doc, title="P"))
+        session.add(_make_doc(child_doc, title="C"))
+        session.add(_make_doc(other_doc, title="O"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.patch(f"/documents/{parent_doc}/tags", json={"tags": ["science"]})
+        await client.patch(f"/documents/{child_doc}/tags", json={"tags": ["science/biology"]})
+        await client.patch(f"/documents/{other_doc}/tags", json={"tags": ["history"]})
+
+        resp = await client.get("/documents?tag=science")
+        ids = [i["id"] for i in resp.json()["items"]]
+        assert parent_doc in ids
+        assert child_doc in ids
+        assert other_doc not in ids
 
 
 @pytest.mark.anyio
@@ -222,11 +253,11 @@ async def test_s162_parent_tag_filter_returns_children(test_db):
         assert unrelated["id"] not in result_ids
 
 
-# Deletion removes index rows and decrements note_count
+# Deletion removes index rows and decrements usage_count
 
 
 async def test_s162_delete_note_removes_tag_rows_and_decrements_count(test_db):
-    """Deleting a note removes its NoteTagIndexModel rows; canonical tag note_count goes to 0."""
+    """Deleting a note removes its NoteTagIndexModel rows; canonical tag usage_count goes to 0."""
     unique_tag = f"del-tag-{uuid.uuid4().hex[:8]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
@@ -240,7 +271,7 @@ async def test_s162_delete_note_removes_tag_rows_and_decrements_count(test_db):
         ac_resp = await client.get(f"/tags/autocomplete?q={unique_tag}")
         matching = [t for t in ac_resp.json() if t["id"] == unique_tag]
         assert len(matching) == 1
-        assert matching[0]["note_count"] == 1
+        assert matching[0]["usage_count"] == 1
 
         # Delete the note
         assert (await client.delete(f"/notes/{note_id}")).status_code == 204
@@ -249,7 +280,7 @@ async def test_s162_delete_note_removes_tag_rows_and_decrements_count(test_db):
         ac_resp2 = await client.get(f"/tags/autocomplete?q={unique_tag}")
         matching2 = [t for t in ac_resp2.json() if t["id"] == unique_tag]
         if matching2:
-            assert matching2[0]["note_count"] == 0
+            assert matching2[0]["usage_count"] == 0
 
         # Note no longer in tag filter
         filter_resp = await client.get(f"/notes?tag={unique_tag}")
@@ -310,7 +341,7 @@ async def test_s162_tag_tree_nests_children(test_db):
 
 
 async def test_s162_tag_tree_inclusive_count(test_db):
-    """Parent node note_count includes own notes plus descendant notes."""
+    """Parent node usage_count includes own notes plus descendant notes."""
     unique = uuid.uuid4().hex[:6]
     parent_tag = f"{unique}inc"
     child_tag = f"{unique}inc/{unique}child"
@@ -324,14 +355,14 @@ async def test_s162_tag_tree_inclusive_count(test_db):
         tree = resp.json()
         parent_node = next((t for t in tree if t["id"] == parent_tag), None)
         assert parent_node is not None
-        assert parent_node["note_count"] == 3  # 1 direct + 2 children
+        assert parent_node["usage_count"] == 3  # 1 direct + 2 children
 
 
 # DELETE /tags/{id}
 
 
 async def test_s162_delete_tag_409_when_notes_exist(test_db):
-    """DELETE /tags/{id} returns 409 when tag note_count > 0."""
+    """DELETE /tags/{id} returns 409 when tag usage_count > 0."""
     unique_tag = f"protected-{uuid.uuid4().hex[:8]}"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await client.post("/notes", json={"content": "Note", "tags": [unique_tag]})
@@ -353,11 +384,11 @@ async def test_s162_delete_tag_204_when_empty(test_db):
         assert (await client.delete(f"/tags/{unique_tag}")).status_code == 204
 
 
-# Concurrent note creates do not corrupt note_count
+# Concurrent note creates do not corrupt usage_count
 
 
-async def test_s162_concurrent_creates_note_count_accurate(test_db):
-    """5 concurrent POST /notes with same tag must result in note_count=5 (SQLite atomic UPDATE).
+async def test_s162_concurrent_creates_usage_count_accurate(test_db):
+    """5 concurrent POST /notes with same tag must result in usage_count=5 (SQLite atomic UPDATE).
 
     Uses test_db fixture so tables are initialized in the isolated in-memory DB.
     asyncio.gather fires 5 simultaneous POST /notes requests; the ON CONFLICT atomic
@@ -379,7 +410,7 @@ async def test_s162_concurrent_creates_note_count_accurate(test_db):
         results = resp.json()
         matching = [t for t in results if t["id"] == unique_tag]
         assert len(matching) == 1
-        assert matching[0]["note_count"] == 5
+        assert matching[0]["usage_count"] == 5
 
 
 # ===========================================================================

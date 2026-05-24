@@ -62,7 +62,7 @@ export function FilterBar({ selected, onChange }: FilterBarProps) {
       <div className="flex items-center gap-12 overflow-x-auto no-scrollbar pb-2">
         {CATEGORY_GROUPS.map((group) => (
           <div key={group.label} className="flex flex-col gap-3 group/nav">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 transition-colors group-hover/nav:text-primary/70">
+            <span className="lum-eyebrow transition-colors group-hover/nav:text-primary/70">
               {group.label}
             </span>
             <div className="flex items-center gap-2">

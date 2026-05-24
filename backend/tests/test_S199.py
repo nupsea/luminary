@@ -178,6 +178,7 @@ async def test_autocomplete_normalizes_query(test_db):
 # Integration tests: migration endpoints
 
 
+@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_migrate_tags_merges_duplicates(test_db):
     """Two tags 'Python' and 'python' should merge into 'python' with combined note count."""

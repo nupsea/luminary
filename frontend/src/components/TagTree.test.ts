@@ -33,27 +33,31 @@ const MOCK_TAG_TREE: TagTreeItem[] = [
     id: "programming",
     display_name: "programming",
     parent_tag: null,
-    note_count: 34,
+    usage_count: 34,
+    scoped_count: 34,
     children: [
       {
         id: "programming/python",
         display_name: "python",
         parent_tag: "programming",
-        note_count: 18,
+        usage_count: 18,
+        scoped_count: 18,
         children: [],
       },
       {
         id: "programming/go",
         display_name: "go",
         parent_tag: "programming",
-        note_count: 9,
+        usage_count: 9,
+        scoped_count: 9,
         children: [],
       },
       {
         id: "programming/rust",
         display_name: "rust",
         parent_tag: "programming",
-        note_count: 7,
+        usage_count: 7,
+        scoped_count: 7,
         children: [],
       },
     ],
@@ -62,13 +66,15 @@ const MOCK_TAG_TREE: TagTreeItem[] = [
     id: "science",
     display_name: "science",
     parent_tag: null,
-    note_count: 15,
+    usage_count: 15,
+    scoped_count: 15,
     children: [
       {
         id: "science/physics",
         display_name: "physics",
         parent_tag: "science",
-        note_count: 8,
+        usage_count: 8,
+        scoped_count: 8,
         children: [],
       },
     ],
@@ -99,12 +105,12 @@ describe("TagTree nesting from fixture", () => {
     expect(childIds).toContain("programming/rust")
   })
 
-  it("note_count pill values match fixture", () => {
+  it("usage_count pill values match fixture", () => {
     const flat = flattenTagTree(MOCK_TAG_TREE)
     const python = flat.find((t) => t.id === "programming/python")
-    expect(python?.note_count).toBe(18)
+    expect(python?.usage_count).toBe(18)
     const go = flat.find((t) => t.id === "programming/go")
-    expect(go?.note_count).toBe(9)
+    expect(go?.usage_count).toBe(9)
   })
 
   it("flattenTagTree preserves parent-before-child order", () => {
@@ -182,9 +188,9 @@ describe("buildMergeRequest", () => {
 
 describe("filterMergeOptions", () => {
   const TAGS: AutocompleteResult[] = [
-    { id: "ml", display_name: "machine learning", parent_tag: null, note_count: 10 },
-    { id: "programming/python", display_name: "python", parent_tag: "programming", note_count: 5 },
-    { id: "science", display_name: "science", parent_tag: null, note_count: 3 },
+    { id: "ml", display_name: "machine learning", parent_tag: null, usage_count: 10 },
+    { id: "programming/python", display_name: "python", parent_tag: "programming", usage_count: 5 },
+    { id: "science", display_name: "science", parent_tag: null, usage_count: 3 },
   ]
 
   it("excludes the source tag from results", () => {
@@ -214,7 +220,7 @@ describe("filterMergeOptions", () => {
       id: `tag-${i}`,
       display_name: `Tag ${i}`,
       parent_tag: null,
-      note_count: 1,
+      usage_count: 1,
     }))
     const results = filterMergeOptions(many, "tag-0", "", 5)
     expect(results).toHaveLength(5)
@@ -228,19 +234,22 @@ const DEEP_TAG_TREE: TagTreeItem[] = [
     id: "science",
     display_name: "science",
     parent_tag: null,
-    note_count: 20,
+    usage_count: 20,
+    scoped_count: 20,
     children: [
       {
         id: "science/biology",
         display_name: "biology",
         parent_tag: "science",
-        note_count: 10,
+        usage_count: 10,
+        scoped_count: 10,
         children: [
           {
             id: "science/biology/genetics",
             display_name: "genetics",
             parent_tag: "science/biology",
-            note_count: 5,
+            usage_count: 5,
+            scoped_count: 5,
             children: [],
           },
         ],
@@ -249,7 +258,8 @@ const DEEP_TAG_TREE: TagTreeItem[] = [
         id: "science/physics",
         display_name: "physics",
         parent_tag: "science",
-        note_count: 8,
+        usage_count: 8,
+        scoped_count: 8,
         children: [],
       },
     ],
@@ -258,13 +268,15 @@ const DEEP_TAG_TREE: TagTreeItem[] = [
     id: "programming",
     display_name: "programming",
     parent_tag: null,
-    note_count: 15,
+    usage_count: 15,
+    scoped_count: 15,
     children: [
       {
         id: "programming/python",
         display_name: "python",
         parent_tag: "programming",
-        note_count: 7,
+        usage_count: 7,
+        scoped_count: 7,
         children: [],
       },
     ],

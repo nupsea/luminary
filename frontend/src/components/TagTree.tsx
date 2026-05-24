@@ -2,7 +2,7 @@
  * TagTree -- collapsible hierarchical tag tree for the Notes sidebar.
  *
  * Data: GET /tags/tree -> list[TagTreeItem]
- * Each item: tag name, note_count pill, gear icon on hover (opens TagManagementPanel).
+ * Each item: tag name, usage_count pill, gear icon on hover (opens TagManagementPanel).
  *
  * Interactions:
  *   Click item -> setActiveTag in useAppStore (Notes list refetches with ?tag=)
@@ -11,8 +11,9 @@
  * States: loading (skeleton), empty (placeholder), error (retry).
  */
 
-import { ChevronDown, ChevronRight, Settings2, Wrench, Search, X } from "lucide-react"
+import { ArrowRight, ChevronDown, ChevronRight, Settings2, Wrench, Search, X } from "lucide-react"
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NormalizationDrawer } from "@/components/NormalizationDrawer"
@@ -25,9 +26,15 @@ import type { components } from "@/types/api"
 
 
 export type TagTreeItem = components["schemas"]["TagTreeItem"]
+export type TagTreeScope = "all" | "note" | "document"
 
-const fetchTagTree = (): Promise<TagTreeItem[]> =>
-  apiGet<TagTreeItem[]>("/tags/tree")
+interface CrossContentCounts {
+  document_count: number
+  note_count: number
+}
+
+const fetchTagTree = (scope: TagTreeScope): Promise<TagTreeItem[]> =>
+  apiGet<TagTreeItem[]>("/tags/tree", scope === "all" ? undefined : { scope })
 
 // Single tag row
 
@@ -98,9 +105,13 @@ function TagTreeItemRow({
           )}
         </span>
 
-        {/* Note count pill */}
-        <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-          {item.note_count}
+        {/* Scoped usage pill (note-scoped on Notes, doc-scoped elsewhere,
+            full usage when unscoped -- scoped_count equals usage_count then). */}
+        <span
+          className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+          title={`${item.scoped_count} use${item.scoped_count === 1 ? "" : "s"} (${item.usage_count} total)`}
+        >
+          {item.scoped_count}
         </span>
 
         {/* Gear icon -- shown on hover */}
@@ -188,13 +199,21 @@ function collectMatchedIds(items: FilteredTagTreeItem[]): string[] {
   return result
 }
 
-export function TagTree() {
+interface TagTreeProps {
+  /** Restrict tree to tags used on this content type. Defaults to 'all'
+   * so existing call sites keep their pre-2E.2 behavior; Notes opts in
+   * to 'note' to hide doc-only tags from the focused sidebar. */
+  scope?: TagTreeScope
+}
+
+export function TagTree({ scope = "all" }: TagTreeProps = {}) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [normOpen, setNormOpen] = useState(false)
   const [scanInFlight, setScanInFlight] = useState(false)
   const activeTag = useAppStore((s) => s.activeTag)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const navigate = useNavigate()
 
   const {
     data: tree,
@@ -202,10 +221,35 @@ export function TagTree() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ["tags-tree"],
-    queryFn: fetchTagTree,
+    queryKey: ["tags-tree", `scope:${scope}`],
+    queryFn: () => fetchTagTree(scope),
     staleTime: 30_000,
   })
+
+  // Spill-over: only fetch the cross-content split when a tag is active
+  // AND this tree is scoped (i.e. mounted on a focused per-type surface
+  // like the Notes sidebar). When the tree is unscoped the active tag
+  // already includes both sides, so no spill-over is needed.
+  const { data: crossCounts } = useQuery({
+    queryKey: ["tag-cross-content-counts", activeTag],
+    queryFn: () =>
+      apiGet<CrossContentCounts>(`/tags/${encodeURIComponent(activeTag!)}/cross-content-counts`),
+    enabled: !!activeTag && scope !== "all",
+    staleTime: 60_000,
+  })
+  // When mounted on Notes (scope='note'), the "other side" is documents.
+  // When mounted on Library (scope='document'), the other side is notes.
+  const otherSideCount =
+    scope === "note"
+      ? crossCounts?.document_count
+      : scope === "document"
+        ? crossCounts?.note_count
+        : 0
+  const otherSideHref =
+    scope === "note"
+      ? `/library?tag=${encodeURIComponent(activeTag ?? "")}`
+      : `/notes?tag=${encodeURIComponent(activeTag ?? "")}`
+  const otherSideLabel = scope === "note" ? "documents" : "notes"
 
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
@@ -367,6 +411,19 @@ export function TagTree() {
             searchQuery={debouncedQuery}
           />
         </div>
+      )}
+      {activeTag && otherSideCount !== undefined && otherSideCount > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate(otherSideHref)}
+          className="mt-1 flex items-center gap-1 self-start rounded-md border border-dashed border-border bg-background px-2 py-1 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-foreground"
+          title={`Open ${otherSideLabel} filtered to #${activeTag}`}
+        >
+          <span>
+            Also in {otherSideCount} {otherSideCount === 1 ? otherSideLabel.slice(0, -1) : otherSideLabel}
+          </span>
+          <ArrowRight size={11} />
+        </button>
       )}
       <NormalizationDrawer open={normOpen} onOpenChange={setNormOpen} />
     </>

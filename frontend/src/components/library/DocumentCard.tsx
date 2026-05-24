@@ -10,21 +10,26 @@ import {
   Check, 
   Code, 
   Cpu, 
-  FileText, 
-  MessageSquare, 
+  FileText,
+  FolderPlus,
+  MessageSquare,
+  Sparkles,
   Mic, 
-  MoreVertical, 
-  Network, 
-  Newspaper, 
-  Pencil, 
-  StickyNote, 
+  MoreVertical,
+  Network,
+  Newspaper,
+  StickyNote,
   Trash2, 
   X, 
   Zap 
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
+import { addDocumentToCollection, fetchCollectionTree } from "@/lib/notesApi"
+import { retagDocument } from "@/pages/Learning/api"
+import { flattenCollectionTree, type CollectionTreeItem } from "@/lib/collectionUtils"
 import type { ContentType, DocumentListItem } from "./types"
 import {
   CONTENT_TYPE_ICONS,
@@ -106,8 +111,6 @@ const ACTION_ICONS: Record<DocAction, typeof BookOpen> = {
 interface DocumentCardProps {
   doc: DocumentListItem
   onClick: (id: string) => void
-  onTagClick?: (tag: string) => void
-  onTagsChange?: (id: string, tags: string[]) => void
   onDelete?: (id: string) => void
   onContentTypeChange?: (id: string, contentType: ContentType) => void
   onAction?: (docId: string, action: DocAction) => void
@@ -119,8 +122,6 @@ interface DocumentCardProps {
 export function DocumentCard({
   doc,
   onClick,
-  onTagClick,
-  onTagsChange,
   onDelete,
   onContentTypeChange,
   onAction,
@@ -134,13 +135,18 @@ export function DocumentCard({
   const isProcessing = isDocumentProcessing(doc)
   const isErrored = isDocumentErrored(doc)
   const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : CONTENT_TYPE_BADGE[doc.content_type])
-  const [editingTags, setEditingTags] = useState(false)
-  const [tagInput, setTagInput] = useState("")
+  const navigate = useNavigate()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [typePopoverOpen, setTypePopoverOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const actionMenuRef = useRef<HTMLDivElement>(null)
+  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false)
+  const [collections, setCollections] = useState<CollectionTreeItem[] | null>(null)
+  const [collectionsLoading, setCollectionsLoading] = useState(false)
+  const [addedCollectionIds, setAddedCollectionIds] = useState<Set<string>>(new Set())
+  const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
+  const [retagAdded, setRetagAdded] = useState<number | null>(null)
 
   // Close popover on outside click
   useEffect(() => {
@@ -151,6 +157,7 @@ export function DocumentCard({
       }
       if (actionMenuOpen && actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
         setActionMenuOpen(false)
+        setCollectionPickerOpen(false)
       }
     }
     document.addEventListener("mousedown", handleClick)
@@ -171,37 +178,39 @@ export function DocumentCard({
     onSelect?.(doc.id, e.target.checked)
   }
 
-  function handleTagEdit(e: React.MouseEvent) {
-    e.stopPropagation()
-    setEditingTags(true)
-    setTagInput("")
-  }
-
-  function handleTagRemove(e: React.MouseEvent, tag: string) {
-    e.stopPropagation()
-    onTagsChange?.(doc.id, doc.tags.filter((t) => t !== tag))
-  }
-
-  function handleTagInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" && tagInput.trim()) {
-      e.preventDefault()
-      const newTag = tagInput.trim().toLowerCase()
-      if (!doc.tags.includes(newTag)) {
-        onTagsChange?.(doc.id, [...doc.tags, newTag])
-      }
-      setTagInput("")
-    } else if (e.key === "Escape") {
-      setEditingTags(false)
+  async function handleOpenCollectionPicker() {
+    setCollectionPickerOpen(true)
+    if (collections !== null || collectionsLoading) return
+    setCollectionsLoading(true)
+    try {
+      const tree = await fetchCollectionTree()
+      setCollections(tree)
+    } finally {
+      setCollectionsLoading(false)
     }
   }
 
-  function handleTagInputClick(e: React.MouseEvent) {
-    e.stopPropagation()
+  async function handleAddToCollection(collectionId: string) {
+    if (addedCollectionIds.has(collectionId)) return
+    try {
+      await addDocumentToCollection(collectionId, doc.id)
+      setAddedCollectionIds((prev) => new Set(prev).add(collectionId))
+    } catch {
+      // Silent — POST is idempotent server-side; surface failure only if needed later.
+    }
   }
 
-  function handleCommitTags(e: React.MouseEvent) {
-    e.stopPropagation()
-    setEditingTags(false)
+  async function handleRetag() {
+    if (retagState === "running") return
+    setRetagState("running")
+    setRetagAdded(null)
+    try {
+      const res = await retagDocument(doc.id)
+      setRetagAdded(res.added)
+      setRetagState("done")
+    } catch {
+      setRetagState("idle")
+    }
   }
 
   async function handleTypeChange(newType: ContentType) {
@@ -227,6 +236,11 @@ export function DocumentCard({
         isProcessing && "opacity-70",
         isErrored && "border-red-200",
       )}
+      draggable={!selectMode}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("application/x-luminary-doc-id", doc.id)
+        e.dataTransfer.effectAllowed = "copy"
+      }}
       onClick={handleCardClick}
       title={
         isProcessing
@@ -281,25 +295,98 @@ export function DocumentCard({
               </button>
               {actionMenuOpen && (
                 <div
-                  className="absolute right-0 top-full z-30 mt-1 w-48 rounded-lg border border-border bg-background p-1 shadow-lg"
+                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-border bg-background p-1 shadow-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {DOC_ACTIONS.map(({ action, label }) => {
-                    const ActionIcon = ACTION_ICONS[action]
-                    return (
+                  {!collectionPickerOpen && (
+                    <>
+                      {DOC_ACTIONS.map(({ action, label }) => {
+                        const ActionIcon = ACTION_ICONS[action]
+                        return (
+                          <button
+                            key={action}
+                            onClick={() => {
+                              setActionMenuOpen(false)
+                              onAction(doc.id, action)
+                            }}
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                          >
+                            <ActionIcon size={14} className="shrink-0 text-muted-foreground" />
+                            {label}
+                          </button>
+                        )
+                      })}
+                      <div className="my-1 h-px bg-border" />
                       <button
-                        key={action}
-                        onClick={() => {
-                          setActionMenuOpen(false)
-                          onAction(doc.id, action)
-                        }}
+                        onClick={() => void handleOpenCollectionPicker()}
                         className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
                       >
-                        <ActionIcon size={14} className="shrink-0 text-muted-foreground" />
-                        {label}
+                        <FolderPlus size={14} className="shrink-0 text-muted-foreground" />
+                        Add to collection…
                       </button>
-                    )
-                  })}
+                      <button
+                        onClick={() => void handleRetag()}
+                        disabled={retagState === "running"}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent disabled:opacity-60"
+                      >
+                        <Sparkles size={14} className="shrink-0 text-muted-foreground" />
+                        {retagState === "running"
+                          ? "Re-tagging…"
+                          : retagState === "done"
+                            ? retagAdded && retagAdded > 0
+                              ? `Re-tag (added ${retagAdded})`
+                              : "Re-tag (no new tags)"
+                            : "Re-tag"}
+                      </button>
+                    </>
+                  )}
+                  {collectionPickerOpen && (
+                    <div className="flex flex-col">
+                      <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
+                        <span>Add to collection</span>
+                        <button
+                          onClick={() => setCollectionPickerOpen(false)}
+                          className="rounded p-0.5 hover:bg-accent hover:text-foreground"
+                          title="Back"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto">
+                        {collectionsLoading && (
+                          <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
+                        )}
+                        {!collectionsLoading && collections && collections.length === 0 && (
+                          <p className="px-2 py-1.5 text-xs text-muted-foreground">No collections yet</p>
+                        )}
+                        {!collectionsLoading && collections && collections.length > 0 && (
+                          flattenCollectionTree(collections).map((col) => {
+                            const added = addedCollectionIds.has(col.id)
+                            const isChild = !collections.some((root) => root.id === col.id)
+                            return (
+                              <button
+                                key={col.id}
+                                onClick={() => void handleAddToCollection(col.id)}
+                                disabled={added}
+                                className={cn(
+                                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors",
+                                  added ? "text-muted-foreground" : "hover:bg-accent",
+                                  isChild && "pl-5",
+                                )}
+                              >
+                                <span
+                                  className="h-2 w-2 shrink-0 rounded-sm"
+                                  style={{ backgroundColor: col.color }}
+                                />
+                                <span className="flex-1 truncate">{col.name}</span>
+                                {added && <Check size={12} className="shrink-0 text-primary" />}
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -404,53 +491,65 @@ export function DocumentCard({
         </p>
       )}
 
-      {/* Tags row */}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 min-h-[22px]">
-        {doc.tags.map((tag) => (
+      {/* Compact tag-count indicator. The full chip cloud + add/remove lives
+          in the reader's Tags tab now -- packing 50+ chips into the card
+          drowns out the rest of the metadata. */}
+      {doc.tags.length > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {doc.tags.length} tag{doc.tags.length === 1 ? "" : "s"}
+        </p>
+      )}
+
+      {/* Collection membership chips (plan 2E.5). The add affordance is
+          rendered inline whether or not the doc has any collections yet --
+          previously discovery relied on the hover-only MoreVertical menu,
+          which left users thinking older docs couldn't be added. */}
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {doc.collections?.slice(0, 2).map((c) => (
           <button
-            key={tag}
+            key={c.id}
             onClick={(e) => {
               e.stopPropagation()
-              onTagClick?.(tag)
+              navigate(`/collections/${c.id}`)
             }}
-            className="flex items-center gap-0.5 rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground hover:bg-primary/20 transition-colors"
+            className="flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={`Open collection: ${c.name}`}
           >
-            {tag}
-            {editingTags && (
-              <X
-                size={10}
-                className="ml-0.5 text-muted-foreground hover:text-destructive"
-                onClick={(e) => handleTagRemove(e, tag)}
-              />
-            )}
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: c.color }}
+            />
+            <span className="truncate max-w-[8rem]">{c.name}</span>
           </button>
         ))}
-
-        {editingTags ? (
-          <div className="flex items-center gap-1" onClick={handleTagInputClick}>
-            <input
-              autoFocus
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleTagInputKeyDown}
-              placeholder="add tag..."
-              className="h-5 w-20 rounded border border-border bg-background px-1.5 text-xs outline-none focus:border-primary"
-            />
-            <button onClick={handleCommitTags} className="text-primary hover:text-primary/80">
-              <Check size={12} />
-            </button>
-          </div>
-        ) : (
-          onTagsChange && (
-            <button
-              onClick={handleTagEdit}
-              className="text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-              title="Edit tags"
-            >
-              <Pencil size={11} />
-            </button>
-          )
+        {doc.collections && doc.collections.length > 2 && (
+          <span
+            className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+            title={doc.collections
+              .slice(2)
+              .map((c) => c.name)
+              .join(", ")}
+          >
+            +{doc.collections.length - 2}
+          </span>
         )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            // Open the action menu and route straight to the collection
+            // picker step so the user lands on the right surface in one
+            // click instead of fishing through the action menu.
+            setActionMenuOpen(true)
+            void handleOpenCollectionPicker()
+          }}
+          className="flex items-center gap-1 rounded-full border border-dashed border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-foreground"
+          title="Add this document to a collection"
+        >
+          <FolderPlus size={10} />
+          <span>
+            {doc.collections && doc.collections.length > 0 ? "Add" : "Add to collection"}
+          </span>
+        </button>
       </div>
 
       {/* Reading progress bar — shown when at least one section has been read */}

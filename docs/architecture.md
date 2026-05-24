@@ -10,7 +10,7 @@ description: Luminary architecture overview -- always loaded. Read before making
 Types --> Config --> Repo --> Service --> Runtime --> API
 ```
 
-- **Types** (`schemas.py`, Pydantic models, enums): zero I/O, zero imports from other layers
+- **Types** (`schemas/`, `types.py`, Pydantic models, enums): zero I/O, zero imports from other layers
 - **Config** (`config.py`): singleton `Settings` via `@lru_cache`, reads `.env`
 - **Repo**: SQLAlchemy async queries, LanceDB ops, Kuzu Cypher. Reads/writes only.
 - **Service**: business logic, orchestrates repos + ML models, implements domain rules
@@ -35,12 +35,11 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 | LLM routing | LiteLLM (Ollama local + cloud providers) |
 | Spaced repetition | FSRS (not SM-2) |
 | Tracing | Arize Phoenix (local, OpenTelemetry) |
-| Frontend | React 18 + TypeScript 5 + Vite 5 |
-| UI components | shadcn/ui + Tailwind CSS |
+| Frontend | React 19 + TypeScript 5.9 + Vite 7 |
+| UI components | shadcn/ui + Tailwind CSS 3 + Lucide icons |
 | Knowledge graph viz | Sigma.js v3 + Graphology (WebGL) |
-| State | Zustand |
-| Data fetching | TanStack Query |
-| Desktop packaging | Tauri v1.6 (Phase 5, not yet) |
+| State | Zustand v5 |
+| Data fetching | TanStack Query v5 |
 
 ## Data Stores
 
@@ -51,21 +50,38 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 
 ## Navigation Tabs
 
-`Learning | Chat | Viz | Study | Notes | Monitoring`
+**Learner rail (top of sidebar):** `Library | Notes | Study | Ask | Map | Progress`
+
+- `Library` (route `/`) — document grid; landing page. Today-hero strip surfaces due cards or Continue-reading.
+- `Notes` (`/notes`) — markdown notes, collections, tags.
+- `Study` (`/study`) — flashcards (FSRS), teach-back, collection study dashboard.
+- `Ask` (`/chat`) — RAG chat across the library with source citations. Renamed from "Chat" in the design refactor; route name preserved for deep-link / cross-tab event compatibility.
+- `Map` (`/viz`) — knowledge graph (Sigma.js entity + relationship view). Renamed from "Viz" for the same reasons.
+- `Progress` (`/progress`) — streaks, XP, mastery, review schedule. Uses the Luminary lantern glyph as its nav icon.
+
+**Dev rail (bottom of sidebar):** `Quality | Admin`
+
+- `Quality` (`/quality`) — RAGAS retrieval eval dashboard. Demoted from the learner rail in the design refactor.
+- `Admin` (`/admin`) — dev tools, ingestion queue, model usage. Also accessible at `/monitoring` (legacy alias).
 
 ## Backend Directory
 
 ```
 backend/app/
-  models.py          SQLAlchemy ORM models (single file)
+  main.py            FastAPI app factory, router registration, lifespan
+  config.py          Settings (pydantic-settings, @lru_cache singleton)
+  database.py        Engine + async session factory
   db_init.py         DDL: CREATE TABLE / CREATE INDEX (run at startup)
-  database.py        Engine + session factory
-  config.py          Settings (pydantic-settings)
-  services/          Business logic (one file per domain)
-  routers/           FastAPI routers (one file per domain)
-  runtime/           LangGraph graphs, background workers
-  workflows/         Ingestion pipeline (LangGraph)
-  telemetry.py       Arize Phoenix tracing
+  models.py          SQLAlchemy ORM models (single file)
+  types.py           Cross-layer dataclasses / TypedDicts (no I/O)
+  telemetry.py       Arize Phoenix tracing + OpenTelemetry exporters
+  schemas/           Pydantic request/response schemas (per domain)
+  repos/             Data-access layer (SQLAlchemy queries, LanceDB ops)
+  services/          Business logic (one file per domain -- ~45 services)
+  routers/           Thin FastAPI handlers (one file per domain -- ~30 routers)
+  runtime/           LangGraph chat graph + chat_nodes/ (graph node fns)
+  workflows/         Ingestion pipeline (LangGraph) + ingestion_nodes/
+  scripts/           One-off maintenance / migration scripts
 backend/tests/       pytest tests (mirror app/ structure)
 ```
 
@@ -73,9 +89,31 @@ backend/tests/       pytest tests (mirror app/ structure)
 
 ```
 frontend/src/
-  components/        Reusable components
-  pages/             Tab-level components (Learning, Chat, Viz, Study, Notes, Monitoring)
-  store/             Zustand stores
-  lib/               Utilities (utils.ts, api.ts)
-  hooks/             Custom React hooks
+  App.tsx            Router, nav rail, Cmd+K, global chat panel, prefetch
+  main.tsx           React 19 root
+  index.css          Tailwind layers + design tokens (--type-*, .lum-*)
+  store.ts, vizStore.ts  Zustand stores (main + knowledge map)
+  store/             Additional Zustand slice files
+  pages/             Tab-level routes
+    Learning.tsx, Learning/              Library (route '/')
+    Notes.tsx, Notes/
+    Study.tsx, Study/
+    Chat.tsx, Chat/                      'Ask' tab
+    Viz.tsx, Viz/                        'Map' tab
+    Progress.tsx
+    Admin.tsx, Quality.tsx, Evals.tsx, Monitoring.tsx (dev surfaces)
+  components/
+    library/         DocumentCard, FilterBar, SearchBar, UploadDialog, ...
+    reader/          PDFViewer, EPUBViewer, DocumentReader, ...
+    chat/            Chat session list + message components
+    study/           CollectionStudyDashboard, struggling-cards panel, ...
+    Teachback/       Teach-back result row + expandable detail
+    evals/, goals/   Eval dashboard + goal manager components
+    icons/           Custom SVG icon components (LuminaryGlyph)
+    ui/              shadcn/ui primitives
+    *.tsx            Top-level shared components (~30 files)
+  lib/               apiClient, utility functions
+  hooks/             Custom React hooks (useDebounce, useReviewNotification, ...)
+  types/             Generated openapi types (api.ts)
+  assets/            Static assets bundled by Vite
 ```

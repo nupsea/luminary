@@ -3,7 +3,7 @@ import * as pdfjsLib from "pdfjs-dist"
 import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
-import { Search } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, ZoomIn } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionItem } from "./types"
@@ -248,6 +248,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
     // ── Search state ──────────────────────────────────────────────────
     const [searchOpen, setSearchOpen] = useState(false)
+    const [zoomOpen, setZoomOpen] = useState(false)
+    const zoomPopoverRef = useRef<HTMLDivElement | null>(null)
     const [searchQuery, setSearchQuery] = useState("")
     const [globalMatches, setGlobalMatches] = useState<PageMatch[]>([])
     const [globalMatchIndex, setGlobalMatchIndex] = useState(-1)
@@ -738,6 +740,16 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentPage, totalPages, searchOpen])
 
+    useEffect(() => {
+      if (!zoomOpen) return
+      const onDocPointerDown = (e: PointerEvent) => {
+        const node = zoomPopoverRef.current
+        if (node && !node.contains(e.target as Node)) setZoomOpen(false)
+      }
+      document.addEventListener("pointerdown", onDocPointerDown)
+      return () => document.removeEventListener("pointerdown", onDocPointerDown)
+    }, [zoomOpen])
+
     if (loadStatus === "loading") {
       return <Skeleton className="h-full w-full min-h-[600px]" />
     }
@@ -875,17 +887,19 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           </div>
 
           {/* Toolbar (moved to bottom) */}
-          <div className="flex items-center gap-2 px-3 py-2 border-t bg-background flex-shrink-0">
+          <div className="flex items-center gap-1 px-3 py-1.5 border-t bg-background flex-shrink-0">
             <button
-              className="px-2 py-1 text-sm border rounded hover:bg-accent disabled:opacity-40"
+              className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage <= 1}
+              title="Previous page"
+              aria-label="Previous page"
             >
-              Prev
+              <ChevronLeft className="h-4 w-4" />
             </button>
             <input
               type="number"
-              className="w-14 text-center text-sm border rounded px-1 py-1"
+              className="w-12 text-center text-sm border rounded px-1 py-0.5"
               value={pageInput}
               min={1}
               max={totalPages}
@@ -894,35 +908,50 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               onKeyDown={(e) => { if (e.key === "Enter") commitPageInput() }}
               aria-label="Current page"
             />
-            <span className="text-sm text-muted-foreground">/ {totalPages}</span>
+            <span className="text-xs text-muted-foreground tabular-nums">/ {totalPages}</span>
             <button
-              className="px-2 py-1 text-sm border rounded hover:bg-accent disabled:opacity-40"
+              className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
+              title="Next page"
+              aria-label="Next page"
             >
-              Next
+              <ChevronRight className="h-4 w-4" />
             </button>
             <button
-              className="px-2 py-1 text-sm border rounded hover:bg-accent"
+              className="p-1 rounded hover:bg-accent ml-1"
               onClick={() => setSearchOpen((v) => !v)}
               title="Search in PDF (Ctrl+F)"
               aria-label="Search in PDF"
             >
-              <Search className="h-4 w-4 inline" />
+              <Search className="h-4 w-4" />
             </button>
-            <div className="flex items-center gap-1 ml-auto">
-              <span className="text-xs text-muted-foreground">Zoom</span>
-              <input
-                type="range"
-                min={50}
-                max={200}
-                step={10}
-                value={Math.round(zoom * 100)}
-                onChange={(e) => setZoom(parseInt(e.target.value, 10) / 100)}
-                className="w-24"
+            <div className="ml-auto relative" ref={zoomPopoverRef}>
+              <button
+                className="flex items-center gap-1 px-2 py-1 rounded hover:bg-accent text-xs tabular-nums"
+                onClick={() => setZoomOpen((v) => !v)}
+                title="Zoom"
                 aria-label="Zoom level"
-              />
-              <span className="text-xs w-10">{Math.round(zoom * 100)}%</span>
+                aria-expanded={zoomOpen}
+              >
+                <ZoomIn className="h-4 w-4" />
+                <span className="w-8 text-right">{Math.round(zoom * 100)}%</span>
+              </button>
+              {zoomOpen && (
+                <div className="absolute right-0 bottom-full mb-2 z-30 flex items-center gap-2 px-3 py-2 border rounded-md bg-background shadow-md">
+                  <input
+                    type="range"
+                    min={50}
+                    max={200}
+                    step={10}
+                    value={Math.round(zoom * 100)}
+                    onChange={(e) => setZoom(parseInt(e.target.value, 10) / 100)}
+                    className="w-32"
+                    aria-label="Zoom level"
+                  />
+                  <span className="text-xs w-10 tabular-nums">{Math.round(zoom * 100)}%</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

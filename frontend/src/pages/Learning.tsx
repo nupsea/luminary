@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookOpen, BookPlus, Plus, Trash2 } from "lucide-react"
+import { BookPlus, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { DocumentCard } from "@/components/library/DocumentCard"
 import { FilterBar } from "@/components/library/FilterBar"
+import { LibraryCollectionsRail } from "@/components/library/LibraryCollectionsRail"
+import { LibraryTagRail } from "@/components/library/LibraryTagRail"
 import { IngestingPlaceholder } from "@/components/library/IngestingPlaceholder"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
@@ -17,6 +19,7 @@ import { useSelectDocument } from "@/hooks/useSelectDocument"
 import { buildDocActionDetail } from "@/lib/docActionUtils"
 import type { DocAction } from "@/lib/docActionUtils"
 import { isDocumentReady } from "@/lib/documentReadiness"
+import { apiGet } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
 
 import {
@@ -24,11 +27,11 @@ import {
   deleteDocument,
   fetchDocuments,
   fetchRecentlyAccessed,
-  patchTags,
 } from "./Learning/api"
 import { LibraryStatsBar } from "./Learning/LibraryStatsBar"
 import { LibraryTable } from "./Learning/LibraryTable"
 import { SearchPanel } from "./Learning/SearchPanel"
+import { TodayHero } from "./Learning/TodayHero"
 import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
 
 const PAGE_SIZE = 20
@@ -70,6 +73,14 @@ export default function Learning() {
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const libraryView = useAppStore((s) => s.libraryView)
   const setLibraryView = useAppStore((s) => s.setLibraryView)
+  const libraryFiltersOpen = useAppStore((s) => s.libraryFiltersOpen)
+  const setLibraryFiltersOpen = useAppStore((s) => s.setLibraryFiltersOpen)
+  // Seed the Library's collection filter from the global activeCollectionId
+  // when arriving from the collection workspace (or anywhere else that sets
+  // the store). Then clear the store so a later return to /library without
+  // a fresh selection doesn't reapply the old filter.
+  const incomingCollectionId = useAppStore((s) => s.activeCollectionId)
+  const clearActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const queryClient = useQueryClient()
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -95,6 +106,16 @@ export default function Learning() {
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
   const [page, setPage] = useState(1)
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
+    incomingCollectionId ?? null,
+  )
+  // Consume the store value once on mount so a subsequent visit to /library
+  // (e.g. via the sidebar tab) lands unfiltered. The local selectedCollectionId
+  // remains the source of truth from here on.
+  useEffect(() => {
+    if (incomingCollectionId) clearActiveCollectionId(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [uploadOpen, setUploadOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
@@ -102,12 +123,25 @@ export default function Learning() {
 
   const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
 
+  // Fetch the active collection's name + color so the chip in the active-
+  // filter row can render legibly (slug != display name; users named it).
+  const { data: activeCollectionMeta } = useQuery({
+    queryKey: ["collection-meta", selectedCollectionId],
+    queryFn: () =>
+      apiGet<{ id: string; name: string; color: string }>(
+        `/collections/${selectedCollectionId}`,
+      ),
+    enabled: !!selectedCollectionId,
+    staleTime: 60_000,
+  })
+
   const { data: pageData, isLoading, isError, isSuccess, refetch } = useQuery({
-    queryKey: ["documents", content_type, tagFilter, sort, page, PAGE_SIZE],
+    queryKey: ["documents", content_type, tagFilter, selectedCollectionId, sort, page, PAGE_SIZE],
     queryFn: () =>
       fetchDocuments({
         content_type,
         tag: tagFilter ?? undefined,
+        collection_id: selectedCollectionId ?? undefined,
         sort,
         page,
         page_size: PAGE_SIZE,
@@ -119,13 +153,6 @@ export default function Learning() {
   const { data: recentItems } = useQuery({
     queryKey: ["documents-recent"],
     queryFn: fetchRecentlyAccessed,
-  })
-
-  const tagsMutation = useMutation({
-    mutationFn: ({ id, tags }: { id: string; tags: string[] }) => patchTags(id, tags),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["documents"] })
-    },
   })
 
   const bulkDeleteMutation = useMutation({
@@ -181,19 +208,6 @@ export default function Learning() {
     window.dispatchEvent(new CustomEvent("luminary:navigate", { detail }))
   }
 
-  function handleTagClick(tag: string) {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set("tag", tag)
-      return next
-    })
-    setPage(1)
-  }
-
-  function handleTagsChange(id: string, tags: string[]) {
-    tagsMutation.mutate({ id, tags })
-  }
-
   function handleContentTypeChange(_id: string, _contentType: ContentType) {
     void queryClient.invalidateQueries({ queryKey: ["documents"] })
     void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
@@ -238,6 +252,11 @@ export default function Learning() {
 
   function handleSortChange(s: SortOption) {
     setSort(s)
+    setPage(1)
+  }
+
+  function handleCollectionSelect(id: string | null) {
+    setSelectedCollectionId(id)
     setPage(1)
   }
 
@@ -331,6 +350,26 @@ export default function Learning() {
           <>
             <SortSelect value={sort} onChange={handleSortChange} />
             <ViewToggle value={libraryView} onChange={setLibraryView} />
+            <button
+              onClick={() => setLibraryFiltersOpen(!libraryFiltersOpen)}
+              className={`flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                libraryFiltersOpen
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-background text-foreground hover:bg-accent"
+              }`}
+              title={libraryFiltersOpen ? "Hide filters" : "Show filters"}
+            >
+              <SlidersHorizontal size={14} />
+              Filters
+              {(() => {
+                const active = (selectedCollectionId ? 1 : 0) + (tagFilter ? 1 : 0)
+                return active > 0 ? (
+                  <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 text-[10px] font-semibold text-primary">
+                    {active}
+                  </span>
+                ) : null
+              })()}
+            </button>
           </>
         )}
         <button
@@ -355,36 +394,98 @@ export default function Learning() {
         </button>
       </div>
 
-      {/* Active filters */}
-      {tagFilter && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Filtered by tag:</span>
-          <button
-            onClick={() => {
-              setSearchParams((prev) => {
-                const next = new URLSearchParams(prev)
-                next.delete("tag")
-                return next
-              })
-              setPage(1)
-            }}
-            className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
-          >
-            {tagFilter}
-            <span className="ml-0.5">×</span>
-          </button>
+      {/* Active filters -- always rendered when anything is active so the
+          collection/tag selection is obvious without opening the filter rail.
+          Each chip is clickable to clear; "Clear all" appears once both
+          dimensions are filled. */}
+      {(tagFilter || selectedCollectionId) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-primary/80">
+            Filtered:
+          </span>
+          {selectedCollectionId && (
+            <button
+              onClick={() => handleCollectionSelect(null)}
+              className="flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs font-medium text-foreground hover:bg-accent ring-1 ring-border"
+              title="Clear collection filter"
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: activeCollectionMeta?.color ?? "#888" }}
+              />
+              <span className="truncate max-w-[14rem]">
+                {activeCollectionMeta?.name ?? "Collection"}
+              </span>
+              <span className="text-muted-foreground">×</span>
+            </button>
+          )}
+          {tagFilter && (
+            <button
+              onClick={() => {
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev)
+                  next.delete("tag")
+                  return next
+                })
+                setPage(1)
+              }}
+              className="flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs font-medium text-foreground hover:bg-accent ring-1 ring-border"
+              title="Clear tag filter"
+            >
+              <span className="text-muted-foreground">#</span>
+              <span className="truncate max-w-[14rem]">{tagFilter}</span>
+              <span className="text-muted-foreground">×</span>
+            </button>
+          )}
+          {tagFilter && selectedCollectionId && (
+            <button
+              onClick={() => {
+                handleCollectionSelect(null)
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev)
+                  next.delete("tag")
+                  return next
+                })
+                setPage(1)
+              }}
+              className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 
       {searchActive ? (
         <SearchPanel query={search} onDocumentClick={handleDocumentClick} />
       ) : (
-        <>
+        <div className={libraryFiltersOpen ? "flex gap-4 items-start" : "contents"}>
+          {libraryFiltersOpen && (
+            <div className="flex w-56 shrink-0 flex-col gap-3">
+              <LibraryCollectionsRail
+                selectedId={selectedCollectionId}
+                onSelect={handleCollectionSelect}
+              />
+              <LibraryTagRail
+                activeTag={tagFilter}
+                onSelect={(tag) => {
+                  setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev)
+                    if (tag) next.set("tag", tag)
+                    else next.delete("tag")
+                    return next
+                  })
+                  setPage(1)
+                }}
+              />
+            </div>
+          )}
+          <div className={libraryFiltersOpen ? "flex-1 min-w-0 flex flex-col gap-4" : "contents"}>
           <FilterBar selected={selectedTypes} onChange={handleTypesChange} />
 
           {isLoading && libraryView === "grid" ? (
             <LoadingSkeleton />
-          ) : isSuccess && total === 0 && !tagFilter && selectedTypes.size === 0 ? (
+          ) : isSuccess && total === 0 && !tagFilter && selectedTypes.size === 0 && !selectedCollectionId ? (
             <EmptyState onAdd={() => setUploadOpen(true)} />
           ) : (
             <>
@@ -417,33 +518,21 @@ export default function Learning() {
                 />
               )}
 
-              {/* Continue reading -- single highlighted row for most recently accessed doc */}
-              {recentItems && recentItems.length > 0 && selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
-                <div
-                  className="flex cursor-pointer select-none items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10"
-                  onClick={() => handleDocumentClick(recentItems[0].id)}
-                >
-                  <BookOpen size={15} className="shrink-0 text-primary" />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-primary">
-                      Continue reading
-                    </span>
-                    <span className="truncate text-sm font-medium text-foreground">
-                      {recentItems[0].title}
-                    </span>
-                  </div>
-                  {recentItems[0].reading_progress_pct > 0 && (
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {Math.round(recentItems[0].reading_progress_pct * 100)}% read
-                    </span>
-                  )}
-                </div>
+              {/* Today hero -- surfaces highest-leverage action: due cards (recall)
+                  beats continue-reading (reception). Hides when no cards due AND no recent doc. */}
+              {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
+                <TodayHero
+                  recentItem={recentItems?.[0]}
+                  onContinue={handleDocumentClick}
+                />
               )}
 
               <section>
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <h2 className="lum-eyebrow mb-2">
                   {tagFilter
                     ? `Tagged: ${tagFilter}`
+                    : selectedCollectionId
+                    ? "In collection"
                     : selectedTypes.size > 0
                     ? "Results"
                     : "All documents"}
@@ -472,11 +561,20 @@ export default function Learning() {
                     </button>
                   </div>
                 ) : items.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-muted-foreground">
-                    {tagFilter
-                      ? `No documents tagged "${tagFilter}".`
-                      : "No documents match your filters."}
-                  </p>
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    {tagFilter ? (
+                      <p>No documents tagged &ldquo;{tagFilter}&rdquo;.</p>
+                    ) : selectedCollectionId ? (
+                      <>
+                        <p>No documents in this collection yet.</p>
+                        <p className="mt-1 text-xs text-muted-foreground/80">
+                          Add one from any DocumentCard&apos;s <span className="font-semibold">⋯</span> menu, or drag a card onto the collection in the rail.
+                        </p>
+                      </>
+                    ) : (
+                      <p>No documents match your filters.</p>
+                    )}
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {items.map((doc) => (
@@ -484,8 +582,6 @@ export default function Learning() {
                         key={doc.id}
                         doc={doc}
                         onClick={handleDocumentClick}
-                        onTagClick={handleTagClick}
-                        onTagsChange={handleTagsChange}
                         onDelete={!selectMode ? handleDeleteDocument : undefined}
                         onContentTypeChange={handleContentTypeChange}
                         onAction={handleDocAction}
@@ -521,7 +617,8 @@ export default function Learning() {
               )}
             </>
           )}
-        </>
+          </div>
+        </div>
       )}
 
       {/* Bulk action bar */}

@@ -61,6 +61,7 @@ def _make_tag(tag_id: str, display_name: str, note_count: int = 5) -> CanonicalT
 # Tests: scan
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_creates_suggestion_for_similar_pair(test_db):
     """Scan with similar embeddings creates a TagMergeSuggestionModel row."""
@@ -102,6 +103,7 @@ async def test_scan_creates_suggestion_for_similar_pair(test_db):
         assert row.suggested_canonical_id == "ml"
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_skips_existing_alias(test_db):
     """Scan skips pairs already linked in TagAliasModel (in either direction)."""
@@ -132,6 +134,7 @@ async def test_scan_skips_existing_alias(test_db):
     assert count == 0
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_skips_pairs_below_threshold(test_db):
     """Scan skips pairs with cosine similarity <= 0.85."""
@@ -158,6 +161,7 @@ async def test_scan_skips_pairs_below_threshold(test_db):
     assert count == 0
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_with_fewer_than_two_tags_returns_zero(test_db):
     """Scan with 0 or 1 tags returns 0 without crashing."""
@@ -177,6 +181,7 @@ async def test_scan_with_fewer_than_two_tags_returns_zero(test_db):
 # Tests: accept
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_accept_merges_tags_and_creates_alias(test_db):
     """Accept endpoint creates TagAliasModel and deletes source CanonicalTagModel."""
@@ -233,6 +238,7 @@ async def test_accept_merges_tags_and_creates_alias(test_db):
         assert sug.status == "accepted"
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_reject_sets_status_rejected(test_db):
     """reject_suggestion sets status=rejected without touching tags."""

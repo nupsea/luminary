@@ -11,6 +11,9 @@ export interface CollectionTreeItem {
   icon: string | null
   note_count: number
   document_count: number
+  // Inclusive descendant count restricted to the requested ?contains.
+  // Falls back to note_count + document_count when unscoped (plan 2E.1c).
+  scoped_count: number
   children: CollectionTreeItem[]
 }
 

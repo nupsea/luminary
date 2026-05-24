@@ -20,6 +20,20 @@ class Settings(BaseSettings):
     WHISPER_MODEL_SIZE: str = "base"
     VISION_MODEL: str = "ollama/llava:7b"
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
+    # 2D.2: seed document auto-tags with entities from the graph extraction.
+    # On by default -- no extra LLM calls; uses entities already populated by
+    # entity_extract_node. Requires GLINER_ENABLED at ingestion time for old docs
+    # to have entities; new ingestions get entities automatically.
+    AUTO_TAG_USE_ENTITIES: bool = True
+    # Per-doc mention threshold for entity-as-tag selection. Higher = fewer,
+    # more central tags. Scales naturally with document length: long technical
+    # books yield many tags, short articles a handful. Default 3 -- combined
+    # with the CONCEPT-only entity query and the stoplist, this keeps the
+    # generic ambient-noun tail out of the rail.
+    AUTO_TAG_ENTITY_MIN_MENTIONS: int = 3
+    # Auto-tag minimum slug length. Two-char concept tags like 'ai' are useful
+    # but anything shorter is almost always an extraction artifact.
+    AUTO_TAG_MIN_SLUG_LENGTH: int = 2
     WEB_SEARCH_PROVIDER: str = "none"  # "none" | "brave" | "tavily" | "duckduckgo"
     BRAVE_API_KEY: str = ""
     TAVILY_API_KEY: str = ""

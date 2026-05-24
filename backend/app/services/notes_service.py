@@ -17,7 +17,14 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
-from app.models import NoteModel, NoteSourceModel, NoteTagIndexModel
+from app.models import (
+    DocumentTagIndexModel,
+    DocumentTagProvenanceModel,
+    NoteModel,
+    NoteSourceModel,
+    NoteTagIndexModel,
+)
+from app.schemas.membership import CollectionRef
 from app.schemas.notes import NoteResponse
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import (
@@ -34,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 def to_response(
     note: NoteModel,
-    collection_ids: list[str] | None = None,
+    collections: list[CollectionRef] | None = None,
     source_document_ids: list[str] | None = None,
 ) -> NoteResponse:
     return NoteResponse(
@@ -45,8 +52,10 @@ def to_response(
         content=note.content,
         tags=note.tags or [],
         group_name=note.group_name,
-        collection_ids=collection_ids or [],
+        collections=collections or [],
         source_document_ids=source_document_ids or [],
+        title=note.title,
+        title_auto_generated=note.title_auto_generated,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -116,7 +125,7 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
             )
         )
         await session.execute(
-            text("UPDATE canonical_tags SET note_count = MAX(0, note_count - 1) WHERE id = :tag"),
+            text("UPDATE canonical_tags SET usage_count = MAX(0, usage_count - 1) WHERE id = :tag"),
             {"tag": tag},
         )
 
@@ -143,10 +152,10 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
         await session.execute(
             text(
                 "INSERT INTO canonical_tags"
-                " (id, display_name, parent_tag, note_count, created_at)"
+                " (id, display_name, parent_tag, usage_count, created_at)"
                 " VALUES (:id, :display_name, :parent_tag, 1, datetime('now'))"
                 " ON CONFLICT(id) DO UPDATE SET"
-                " note_count = canonical_tags.note_count + 1"
+                " usage_count = canonical_tags.usage_count + 1"
             ),
             {
                 "id": tag,
@@ -159,6 +168,117 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
     if removed or added:
 
         invalidate_tag_graph_cache()
+
+
+async def sync_document_tag_index(
+    document_id: str,
+    tags: list[str],
+    session: AsyncSession,
+    *,
+    record_manual_provenance: bool = False,
+) -> None:
+    """Sync DocumentTagIndexModel and CanonicalTagModel.usage_count for a document.
+
+    Mirrors sync_tag_index for documents. Call with tags=[] on deletion to
+    remove every row for this document and decrement counts.
+
+    When `record_manual_provenance=True`, also INSERT OR IGNORE a
+    DocumentTagProvenanceModel row with source='manual' for every tag in the
+    new list. Used by the manual PATCH paths so the prune endpoint can
+    distinguish user-set tags from auto-generated ones. The auto-tagger
+    writes its own provenance rows explicitly with the right tagger_version
+    and should NOT pass this flag (would cross-label its writes as manual).
+    """
+
+    tags = [normalize_tag_slug(t) for t in tags if normalize_tag_slug(t)]
+
+    old_rows = (
+        (
+            await session.execute(
+                select(DocumentTagIndexModel.tag_full).where(
+                    DocumentTagIndexModel.document_id == document_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    old_tags: set[str] = set(old_rows)
+    new_tags: set[str] = set(tags)
+
+    removed = old_tags - new_tags
+    added = new_tags - old_tags
+
+    for tag in removed:
+        await session.execute(
+            delete(DocumentTagIndexModel).where(
+                DocumentTagIndexModel.document_id == document_id,
+                DocumentTagIndexModel.tag_full == tag,
+            )
+        )
+        await session.execute(
+            delete(DocumentTagProvenanceModel).where(
+                DocumentTagProvenanceModel.document_id == document_id,
+                DocumentTagProvenanceModel.tag_full == tag,
+            )
+        )
+        await session.execute(
+            text("UPDATE canonical_tags SET usage_count = MAX(0, usage_count - 1) WHERE id = :tag"),
+            {"tag": tag},
+        )
+
+    for tag in added:
+        segments = tag.split("/")
+        tag_root = segments[0]
+        tag_parent = "/".join(segments[:-1]) if len(segments) > 1 else ""
+        display_name = segments[-1]
+        canonical_parent = tag_parent if tag_parent else None
+
+        await session.execute(
+            text(
+                "INSERT OR IGNORE INTO document_tag_index"
+                " (document_id, tag_full, tag_root, tag_parent)"
+                " VALUES (:document_id, :tag_full, :tag_root, :tag_parent)"
+            ),
+            {
+                "document_id": document_id,
+                "tag_full": tag,
+                "tag_root": tag_root,
+                "tag_parent": tag_parent,
+            },
+        )
+        await session.execute(
+            text(
+                "INSERT INTO canonical_tags"
+                " (id, display_name, parent_tag, usage_count, created_at)"
+                " VALUES (:id, :display_name, :parent_tag, 1, datetime('now'))"
+                " ON CONFLICT(id) DO UPDATE SET"
+                " usage_count = canonical_tags.usage_count + 1"
+            ),
+            {
+                "id": tag,
+                "display_name": display_name,
+                "parent_tag": canonical_parent,
+            },
+        )
+
+    if removed or added:
+        invalidate_tag_graph_cache()
+
+    if record_manual_provenance:
+        # INSERT OR IGNORE so we don't clobber an existing auto-source row.
+        # If the user is manually re-asserting a tag the auto-tagger also
+        # produced, the auto provenance stays authoritative for now -- a later
+        # slice could promote to manual.
+        for tag in tags:
+            await session.execute(
+                text(
+                    "INSERT OR IGNORE INTO document_tag_provenance"
+                    " (document_id, tag_full, source, tagger_version, created_at)"
+                    " VALUES (:doc_id, :tag, 'manual', NULL, datetime('now'))"
+                ),
+                {"doc_id": document_id, "tag": tag},
+            )
 
 
 async def sync_note_sources(

@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.membership import CollectionRef
+
 
 class NoteCreateRequest(BaseModel):
     document_id: str | None = None
@@ -30,6 +32,10 @@ class NoteUpdateRequest(BaseModel):
     section_id: str | None = None
     # None means "not supplied" (do not change); [] means "remove all sources"
     source_document_ids: list[str] | None = None
+    # Manual title edit. When supplied, the row is flipped to
+    # title_auto_generated=False so subsequent auto-gen passes never
+    # overwrite the user's choice. Empty string is a legal "clear to null".
+    title: str | None = None
 
 
 class NoteResponse(BaseModel):
@@ -40,9 +46,14 @@ class NoteResponse(BaseModel):
     content: str
     tags: list[str]
     group_name: str | None
-    collection_ids: list[str] = []
+    # Replaces the bare collection_ids list (plan 2E.5). Same membership
+    # data, enriched with name + color so cards can render chips without
+    # a follow-up fetch. Ordered by CollectionModel.sort_order ASC.
+    collections: list[CollectionRef] = []
     # all source document IDs from NoteSourceModel pivot
     source_document_ids: list[str] = []
+    title: str | None = None
+    title_auto_generated: bool = True
     created_at: datetime
     updated_at: datetime
 

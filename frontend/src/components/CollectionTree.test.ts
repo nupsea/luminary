@@ -34,6 +34,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
     icon: null,
     note_count: 5,
     document_count: 2,
+    scoped_count: 7,
     children: [
       {
         id: "col-1a",
@@ -42,6 +43,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
         icon: null,
         note_count: 18,
         document_count: 0,
+        scoped_count: 18,
         children: [],
       },
       {
@@ -51,6 +53,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
         icon: null,
         note_count: 27,
         document_count: 1,
+        scoped_count: 28,
         children: [],
       },
     ],
@@ -62,6 +65,7 @@ const MOCK_TREE: CollectionTreeItem[] = [
     icon: null,
     note_count: 12,
     document_count: 0,
+    scoped_count: 12,
     children: [],
   },
 ]
@@ -75,8 +79,8 @@ describe("CollectionTree item count from fixture", () => {
 
   it("counts only top-level items when tree has no children", () => {
     const flat: CollectionTreeItem[] = [
-      { id: "a", name: "A", color: "#fff", icon: null, note_count: 1, document_count: 0, children: [] },
-      { id: "b", name: "B", color: "#fff", icon: null, note_count: 2, document_count: 0, children: [] },
+      { id: "a", name: "A", color: "#fff", icon: null, note_count: 1, document_count: 0, scoped_count: 1, children: [] },
+      { id: "b", name: "B", color: "#fff", icon: null, note_count: 2, document_count: 0, scoped_count: 2, children: [] },
     ]
     expect(countTreeItems(flat)).toBe(2)
   })

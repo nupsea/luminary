@@ -13,14 +13,15 @@ export const VALID_SURFACES: ReadonlyArray<Surface> = [
 // Map the active route pathname to a surface label that POST /pomodoro/start
 // expects. Routes outside the four learning surfaces map to "none".
 export function inferSurfaceFromPath(pathname: string): Surface {
-  // Strip trailing slash and query but keep the first segment for matching.
   const path = pathname.split("?")[0]?.replace(/\/$/, "") ?? ""
 
-  if (path === "" || path === "/") return "read"
+  if (path.startsWith("/library")) return "read"
   if (path.startsWith("/study")) return "recall"
   if (path.startsWith("/notes")) return "write"
   if (path.startsWith("/chat")) return "explore"
-  // Learning page is the root; explicit alias if anyone routes there.
+  // Pre-2E.0 alias: / still renders Library until the hub UI lands (2E.7).
+  if (path === "" || path === "/") return "read"
+  // Pre-2E.0 alias: /learning was an early codename for Library.
   if (path.startsWith("/learning")) return "read"
   return "none"
 }

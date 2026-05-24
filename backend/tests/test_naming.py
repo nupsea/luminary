@@ -76,6 +76,18 @@ class TestNormalizeTagSlug:
     def test_already_normalized(self):
         assert normalize_tag_slug("machine-learning") == "machine-learning"
 
+    def test_strips_punctuation(self):
+        assert normalize_tag_slug("person's-name") == "persons-name"
+        assert normalize_tag_slug("benjamin,-brandon") == "benjamin-brandon"
+        assert normalize_tag_slug("ne-.-role") == "ne-role"
+        assert normalize_tag_slug("r-.-name") == "r-name"
+
+    def test_strips_url_artifacts(self):
+        # Colons and dots disappear; the surviving slug is still emitted -- the
+        # caller is responsible for rejecting too-short / too-numeric results.
+        assert normalize_tag_slug("s3:/...") == "s3"
+        assert normalize_tag_slug("thrift:localhost:9083") == "thriftlocalhost9083"
+
     def test_mixed_separators_in_segment(self):
         assert normalize_tag_slug("my_tag name") == "my-tag-name"
 

@@ -258,7 +258,7 @@ export function TeachbackPanel({
             >
               {failed
                 ? "Review the feedback and try again, or continue."
-                : "Great job! Move on to the next card."}
+                : "Solid explanation. Move on to the next card."}
             </p>
             <div className="flex items-center justify-center gap-3">
               <motion.button

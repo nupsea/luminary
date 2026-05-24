@@ -48,24 +48,11 @@ import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
 import { API_BASE } from "@/lib/config"
+import type { Note } from "@/lib/notesApi"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface Note {
-  id: string
-  document_id: string | null
-  chunk_id: string | null
-  content: string
-  tags: string[]
-  group_name: string | null
-  collection_ids: string[]
-  // S175: multi-document source linkage
-  source_document_ids: string[]
-  created_at: string
-  updated_at: string
-}
 
 interface GroupInfo { name: string; count: number }
 interface TagInfo { name: string; count: number }
@@ -281,10 +268,10 @@ function ClipCard({ clip, docTitle, onDeleted, onConvertToNote, onCreateFlashcar
     .join(" — ")
 
   const sourceUrl = clip.section_id
-    ? `/?doc=${clip.document_id}&section_id=${clip.section_id}`
+    ? `/library?doc=${clip.document_id}&section_id=${clip.section_id}`
     : clip.pdf_page_number
-      ? `/?doc=${clip.document_id}&page=${clip.pdf_page_number}`
-      : `/?doc=${clip.document_id}`
+      ? `/library?doc=${clip.document_id}&page=${clip.pdf_page_number}`
+      : `/library?doc=${clip.document_id}`
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
@@ -498,7 +485,7 @@ function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navi
 }
 
 // ---------------------------------------------------------------------------
-// NoteCard — card view; editing is delegated to NoteEditorDialog
+// NoteCard — card view; editing is delegated to NoteReaderSheet
 // ---------------------------------------------------------------------------
 
 interface NoteCardProps {
@@ -610,6 +597,41 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {/* Collection membership chips (plan 2E.5). Up to 2 + overflow;
+          click jumps to the collection workspace. */}
+      {note.collections && note.collections.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {note.collections.slice(0, 2).map((c) => (
+            <button
+              key={c.id}
+              onClick={(e) => {
+                e.stopPropagation()
+                navigate(`/collections/${c.id}`)
+              }}
+              className="flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              title={`Open collection: ${c.name}`}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: c.color }}
+              />
+              <span className="truncate max-w-[8rem]">{c.name}</span>
+            </button>
+          ))}
+          {note.collections.length > 2 && (
+            <span
+              className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+              title={note.collections
+                .slice(2)
+                .map((c) => c.name)
+                .join(", ")}
+            >
+              +{note.collections.length - 2}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -1093,7 +1115,7 @@ export default function NotesPage() {
         {/* Collections section */}
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between px-1">
-            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="lum-eyebrow px-2">
               Collections
             </p>
             <button
@@ -1104,7 +1126,8 @@ export default function NotesPage() {
               <Plus size={12} />
             </button>
           </div>
-          <CollectionTree />
+          <CollectionTree contains="note" />
+
           <button
             onClick={() => setShowCreateCollection(true)}
             className="mt-1 flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -1117,18 +1140,18 @@ export default function NotesPage() {
         {/* Tags section */}
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between px-1">
-            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="lum-eyebrow px-2">
               Tags
             </p>
           </div>
-          <TagTree />
+          <TagTree scope="note" />
         </div>
 
         {/* Suggested Collections summary + auto-organize trigger */}
         {(clusterSuggestions.length > 0 || isClusterQueued) && (
           <div className="mt-3">
             <div className="mb-1 flex items-center justify-between px-1">
-              <p className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="lum-eyebrow px-2">
                 Suggested Collections
               </p>
               <button

@@ -176,13 +176,27 @@ class CollectionRepo:
         await self.session.commit()
         return added
 
-    async def remove_member(self, collection_id: str, member_id: str) -> None:
-        await self.session.execute(
-            delete(CollectionMemberModel).where(
-                CollectionMemberModel.collection_id == collection_id,
-                CollectionMemberModel.member_id == member_id,
-            )
+    async def remove_member(
+        self,
+        collection_id: str,
+        member_id: str,
+        member_type: str | None = None,
+    ) -> None:
+        """Remove a member from a collection.
+
+        When member_type is None the legacy behaviour is preserved and every
+        membership row matching (collection_id, member_id) is deleted -- this
+        was safe when notes and documents lived in disjoint UUID spaces. When
+        member_type is given the delete is scoped to that type, which is what
+        cross-content membership requires.
+        """
+        stmt = delete(CollectionMemberModel).where(
+            CollectionMemberModel.collection_id == collection_id,
+            CollectionMemberModel.member_id == member_id,
         )
+        if member_type is not None:
+            stmt = stmt.where(CollectionMemberModel.member_type == member_type)
+        await self.session.execute(stmt)
         await self.session.commit()
 
     async def members_of(
@@ -203,6 +217,42 @@ class CollectionRepo:
             )
         )
         return result.scalar() or 0
+
+    async def refs_for_members(
+        self, member_ids: list[str], *, member_type: str
+    ) -> dict[str, list[tuple[str, str, str]]]:
+        """Batch-load collection refs for a list of members.
+
+        Returns {member_id: [(collection_id, name, color), ...]} where the
+        inner list is ordered by CollectionModel.sort_order ASC, name ASC --
+        the same order as list_all(). Used by /documents and /notes list
+        endpoints to populate membership chips without N+1 queries.
+        """
+        if not member_ids:
+            return {}
+        # Raw SQL bypasses any SQLAlchemy from-clause auto-detection quirks
+        # that have surfaced in cross-test runs; the query is simple enough.
+        placeholders = ",".join(f":m{i}" for i in range(len(member_ids)))
+        params: dict[str, str] = {"member_type": member_type}
+        for i, mid in enumerate(member_ids):
+            params[f"m{i}"] = mid
+        rows = (
+            await self.session.execute(
+                text(
+                    "SELECT cm.member_id, c.id, c.name, c.color "
+                    "FROM collection_members cm "
+                    "JOIN collections c ON c.id = cm.collection_id "
+                    f"WHERE cm.member_id IN ({placeholders}) "
+                    "AND cm.member_type = :member_type "
+                    "ORDER BY c.sort_order, c.name"
+                ),
+                params,
+            )
+        ).all()
+        out: dict[str, list[tuple[str, str, str]]] = {}
+        for member_id, cid, name, color in rows:
+            out.setdefault(member_id, []).append((cid, name, color))
+        return out
 
 
 def get_collection_repo(session: AsyncSession = Depends(get_db)) -> CollectionRepo:

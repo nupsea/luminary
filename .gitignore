@@ -67,3 +67,6 @@ uv.lock
 # Internal project metadata (project root only)
 prd.json
 evals/scores_history.jsonl
+
+# Design system reference inputs (local-only)
+REF/

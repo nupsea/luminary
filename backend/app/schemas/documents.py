@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.membership import CollectionRef
 from app.workflows.ingestion import ContentType
 
 
@@ -37,6 +38,10 @@ class DocumentListItem(BaseModel):
     youtube_url: str | None = None
     enrichment_status: str | None = None
     objective_progress_pct: float | None = None
+    mastery_pct: float | None = None
+    # Membership chips for the card surface (plan 2E.5). Ordered by
+    # CollectionModel.sort_order ASC, created_at ASC -- stable across pages.
+    collections: list[CollectionRef] = []
 
 
 class DocumentListResponse(BaseModel):

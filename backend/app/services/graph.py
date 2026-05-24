@@ -250,6 +250,16 @@ class KuzuService:
     def get_entities_for_documents(self, document_ids: list[str], limit: int = 15) -> list[str]:
         return self._view.get_entities_for_documents(document_ids, limit=limit)
 
+    def get_entities_with_counts(
+        self,
+        document_id: str,
+        min_mentions: int = 1,
+        allowed_types: tuple[str, ...] = ("CONCEPT",),
+    ) -> list[tuple[str, int]]:
+        return self._view.get_entities_with_counts(
+            document_id, min_mentions=min_mentions, allowed_types=allowed_types
+        )
+
     def get_cross_document_entities(self, limit: int = 10) -> list[str]:
         return self._view.get_cross_document_entities(limit=limit)
 

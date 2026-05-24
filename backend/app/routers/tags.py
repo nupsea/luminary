@@ -1,13 +1,13 @@
 """CRUD endpoints for canonical tags.
 
 Routes:
-  GET    /tags                      -- flat list sorted by note_count DESC
-  GET    /tags/tree                 -- hierarchical structure with note_count (includes descendants)
+  GET    /tags                      -- flat list sorted by usage_count DESC
+  GET    /tags/tree                 -- hierarchy with usage_count (includes descendants)
   GET    /tags/autocomplete?q=      -- prefix-search, up to 10 results
   GET    /tags/{tag_id}/notes       -- notes with this tag or any child tag
   POST   /tags                      -- create canonical tag
   PUT    /tags/{tag_id}             -- rename display_name or re-parent
-  DELETE /tags/{tag_id}             -- 409 if note_count > 0
+  DELETE /tags/{tag_id}             -- 409 if usage_count > 0
 """
 
 import asyncio
@@ -40,7 +40,11 @@ class TagResponse(BaseModel):
     id: str
     display_name: str
     parent_tag: str | None
-    note_count: int
+    usage_count: int
+    # Count restricted to the requested ?scope. Equal to usage_count for
+    # scope='all'; equal to the per-content-type count for scope='note' or
+    # 'document'. See redesign-phase-2-plan 2E.1a.
+    scoped_count: int
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -50,7 +54,11 @@ class TagTreeItem(BaseModel):
     id: str
     display_name: str
     parent_tag: str | None
-    note_count: int  # inclusive of descendants
+    usage_count: int  # inclusive of descendants, from canonical_tags.usage_count
+    # Inclusive descendant count restricted to ?scope. Equal to usage_count
+    # when scope='all'. Empty subtrees are pruned but ancestors with any
+    # matching descendant are preserved. See redesign-phase-2-plan 2E.1b.
+    scoped_count: int
     children: list["TagTreeItem"]
 
 
@@ -61,7 +69,7 @@ class TagAutocompleteResult(BaseModel):
     id: str
     display_name: str
     parent_tag: str | None
-    note_count: int
+    usage_count: int
 
 
 class TagCreateRequest(BaseModel):
@@ -82,6 +90,7 @@ class TagMergeRequest(BaseModel):
 
 class TagMergeResponse(BaseModel):
     affected_notes: int
+    affected_documents: int = 0
 
 
 class NoteItem(BaseModel):
@@ -92,11 +101,18 @@ class NoteItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TagCrossContentCounts(BaseModel):
+    """Per-content-type usage for a single tag (plan 2E.4 spill-over chips)."""
+
+    document_count: int
+    note_count: int
+
+
 class TagNodeItem(BaseModel):
     id: str
     display_name: str
     parent_tag: str | None
-    note_count: int
+    usage_count: int
 
 
 class TagEdgeItem(BaseModel):
@@ -111,12 +127,13 @@ class TagGraphResponse(BaseModel):
     generated_at: float
 
 
-def _to_response(tag: CanonicalTagModel) -> TagResponse:
+def _to_response(tag: CanonicalTagModel, scoped_count: int | None = None) -> TagResponse:
     return TagResponse(
         id=tag.id,
         display_name=tag.display_name,
         parent_tag=tag.parent_tag,
-        note_count=tag.note_count,
+        usage_count=tag.usage_count,
+        scoped_count=tag.usage_count if scoped_count is None else scoped_count,
         created_at=tag.created_at,
     )
 
@@ -126,7 +143,7 @@ def _compute_inclusive_count(
     count_by_id: dict[str, int],
     children_by_parent: dict[str, list[str]],
 ) -> int:
-    """Recursively sum note_count for tag + all descendants."""
+    """Recursively sum usage_count for tag + all descendants."""
     direct = count_by_id.get(tag_id, 0)
     child_sum = sum(
         _compute_inclusive_count(child, count_by_id, children_by_parent)
@@ -154,7 +171,7 @@ async def get_tag_graph_endpoint(
                 id=n.id,
                 display_name=n.display_name,
                 parent_tag=n.parent_tag,
-                note_count=n.note_count,
+                usage_count=n.usage_count,
             )
             for n in graph.nodes
         ],
@@ -168,7 +185,7 @@ async def autocomplete_tags(
     q: str = Query(default=""),
     repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagAutocompleteResult]:
-    """Return up to 10 canonical tags matching the prefix q, sorted by note_count DESC."""
+    """Return up to 10 canonical tags matching the prefix q, sorted by usage_count DESC."""
 
     normalized_q = normalize_tag_slug(q) if q else ""
     tags = await repo.autocomplete(normalized_q)
@@ -177,7 +194,7 @@ async def autocomplete_tags(
             id=t.id,
             display_name=t.display_name,
             parent_tag=t.parent_tag,
-            note_count=t.note_count,
+            usage_count=t.usage_count,
         )
         for t in tags
     ]
@@ -185,59 +202,146 @@ async def autocomplete_tags(
 
 @router.get("/tree", response_model=list[TagTreeItem])
 async def get_tag_tree(
+    scope: str = Query(
+        default="all",
+        description="'all' | 'note' | 'document' -- restrict scoped_count to that content type.",
+    ),
+    session: AsyncSession = Depends(get_db),
     repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagTreeItem]:
     """Return all canonical tags as a hierarchical tree.
 
-    node.note_count is the inclusive count (direct notes + all descendants).
+    `usage_count` is the inclusive count (direct + descendants) from
+    canonical_tags. `scoped_count` is the inclusive count restricted to the
+    requested scope (equal to usage_count when scope='all'). When scoped,
+    subtrees with zero matches are pruned but ancestors with any matching
+    descendant are preserved.
     """
+    if scope not in ("all", "note", "document"):
+        raise HTTPException(status_code=422, detail="scope must be 'all', 'note', or 'document'")
+
     all_tags = list(await repo.list_by_id())
 
-    count_by_id: dict[str, int] = {t.id: t.note_count for t in all_tags}
+    global_count_by_id: dict[str, int] = {t.id: t.usage_count for t in all_tags}
+    if scope == "all":
+        scoped_count_by_id: dict[str, int] = dict(global_count_by_id)
+    else:
+        table = "note_tag_index" if scope == "note" else "document_tag_index"
+        member_col = "note_id" if scope == "note" else "document_id"
+        rows = (
+            await session.execute(
+                sa_text(
+                    f"SELECT tag_full, COUNT(DISTINCT {member_col}) "
+                    f"FROM {table} GROUP BY tag_full"
+                )
+            )
+        ).all()
+        scoped_count_by_id = {r[0]: int(r[1]) for r in rows}
+
     children_by_parent: dict[str, list[str]] = {}
     for t in all_tags:
         if t.parent_tag:
             children_by_parent.setdefault(t.parent_tag, []).append(t.id)
 
-    # Build lookup for display_name and parent_tag by id
     tag_by_id: dict[str, CanonicalTagModel] = {t.id: t for t in all_tags}
 
-    # Build tree: top-level nodes only (no parent_tag)
+    # Cap rendered depth at 2 (top-level + immediate children) to match the
+    # pre-2E.1b contract; inclusive counts still cover the full descendant
+    # subtree, so deeper grandchildren contribute to ancestor counts even
+    # though they don't render as nodes.
+    def build_node(tag_id: str, parent: str | None, depth: int) -> TagTreeItem | None:
+        tag = tag_by_id.get(tag_id)
+        if tag is None:
+            return None
+        inclusive_scoped = _compute_inclusive_count(
+            tag_id, scoped_count_by_id, children_by_parent
+        )
+        if scope != "all" and inclusive_scoped == 0:
+            return None
+        children: list[TagTreeItem] = []
+        if depth < 1:
+            for child_id in children_by_parent.get(tag_id, []):
+                child = build_node(child_id, tag_id, depth + 1)
+                if child is not None:
+                    children.append(child)
+        inclusive_global = _compute_inclusive_count(
+            tag_id, global_count_by_id, children_by_parent
+        )
+        return TagTreeItem(
+            id=tag_id,
+            display_name=tag.display_name,
+            parent_tag=parent,
+            usage_count=inclusive_global,
+            scoped_count=inclusive_scoped,
+            children=children,
+        )
+
     top_level: list[TagTreeItem] = []
     for t in all_tags:
         if t.parent_tag is None:
-            children = [
-                TagTreeItem(
-                    id=child_id,
-                    display_name=(
-                        tag_by_id[child_id].display_name if child_id in tag_by_id else child_id
-                    ),
-                    parent_tag=t.id,
-                    note_count=_compute_inclusive_count(child_id, count_by_id, children_by_parent),
-                    children=[],  # max 2 levels supported in query; deeper children truncated
-                )
-                for child_id in children_by_parent.get(t.id, [])
-            ]
-            top_level.append(
-                TagTreeItem(
-                    id=t.id,
-                    display_name=t.display_name,
-                    parent_tag=None,
-                    note_count=_compute_inclusive_count(t.id, count_by_id, children_by_parent),
-                    children=children,
-                )
-            )
+            node = build_node(t.id, None, 0)
+            if node is not None:
+                top_level.append(node)
 
     return top_level
 
 
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
+    scope: str = Query(
+        default="all",
+        description="'all' | 'note' | 'document' -- restrict to tags used by that content type.",
+    ),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    session: AsyncSession = Depends(get_db),
     repo: TagRepo = Depends(get_tag_repo),
 ) -> list[TagResponse]:
-    """Return all canonical tags sorted by note_count DESC."""
-    tags = await repo.list_by_count()
-    return [_to_response(t) for t in tags]
+    """Return canonical tags sorted by usage_count DESC.
+
+    scope='document' filters to tags that appear in document_tag_index;
+    scope='note' to tags in note_tag_index; default 'all' returns the full
+    canonical list. `limit` caps the result (no cap by default).
+    """
+    if scope == "all":
+        tags = await repo.list_by_count()
+        out = [_to_response(t) for t in tags]
+    elif scope in ("note", "document"):
+        table = "note_tag_index" if scope == "note" else "document_tag_index"
+        member_col = "note_id" if scope == "note" else "document_id"
+        # Aggregate the scoped count in the same pass; order by it so a tag
+        # mostly used on notes doesn't outrank doc-heavy tags when scope=document.
+        rows = (
+            await session.execute(
+                sa_text(
+                    "SELECT t.id, t.display_name, t.parent_tag, t.usage_count, "
+                    "t.created_at, "
+                    f"(SELECT COUNT(DISTINCT idx.{member_col}) FROM {table} idx "
+                    "  WHERE idx.tag_full = t.id) AS scoped_count "
+                    "FROM canonical_tags t "
+                    f"WHERE EXISTS (SELECT 1 FROM {table} idx2 WHERE idx2.tag_full = t.id) "
+                    "ORDER BY scoped_count DESC, t.usage_count DESC"
+                )
+            )
+        ).all()
+        out = [
+            _to_response(
+                CanonicalTagModel(
+                    id=r[0],
+                    display_name=r[1],
+                    parent_tag=r[2],
+                    usage_count=r[3],
+                    created_at=r[4],
+                ),
+                scoped_count=r[5],
+            )
+            for r in rows
+        ]
+    else:
+        raise HTTPException(status_code=422, detail="scope must be 'all', 'note', or 'document'")
+
+    if limit is not None:
+        out = out[:limit]
+    return out
 
 
 @router.post("", response_model=TagResponse, status_code=201)
@@ -290,17 +394,21 @@ async def merge_tags(
             session, source_id=source_id, target_id=target_id
         )
         logger.info(
-            "Successfully merged tag %r -> %r (affected_notes=%d)",
+            "Successfully merged tag %r -> %r (affected_notes=%d, affected_documents=%d)",
             source_id,
             target_id,
             result.affected_notes,
+            result.affected_documents,
         )
     except Exception as exc:
         logger.exception("Merge failed for tag %r -> %r", source_id, target_id)
         await session.rollback()
         raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
 
-    return TagMergeResponse(affected_notes=result.affected_notes)
+    return TagMergeResponse(
+        affected_notes=result.affected_notes,
+        affected_documents=result.affected_documents,
+    )
 
 
 # Normalization schemas
@@ -309,7 +417,7 @@ async def merge_tags(
 class TagInfo(BaseModel):
     id: str
     display_name: str
-    note_count: int
+    usage_count: int
 
 
 class TagMergeSuggestionResponse(BaseModel):
@@ -372,12 +480,12 @@ async def get_normalization_suggestions(
             tag_a=TagInfo(
                 id=d.tag_a_id,
                 display_name=d.tag_a_display_name,
-                note_count=d.tag_a_note_count,
+                usage_count=d.tag_a_usage_count,
             ),
             tag_b=TagInfo(
                 id=d.tag_b_id,
                 display_name=d.tag_b_display_name,
-                note_count=d.tag_b_note_count,
+                usage_count=d.tag_b_usage_count,
             ),
             similarity=d.similarity,
             suggested_canonical_id=d.suggested_canonical_id,
@@ -476,7 +584,7 @@ async def migrate_tag_naming(
     For canonical_tags: normalizes id and display_name.
     For note_tag_index: normalizes tag_full, tag_root, tag_parent.
     For NoteModel.tags: normalizes the JSON tags array on each note.
-    Merges duplicates that collapse to the same normalized form (keeps higher note_count).
+    Merges duplicates that collapse to the same normalized form (keeps higher usage_count).
     """
 
     # Bespoke multi-table normalization migration: rename/merge canonical_tags,
@@ -527,14 +635,14 @@ async def migrate_tag_naming(
                 await session.execute(
                     sa_text(
                         "INSERT OR IGNORE INTO canonical_tags"
-                        " (id, display_name, parent_tag, note_count, created_at)"
-                        " VALUES (:id, :display_name, :parent_tag, :note_count, datetime('now'))"
+                        " (id, display_name, parent_tag, usage_count, created_at)"
+                        " VALUES (:id, :display_name, :parent_tag, :usage_count, datetime('now'))"
                     ),
                     {
                         "id": normalized_id,
                         "display_name": new_display,
                         "parent_tag": new_parent,
-                        "note_count": tag.note_count,
+                        "usage_count": tag.usage_count,
                     },
                 )
 
@@ -562,8 +670,8 @@ async def migrate_tag_naming(
                 renamed_count += 1
         else:
             # Multiple tags collapse to same normalized form -- merge
-            # Sort by note_count desc so merged count reflects the best variant
-            tag_group.sort(key=lambda t: t.note_count, reverse=True)
+            # Sort by usage_count desc so merged count reflects the best variant
+            tag_group.sort(key=lambda t: t.usage_count, reverse=True)
 
             # Collect all note_ids from all variants
             all_note_ids: set[str] = set()
@@ -593,14 +701,14 @@ async def migrate_tag_naming(
             await session.execute(
                 sa_text(
                     "INSERT OR IGNORE INTO canonical_tags"
-                    " (id, display_name, parent_tag, note_count, created_at)"
-                    " VALUES (:id, :display_name, :parent_tag, :note_count, datetime('now'))"
+                    " (id, display_name, parent_tag, usage_count, created_at)"
+                    " VALUES (:id, :display_name, :parent_tag, :usage_count, datetime('now'))"
                 ),
                 {
                     "id": normalized_id,
                     "display_name": new_display,
                     "parent_tag": new_parent,
-                    "note_count": len(all_note_ids),
+                    "usage_count": len(all_note_ids),
                 },
             )
 
@@ -649,6 +757,35 @@ async def get_notes_for_tag(
     return [NoteItem(id=n.id, content=n.content, tags=n.tags or []) for n in notes]
 
 
+@router.get("/{tag_id}/cross-content-counts", response_model=TagCrossContentCounts)
+async def get_tag_cross_content_counts(
+    tag_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> TagCrossContentCounts:
+    """Per-content-type usage for a single tag.
+
+    Drives the Library/Notes spill-over chip ("Also in N notes →") when a
+    user has narrowed one surface and we want to surface the cross-content
+    overflow without making them hop back to ⌘K (plan 2E.4).
+    """
+    row = (
+        await session.execute(
+            sa_text(
+                "SELECT "
+                "  (SELECT COUNT(DISTINCT document_id) FROM document_tag_index "
+                "   WHERE tag_full = :tag) AS doc_count, "
+                "  (SELECT COUNT(DISTINCT note_id) FROM note_tag_index "
+                "   WHERE tag_full = :tag) AS note_count"
+            ),
+            {"tag": tag_id},
+        )
+    ).first()
+    return TagCrossContentCounts(
+        document_count=int(row[0] or 0) if row else 0,
+        note_count=int(row[1] or 0) if row else 0,
+    )
+
+
 @router.put("/{tag_id}", response_model=TagResponse)
 async def update_tag(
     tag_id: str,
@@ -674,13 +811,13 @@ async def delete_tag(
     tag_id: str,
     repo: TagRepo = Depends(get_tag_repo),
 ) -> None:
-    """Delete a canonical tag. Returns 409 if the tag has notes (note_count > 0)."""
+    """Delete a canonical tag. Returns 409 if the tag has notes (usage_count > 0)."""
     tag = await repo.get_or_404(tag_id)
-    if tag.note_count > 0:
+    if tag.usage_count > 0:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"Tag '{tag_id}' has {tag.note_count} notes."
+                f"Tag '{tag_id}' has {tag.usage_count} notes."
                 " Remove notes from this tag before deleting."
             ),
         )

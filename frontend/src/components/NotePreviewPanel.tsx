@@ -15,11 +15,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { navigateToNote } from "@/lib/noteGraphUtils"
 
+interface CollectionRef {
+  id: string
+  name: string
+  color: string
+}
+
 interface NoteDetail {
   id: string
   content: string
   tags: string[]
-  collection_ids: string[]
+  collections: CollectionRef[]
   document_id: string | null
 }
 
@@ -51,7 +57,7 @@ export default function NotePreviewPanel({ noteId, onClose }: NotePreviewPanelPr
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+        <span className="lum-eyebrow">
           Note
         </span>
         <button
@@ -103,10 +109,10 @@ export default function NotePreviewPanel({ noteId, onClose }: NotePreviewPanelPr
             )}
 
             {/* Collections */}
-            {data.collection_ids.length > 0 && (
+            {data.collections.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                In {data.collection_ids.length}{" "}
-                {data.collection_ids.length === 1 ? "collection" : "collections"}
+                In {data.collections.length}{" "}
+                {data.collections.length === 1 ? "collection" : "collections"}
               </p>
             )}
           </>

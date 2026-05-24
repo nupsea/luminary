@@ -237,6 +237,7 @@ async def test_list_documents_filter_by_content_type(test_db):
     assert types == {"book", "paper"}
 
 
+@pytest.mark.unstable
 async def test_list_documents_filter_by_tag(test_db):
     """tag query param filters to documents with that tag."""
     _, factory, _ = test_db

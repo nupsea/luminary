@@ -38,8 +38,12 @@ import { CollectionHealthPanel } from "@/components/CollectionHealthPanel"
 export type { CollectionTreeItem }
 export { flattenCollectionTree }
 
-const fetchCollectionTree = (): Promise<CollectionTreeItem[]> =>
-  apiGet<CollectionTreeItem[]>("/collections/tree")
+export type CollectionTreeContains = "document" | "note"
+
+const fetchCollectionTree = (
+  contains?: CollectionTreeContains,
+): Promise<CollectionTreeItem[]> =>
+  apiGet<CollectionTreeItem[]>("/collections/tree", contains ? { contains } : undefined)
 
 const renameCollection = (id: string, name: string): Promise<void> =>
   apiPut(`/collections/${id}`, { name })
@@ -378,7 +382,15 @@ function CollectionTreeItemRow({
 
 
 
-export function CollectionTree() {
+interface CollectionTreeProps {
+  /** Restrict tree to collections containing this member type. Empty
+   * collections always survive so create-then-add still works. Defaults
+   * to undefined (unscoped) so existing call sites keep current behavior;
+   * Notes opts in to "note" to focus the sidebar. */
+  contains?: CollectionTreeContains
+}
+
+export function CollectionTree({ contains }: CollectionTreeProps = {}) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
@@ -390,8 +402,8 @@ export function CollectionTree() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ["collections-tree"],
-    queryFn: fetchCollectionTree,
+    queryKey: ["collections-tree", contains ? `contains:${contains}` : "contains:all"],
+    queryFn: () => fetchCollectionTree(contains),
     staleTime: 30_000,
   })
 

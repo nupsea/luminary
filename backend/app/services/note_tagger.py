@@ -40,11 +40,13 @@ class NoteTaggerService:
     async def suggest_tags(self, content: str) -> list[str]:
         """Return up to 5 suggested tags for the given note content.
 
-        Returns [] for short content (<20 chars) or when Ollama is unreachable.
+        Returns [] for short content (<20 chars), when Ollama is unreachable,
+        or on any other LLM / parse failure -- the caller should never have
+        to wrap this in its own try/except.
         """
         if len(content) < 20:
             return []
-        from app.services.llm import LLMUnavailableError, get_llm_service  # noqa: PLC0415
+        from app.services.llm import get_llm_service  # noqa: PLC0415
 
         prompt = _USER_TMPL.format(content=content[:2000])
         try:
@@ -56,8 +58,11 @@ class NoteTaggerService:
                 temperature=0.0,
             )
             return _parse_tag_list(raw)
-        except LLMUnavailableError:
-            logger.warning("LLM unavailable during note tagging; returning empty tags")
+        except Exception as exc:
+            # 2D.1.b: broaden from LLMUnavailableError to Exception so parse
+            # drift, network blips, or any other downstream failure degrades
+            # gracefully to an empty suggestion list.
+            logger.warning("note tagger failed (non-fatal): %s", exc)
             return []
 
 

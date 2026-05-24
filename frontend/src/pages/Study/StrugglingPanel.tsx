@@ -32,9 +32,9 @@ export function StrugglingPanel({ documentId }: StrugglingPanelProps) {
     if (!card.document_id) return
     setActiveDocument(card.document_id)
     if (card.source_section_id) {
-      void navigate(`/?section_id=${encodeURIComponent(card.source_section_id)}`)
+      void navigate(`/library?section_id=${encodeURIComponent(card.source_section_id)}`)
     } else {
-      void navigate("/")
+      void navigate("/library")
     }
   }
 
@@ -42,7 +42,7 @@ export function StrugglingPanel({ documentId }: StrugglingPanelProps) {
 
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold text-foreground">Struggling Cards</h2>
+      <h2 className="text-lg font-semibold text-foreground">Struggling cards</h2>
 
       {isLoading ? (
         <div className="flex flex-col gap-2">

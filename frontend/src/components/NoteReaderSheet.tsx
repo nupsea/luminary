@@ -2,12 +2,22 @@
  * NoteReaderSheet -- full-width reader/editor panel for notes.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, FileText, GitBranch, LayoutGrid, Loader2, Maximize2, Minimize2, Pencil, Shapes, Tag, Trash2, Wand2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  Check,
+  ChevronsLeft,
+  ChevronsRight,
+  FileText,
+  LayoutGrid,
+  Pencil,
+  Search,
+  Tag,
+  Trash2,
+  X,
+} from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
-import { TagAutocomplete } from "@/components/TagAutocomplete"
+import { NoteEditor } from "@/components/notes/NoteEditor"
 import {
   Sheet,
   SheetContent,
@@ -16,38 +26,55 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
-import type { CollectionTreeItem } from "@/lib/collectionUtils"
-import { MERMAID_CHEAT_SHEET, MERMAID_TEMPLATES } from "@/lib/mermaidNotes"
-import {
-  replaceExcalidrawDiagram,
-  type ExcalidrawNoteDiagramRef,
-} from "@/lib/noteDiagrams"
+import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
+import {
+  addNoteToCollection,
+  createNote,
+  deleteNote,
+  fetchCollectionTree,
+  fetchSuggestedTags,
+  patchNote,
+  removeNoteFromCollection,
+  suggestNoteTitle,
+  type Note,
+} from "@/lib/notesApi"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface Note {
-  id: string
-  document_id: string | null
-  chunk_id: string | null
-  content: string
-  tags: string[]
-  group_name: string | null
-  collection_ids: string[]
-  // S175: multi-document source linkage
-  source_document_ids: string[]
-  created_at: string
-  updated_at: string
-}
-
 interface DocumentItem {
   id: string
   title: string
+}
+
+interface ExistingNoteSummary {
+  id: string
+  content: string
+  tags: string[]
+  updated_at: string
+}
+
+function firstLine(content: string): string {
+  const line = content.split("\n").find((l) => l.trim().length > 0) ?? ""
+  return line.length > 80 ? line.slice(0, 80) + "..." : line
+}
+
+function formatRelative(dateStr: string): string {
+  const date = new Date(dateStr)
+  const diffMs = Date.now() - date.getTime()
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  return date.toLocaleDateString()
 }
 
 export interface NoteReaderSheetProps {
@@ -60,83 +87,10 @@ export interface NoteReaderSheetProps {
   initialContent?: string
   /** S197: Pre-check a collection when creating a note from gap analysis. */
   initialCollectionId?: string
+  /** Pre-select these source documents when creating a new note. */
+  initialSourceDocIds?: string[]
   /** When set, this collection appears checked and cannot be unchecked (reader context). */
   lockedCollectionId?: string | null
-}
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
-async function createNote(payload: {
-  content: string
-  tags: string[]
-  document_id: string | null
-  source_document_ids?: string[]
-}): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
-
-async function patchNote(
-  id: string,
-  data: { content?: string; tags?: string[]; source_document_ids?: string[] },
-): Promise<Note> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error(`PATCH /notes/${id} failed: ${res.status}`)
-  return res.json() as Promise<Note>
-}
-
-async function deleteNote(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
-}
-
-async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
-  const res = await fetch(`${API_BASE}/collections/tree`)
-  if (!res.ok) return []
-  return res.json() as Promise<CollectionTreeItem[]>
-}
-
-async function addNoteToCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ member_ids: [noteId], member_type: "note" }),
-  })
-  if (!res.ok) throw new Error(`POST /collections/${collectionId}/members failed`)
-}
-
-async function removeNoteFromCollection(collectionId: string, noteId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/collections/${collectionId}/members/${noteId}`, {
-    method: "DELETE",
-  })
-  if (!res.ok && res.status !== 204)
-    throw new Error(`DELETE /collections/${collectionId}/members/${noteId} failed`)
-}
-
-async function fetchSuggestedTags(id: string, signal?: AbortSignal): Promise<string[]> {
-  try {
-    const res = await fetch(`${API_BASE}/notes/${id}/suggest-tags`, {
-      method: "POST",
-      signal,
-    })
-    if (!res.ok) return []
-    const data = (await res.json()) as { tags: string[] }
-    return data.tags ?? []
-  } catch {
-    return []
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,9 +105,12 @@ export function NoteReaderSheet({
   isNew = false,
   initialContent,
   initialCollectionId,
+  initialSourceDocIds,
   lockedCollectionId,
 }: NoteReaderSheetProps) {
   const [mode, setMode] = useState<"read" | "edit">(isNew ? "edit" : "read")
+  // Per-open state; not persisted.
+  const [wideMode, setWideMode] = useState(false)
   const [editContent, setEditContent] = useState("")
   const [editTags, setEditTags] = useState<string[]>([])
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(new Set())
@@ -163,111 +120,44 @@ export function NoteReaderSheet({
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [generatedTitle, setGeneratedTitle] = useState("")
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false)
-  const [diagramOpen, setDiagramOpen] = useState(false)
-  const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const previewRef = useRef<HTMLDivElement>(null)
-  const splitContainerRef = useRef<HTMLDivElement>(null)
+  const [titleEditing, setTitleEditing] = useState(false)
+  const [titleDraft, setTitleDraft] = useState("")
   const abortRef = useRef<AbortController | null>(null)
   const prevNoteId = useRef<string | undefined>(undefined)
   const prevIsNew = useRef<boolean>(false)
   const qc = useQueryClient()
-  // Resizable splitter / fullscreen / scroll sync
-  const [leftPct, setLeftPct] = useState(50)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [isDragging, setIsDragging] = useState(false)
-  // Echo guard: when we set scrollTop programmatically, the receiving pane
-  // fires onScroll. syncingRef holds the source of the in-flight scroll until
-  // the next animation frame so the echo is ignored.
-  const syncingRef = useRef<"write" | "preview" | null>(null)
 
-  function handleSplitterMouseDown(e: React.MouseEvent) {
-    e.preventDefault()
-    setIsDragging(true)
-  }
+  const [appendTarget, setAppendTarget] = useState<ExistingNoteSummary | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerFilter, setPickerFilter] = useState("")
+  const [existingNotes, setExistingNotes] = useState<ExistingNoteSummary[]>([])
+  const [notesLoading, setNotesLoading] = useState(false)
 
-  useEffect(() => {
-    if (!isDragging) return
-    function onMove(e: MouseEvent) {
-      const el = splitContainerRef.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      const pct = ((e.clientX - rect.left) / rect.width) * 100
-      setLeftPct(Math.min(85, Math.max(15, pct)))
-    }
-    function onUp() {
-      setIsDragging(false)
-    }
-    window.addEventListener("mousemove", onMove)
-    window.addEventListener("mouseup", onUp)
-    return () => {
-      window.removeEventListener("mousemove", onMove)
-      window.removeEventListener("mouseup", onUp)
-    }
-  }, [isDragging])
-
-  function syncScroll(source: "write" | "preview") {
-    if (syncingRef.current && syncingRef.current !== source) return
-    const src = source === "write" ? textareaRef.current : previewRef.current
-    const dst = source === "write" ? previewRef.current : textareaRef.current
-    if (!src || !dst) return
-    const srcMax = src.scrollHeight - src.clientHeight
-    const dstMax = dst.scrollHeight - dst.clientHeight
-    if (srcMax <= 0 || dstMax <= 0) return
-    syncingRef.current = source
-    dst.scrollTop = (src.scrollTop / srcMax) * dstMax
-    requestAnimationFrame(() => {
-      syncingRef.current = null
-    })
-  }
-
-  function syncCaret() {
-    const ta = textareaRef.current
-    const dst = previewRef.current
-    if (!ta || !dst) return
-
-    // Stick to bottom if cursor is at the end of the document
-    if (ta.selectionStart >= ta.value.length - 1) {
-      dst.scrollTop = dst.scrollHeight
-      return
-    }
-
-    const textBeforeCaret = ta.value.substring(0, ta.selectionStart)
-    const linesBefore = textBeforeCaret.split("\n").length
-    const totalLines = Math.max(1, ta.value.split("\n").length)
-    
-    const pct = linesBefore / totalLines
-    const dstMax = dst.scrollHeight - dst.clientHeight
-    if (dstMax > 0) {
-      dst.scrollTop = pct * dstMax
-    }
-  }
-
-
-
-  const adjustHeight = useCallback(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    ta.style.height = "auto"
-    ta.style.height = `${ta.scrollHeight}px`
-  }, [])
-
-  // Re-initialise local state when note changes or isNew changes
   useEffect(() => {
     if (isNew) {
       setEditContent(initialContent ?? "")
       setEditTags([])
       setCheckedCollectionIds(initialCollectionId ? new Set([initialCollectionId]) : new Set())
-      setSelectedDocIds([])
+      setSelectedDocIds(initialSourceDocIds ?? [])
       setMode("edit")
       setConfirmDelete(false)
       setSuggestedTags([])
       setIsFetchingTags(false)
+      setAppendTarget(null)
+      setPickerOpen(false)
+      setPickerFilter("")
+      // Reset stale title state so a previously-generated title doesn't bleed
+      // into the next new-note open. The title effect will set "New Note"
+      // synchronously below.
+      setGeneratedTitle("")
+      setIsGeneratingTitle(false)
+      setTitleEditing(false)
+      setTitleDraft("")
       prevIsNew.current = true
     } else if (note) {
       setEditContent(note.content)
       setEditTags(note.tags ?? [])
-      setCheckedCollectionIds(new Set(note.collection_ids ?? []))
+      setCheckedCollectionIds(new Set((note.collections ?? []).map((c) => c.id)))
       setSelectedDocIds(
         note.source_document_ids?.length > 0
           ? note.source_document_ids
@@ -294,30 +184,30 @@ export function NoteReaderSheet({
     }
   }, [note?.id, isNew])
 
-  useEffect(() => {
-    if (mode === "edit") {
-      const timer = setTimeout(() => {
-        syncCaret()
-      }, 100)
-      return () => clearTimeout(timer)
-    }
-  }, [editContent, mode])
-
-  // Fetch LLM-generated title
+  // Resolve the displayed title.
+  // 1. If the user has manually set a title (note.title_auto_generated === false),
+  //    use it verbatim and skip the LLM call entirely. Manual titles are sacred.
+  // 2. Otherwise on existing notes, run the LLM auto-gen path that already
+  //    existed -- falling back to the first content line on failure.
+  // 3. On new (unsaved) notes, show "New Note" so the previous note's title
+  //    doesn't linger when the sheet re-opens for a fresh capture.
   useEffect(() => {
     if (isNew) {
       setGeneratedTitle("New Note")
-    } else if (note && note.content) {
+      setIsGeneratingTitle(false)
+      return
+    }
+    if (note && note.title && !note.title_auto_generated) {
+      setGeneratedTitle(note.title)
+      setIsGeneratingTitle(false)
+      return
+    }
+    if (note && note.content) {
       if (note.content.trim().length > 20) {
         setIsGeneratingTitle(true)
-        fetch(`${API_BASE}/notes/suggest-title`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: note.content }),
-        })
-          .then((res) => res.json())
-          .then((data: { title: string }) => {
-            setGeneratedTitle(data.title)
+        suggestNoteTitle(note.content)
+          .then((title) => {
+            setGeneratedTitle(title)
             setIsGeneratingTitle(false)
           })
           .catch(() => {
@@ -332,7 +222,7 @@ export function NoteReaderSheet({
         )
       }
     }
-  }, [note?.id, note?.content])
+  }, [note?.id, note?.content, note?.title, note?.title_auto_generated, isNew])
 
   // Trigger tag suggestions on mode change or content threshold
   useEffect(() => {
@@ -388,35 +278,9 @@ export function NoteReaderSheet({
     }
   }
 
-  // Focus textarea on entering edit mode. (Auto-grow disabled; the editor pane
-  // now has a fixed height with its own internal scroll.)
-  useEffect(() => {
-    if (mode === "edit" && textareaRef.current) {
-      // Clear any leftover inline height set by a previous adjustHeight call.
-      textareaRef.current.style.height = ""
-      textareaRef.current.focus()
-    }
-  }, [mode])
-  // Silence unused-var lint: adjustHeight retained for future use but no longer wired.
-  void adjustHeight
-
-  // Ctrl+S / Cmd+S saves in edit mode
-  useEffect(() => {
-    if (mode !== "edit") return
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault()
-        saveMut.mutate()
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [mode])
-
-  // Collections list
   const { data: collectionTree, isLoading: collectionsLoading } = useQuery({
     queryKey: ["collections-tree"],
-    queryFn: fetchCollectionTree,
+    queryFn: () => fetchCollectionTree(),
     staleTime: 30_000,
     enabled: note !== null || isNew,
   })
@@ -424,6 +288,12 @@ export function NoteReaderSheet({
 
   const saveMut = useMutation({
     mutationFn: async () => {
+      if (appendTarget) {
+        return patchNote(appendTarget.id, {
+          content: editContent,
+          tags: editTags,
+        })
+      }
       if (isNew) {
         const saved = await createNote({
           content: editContent,
@@ -431,10 +301,15 @@ export function NoteReaderSheet({
           document_id: selectedDocIds[0] || null,
           source_document_ids: selectedDocIds,
         })
-        // When opened from the reader panel, auto-add to the book's collection
-        if (lockedCollectionId) {
-          await addNoteToCollection(lockedCollectionId, saved.id)
-        }
+        // Apply any collection selections the user made while the note was
+        // unsaved. Includes lockedCollectionId for back-compat -- if the
+        // caller set both lockedCollectionId and added it to the staged set
+        // (e.g. via initialCollectionId), the Set dedupes.
+        const pending = new Set(checkedCollectionIds)
+        if (lockedCollectionId) pending.add(lockedCollectionId)
+        await Promise.all(
+          Array.from(pending).map((cid) => addNoteToCollection(cid, saved.id)),
+        )
         return saved
       } else {
         return patchNote(note!.id, {
@@ -453,14 +328,9 @@ export function NoteReaderSheet({
       
       if (savedNote.content.trim().length > 20) {
         setIsGeneratingTitle(true)
-        fetch(`${API_BASE}/notes/suggest-title`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: savedNote.content }),
-        })
-          .then((res) => res.json())
-          .then((data: { title: string }) => {
-            setGeneratedTitle(data.title)
+        suggestNoteTitle(savedNote.content)
+          .then((title) => {
+            setGeneratedTitle(title)
             setIsGeneratingTitle(false)
           })
           .catch(() => {
@@ -484,8 +354,72 @@ export function NoteReaderSheet({
     },
   })
 
+  useNoteSaveShortcut(() => saveMut.mutate(), mode === "edit")
+
+  useEffect(() => {
+    if (pickerOpen && existingNotes.length === 0 && !notesLoading) {
+      setNotesLoading(true)
+      apiGet<ExistingNoteSummary[]>("/notes")
+        .then(setExistingNotes)
+        .catch(() => setExistingNotes([]))
+        .finally(() => setNotesLoading(false))
+    }
+  }, [pickerOpen, existingNotes.length, notesLoading])
+
+  const filteredExistingNotes = useMemo(() => {
+    if (!pickerFilter.trim()) return existingNotes
+    const lower = pickerFilter.toLowerCase()
+    return existingNotes.filter(
+      (n) =>
+        n.content.toLowerCase().includes(lower) ||
+        n.tags.some((t) => t.toLowerCase().includes(lower)),
+    )
+  }, [existingNotes, pickerFilter])
+
+  function pickAppendTarget(target: ExistingNoteSummary) {
+    setAppendTarget(target)
+    setPickerOpen(false)
+    setPickerFilter("")
+    const tail = initialContent ?? ""
+    setEditContent(tail ? `${target.content}\n\n---\n\n${tail}` : target.content)
+    setEditTags(target.tags ?? [])
+  }
+
+  function clearAppendTarget() {
+    setAppendTarget(null)
+    setEditContent(initialContent ?? "")
+    setEditTags([])
+  }
+
+  function commitTitleEdit() {
+    if (!note) {
+      setTitleEditing(false)
+      return
+    }
+    const next = titleDraft.trim()
+    setTitleEditing(false)
+    // No-op if value didn't change.
+    if ((next || null) === (note.title || null)) return
+    void patchNote(note.id, { title: next }).then(() => {
+      // Reflect immediately; refetch in the parent list view too.
+      setGeneratedTitle(next)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+    })
+  }
+
   function handleCollectionToggle(collectionId: string, checked: boolean) {
-    if (!note) return
+    // For new notes we don't have an id yet, so stage the selection in local
+    // state. saveMut applies the staged set as memberships after createNote.
+    if (isNew || !note) {
+      setCheckedCollectionIds((prev) => {
+        const next = new Set(prev)
+        if (checked) next.add(collectionId)
+        else next.delete(collectionId)
+        return next
+      })
+      return
+    }
     if (checked) {
       void addNoteToCollection(collectionId, note.id).then(() => {
         setCheckedCollectionIds((prev) => new Set([...prev, collectionId]))
@@ -514,30 +448,6 @@ export function NoteReaderSheet({
     setSelectedDocIds(note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []))
   }
 
-  function insertAtCursor(markdown: string) {
-    const start = textareaRef.current?.selectionStart ?? editContent.length
-    const end = textareaRef.current?.selectionEnd ?? editContent.length
-    const prefix = start > 0 && !editContent.slice(0, start).endsWith("\n") ? "\n\n" : ""
-    const suffix = editContent.slice(end).startsWith("\n") ? "" : "\n\n"
-    const insertion = `${prefix}${markdown}${suffix}`
-    const next = editContent.substring(0, start) + insertion + editContent.substring(end)
-    setEditContent(next)
-    setTimeout(() => {
-      const newPos = start + insertion.length
-      textareaRef.current?.setSelectionRange(newPos, newPos)
-      textareaRef.current?.focus()
-    }, 0)
-  }
-
-  function handleDiagramSaved(markdown: string) {
-    if (editingDiagramRef) {
-      setEditContent((current) => replaceExcalidrawDiagram(current, editingDiagramRef, markdown))
-      setEditingDiagramRef(null)
-      return
-    }
-    insertAtCursor(markdown)
-  }
-
   const title = isNew
     ? "New Note"
     : note
@@ -553,16 +463,57 @@ export function NoteReaderSheet({
       <SheetContent
         side="right"
         className={
-          isFullscreen
-            ? "w-screen max-w-none sm:max-w-none flex flex-col p-0 overflow-hidden"
-            : "w-[85vw] max-w-5xl sm:max-w-6xl flex flex-col p-0 overflow-hidden"
+          wideMode
+            ? "w-[90vw] max-w-none sm:max-w-none flex flex-col p-0 overflow-hidden transition-[width] duration-200"
+            : "w-[58vw] max-w-4xl sm:max-w-4xl flex flex-col p-0 overflow-hidden transition-[width] duration-200"
         }
       >
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-          <SheetTitle className="text-xl font-semibold leading-tight pr-8 truncate">
-            {isGeneratingTitle ? "Generating Title..." : generatedTitle || title}
+          <button
+            onClick={() => setWideMode((v) => !v)}
+            className="absolute left-3 top-3 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={wideMode ? "Minimize to default width" : "Expand to wide view"}
+            aria-label={wideMode ? "Minimize note sheet" : "Expand note sheet"}
+          >
+            {wideMode ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+          </button>
+          <SheetTitle className="text-xl font-semibold leading-tight pl-7 pr-8 truncate">
+            {appendTarget ? (
+              `Appending to: ${firstLine(appendTarget.content) || "Untitled"}`
+            ) : isGeneratingTitle ? (
+              "Generating Title..."
+            ) : titleEditing && note ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    commitTitleEdit()
+                  } else if (e.key === "Escape") {
+                    setTitleEditing(false)
+                    setTitleDraft("")
+                  }
+                }}
+                onBlur={commitTitleEdit}
+                className="w-full bg-transparent border-b border-primary/40 text-xl font-semibold leading-tight focus:outline-none focus:border-primary"
+              />
+            ) : (
+              <button
+                onClick={() => {
+                  if (!note) return  // can only rename a saved note
+                  setTitleDraft(note.title ?? generatedTitle ?? "")
+                  setTitleEditing(true)
+                }}
+                className="text-left w-full truncate hover:text-primary/90"
+                title={note ? "Click to rename" : undefined}
+              >
+                {generatedTitle || title}
+              </button>
+            )}
           </SheetTitle>
-          {sourceDoc && (
+          {sourceDoc && !appendTarget && (
             <SheetDescription asChild>
               <button
                 className="w-fit text-left text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
@@ -579,394 +530,232 @@ export function NoteReaderSheet({
               </button>
             </SheetDescription>
           )}
+          {isNew && (
+            <SheetDescription asChild>
+              <div className="mt-1 flex flex-col gap-2">
+                {appendTarget ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Append mode
+                    </span>
+                    <span className="flex-1 truncate rounded bg-primary/10 px-2 py-1 text-xs text-foreground">
+                      {firstLine(appendTarget.content)}
+                    </span>
+                    <button
+                      onClick={clearAppendTarget}
+                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      aria-label="Clear append target"
+                      title="Clear append target — back to new note"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : pickerOpen ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
+                      <Search size={13} className="text-muted-foreground" />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={pickerFilter}
+                        onChange={(e) => setPickerFilter(e.target.value)}
+                        placeholder="Search all notes..."
+                        className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+                      />
+                      <button
+                        onClick={() => {
+                          setPickerOpen(false)
+                          setPickerFilter("")
+                        }}
+                        className="text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        cancel
+                      </button>
+                    </div>
+                    <div className="flex max-h-56 flex-col gap-1 overflow-auto">
+                      {notesLoading && (
+                        <p className="py-2 text-xs text-muted-foreground">Loading notes...</p>
+                      )}
+                      {!notesLoading && filteredExistingNotes.length === 0 && (
+                        <p className="py-2 text-xs text-muted-foreground">No matching notes.</p>
+                      )}
+                      {filteredExistingNotes.map((n) => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => pickAppendTarget(n)}
+                          className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-muted-foreground/30 hover:bg-muted/50"
+                        >
+                          <p className="truncate text-xs text-foreground">{firstLine(n.content)}</p>
+                          <div className="mt-0.5 flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground">
+                              {formatRelative(n.updated_at)}
+                            </span>
+                            {n.tags.slice(0, 3).map((t) => (
+                              <span
+                                key={t}
+                                className="rounded-full bg-muted px-1.5 py-0 text-[10px] text-muted-foreground"
+                              >
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setPickerOpen(true)}
+                    className="w-fit text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Append to existing note →
+                  </button>
+                )}
+              </div>
+            </SheetDescription>
+          )}
         </SheetHeader>
 
         <div className={`flex-1 ${mode === "read" && !isNew ? "overflow-auto" : "flex flex-col overflow-hidden min-h-0"}`}>
           <div className={`px-6 py-5 ${mode === "read" && !isNew ? "min-h-full flex flex-col" : "flex flex-col flex-1 min-h-0 gap-4"}`}>
             {mode === "read" && !isNew ? (
-              <div
-                className="flex-1 cursor-text select-text"
-                onDoubleClick={() => setMode("edit")}
-                title="Double-click to edit"
-              >
-                {note === null ? (
-                  <div className="flex flex-col gap-3">
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-2/3" />
-                  </div>
-                ) : note.content.trim() ? (
-                  <MarkdownRenderer
-                    onEditExcalidrawDiagram={(ref) => { setEditingDiagramRef(ref); setDiagramOpen(true) }}
-                  >
-                    {note.content}
-                  </MarkdownRenderer>
-                ) : (
-                  <p className="text-muted-foreground italic text-sm">Start writing...</p>
-                )}
-              </div>
-            ) : (
-              <div
-                ref={splitContainerRef}
-                className={`flex items-stretch flex-1 min-h-0 overflow-hidden ${isDragging ? "select-none cursor-col-resize" : ""}`}
-              >
-                <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${leftPct}%` }}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Editor</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground">Image spec:</span>
-                      {(["small", "medium", "large"] as const).map((size) => (
-                        <button
-                          key={size}
-                          type="button"
-                          onClick={() => {
-                            const start = textareaRef.current?.selectionStart ?? editContent.length
-                            const end = textareaRef.current?.selectionEnd ?? editContent.length
-                            const selectedText = editContent.substring(start, end)
-                            
-                            // If an existing image markdown is selected, try to inject/replace the size
-                            let newMarkdown = ""
-                            const imgRegex = /!\[([^\]]*?)\]\((.*?)\)/
-                            const match = selectedText.match(imgRegex)
-                            
-                            if (match) {
-                              const altText = match[1]
-                              const url = match[2]
-                              const altClean = altText.split("|")[0].trim() || "Image"
-                              newMarkdown = `![${altClean}|${size}](${url})`
-                            } else {
-                              newMarkdown = `![Image|${size}](url)`
-                            }
-
-                            const newContent =
-                              editContent.substring(0, start) +
-                              newMarkdown +
-                              editContent.substring(end)
-                            setEditContent(newContent)
-                            
-                            setTimeout(() => {
-                              const newPos = start + newMarkdown.length
-                              textareaRef.current?.setSelectionRange(newPos, newPos)
-                              textareaRef.current?.focus()
-                            }, 0)
-                          }}
-                          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
-                        >
-                          {size}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <GitBranch size={10} />
-                      Mermaid:
-                    </span>
-                    {MERMAID_TEMPLATES.map((template) => (
-                      <button
-                        key={template.label}
-                        type="button"
-                        onClick={() => insertAtCursor(template.markdown)}
-                        className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
-                      >
-                        {template.label}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => { setEditingDiagramRef(null); setDiagramOpen(true) }}
-                      className="flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent"
-                    >
-                      <Shapes size={10} />
-                      Draw
-                    </button>
-                  </div>
-                  <details className="rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
-                    <summary className="cursor-pointer select-none font-medium text-foreground">Mermaid cheat sheet</summary>
-                    <div className="mt-2 grid grid-cols-1 gap-1">
-                      {MERMAID_CHEAT_SHEET.map((item) => (
-                        <code key={item} className="rounded bg-background px-1.5 py-1 text-[10px] text-foreground">
-                          {item}
-                        </code>
-                      ))}
-                    </div>
-                  </details>
-                  <textarea
-                    ref={textareaRef}
-                    onScroll={() => syncScroll("write")}
-                    value={editContent}
-                    onPaste={async (e) => {
-                      const items = e.clipboardData.items
-                      for (let i = 0; i < items.length; i++) {
-                        if (items[i].type.indexOf("image") !== -1) {
-                          e.preventDefault()
-                          const file = items[i].getAsFile()
-                          if (!file) continue
-
-                          const formData = new FormData()
-                          formData.append("file", file)
-
-                          try {
-                            const res = await fetch(`${API_BASE}/images/notes`, {
-                              method: "POST",
-                              body: formData,
-                            })
-                            if (!res.ok) throw new Error("Upload failed")
-                            const data = (await res.json()) as { path: string }
-
-                            const imgMarkdown = `![Pasted Image|medium](${data.path})`
-                            const start = textareaRef.current?.selectionStart ?? editContent.length
-                            const end = textareaRef.current?.selectionEnd ?? editContent.length
-                            const newContent =
-                              editContent.substring(0, start) +
-                              imgMarkdown +
-                              editContent.substring(end)
-
-                            setEditContent(newContent)
-
-                            // Restore focus and move cursor
-                            setTimeout(() => {
-                              const newPos = start + imgMarkdown.length
-                              textareaRef.current?.setSelectionRange(newPos, newPos)
-                              textareaRef.current?.focus()
-                            }, 0)
-                          } catch (err) {
-                            console.error("Paste image failed", err)
-                          }
-                        }
-                      }
-                    }}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    placeholder="Write your note in Markdown..."
-                    className="w-full flex-1 resize-none overflow-auto rounded border-none bg-background px-2 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
-                  />
-                </div>
+              <>
                 <div
-                  onMouseDown={handleSplitterMouseDown}
-                  className="mx-3 w-1 shrink-0 cursor-col-resize self-stretch rounded bg-border hover:bg-primary/40 transition-colors"
-                  title="Drag to resize"
-                />
-                <div className="flex flex-col gap-2 min-w-0 min-h-0 h-full" style={{ width: `${100 - leftPct}%` }}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Preview</span>
-                  </div>
-                  <div
-                    ref={previewRef}
-                    onScroll={() => syncScroll("preview")}
-                    className="prose-sm flex-1 overflow-auto px-2 py-2"
-                  >
-                    {editContent.trim() ? (
-                      <MarkdownRenderer
-                        onEditExcalidrawDiagram={(ref) => { setEditingDiagramRef(ref); setDiagramOpen(true) }}
-                      >
-                        {editContent}
-                      </MarkdownRenderer>
-                    ) : (
-                      <p className="text-muted-foreground italic text-sm">Preview will appear here...</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className={
-              mode === "read" && !isNew
-                ? "mt-12 pt-8 border-t border-border space-y-6 pb-24"
-                : "shrink-0 pt-4 border-t border-border space-y-4 max-h-[30vh] overflow-y-auto pb-2"
-            }>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Tag size={12} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Tags</span>
-                  </div>
-                  {mode === "edit" && !isNew && (
-                    <button
-                      onClick={() => void handleFetchSuggestions()}
-                      disabled={isFetchingTags}
-                      className="flex items-center gap-1 text-[10px] text-primary hover:underline disabled:opacity-50"
-                    >
-                      {isFetchingTags ? (
-                        <Loader2 size={10} className="animate-spin" />
-                      ) : (
-                        <Wand2 size={10} />
-                      )}
-                      Suggest tags
-                    </button>
+                  className="flex-1 cursor-text select-text"
+                  onDoubleClick={() => setMode("edit")}
+                  title="Double-click to edit"
+                >
+                  {note === null ? (
+                    <div className="flex flex-col gap-3">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  ) : note.content.trim() ? (
+                    <MarkdownRenderer>{note.content}</MarkdownRenderer>
+                  ) : (
+                    <p className="text-muted-foreground italic text-sm">Start writing...</p>
                   )}
                 </div>
-                {mode === "read" && !isNew ? (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {note?.tags.length ? (
-                        note.tags.map((t) => {
-                          const parts = t.split("/")
-                          return (
+                <div className="mt-12 pt-8 border-t border-border space-y-6 pb-24">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Tag size={12} />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Tags</span>
+                    </div>
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {note?.tags.length ? (
+                          note.tags.map((t) => {
+                            const parts = t.split("/")
+                            return (
+                              <button
+                                key={t}
+                                onClick={() => dispatchTagNavigate(t)}
+                                className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                              >
+                                <span className="text-primary">{parts[0]}</span>
+                                {parts.length > 1 && (
+                                  <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+                                )}
+                              </button>
+                            )
+                          })
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">No tags</span>
+                        )}
+                      </div>
+                      {suggestedTags.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-medium text-muted-foreground">Suggestions:</span>
+                          {suggestedTags.map((tag) => (
                             <button
-                              key={t}
-                              onClick={() => dispatchTagNavigate(t)}
-                              className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+                              key={tag}
+                              onClick={() => void handleAddSuggestedTag(tag)}
+                              className="flex items-center gap-1 rounded-full border border-dashed border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10 transition-colors"
                             >
-                              <span className="text-primary">{parts[0]}</span>
-                              {parts.length > 1 && (
-                                <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
-                              )}
+                              <Check size={9} />
+                              {tag}
                             </button>
-                          )
-                        })
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">No tags</span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {suggestedTags.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[10px] font-medium text-muted-foreground">Suggestions:</span>
-                        {suggestedTags.map((tag) => (
-                          <button
-                            key={tag}
-                            onClick={() => void handleAddSuggestedTag(tag)}
-                            className="flex items-center gap-1 rounded-full border border-dashed border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10 transition-colors"
-                          >
-                            <Check size={9} />
-                            {tag}
-                          </button>
-                        ))}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <LayoutGrid size={12} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Collections</span>
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    <TagAutocomplete tags={editTags} onChange={setEditTags} />
-                    {!isNew && suggestedTags.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[10px] font-medium text-muted-foreground">Suggestions:</span>
-                        {suggestedTags.map((tag) => (
-                          <button
-                            key={tag}
-                            onClick={() => handleAddSuggestedTag(tag)}
-                            className="flex items-center gap-1 rounded-full border border-dashed border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10 transition-colors"
-                          >
-                            <Check size={9} />
-                            {tag}
-                          </button>
-                        ))}
-                        <button
-                          onClick={() => setSuggestedTags([])}
-                          className="text-[10px] text-muted-foreground hover:underline"
-                        >
-                          Dismiss
-                        </button>
+                      <div className="flex flex-wrap gap-1.5">
+                        {note && note.collections.length > 0 ? (
+                          allCollections
+                            .filter((c) => checkedCollectionIds.has(c.id))
+                            .map((c) => (
+                              <div key={c.id} className="flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs">
+                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color }} />
+                                {c.name}
+                              </div>
+                            ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">Standalone note</span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <LayoutGrid size={12} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Collections</span>
-                  </div>
-                  {mode === "read" && !isNew ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {note && note.collection_ids.length > 0 ? (
-                        allCollections
-                          .filter((c) => checkedCollectionIds.has(c.id))
-                          .map((c) => (
-                            <div key={c.id} className="flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs">
-                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color }} />
-                              {c.name}
-                            </div>
-                          ))
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">Standalone note</span>
-                      )}
                     </div>
-                  ) : (
-                    <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
-                      {collectionsLoading ? (
-                        <Skeleton className="h-4 w-24" />
-                      ) : (
-                        allCollections.map((col) => (
-                          <label
-                            key={col.id}
-                            className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50 ${isNew || col.id === lockedCollectionId ? 'opacity-75' : ''}`}
-                            title={col.id === lockedCollectionId ? "This collection is linked to the current document" : isNew ? "Create the note first to add to collections" : ""}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checkedCollectionIds.has(col.id) || col.id === lockedCollectionId}
-                              onChange={(e) => handleCollectionToggle(col.id, e.target.checked)}
-                              disabled={isNew || col.id === lockedCollectionId}
-                              className="h-3 w-3 rounded border-border"
-                            />
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: col.color }} />
-                            <span className="truncate">{col.name}</span>
-                          </label>
-                        ))
-                      )}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <FileText size={12} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Source Documents</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedDocIds.length > 0 ? (
+                          selectedDocIds.map((id) => {
+                            const doc = documents.find((d) => d.id === id)
+                            return (
+                              <div key={id} className="rounded bg-muted px-2 py-0.5 text-xs truncate max-w-[200px]">
+                                {doc?.title ?? id}
+                              </div>
+                            )
+                          })
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">No source documents</span>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
-
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <FileText size={12} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Source Documents</span>
-                  </div>
-                  {mode === "read" && !isNew ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedDocIds.length > 0 ? (
-                        selectedDocIds.map((id) => {
-                          const doc = documents.find((d) => d.id === id)
-                          return (
-                            <div key={id} className="rounded bg-muted px-2 py-0.5 text-xs truncate max-w-[200px]">
-                              {doc?.title ?? id}
-                            </div>
-                          )
-                        })
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">No source documents</span>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="max-h-40 overflow-y-auto flex flex-col gap-1">
-                      {documents.map((doc) => (
-                        <label
-                          key={doc.id}
-                          className="flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 text-xs text-foreground hover:bg-accent/50"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedDocIds.includes(doc.id)}
-                            onChange={(e) => {
-                              setSelectedDocIds((prev) =>
-                                e.target.checked ? [...prev, doc.id] : prev.filter((id) => id !== doc.id)
-                              )
-                            }}
-                            className="h-3 w-3 rounded border-border"
-                          />
-                          <span className="truncate">{doc.title}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+              </>
+            ) : (
+              <NoteEditor
+                layout="splitter"
+                content={editContent}
+                onContentChange={setEditContent}
+                tags={editTags}
+                onTagsChange={setEditTags}
+                selectedDocIds={selectedDocIds}
+                onSelectedDocIdsChange={setSelectedDocIds}
+                checkedCollectionIds={checkedCollectionIds}
+                onCollectionToggle={handleCollectionToggle}
+                documents={documents}
+                collections={allCollections}
+                isNew={isNew}
+                lockedCollectionId={lockedCollectionId ?? null}
+                collectionsLoading={collectionsLoading}
+                showCollections={!appendTarget}
+                showSourceDocs={!appendTarget}
+                suggestedTags={suggestedTags}
+                suggestionsBusy={isFetchingTags}
+                onSuggestTags={() => void handleFetchSuggestions()}
+                onAddSuggestedTag={(tag) => void handleAddSuggestedTag(tag)}
+                onDismissSuggestions={() => setSuggestedTags([])}
+              />
+            )}
           </div>
         </div>
 
         <div className="shrink-0 border-t border-border bg-background px-6 py-4 flex items-center gap-3">
-          <button
-            onClick={() => setIsFullscreen((v) => !v)}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-accent shadow-sm transition-colors"
-            title={isFullscreen ? "Exit fullscreen" : "Expand to full screen"}
-          >
-            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            {isFullscreen ? "Collapse" : "Expand"}
-          </button>
           {mode === "read" && !isNew ? (
             confirmDelete ? (
               <div className="flex flex-1 items-center justify-end gap-3">
@@ -1026,17 +815,17 @@ export function NoteReaderSheet({
                 disabled={!editContent.trim() || saveMut.isPending}
                 className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shadow-sm transition-colors"
               >
-                {saveMut.isPending ? "Saving..." : isNew ? "Create Note" : "Save Changes"}
+                {saveMut.isPending
+                  ? "Saving..."
+                  : appendTarget
+                    ? "Append"
+                    : isNew
+                      ? "Create Note"
+                      : "Save Changes"}
               </button>
             </>
           )}
         </div>
-        <NoteDiagramDialog
-          open={diagramOpen}
-          onOpenChange={setDiagramOpen}
-          scenePath={editingDiagramRef?.scenePath}
-          onSaved={handleDiagramSaved}
-        />
       </SheetContent>
     </Sheet>
   )

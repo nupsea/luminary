@@ -34,6 +34,7 @@ export async function fetchSearch(
 export const fetchDocuments = (params: {
   content_type?: string
   tag?: string
+  collection_id?: string
   sort: SortOption
   page: number
   page_size: number
@@ -44,6 +45,7 @@ export const fetchDocuments = (params: {
     page_size: params.page_size,
     content_type: params.content_type,
     tag: params.tag,
+    collection_id: params.collection_id,
   })
 
 export async function fetchRecentlyAccessed(): Promise<DocumentListItem[]> {
@@ -66,6 +68,9 @@ export const bulkDelete = (ids: string[]): Promise<void> =>
 
 export const deleteDocument = (id: string): Promise<void> =>
   apiDelete(`/documents/${id}`)
+
+export const retagDocument = (id: string): Promise<{ document_id: string; added: number }> =>
+  apiPost(`/documents/${id}/retag`, {})
 
 export const fetchDueCount = (): Promise<DueCountResponse> =>
   apiGet<DueCountResponse>("/study/due-count")

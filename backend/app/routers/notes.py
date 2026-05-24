@@ -23,7 +23,9 @@ from app.models import (
     NoteSourceModel,
     NoteTagIndexModel,
 )
+from app.repos.collection_repo import CollectionRepo
 from app.repos.note_repo import NoteRepo, get_note_repo
+from app.schemas.membership import CollectionRef
 from app.schemas.notes import (
     BatchAcceptItem,
     BatchAcceptRequest,
@@ -57,6 +59,7 @@ from app.schemas.notes import (
 
 # indirect: tests patch `app.services.note_tagger.get_note_tagger`
 from app.services import note_tagger as _note_tagger_module
+from app.services.activity_service import ActivityService
 
 # Promoted from inline lazy imports — all import cleanly without back-importing `app.routers.notes`;
 # the original noqa: PLC0415 markers were leftovers from earlier circular
@@ -218,6 +221,8 @@ async def create_note(
     # sync multi-document source pivot
     await _sync_note_sources(note.id, req.source_document_ids, session)
     await session.commit()
+    # Note creation is meaningful by definition; no debounce needed.
+    await ActivityService(session).record_note_edit(note.id)
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -365,23 +370,17 @@ async def list_notes(
     # Bulk-load collection memberships and source_document_ids in one query each.
     # The note_ids set is only known after the above list executes, so these two
     # queries must follow here rather than being folded into the primary query.
-    coll_map: dict[str, list[str]] = {}
+    coll_map: dict[str, list[CollectionRef]] = {}
     src_map: dict[str, list[str]] = {}
     if notes:
         note_ids = [n.id for n in notes]
-        member_rows = (
-            await session.execute(
-                select(
-                    CollectionMemberModel.member_id,
-                    CollectionMemberModel.collection_id,
-                ).where(
-                    CollectionMemberModel.member_id.in_(note_ids),
-                    CollectionMemberModel.member_type == "note",
-                )
-            )
-        ).all()
-        for row in member_rows:
-            coll_map.setdefault(row[0], []).append(row[1])
+        refs_by_note = await CollectionRepo(session).refs_for_members(
+            note_ids, member_type="note"
+        )
+        coll_map = {
+            nid: [CollectionRef(id=cid, name=name, color=color) for cid, name, color in refs]
+            for nid, refs in refs_by_note.items()
+        }
 
         # bulk-load source_document_ids from pivot
         src_rows = (
@@ -411,6 +410,13 @@ async def _apply_note_update(
         note.group_name = req.group_name
     if req.section_id is not None:
         note.section_id = req.section_id
+    if req.title is not None:
+        # Manual title edit. Empty string clears to NULL so future content
+        # changes can re-trigger auto-gen if the user wants. Either way we
+        # flip the auto flag off so a manual title is never clobbered.
+        cleaned = req.title.strip()
+        note.title = cleaned or None
+        note.title_auto_generated = False
     note.updated_at = datetime.now(UTC)
 
     await session.flush()  # Ensure content update is visible to other queries if needed
@@ -422,6 +428,11 @@ async def _apply_note_update(
         await _sync_note_sources(note.id, req.source_document_ids, session)
     # Four-table update (note + FTS + tag index + source pivot) must commit together.
     await session.commit()
+    # Bump meaningful-activity timestamp when the content actually changed.
+    # Plan 2E.8: tag/title-only edits don't count -- pure metadata edits
+    # shouldn't drag the note up the "recently touched" hub feed.
+    if req.content is not None:
+        await ActivityService(session).record_note_edit(note.id)
     # Fetch updated source_document_ids for response; must run after commit to see
     # the new pivot rows written by _sync_note_sources above.
     src_rows = (
@@ -445,13 +456,19 @@ async def _apply_note_update(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
-    # Re-fetch relevant IDs for a fully populated response
-    coll_rows = await repo.collection_ids_for(note.id)
+    # Re-fetch collection refs for a fully populated response. Single-note
+    # path; reuse the batch helper to keep one source of truth for ordering.
+    coll_refs_raw = (
+        await CollectionRepo(session).refs_for_members([note.id], member_type="note")
+    ).get(note.id, [])
 
     logger.info("Updated note", extra={"note_id": note_id})
     return _to_response(
         note,
-        collection_ids=coll_rows,
+        collections=[
+            CollectionRef(id=cid, name=name, color=color)
+            for cid, name, color in coll_refs_raw
+        ],
         source_document_ids=list(src_rows),
     )
 
@@ -883,15 +900,21 @@ async def get_note(
     note_id: str,
     repo: NoteRepo = Depends(get_note_repo),
 ) -> NoteResponse:
-    """Get a single note by ID, including collection_ids.
+    """Get a single note by ID, including its collection memberships.
 
     Registered AFTER all static-path GET routes (/search, /groups, /flashcards)
     to prevent the dynamic {note_id} segment from shadowing them.
     """
     note = await repo.get_or_404(note_id)
-    member_rows = await repo.collection_ids_for(note_id)
     src_rows = await repo.source_document_ids_for(note_id)
-    return _to_response(note, member_rows, src_rows)
+    coll_refs_raw = (
+        await CollectionRepo(repo.session).refs_for_members([note_id], member_type="note")
+    ).get(note_id, [])
+    coll_refs = [
+        CollectionRef(id=cid, name=name, color=color)
+        for cid, name, color in coll_refs_raw
+    ]
+    return _to_response(note, coll_refs, src_rows)
 
 
 @router.post("/gap-detect", response_model=GapDetectResponse)

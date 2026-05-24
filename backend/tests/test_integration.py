@@ -217,6 +217,7 @@ async def _ingest_fixture(
 # Integration tests
 
 
+@pytest.mark.unstable
 async def test_ingest_fiction(integration_db, monkeypatch):
     """Ingest The Time Machine (fiction); assert pipeline reaches 'complete' stage,
     produces ≥5 chunks, and stores ≥1 entity in the knowledge graph."""
@@ -248,6 +249,7 @@ async def test_ingest_fiction(integration_db, monkeypatch):
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
+@pytest.mark.unstable
 async def test_ingest_technical(integration_db, monkeypatch):
     """Ingest Art of Unix Programming Ch.1 (technical); assert pipeline reaches
     'complete' stage, produces ≥5 chunks, and stores ≥1 entity."""

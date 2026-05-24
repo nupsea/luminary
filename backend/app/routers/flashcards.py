@@ -68,6 +68,7 @@ from app.schemas.flashcards import (
     TraceFlashcardRequest,
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
+from app.services.activity_service import ActivityService
 from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.engagement_service import EngagementService
 from app.services.flashcard import (
@@ -207,6 +208,11 @@ async def generate_flashcards(
         "Generated flashcards",
         extra={"document_id": req.document_id, "count": len(cards)},
     )
+    if cards:
+        # Plan 2E.8: flashcard create is a meaningful event on the source doc.
+        await ActivityService(session).record_flashcard_event(
+            document_id=req.document_id, note_id=None
+        )
     return [_to_response(c) for c in cards]
 
 
@@ -700,6 +706,13 @@ async def review_flashcard(
         )
         session.add(event)
         await session.commit()
+
+    # Bump content_activity for the doc this card sources from. Flashcard
+    # grading is the canonical "meaningful interaction" signal for study
+    # surfaces; plan 2E.8 explicitly lists "flashcard create or grade".
+    await ActivityService(session).record_flashcard_event(
+        document_id=card.document_id, note_id=card.note_id
+    )
 
     # Fire-and-forget coverage update -- does not block the review response.
     if card.document_id:

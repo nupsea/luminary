@@ -27,7 +27,7 @@ class TagNodeOut:
     id: str
     display_name: str
     parent_tag: str | None
-    note_count: int
+    usage_count: int
 
 
 @dataclass
@@ -83,7 +83,7 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
     """Build the tag co-occurrence graph.
 
     Algorithm:
-    1. Fetch top-200 canonical tags by note_count as the node set.
+    1. Fetch top-200 canonical tags by usage_count as the node set.
     2. Self-join note_tag_index to compute co-occurrence weights.
     3. Filter: weight >= 2, both endpoints in node set, take top-500 by weight.
     4. Cache result and return.
@@ -95,19 +95,19 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
     if cached is not None:
         return cached
 
-    # 1. Top-200 canonical tags by note_count
+    # 1. Top-200 canonical tags by usage_count
     nodes_result = await session.execute(
         text(
-            "SELECT id, display_name, parent_tag, note_count"
+            "SELECT id, display_name, parent_tag, usage_count"
             " FROM canonical_tags"
-            " ORDER BY note_count DESC"
+            " ORDER BY usage_count DESC"
             f" LIMIT {MAX_NODES}"
         )
     )
     node_rows = nodes_result.fetchall()
     node_set: set[str] = {row[0] for row in node_rows}
     nodes: list[TagNodeOut] = [
-        TagNodeOut(id=row[0], display_name=row[1], parent_tag=row[2], note_count=row[3])
+        TagNodeOut(id=row[0], display_name=row[1], parent_tag=row[2], usage_count=row[3])
         for row in node_rows
     ]
 

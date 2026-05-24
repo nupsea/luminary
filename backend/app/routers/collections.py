@@ -15,7 +15,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
@@ -24,6 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import CollectionMemberModel, CollectionModel, DocumentModel
 from app.repos.collection_repo import CollectionRepo, get_collection_repo
+from app.schemas.home import (
+    CollectionOverviewResponse,
+    CollectionTagChip,
+    RecentItem,
+)
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 from app.services.naming import normalize_collection_name
@@ -73,6 +78,10 @@ class CollectionTreeItem(BaseModel):
     icon: str | None
     note_count: int
     document_count: int
+    # Inclusive count (direct + descendants) restricted to the requested
+    # ?contains member_type. Equals note_count+document_count for the node
+    # itself when unscoped (?contains absent). See plan 2E.1c.
+    scoped_count: int
     children: list["CollectionTreeItem"]
 
 
@@ -227,9 +236,25 @@ async def create_collection(
 
 @router.get("/tree", response_model=list[CollectionTreeItem])
 async def get_collection_tree(
+    contains: str | None = Query(
+        default=None,
+        description="'document' | 'note' -- restrict scoped_count to that member type "
+        "and prune subtrees with zero matches (ancestors with matching descendants are kept).",
+    ),
     repo: CollectionRepo = Depends(get_collection_repo),
 ) -> list[CollectionTreeItem]:
-    """Return all collections as a 2-level nested tree with item counts."""
+    """Return all collections as a 2-level nested tree with item counts.
+
+    scoped_count semantics:
+      - unscoped: equals direct note_count + document_count for each node
+      - ?contains=document: equals inclusive descendant document count
+      - ?contains=note:     equals inclusive descendant note count
+    """
+    if contains is not None and contains not in ("document", "note"):
+        raise HTTPException(
+            status_code=422, detail="contains must be 'document' or 'note'"
+        )
+
     all_cols = list(await repo.list_all())
     counts = await repo.member_counts()
     note_counts: dict[str, int] = {
@@ -239,34 +264,70 @@ async def get_collection_tree(
         cid: c for (cid, mtype), c in counts.items() if mtype == "document"
     }
 
-    # Assemble tree: top-level first, then attach children
+    children_by_parent: dict[str, list[str]] = {}
+    for col in all_cols:
+        if col.parent_collection_id is not None:
+            children_by_parent.setdefault(col.parent_collection_id, []).append(col.id)
+
+    def direct_scoped(cid: str) -> int:
+        if contains == "document":
+            return doc_counts.get(cid, 0)
+        if contains == "note":
+            return note_counts.get(cid, 0)
+        return note_counts.get(cid, 0) + doc_counts.get(cid, 0)
+
+    def direct_total(cid: str) -> int:
+        return note_counts.get(cid, 0) + doc_counts.get(cid, 0)
+
+    def inclusive_scoped(cid: str) -> int:
+        total = direct_scoped(cid)
+        for child_id in children_by_parent.get(cid, []):
+            total += inclusive_scoped(child_id)
+        return total
+
+    def inclusive_total(cid: str) -> int:
+        total = direct_total(cid)
+        for child_id in children_by_parent.get(cid, []):
+            total += inclusive_total(child_id)
+        return total
+
+    col_by_id: dict[str, CollectionModel] = {c.id: c for c in all_cols}
+
+    # Cap rendered depth at 2 (top + immediate children) to match the
+    # pre-2E.1c contract. Inclusive counts still cover the full subtree.
+    def build_node(cid: str, depth: int) -> CollectionTreeItem | None:
+        col = col_by_id.get(cid)
+        if col is None:
+            return None
+        scoped = inclusive_scoped(cid)
+        # Empty collections (no members of any type) must survive every scope
+        # filter -- otherwise a brand-new collection vanishes from the rail
+        # that created it before any members are added.
+        if contains is not None and scoped == 0 and inclusive_total(cid) > 0:
+            return None
+        children: list[CollectionTreeItem] = []
+        if depth < 1:
+            for child_id in children_by_parent.get(cid, []):
+                node = build_node(child_id, depth + 1)
+                if node is not None:
+                    children.append(node)
+        return CollectionTreeItem(
+            id=col.id,
+            name=col.name,
+            color=col.color,
+            icon=col.icon,
+            note_count=note_counts.get(col.id, 0),
+            document_count=doc_counts.get(col.id, 0),
+            scoped_count=scoped,
+            children=children,
+        )
+
     top_level: list[CollectionTreeItem] = []
     for col in all_cols:
         if col.parent_collection_id is None:
-            children = [
-                CollectionTreeItem(
-                    id=child.id,
-                    name=child.name,
-                    color=child.color,
-                    icon=child.icon,
-                    note_count=note_counts.get(child.id, 0),
-                    document_count=doc_counts.get(child.id, 0),
-                    children=[],
-                )
-                for child in all_cols
-                if child.parent_collection_id == col.id
-            ]
-            top_level.append(
-                CollectionTreeItem(
-                    id=col.id,
-                    name=col.name,
-                    color=col.color,
-                    icon=col.icon,
-                    note_count=note_counts.get(col.id, 0),
-                    document_count=doc_counts.get(col.id, 0),
-                    children=children,
-                )
-            )
+            node = build_node(col.id, 0)
+            if node is not None:
+                top_level.append(node)
 
     return top_level
 
@@ -528,6 +589,129 @@ async def export_collection(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/{collection_id}/overview", response_model=CollectionOverviewResponse)
+async def get_collection_overview(
+    collection_id: str,
+    recent_limit: int = Query(default=8, ge=1, le=50),
+    tag_limit: int = Query(default=8, ge=1, le=20),
+    session: AsyncSession = Depends(get_db),
+    repo: CollectionRepo = Depends(get_collection_repo),
+) -> CollectionOverviewResponse:
+    """Overview tab on /collections/:id (plan 2E.6).
+
+    Recent activity is the same interleaving as /home/overview but joined
+    against this collection's members. Tag chips reflect the union of
+    tags applied to those members, sorted by how often they appear within
+    the collection.
+    """
+    await repo.get_or_404(collection_id)
+
+    recent_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT 'document' AS member_type, ca.member_id, d.title AS title,
+                       NULL AS preview, ca.last_meaningful_at
+                FROM collection_members cm
+                JOIN content_activity ca
+                  ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
+                JOIN documents d ON d.id = cm.member_id
+                WHERE cm.collection_id = :cid AND cm.member_type = 'document'
+                UNION ALL
+                SELECT 'note' AS member_type, ca.member_id,
+                       COALESCE(NULLIF(n.title, ''), substr(n.content, 1, 60)) AS title,
+                       substr(n.content, 1, 120) AS preview,
+                       ca.last_meaningful_at
+                FROM collection_members cm
+                JOIN content_activity ca
+                  ON ca.member_id = cm.member_id AND ca.member_type = cm.member_type
+                JOIN notes n ON n.id = cm.member_id
+                WHERE cm.collection_id = :cid AND cm.member_type = 'note' AND n.archived = 0
+                ORDER BY last_meaningful_at DESC
+                LIMIT :recent_limit
+                """
+            ),
+            {"cid": collection_id, "recent_limit": recent_limit},
+        )
+    ).all()
+    recent_items = [
+        RecentItem(
+            member_type=row[0],
+            member_id=row[1],
+            title=row[2] or "(untitled)",
+            preview=row[3],
+            last_meaningful_at=row[4],
+        )
+        for row in recent_rows
+    ]
+
+    # Tag chips: union of doc + note tags from this collection's members,
+    # counted by how many *members* carry them (so a tag on 2 docs + 1 note
+    # ranks as 3, regardless of how many index rows exist).
+    tag_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT t.id, t.display_name, COUNT(*) AS hit_count
+                FROM (
+                    SELECT dti.tag_full AS tag_id
+                    FROM collection_members cm
+                    JOIN document_tag_index dti ON dti.document_id = cm.member_id
+                    WHERE cm.collection_id = :cid AND cm.member_type = 'document'
+                    UNION ALL
+                    SELECT nti.tag_full AS tag_id
+                    FROM collection_members cm
+                    JOIN note_tag_index nti ON nti.note_id = cm.member_id
+                    WHERE cm.collection_id = :cid AND cm.member_type = 'note'
+                ) AS hits
+                JOIN canonical_tags t ON t.id = hits.tag_id
+                GROUP BY t.id, t.display_name
+                ORDER BY hit_count DESC, t.id
+                LIMIT :tag_limit
+                """
+            ),
+            {"cid": collection_id, "tag_limit": tag_limit},
+        )
+    ).all()
+    tags = [
+        CollectionTagChip(id=r[0], display_name=r[1], count=int(r[2]))
+        for r in tag_rows
+    ]
+
+    # Member counts for the mini-stat row at the top of the tab.
+    count_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM collection_members
+                    WHERE collection_id = :cid AND member_type = 'document') AS doc_count,
+                  (SELECT COUNT(*) FROM collection_members
+                    WHERE collection_id = :cid AND member_type = 'note') AS note_count,
+                  (SELECT COUNT(DISTINCT fc.id) FROM collection_members cm
+                    JOIN flashcards fc ON (
+                      (cm.member_type = 'document' AND fc.document_id = cm.member_id)
+                      OR (cm.member_type = 'note' AND fc.note_id = cm.member_id)
+                    )
+                    WHERE cm.collection_id = :cid) AS fc_count
+                """
+            ),
+            {"cid": collection_id},
+        )
+    ).first()
+    doc_count = int(count_rows[0] or 0) if count_rows else 0
+    note_count = int(count_rows[1] or 0) if count_rows else 0
+    fc_count = int(count_rows[2] or 0) if count_rows else 0
+
+    return CollectionOverviewResponse(
+        recent_items=recent_items,
+        tags=tags,
+        document_count=doc_count,
+        note_count=note_count,
+        flashcard_count=fc_count,
+    )
+
+
 # NOTE: These health routes are registered BEFORE /{collection_id}/notes/{note_id} to avoid
 # any ambiguity. The /health path segment is not a note_id wildcard.
 @router.get("/{collection_id}/health")
@@ -563,7 +747,11 @@ async def archive_stale_notes(
 async def remove_member_from_collection(
     collection_id: str,
     member_id: str,
+    member_type: str | None = Query(
+        default=None,
+        description="When set ('note' or 'document'), scope the delete to that member type.",
+    ),
     repo: CollectionRepo = Depends(get_collection_repo),
 ) -> None:
     """Remove a member (note or document) from a collection."""
-    await repo.remove_member(collection_id, member_id)
+    await repo.remove_member(collection_id, member_id, member_type=member_type)

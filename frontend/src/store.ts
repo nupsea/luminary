@@ -16,6 +16,8 @@ interface AppState {
   llmMode: "private" | "cloud" | "hybrid"
   currentProvider: string
   libraryView: "grid" | "list"
+  // Library left-rail (Filters) open/closed state. Persisted; default closed.
+  libraryFiltersOpen: boolean
   notesView: "grid" | "list"
   // Review reminders toggle. Persisted to localStorage; default true (opt-out model).
   // Note: direct localStorage read at module load is safe because Luminary is a client-only
@@ -64,6 +66,7 @@ interface AppState {
   setLastReadyDocumentId: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
+  setLibraryFiltersOpen: (open: boolean) => void
   setNotesView: (view: "grid" | "list") => void
   setReviewRemindersEnabled: (enabled: boolean) => void
   setStudySectionFilter: (filter: StudySectionFilter | null) => void
@@ -81,6 +84,7 @@ export const useAppStore = create<AppState>()(
       llmMode: "private",
       currentProvider: "openai",
       libraryView: "grid",
+      libraryFiltersOpen: false,
       notesView: "grid",
       // Only "false" disables; absent key (first run) defaults to enabled.
       reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
@@ -113,6 +117,7 @@ export const useAppStore = create<AppState>()(
       setLastReadyDocumentId: (id) => set({ lastReadyDocumentId: id }),
       setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
       setLibraryView: (view) => set({ libraryView: view }),
+      setLibraryFiltersOpen: (open) => set({ libraryFiltersOpen: open }),
       setNotesView: (view) => set({ notesView: view }),
       setReviewRemindersEnabled: (enabled) => {
         localStorage.setItem("luminary:reviewReminders", String(enabled))
@@ -132,6 +137,7 @@ export const useAppStore = create<AppState>()(
         chatScope: state.chatScope,
         chatSelectedDocId: state.chatSelectedDocId,
         libraryView: state.libraryView,
+        libraryFiltersOpen: state.libraryFiltersOpen,
         notesView: state.notesView,
         reviewRemindersEnabled: state.reviewRemindersEnabled,
         studySessionId: state.studySessionId,

@@ -229,6 +229,14 @@ class NoteModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     group_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Persisted note title. NULL means "no title yet" (auto-gen will fill on
+    # the next content threshold). title_auto_generated tracks whether the
+    # current value came from the LLM or from a manual user edit; the
+    # generator never overwrites a manually-set title.
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    title_auto_generated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
     # short hash of content for dedup (sha256[:16])
     content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # archived flag -- excluded from default GET /notes list; set by archive-stale
@@ -739,12 +747,49 @@ class NoteTagIndexModel(Base):
     tag_parent: Mapped[str] = mapped_column(String, nullable=False, default="")
 
 
+class DocumentTagProvenanceModel(Base):
+    """Per (document, tag) source-tracking row.
+
+    Records whether a tag came from a human (`source='manual'`) or from the
+    auto-tagging pipeline (`source='auto'`), plus the tagger version that
+    produced it. Separate from DocumentTagIndexModel so the shadow index
+    stays focused on lookup and this stays focused on lineage.
+
+    Composite PK (document_id, tag_full) makes auto-tag re-runs idempotent.
+    """
+
+    __tablename__ = "document_tag_provenance"
+
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_full: Mapped[str] = mapped_column(String, primary_key=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)  # 'manual' | 'auto'
+    tagger_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class DocumentTagIndexModel(Base):
+    """Shadow/denorm table: one row per (document, tag) pair for O(1) tag prefix lookup.
+
+    document_id has no FK (shadow table -- mirrors NoteTagIndexModel pattern).
+    Same column semantics: tag_full / tag_root / tag_parent.
+    Composite PK on (document_id, tag_full) enforces uniqueness.
+    """
+
+    __tablename__ = "document_tag_index"
+
+    document_id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_full: Mapped[str] = mapped_column(String, primary_key=True)
+    tag_root: Mapped[str] = mapped_column(String, nullable=False)
+    tag_parent: Mapped[str] = mapped_column(String, nullable=False, default="")
+
+
 class CanonicalTagModel(Base):
     """Registry of canonical tag slugs with slash-convention hierarchy.
 
     id is the full slug (PK), e.g. 'science/biology'.
     parent_tag is the parent slug e.g. 'science', or None for top-level tags.
-    note_count is denormalized -- kept accurate by _sync_tag_index.
+    usage_count is the denormalized total across notes + documents, kept
+    accurate by sync_tag_index and sync_document_tag_index.
     """
 
     __tablename__ = "canonical_tags"
@@ -752,7 +797,7 @@ class CanonicalTagModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)  # full slug
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     parent_tag: Mapped[str | None] = mapped_column(String, nullable=True)
-    note_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
@@ -772,7 +817,7 @@ class TagMergeSuggestionModel(Base):
     """Suggested tag pair merges from SmartTagNormalizerService.
 
     status: 'pending' | 'accepted' | 'rejected'
-    suggested_canonical_id: whichever of tag_a or tag_b has higher note_count (the merge target).
+    suggested_canonical_id: whichever of tag_a or tag_b has higher usage_count (the merge target).
     """
 
     __tablename__ = "tag_merge_suggestions"
@@ -1040,5 +1085,23 @@ class ChatMessageModel(Base):
     # Optional structured payload for assistant turns: citations, confidence, web_sources, etc.
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
+    )
+
+
+class ContentActivityModel(Base):
+    """Last *meaningful* interaction per (member_id, member_type).
+
+    Distinct from documents.last_accessed_at (which bumps on any open click);
+    this column drives the "recently touched" hub feed where pure clicks
+    must NOT bump (plan 2E.8). Only ActivityService writes here.
+    """
+
+    __tablename__ = "content_activity"
+
+    # 'document' | 'note' (extensible to other content types in future)
+    member_type: Mapped[str] = mapped_column(String(16), primary_key=True)
+    member_id: Mapped[str] = mapped_column(String, primary_key=True)
+    last_meaningful_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
     )

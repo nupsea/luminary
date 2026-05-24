@@ -85,10 +85,10 @@ export function NodePopover({
           onClose()
           if (docId) {
             onNavigate(
-              `/?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`,
+              `/library?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`,
             )
           } else {
-            onNavigate(`/?search=${encodeURIComponent(entityLabel)}`)
+            onNavigate(`/library?search=${encodeURIComponent(entityLabel)}`)
           }
         }}
         className="w-full rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors text-center"

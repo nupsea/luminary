@@ -21,6 +21,7 @@ from sqlalchemy import update as _update
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel
+from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
 from app.services.section_summarizer import get_section_summarizer_service
 from app.services.summarizer import get_summarization_service
@@ -205,6 +206,20 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     except Exception as exc:
         logger.warning(
             "enrichment_enqueue_node: pregenerate schedule failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+
+    # Auto-tag enrichment (2D.1). Scheduled after stage='complete' commits so
+    # tag writes never gate the doc becoming usable. Failures are logged and
+    # do not propagate.
+    try:
+        auto_tag_task = asyncio.create_task(enrich_document_tags(doc_id))
+        _background_tasks.add(auto_tag_task)
+        auto_tag_task.add_done_callback(_background_tasks.discard)
+    except Exception as exc:
+        logger.warning(
+            "enrichment_enqueue_node: auto-tag schedule failed (non-fatal): %s",
             exc,
             extra={"doc_id": doc_id},
         )

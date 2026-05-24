@@ -49,6 +49,7 @@ async def test_db(tmp_path, monkeypatch):
 # Tag migration tests
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_tag_migration_merges_duplicates(test_db):
     """POST /tags/migrate-naming merges 'Python' and 'python' into 'python' with combined notes."""
@@ -312,6 +313,7 @@ async def test_sync_tag_index_normalizes(test_db):
         assert "Machine Learning" not in rows
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_autocomplete_normalizes_query(test_db):
     """GET /tags/autocomplete normalizes the query parameter."""

@@ -46,9 +46,9 @@ async def test_get_or_404_raises(repo: TagRepo) -> None:
 async def test_list_by_count_orders_desc(repo: TagRepo) -> None:
     await repo.create(id="a", display_name="A", parent_tag=None)
     await repo.create(id="b", display_name="B", parent_tag=None)
-    # Bump b's note_count
+    # Bump b's usage_count
     b = await repo.get_or_404("b")
-    b.note_count = 5
+    b.usage_count = 5
     await repo.session.commit()
     rows = await repo.list_by_count()
     assert [r.id for r in rows[:2]] == ["b", "a"]

@@ -1,63 +1,82 @@
 /**
- * Global Cmd+K / Ctrl+K search dialog.
+ * Global Cmd+K / Ctrl+K search dialog (2D.3 + 2D.4).
  *
- * Opens a full-screen overlay with a search input that queries GET /search
- * with 300 ms debounce. Results are grouped by document. Clicking a result
- * closes the dialog and navigates the user to the document in Learning tab.
+ * Renders against UnifiedSearchResult only -- the per-endpoint shape
+ * (DocumentGroup, NoteSearchItem, FlashcardResponse) never reaches this
+ * component. Adapters live in @/lib/unifiedSearch.
  */
 
-import { FileText, Search, X } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { FileText, Layers, Search, StickyNote, X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+
 import { useDebounce } from "@/hooks/useDebounce"
+import {
+  fetchUnifiedSearch,
+  loadRecentSeeks,
+  pushRecentSeek,
+  type SearchKind,
+  type UnifiedSearchResult,
+} from "@/lib/unifiedSearch"
+import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
-
-import { apiGet } from "@/lib/apiClient"
-import type { components } from "@/types/api"
-
-type DocumentGroup = components["schemas"]["DocumentGroup"]
-type SearchResponse = components["schemas"]["SearchResponse"]
-
-const fetchSearch = (q: string): Promise<SearchResponse> =>
-  apiGet<SearchResponse>("/search", { q, limit: 20 })
 
 interface SearchDialogProps {
   open: boolean
   onClose: () => void
 }
 
+const KINDS: { id: SearchKind; label: string; icon: typeof FileText }[] = [
+  { id: "document", label: "Documents", icon: FileText },
+  { id: "note", label: "Notes", icon: StickyNote },
+  { id: "flashcard", label: "Flashcards", icon: Layers },
+]
+
+const KIND_ICON: Record<SearchKind, typeof FileText> = {
+  document: FileText,
+  note: StickyNote,
+  flashcard: Layers,
+}
+
 export function SearchDialog({ open, onClose }: SearchDialogProps) {
   const [query, setQuery] = useState("")
-  const [groups, setGroups] = useState<DocumentGroup[]>([])
+  const [results, setResults] = useState<UnifiedSearchResult[]>([])
   const [loading, setLoading] = useState(false)
+  const [activeKinds, setActiveKinds] = useState<Set<SearchKind>>(
+    () => new Set<SearchKind>(["document", "note", "flashcard"]),
+  )
+  const [recent, setRecent] = useState<string[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const debouncedQuery = useDebounce(query, 300)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const navigate = useNavigate()
 
-  // Focus input when opened
   useEffect(() => {
     if (open) {
       setQuery("")
-      setGroups([])
+      setResults([])
+      setRecent(loadRecentSeeks())
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [open])
 
-  // Search on debounced query change
   useEffect(() => {
     if (!debouncedQuery.trim()) {
-      setGroups([])
+      setResults([])
       return
     }
     let cancelled = false
     setLoading(true)
-    fetchSearch(debouncedQuery)
-      .then((data) => {
-        if (!cancelled) setGroups(data.results)
+    fetchUnifiedSearch({
+      q: debouncedQuery,
+      kinds: Array.from(activeKinds),
+    })
+      .then((rows) => {
+        if (!cancelled) setResults(rows)
       })
       .catch(() => {
-        if (!cancelled) setGroups([])
+        if (!cancelled) setResults([])
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -65,9 +84,8 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
     return () => {
       cancelled = true
     }
-  }, [debouncedQuery])
+  }, [debouncedQuery, activeKinds])
 
-  // Close on Escape
   useEffect(() => {
     if (!open) return
     function onKeyDown(e: KeyboardEvent) {
@@ -78,17 +96,48 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   }, [open, onClose])
 
   const handleResultClick = useCallback(
-    (documentId: string) => {
-      setActiveDocument(documentId)
-      navigate("/")
+    (r: UnifiedSearchResult) => {
+      pushRecentSeek(query)
+      if (r.kind === "document") {
+        if (r.documentId) setActiveDocument(r.documentId)
+        navigate("/library")
+      } else if (r.kind === "note") {
+        if (r.documentId) setNotesDocumentId(r.documentId)
+        navigate("/notes")
+      } else {
+        // Flashcard: route to Study. Use documentId so the study page can
+        // restore deck context; falls through to landing when null.
+        if (r.documentId) setActiveDocument(r.documentId)
+        navigate("/study")
+      }
       onClose()
     },
-    [setActiveDocument, navigate, onClose],
+    [navigate, onClose, query, setActiveDocument, setNotesDocumentId],
   )
 
-  if (!open) return null
+  const handleRecentClick = useCallback((q: string) => {
+    setQuery(q)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }, [])
 
-  const totalMatches = groups.reduce((n, g) => n + g.matches.length, 0)
+  const toggleKind = useCallback((k: SearchKind) => {
+    setActiveKinds((prev) => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      // Don't allow zero kinds -- empty facet set returns nothing, confusing UX.
+      if (next.size === 0) next.add(k)
+      return next
+    })
+  }, [])
+
+  const counts = useMemo(() => {
+    const c: Record<SearchKind, number> = { document: 0, note: 0, flashcard: 0 }
+    for (const r of results) c[r.kind] += 1
+    return c
+  }, [results])
+
+  if (!open) return null
 
   return (
     <div
@@ -106,7 +155,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search across all documents..."
+            placeholder="Search documents, notes, flashcards…"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
           {query && (
@@ -119,55 +168,100 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
           </kbd>
         </div>
 
-        {/* Results */}
+        {/* Facet chips */}
+        <div className="flex items-center gap-1.5 border-b border-border px-4 py-2">
+          {KINDS.map(({ id, label, icon: Icon }) => {
+            const active = activeKinds.has(id)
+            return (
+              <button
+                key={id}
+                onClick={() => toggleKind(id)}
+                className={cn(
+                  "flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
+                  active
+                    ? "border-primary bg-primary/15 text-primary"
+                    : "border-border bg-background text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon size={11} />
+                {label}
+                {query && active && counts[id] > 0 && (
+                  <span className="text-[10px] opacity-70">{counts[id]}</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Results / recents */}
         <div className="max-h-[60vh] overflow-y-auto">
-          {loading && (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">Searching...</p>
+          {!query && recent.length > 0 && (
+            <div className="px-4 py-3">
+              <p className="lum-eyebrow mb-1.5">Recent</p>
+              <div className="flex flex-col">
+                {recent.map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => handleRecentClick(r)}
+                    className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground/80 hover:bg-accent"
+                  >
+                    <Search size={12} className="shrink-0 text-muted-foreground" />
+                    <span className="truncate">{r}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
-          {!loading && query && groups.length === 0 && (
+
+          {!query && recent.length === 0 && (
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+              Start typing to search across documents, notes, and flashcards.
+            </p>
+          )}
+
+          {loading && (
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">Searching…</p>
+          )}
+          {!loading && query && results.length === 0 && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               No results for &quot;{query}&quot;
             </p>
           )}
-          {!loading && groups.length > 0 && (
+          {!loading && results.length > 0 && (
             <>
               <p className="px-4 pt-3 text-xs text-muted-foreground">
-                {totalMatches} match{totalMatches !== 1 ? "es" : ""} across {groups.length} document
-                {groups.length !== 1 ? "s" : ""}
+                {results.length} result{results.length !== 1 ? "s" : ""}
               </p>
-              {groups.map((group) => (
-                <div key={group.document_id} className="border-b border-border last:border-0">
-                  {/* Document header */}
-                  <button
-                    className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-accent"
-                    onClick={() => handleResultClick(group.document_id)}
-                  >
-                    <FileText size={14} className="shrink-0 text-primary" />
-                    <span className="font-medium text-sm text-foreground">{group.document_title}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{group.content_type}</span>
-                  </button>
-                  {/* Match rows */}
-                  {group.matches.map((match) => (
-                    <button
-                      key={match.chunk_id}
-                      className="flex w-full flex-col gap-0.5 px-8 py-2 text-left hover:bg-accent/60"
-                      onClick={() => handleResultClick(match.document_id)}
-                    >
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{match.section_heading || "Untitled section"}</span>
-                        {match.page > 0 && <span>· p.{match.page}</span>}
-                      </div>
-                      <p className="line-clamp-2 text-xs text-foreground/80">{match.text_excerpt}</p>
-                    </button>
-                  ))}
-                </div>
-              ))}
+              <ul className="flex flex-col">
+                {results.map((r) => {
+                  const Icon = KIND_ICON[r.kind]
+                  return (
+                    <li key={r.key}>
+                      <button
+                        onClick={() => handleResultClick(r)}
+                        className="flex w-full flex-col gap-0.5 border-b border-border px-4 py-2 text-left transition-colors last:border-0 hover:bg-accent"
+                      >
+                        <div className="flex items-center gap-2 text-sm text-foreground">
+                          <Icon size={13} className="shrink-0 text-primary" />
+                          <span className="truncate font-medium">{r.title}</span>
+                          <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {r.kind}
+                          </span>
+                        </div>
+                        {(r.snippet || r.context) && (
+                          <div className="flex items-center gap-2 pl-5 text-xs text-muted-foreground">
+                            {r.context && <span className="shrink-0">{r.context}</span>}
+                            {r.snippet && (
+                              <span className="line-clamp-1 text-foreground/70">{r.snippet}</span>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
             </>
-          )}
-          {!query && (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-              Start typing to search across all documents.
-            </p>
           )}
         </div>
       </div>

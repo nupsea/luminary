@@ -81,7 +81,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
       {/* Left: TOC panel */}
       <div className="w-56 shrink-0 border-r border-border flex flex-col overflow-hidden">
         <div className="px-3 py-2 border-b border-border">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          <span className="lum-eyebrow">
             Chapters
           </span>
         </div>

@@ -76,12 +76,13 @@ ignore = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-m 'not slow and not e2e'"
+addopts = "-m 'not slow and not e2e and not unstable'"
 pythonpath = ["tests"]
 markers = [
     "slow: marks tests as slow (real ML model downloads; excluded from make test fast path)",
     "e2e: requires live backend + Ollama; excluded from make ci",
     "integration_http: ASGITransport upload tests with mocked ML; included in make ci",
+    "unstable: known-broken or environment-flaky; excluded from CI, runnable locally via `uv run pytest -m unstable`",
 ]
 
 [dependency-groups]
@@ -90,6 +91,7 @@ dev = [
     "psutil>=6.1.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-timeout>=2.4.0",
     "reportlab>=4.4.10",
     "ruff>=0.15.2",
     "tiktoken>=0.12.0",

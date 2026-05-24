@@ -1,53 +1,39 @@
 import { Loader2, RefreshCw } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
-import { NotesReaderPanel } from "./NotesReaderPanel"
 import { ReferencesPanel } from "./ReferencesPanel"
+import { TagsPanel } from "./TagsPanel"
 import { CONVERSATION_TAB, SUMMARY_TABS, type SummaryMode, type SummaryTabDef } from "./types"
 
 type SummaryMap = Partial<Record<SummaryMode, string>>
 type StreamingMap = Partial<Record<SummaryMode, boolean>>
 
-type PanelTab = SummaryMode | "references" | "notes"
+type PanelTab = SummaryMode | "references" | "tags"
 
 interface SummaryPanelProps {
   documentId: string
   contentType: string
-  activeSectionId?: string | null
-  onScrollToSection?: (sectionId: string) => void
-  onNoteCountKnown: (count: number) => void
 }
 
-export function SummaryPanel({ documentId, contentType, activeSectionId, onScrollToSection, onNoteCountKnown }: SummaryPanelProps) {
+export function SummaryPanel({ documentId, contentType }: SummaryPanelProps) {
   const summaryTabs: SummaryTabDef[] =
     contentType === "conversation" ? [...SUMMARY_TABS, CONVERSATION_TAB] : SUMMARY_TABS
   const allTabs = [
-    { mode: "notes" as PanelTab, label: "Notes" },
     ...summaryTabs.map((t) => ({ mode: t.mode as PanelTab, label: t.label })),
     { mode: "references" as PanelTab, label: "References" },
+    { mode: "tags" as PanelTab, label: "Tags" },
   ]
 
-  const [activeTab, setActiveTab] = useState<PanelTab>("notes")
-  const defaultTabResolved = useRef(false)
+  const [activeTab, setActiveTab] = useState<PanelTab>(summaryTabs[0]?.mode as PanelTab)
   const [summaries, setSummaries] = useState<SummaryMap>({})
   const [streaming, setStreaming] = useState<StreamingMap>({})
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [cacheLoading, setCacheLoading] = useState(true)
-
-  const handleNoteCountKnown = useCallback((count: number) => {
-    onNoteCountKnown(count)
-    if (!defaultTabResolved.current) {
-      defaultTabResolved.current = true
-      if (count === 0) {
-        setActiveTab("executive")
-      }
-    }
-  }, [onNoteCountKnown])
 
   useEffect(() => {
     let cancelled = false
@@ -135,7 +121,7 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
     }
   }
 
-  const isSidePanel = activeTab === "references" || activeTab === "notes"
+  const isSidePanel = activeTab === "references" || activeTab === "tags"
   const currentSummary = !isSidePanel ? summaries[activeTab as SummaryMode] : undefined
   const isStreaming = !isSidePanel ? (streaming[activeTab as SummaryMode] ?? false) : false
 
@@ -159,15 +145,15 @@ export function SummaryPanel({ documentId, contentType, activeSectionId, onScrol
       </div>
 
       <div className="flex-1 overflow-auto">
-        {summaryError && activeTab !== "references" && activeTab !== "notes" && (
+        {summaryError && activeTab !== "references" && (
           <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {summaryError}
           </div>
         )}
-        {activeTab === "notes" ? (
-          <NotesReaderPanel documentId={documentId} activeSectionId={activeSectionId ?? null} onScrollToSection={onScrollToSection} onNoteCountKnown={handleNoteCountKnown} />
-        ) : activeTab === "references" ? (
+        {activeTab === "references" ? (
           <ReferencesPanel documentId={documentId} />
+        ) : activeTab === "tags" ? (
+          <TagsPanel documentId={documentId} />
         ) : cacheLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={14} className="animate-spin" />

@@ -36,6 +36,52 @@ class KuzuViewRepo:
         self._prereq = prereq
         self._concept = concept
 
+    def get_entities_with_counts(
+        self,
+        document_id: str,
+        min_mentions: int = 1,
+        allowed_types: tuple[str, ...] = ("CONCEPT",),
+    ) -> list[tuple[str, int]]:
+        """Return [(entity_name, mention_count)] for one document, ordered DESC.
+
+        Used by the auto-tagger to score-rank entity candidates: an entity
+        mentioned more times is more central to the document. `allowed_types`
+        defaults to CONCEPT only -- right for tech docs where PERSON/PLACE
+        entities are mostly author names, example characters, or stack
+        locations rather than topic-shaped. Narrative-content callers should
+        pass ('PERSON', 'PLACE', 'CONCEPT') so characters and settings can
+        surface. Returns [] on any Kuzu error so the caller stays non-fatal.
+        """
+        if not document_id or not allowed_types:
+            return []
+        try:
+            # Kuzu doesn't bind list params well across versions; render a
+            # safe IN list. allowed_types values are constants we control.
+            types_sql = ", ".join(f"'{t}'" for t in allowed_types if t.isalpha())
+            if not types_sql:
+                return []
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document {id: $did})"
+                f" WHERE e.type IN [{types_sql}]"
+                " AND r.count >= $min_mentions"
+                " RETURN e.name, r.count"
+                " ORDER BY r.count DESC",
+                {"did": document_id, "min_mentions": int(min_mentions)},
+            )
+            out: list[tuple[str, int]] = []
+            seen: set[str] = set()
+            while result.has_next():
+                row = result.get_next()
+                name = row[0]
+                count = row[1]
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append((name, int(count or 0)))
+            return out
+        except Exception:
+            logger.warning("get_entities_with_counts failed", exc_info=True)
+            return []
+
     def get_entities_for_documents(self, document_ids: list[str], limit: int = 15) -> list[str]:
         """Return entity names (PERSON, PLACE, CONCEPT) mentioned in the given documents.
 

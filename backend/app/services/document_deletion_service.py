@@ -90,6 +90,12 @@ class DocumentDeletionService:
         """
         document_id = doc.id
 
+        # Drop document_tag_index rows + decrement canonical_tags counts. Local
+        # import keeps notes_service from importing the deletion service.
+        from app.services.notes_service import sync_document_tag_index
+
+        await sync_document_tag_index(document_id, [], session)
+
         # FTS5 virtual tables -- use raw DELETE because they don't have an ORM model.
         await session.execute(
             text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),

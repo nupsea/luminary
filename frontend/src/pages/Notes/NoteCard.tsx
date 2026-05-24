@@ -1,5 +1,5 @@
 // NoteCard -- card view of a single note. Editing is delegated to
-// NoteEditorDialog (the parent opens it when onEdit fires). The card
+// NoteReaderSheet (the parent opens it when onEdit fires). The card
 // owns the inline delete confirmation and the tag chips that
 // dispatch a tag-navigate event for the sidebar tree.
 
@@ -132,6 +132,41 @@ export function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {/* Collection membership chips (plan 2E.5). Up to 2 + overflow;
+          click jumps to the collection workspace. */}
+      {note.collections && note.collections.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {note.collections.slice(0, 2).map((c) => (
+            <button
+              key={c.id}
+              onClick={(e) => {
+                e.stopPropagation()
+                navigate(`/collections/${c.id}`)
+              }}
+              className="flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              title={`Open collection: ${c.name}`}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: c.color }}
+              />
+              <span className="truncate max-w-[8rem]">{c.name}</span>
+            </button>
+          ))}
+          {note.collections.length > 2 && (
+            <span
+              className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+              title={note.collections
+                .slice(2)
+                .map((c) => c.name)
+                .join(", ")}
+            >
+              +{note.collections.length - 2}
+            </span>
+          )}
         </div>
       )}
     </div>

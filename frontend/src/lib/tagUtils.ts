@@ -8,7 +8,8 @@ export interface TagTreeItem {
   id: string
   display_name: string
   parent_tag: string | null
-  note_count: number
+  usage_count: number
+  scoped_count: number
   children: TagTreeItem[]
 }
 
@@ -16,7 +17,7 @@ export interface AutocompleteResult {
   id: string
   display_name: string
   parent_tag: string | null
-  note_count: number
+  usage_count: number
 }
 
 /**

@@ -19,6 +19,11 @@ interface InDocSearchBarProps {
   totalHits: number
   onPrev: () => void
   onNext: () => void
+  /** Prefill the input the first time the bar opens (e.g., from a tag click). */
+  initialQuery?: string
+  /** Fires once after initialQuery has been pushed into the input, so the
+   * caller can clear its pending state and not re-prefill on next open. */
+  onConsumeInitialQuery?: () => void
 }
 
 export function InDocSearchBar({
@@ -29,8 +34,10 @@ export function InDocSearchBar({
   totalHits,
   onPrev,
   onNext,
+  initialQuery,
+  onConsumeInitialQuery,
 }: InDocSearchBarProps) {
-  const [inputValue, setInputValue] = useState("")
+  const [inputValue, setInputValue] = useState(initialQuery ?? "")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -38,6 +45,13 @@ export function InDocSearchBar({
 
   useEffect(() => {
     inputRef.current?.focus()
+    if (initialQuery) {
+      // Select the prefilled query so the user can immediately type to replace.
+      inputRef.current?.select()
+      onConsumeInitialQuery?.()
+    }
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

@@ -138,7 +138,7 @@ export function ChatSessionList({
         ) : (
           grouped.map((group) => (
             <div key={group.label} className="mb-3">
-              <div className="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <div className="lum-eyebrow px-2 pt-2 pb-1">
                 {group.label}
               </div>
               {group.items.map((s) => {

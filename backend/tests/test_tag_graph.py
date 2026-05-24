@@ -45,13 +45,13 @@ async def test_db(tmp_path, monkeypatch):
 
 
 def _make_canonical_tag(
-    tag_id: str, display_name: str, note_count: int, parent_tag: str | None = None
+    tag_id: str, display_name: str, usage_count: int, parent_tag: str | None = None
 ) -> CanonicalTagModel:
     return CanonicalTagModel(
         id=tag_id,
         display_name=display_name,
         parent_tag=parent_tag,
-        note_count=note_count,
+        usage_count=usage_count,
     )
 
 
@@ -83,7 +83,7 @@ async def test_cooccurrence_weight(test_db):
     note3 = str(uuid.uuid4())
 
     async with factory() as session:
-        # Canonical tags (note_count values set for ordering)
+        # Canonical tags (usage_count values set for ordering)
         session.add_all(
             [
                 _make_canonical_tag("python", "python", 3),

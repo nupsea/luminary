@@ -214,7 +214,7 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        <h2 className="text-lg font-semibold text-foreground">Knowledge Gap Scanner</h2>
+        <h2 className="text-lg font-semibold text-foreground">Knowledge gap scanner</h2>
         <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary border border-primary/20 shadow-sm">AI</span>
       </div>
       <div className="flex flex-col gap-5 rounded-2xl border border-border/50 bg-card/60 backdrop-blur-xl p-6 shadow-xl relative overflow-hidden group">
@@ -511,7 +511,7 @@ export default function Progress() {
 
       {/* Study activity chart */}
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-foreground">Study Activity (Last 30 Days)</h2>
+        <h2 className="text-lg font-semibold text-foreground">Study activity (last 30 days)</h2>
         {historyError ? (
           <SectionError name="study activity" />
         ) : historyLoading ? (
@@ -539,7 +539,7 @@ export default function Progress() {
       {/* Notes over time chart */}
       {notes.length > 0 && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold text-foreground">Notes Over Time</h2>
+          <h2 className="text-lg font-semibold text-foreground">Notes over time</h2>
           {notesLoading ? (
             <SectionSkeleton rows={3} />
           ) : (

@@ -30,7 +30,7 @@ export function HeaderBar({
   return (
     <div className="flex items-center justify-between border-b border-border bg-card/30 px-6 py-2.5 backdrop-blur-md shrink-0">
       <div className="flex items-center gap-6">
-        <h1 className="text-xl font-bold tracking-tight text-foreground">Viz</h1>
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Map</h1>
 
         {/* View mode pills */}
         <div className="flex items-center gap-1 rounded-full border border-border bg-muted/30 p-0.5">

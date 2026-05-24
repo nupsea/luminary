@@ -28,7 +28,7 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 interface TagInfo {
   id: string
   display_name: string
-  note_count: number
+  usage_count: number
 }
 
 interface MergeSuggestion {
@@ -108,7 +108,7 @@ function SuggestionRow({ suggestion, meta, onAccept, onReject }: SuggestionRowPr
       <div className="flex items-center gap-2">
         {/* Notes affected */}
         <span className="flex-1 text-xs text-muted-foreground">
-          {suggestion.tag_a.note_count + suggestion.tag_b.note_count} notes affected
+          {suggestion.tag_a.usage_count + suggestion.tag_b.usage_count} notes affected
         </span>
 
         {/* Error message */}

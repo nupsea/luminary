@@ -36,6 +36,7 @@ from app.routers.feynman import router as feynman_router
 from app.routers.flashcards import router as flashcards_router
 from app.routers.goals import router as goals_router
 from app.routers.graph import router as graph_router
+from app.routers.home import router as home_router
 from app.routers.images import router as images_router
 from app.routers.mastery import router as mastery_router
 from app.routers.monitoring import router as monitoring_router
@@ -211,6 +212,7 @@ app.include_router(goals_router)
 app.include_router(feynman_router)
 app.include_router(flashcards_router)
 app.include_router(graph_router)
+app.include_router(home_router)
 app.include_router(images_router)
 app.include_router(monitoring_router)
 app.include_router(notes_router)

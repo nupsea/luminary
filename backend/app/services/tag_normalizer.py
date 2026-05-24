@@ -34,10 +34,10 @@ class TagSuggestionDetail:
     id: str
     tag_a_id: str
     tag_a_display_name: str
-    tag_a_note_count: int
+    tag_a_usage_count: int
     tag_b_id: str
     tag_b_display_name: str
-    tag_b_note_count: int
+    tag_b_usage_count: int
     similarity: float
     suggested_canonical_id: str
     status: str
@@ -117,9 +117,9 @@ class SmartTagNormalizerService:
                 if existing is not None:
                     continue
 
-                # Suggested canonical = whichever has higher note_count
+                # Suggested canonical = whichever has higher usage_count
                 suggested_canonical_id = (
-                    tag_a.id if tag_a.note_count >= tag_b.note_count else tag_b.id
+                    tag_a.id if tag_a.usage_count >= tag_b.usage_count else tag_b.id
                 )
 
                 suggestion = TagMergeSuggestionModel(
@@ -174,10 +174,10 @@ class SmartTagNormalizerService:
                     id=s.id,
                     tag_a_id=s.tag_a_id,
                     tag_a_display_name=tag_a.display_name,
-                    tag_a_note_count=tag_a.note_count,
+                    tag_a_usage_count=tag_a.usage_count,
                     tag_b_id=s.tag_b_id,
                     tag_b_display_name=tag_b.display_name,
-                    tag_b_note_count=tag_b.note_count,
+                    tag_b_usage_count=tag_b.usage_count,
                     similarity=s.similarity,
                     suggested_canonical_id=s.suggested_canonical_id,
                     status=s.status,

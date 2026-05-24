@@ -13,6 +13,12 @@ export type LearningStatus = "not_started" | "summarized" | "flashcards_generate
 export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed"
 export type ViewMode = "grid" | "list"
 
+export interface CollectionRef {
+  id: string
+  name: string
+  color: string
+}
+
 export interface DocumentListItem {
   id: string
   title: string
@@ -35,6 +41,9 @@ export interface DocumentListItem {
   enrichment_status: string | null
   // null = no objectives extracted; 0 = objectives exist but none covered
   objective_progress_pct: number | null
+  // Membership chips (plan 2E.5). Stable sort: CollectionModel.sort_order
+  // then name. Card UI lands in step 8.
+  collections: CollectionRef[]
 }
 
 export interface DocumentListResponse {

@@ -17,16 +17,19 @@ from app.database import get_session_factory
 from app.models import (
     ChunkModel,
     CodeSnippetModel,
+    CollectionMemberModel,
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
     LearningObjectiveModel,
+    PredictionEventModel,
     ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
     StudySessionModel,
     SummaryModel,
 )
+from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
     BulkDeleteRequest,
@@ -55,14 +58,17 @@ from app.schemas.documents import (
     UrlIngestRequest,
     YouTubeIngestRequest,
 )
+from app.schemas.membership import CollectionRef
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
 
 # indirect: tests patch `app.services.youtube_downloader.{check_ytdlp_available,
 # check_ffmpeg_available, fetch_metadata, download_audio}`.
 from app.services import youtube_downloader as _yt_module
+from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
+from app.services.document_tagger import enrich_document_tags, prune_auto_entity_tags
 from app.services.documents_service import (
     delete_raw_file as _delete_raw_file,
 )
@@ -85,6 +91,7 @@ from app.services.epub_service import (
 )
 from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.naming import normalize_tag_slug
+from app.services.notes_service import sync_document_tag_index
 from app.services.objective_tracker import get_objective_tracker_service
 from app.services.parser import DocumentParser
 from app.services.repo_helpers import get_or_404
@@ -146,18 +153,13 @@ __all__ = [
 ]
 
 
-_LEARNING_STATUS_ORDER = {
-    "studied": 3,
-    "flashcards_generated": 2,
-    "summarized": 1,
-    "not_started": 0,
-}
-
-
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
     content_type: str | None = Query(default=None, description="Comma-separated content types"),
     tag: str | None = Query(default=None, description="Filter by tag value"),
+    collection_id: str | None = Query(
+        default=None, description="Restrict to documents in this collection"
+    ),
     sort: Literal["newest", "oldest", "alphabetical", "most-studied", "last_accessed"] = Query(
         default="newest"
     ),
@@ -245,6 +247,93 @@ async def list_documents(
             .scalar_subquery()
         )
 
+        # Mastery aggregate: weighted FSRS-stability mean, minus prediction-error penalty.
+        # Mirrors MasteryService._compute_weighted_mastery; clamps each card's stability
+        # at _MASTERY_FULL_DAYS (21) and applies bloom_level>=4 weight of 1.5.
+        _bloom_weight = case((FlashcardModel.bloom_level >= 4, 1.5), else_=1.0)
+        _capped_stability = func.min(FlashcardModel.fsrs_stability / 21.0, 1.0)
+        mastery_sum_contribution_sq = (
+            select(func.sum(_capped_stability * _bloom_weight))
+            .where(FlashcardModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
+        mastery_sum_weight_sq = (
+            select(func.sum(_bloom_weight))
+            .where(FlashcardModel.document_id == DocumentModel.id)
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
+        prediction_error_count_sq = (
+            select(func.count())
+            .where(
+                PredictionEventModel.document_id == DocumentModel.id,
+                PredictionEventModel.correct.is_(False),
+            )
+            .correlate(DocumentModel)
+            .scalar_subquery()
+        )
+
+        # Build WHERE filters pushed into SQL.
+        where_clauses = []
+        if content_type:
+            allowed = [t.strip() for t in content_type.split(",") if t.strip()]
+            if allowed:
+                where_clauses.append(DocumentModel.content_type.in_(allowed))
+        if tag:
+            # Prefix match via the shadow index, matching the note tag filter
+            # semantics: ?tag=science also matches docs tagged 'science/biology'.
+            from sqlalchemy import or_
+
+            from app.models import DocumentTagIndexModel as _DocTagIdx
+
+            where_clauses.append(
+                select(_DocTagIdx.document_id)
+                .where(
+                    _DocTagIdx.document_id == DocumentModel.id,
+                    or_(
+                        _DocTagIdx.tag_full == tag,
+                        _DocTagIdx.tag_full.like(f"{tag}/%"),
+                    ),
+                )
+                .exists()
+            )
+        if collection_id:
+            where_clauses.append(
+                select(CollectionMemberModel.id)
+                .where(
+                    CollectionMemberModel.collection_id == collection_id,
+                    CollectionMemberModel.member_id == DocumentModel.id,
+                    CollectionMemberModel.member_type == "document",
+                )
+                .exists()
+            )
+
+        # Total count under the same filters.
+        count_stmt = select(func.count()).select_from(DocumentModel)
+        for clause in where_clauses:
+            count_stmt = count_stmt.where(clause)
+        total = int((await session.execute(count_stmt)).scalar_one())
+
+        # learning_status sort key, derived in SQL from the count subqueries.
+        learning_status_order_sq = case(
+            (study_session_count_sq > 0, 3),
+            (flashcard_count_sq > 0, 2),
+            (summary_count_sq > 0, 1),
+            else_=0,
+        )
+
+        if sort == "newest":
+            order_clauses = [DocumentModel.created_at.desc()]
+        elif sort == "oldest":
+            order_clauses = [DocumentModel.created_at.asc()]
+        elif sort == "alphabetical":
+            order_clauses = [func.lower(DocumentModel.title).asc()]
+        elif sort == "last_accessed":
+            order_clauses = [DocumentModel.last_accessed_at.desc()]
+        else:  # most-studied
+            order_clauses = [learning_status_order_sq.desc(), DocumentModel.created_at.desc()]
+
         stmt = select(
             DocumentModel,
             summary_one_sentence_sq.label("summary_one_sentence"),
@@ -257,16 +346,26 @@ async def list_documents(
             enrichment_status_sq.label("enrichment_status"),
             objectives_total_sq.label("objectives_total"),
             objectives_covered_sq.label("objectives_covered"),
+            mastery_sum_contribution_sq.label("mastery_sum_contribution"),
+            mastery_sum_weight_sq.label("mastery_sum_weight"),
+            prediction_error_count_sq.label("prediction_error_count"),
         )
+        for clause in where_clauses:
+            stmt = stmt.where(clause)
+        stmt = stmt.order_by(*order_clauses).limit(page_size).offset((page - 1) * page_size)
 
-        # Correlated 10-subquery select; the aggregation shape (flashcards, sections,
-        # study sessions, objectives) is this endpoint's bespoke projection and has
-        # no equivalent DocumentRepo method.
         result = await session.execute(stmt)
         rows = result.all()
 
-    # Build items
-    all_items: list[DocumentListItem] = []
+        # Batch-fetch collection memberships for the current page so
+        # DocumentCard can render membership chips without per-card fetches
+        # (plan 2E.5). The id list is only known after the page query runs.
+        page_doc_ids = [row[0].id for row in rows]
+        collection_refs_by_doc = await CollectionRepo(session).refs_for_members(
+            page_doc_ids, member_type="document"
+        )
+
+    page_items: list[DocumentListItem] = []
     for row in rows:
         doc = row[0]
         summary_one_sentence = row[1]
@@ -279,11 +378,19 @@ async def list_documents(
         enrichment_status = row[8]
         objectives_total = row[9] or 0
         objectives_covered = row[10] or 0
+        mastery_sum_contribution = row[11]
+        mastery_sum_weight = row[12]
+        prediction_error_count = row[13] or 0
         reading_progress_pct = (read_section_count / section_count) if section_count > 0 else 0.0
         objective_progress_pct: float | None = None
         if objectives_total > 0:
             objective_progress_pct = round(objectives_covered / objectives_total * 100.0, 1)
-        all_items.append(
+        mastery_pct: float | None = None
+        if mastery_sum_weight and mastery_sum_weight > 0:
+            weighted_mean = float(mastery_sum_contribution or 0.0) / float(mastery_sum_weight)
+            penalty = min(prediction_error_count * 0.05, 0.20)
+            mastery_pct = round(max(0.0, weighted_mean - penalty) * 100.0, 1)
+        page_items.append(
             DocumentListItem(
                 id=doc.id,
                 title=doc.title,
@@ -310,33 +417,13 @@ async def list_documents(
                 youtube_url=doc.youtube_url,
                 enrichment_status=enrichment_status,
                 objective_progress_pct=objective_progress_pct,
+                mastery_pct=mastery_pct,
+                collections=[
+                    CollectionRef(id=cid, name=name, color=color)
+                    for cid, name, color in collection_refs_by_doc.get(doc.id, [])
+                ],
             )
         )
-
-    # Filter by content_type
-    if content_type:
-        allowed = {t.strip() for t in content_type.split(",") if t.strip()}
-        all_items = [i for i in all_items if i.content_type in allowed]
-
-    # Filter by tag
-    if tag:
-        all_items = [i for i in all_items if tag in i.tags]
-
-    # Sort
-    if sort == "newest":
-        all_items.sort(key=lambda i: i.created_at, reverse=True)
-    elif sort == "oldest":
-        all_items.sort(key=lambda i: i.created_at)
-    elif sort == "alphabetical":
-        all_items.sort(key=lambda i: i.title.lower())
-    elif sort == "most-studied":
-        all_items.sort(key=lambda i: _LEARNING_STATUS_ORDER.get(i.learning_status, 0), reverse=True)
-    elif sort == "last_accessed":
-        all_items.sort(key=lambda i: i.last_accessed_at, reverse=True)
-
-    total = len(all_items)
-    start = (page - 1) * page_size
-    page_items = all_items[start : start + page_size]
 
     return DocumentListResponse(items=page_items, total=total, page=page, page_size=page_size)
 
@@ -549,6 +636,10 @@ async def ingest_kindle(
             )
             # Document row must exist in SQLite before the background ingestion job starts.
             session.add(doc)
+            await session.flush()
+            await sync_document_tag_index(
+                doc_id, doc.tags, session, record_manual_provenance=True
+            )
             await session.commit()
 
         get_ingestion_jobs().launch(
@@ -1001,6 +1092,9 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         if body.tags is not None:
 
             doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
+            await sync_document_tag_index(
+                document_id, doc.tags, session, record_manual_provenance=True
+            )
         if body.content_type is not None:
             doc.content_type = body.content_type
         await repo.commit()
@@ -1009,6 +1103,59 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
     if body.content_type is not None:
         response["note"] = "Re-ingest document to apply new chunking strategy."
     return response
+
+
+@router.post("/{document_id}/retag")
+async def retag_document(document_id: str):
+    """Manually trigger auto-tag enrichment for a document.
+
+    Idempotent: a second call with no new model suggestions returns added=0.
+    Failures are swallowed by enrich_document_tags itself; the endpoint
+    always returns 200 with the count of new tags added (zero on failure).
+    """
+    added = await enrich_document_tags(document_id)
+    return {"document_id": document_id, "added": added}
+
+
+@router.post("/tags/prune-auto")
+async def prune_auto_tags_endpoint():
+    """Sweep entity-derived auto-tags that fail the current quality gate.
+
+    Re-applies the TAG_STOPLIST + min-length + non-numeric rules to every
+    existing entity-1 provenance row and removes failures via the standard
+    sync path (canonical counts, shadow index, JSON column stay aligned).
+    Manual tags and LLM-suggested auto-tags are never touched.
+    """
+    result = await prune_auto_entity_tags()
+    return result
+
+
+@router.post("/retag-all")
+async def retag_all_documents():
+    """Schedule auto-tag enrichment for every complete document.
+
+    Runs each enrichment as a fire-and-forget background task so the response
+    returns immediately with the queued count. Errors during any individual
+    enrichment are swallowed and logged by enrich_document_tags.
+
+    Use this once after upgrading to populate auto-tags on existing docs that
+    pre-date the auto-tagger; new docs get enrichment automatically during
+    ingestion. Calling it again later is safe but cheap-ish work for docs
+    whose tag set has already stabilised.
+    """
+    async with get_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(DocumentModel.id).where(DocumentModel.stage == "complete")
+            )
+        ).all()
+    doc_ids = [r[0] for r in rows]
+    for did in doc_ids:
+        task = asyncio.create_task(enrich_document_tags(did))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    logger.info("retag-all: queued %d docs", len(doc_ids))
+    return {"queued": len(doc_ids)}
 
 
 @router.patch("/{document_id}/tags")
@@ -1020,6 +1167,9 @@ async def patch_document_tags(document_id: str, body: PatchTagsRequest):
 
         normalized = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
         doc.tags = normalized
+        await sync_document_tag_index(
+            document_id, normalized, session, record_manual_provenance=True
+        )
         await repo.commit()
     logger.info(
         "Patched document tags",
@@ -1401,3 +1551,17 @@ async def get_reading_position(document_id: str) -> ReadingPositionResponse:
         last_pdf_page=row.last_pdf_page,
         last_epub_chapter_index=row.last_epub_chapter_index,
     )
+
+
+@router.post("/{document_id}/activity/read", status_code=204)
+async def record_doc_read(document_id: str) -> None:
+    """Bump content_activity for a meaningful read (open + scroll past 10%).
+
+    The frontend gates on the 10% threshold and a 5s debounce client-side
+    so the network call only fires once per "actually reading" window;
+    ActivityService re-applies a 5s server-side debounce as a safety net
+    against retries / multi-tab races (plan 2E.8).
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+        await ActivityService(session).record_doc_read(document_id)

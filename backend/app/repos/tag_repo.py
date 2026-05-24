@@ -45,7 +45,7 @@ class TagRepo:
 
     async def list_by_count(self) -> Sequence[CanonicalTagModel]:
         result = await self.session.execute(
-            select(CanonicalTagModel).order_by(CanonicalTagModel.note_count.desc())
+            select(CanonicalTagModel).order_by(CanonicalTagModel.usage_count.desc())
         )
         return result.scalars().all()
 
@@ -59,7 +59,7 @@ class TagRepo:
         result = await self.session.execute(
             select(CanonicalTagModel)
             .where(CanonicalTagModel.id.like(f"{prefix}%"))
-            .order_by(CanonicalTagModel.note_count.desc())
+            .order_by(CanonicalTagModel.usage_count.desc())
             .limit(limit)
         )
         return result.scalars().all()
@@ -102,7 +102,7 @@ class TagRepo:
             id=id,
             display_name=display_name,
             parent_tag=parent_tag,
-            note_count=0,
+            usage_count=0,
             created_at=datetime.now(UTC),
         )
         self.session.add(tag)
@@ -134,7 +134,7 @@ class TagRepo:
     async def delete_with_aliases(self, tag_id: str) -> None:
         """Delete the canonical tag and any aliases pointing to it.
 
-        Caller is expected to have validated existence + note_count == 0.
+        Caller is expected to have validated existence + usage_count == 0.
         """
         await self.session.execute(
             delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id)

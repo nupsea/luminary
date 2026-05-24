@@ -37,14 +37,16 @@ async def test_db_init_normalization_collision():
 
         await conn.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at) "
+                "INSERT INTO canonical_tags"
+                "(id, display_name, parent_tag, usage_count, created_at) "
                 "VALUES (:id, :dn, :pt, :nc, :ca)"
             ),
             {"id": "andrej_karpathy", "dn": "andrej_karpathy", "pt": None, "nc": 1, "ca": now},
         )
         await conn.execute(
             text(
-                "INSERT INTO canonical_tags (id, display_name, parent_tag, note_count, created_at) "
+                "INSERT INTO canonical_tags"
+                "(id, display_name, parent_tag, usage_count, created_at) "
                 "VALUES (:id, :dn, :pt, :nc, :ca)"
             ),
             {"id": "andrej-karpathy", "dn": "andrej-karpathy", "pt": None, "nc": 1, "ca": now},
@@ -70,7 +72,7 @@ async def test_db_init_normalization_collision():
         # New tag should have correct count (1, as it merged)
         new_tag = (
             await conn.execute(
-                text("SELECT id, note_count FROM canonical_tags WHERE id = 'andrej-karpathy'")
+                text("SELECT id, usage_count FROM canonical_tags WHERE id = 'andrej-karpathy'")
             )
         ).fetchone()
         assert new_tag is not None

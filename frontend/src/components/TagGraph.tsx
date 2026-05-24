@@ -23,7 +23,7 @@ export interface TagNodeData {
   id: string
   display_name: string
   parent_tag: string | null
-  note_count: number
+  usage_count: number
 }
 
 export interface TagEdgeData {
@@ -51,11 +51,11 @@ function buildTagGraphology(nodes: TagNodeData[], edges: TagEdgeData[]): Graph {
     if (!g.hasNode(node.id)) {
       g.addNode(node.id, {
         label: node.display_name,
-        noteCount: node.note_count,
+        noteCount: node.usage_count,
         parentTag: node.parent_tag,
         x: Math.random() * 200 - 100,
         y: Math.random() * 200 - 100,
-        size: nodeSizeFromCount(node.note_count),
+        size: nodeSizeFromCount(node.usage_count),
         color: colorFromParentTag(node.parent_tag, TAG_GRAPH_PALETTE),
       })
     }

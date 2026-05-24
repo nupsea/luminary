@@ -149,6 +149,11 @@ export interface paths {
         /**
          * Get Collection Tree
          * @description Return all collections as a 2-level nested tree with item counts.
+         *
+         *     scoped_count semantics:
+         *       - unscoped: equals direct note_count + document_count for each node
+         *       - ?contains=document: equals inclusive descendant document count
+         *       - ?contains=note:     equals inclusive descendant note count
          */
         get: operations["get_collection_tree_collections_tree_get"];
         put?: never;
@@ -299,6 +304,31 @@ export interface paths {
          *     ?format=anki      -- returns .apkg (genanki) with flashcards in this collection's deck
          */
         get: operations["export_collection_collections__collection_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/collections/{collection_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Collection Overview
+         * @description Overview tab on /collections/:id (plan 2E.6).
+         *
+         *     Recent activity is the same interleaving as /home/overview but joined
+         *     against this collection's members. Tag chips reflect the union of
+         *     tags applied to those members, sorted by how often they appear within
+         *     the collection.
+         */
+        get: operations["get_collection_overview_collections__collection_id__overview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -805,6 +835,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/retag": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retag Document
+         * @description Manually trigger auto-tag enrichment for a document.
+         *
+         *     Idempotent: a second call with no new model suggestions returns added=0.
+         *     Failures are swallowed by enrich_document_tags itself; the endpoint
+         *     always returns 200 with the count of new tags added (zero on failure).
+         */
+        post: operations["retag_document_documents__document_id__retag_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/tags/prune-auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prune Auto Tags Endpoint
+         * @description Sweep entity-derived auto-tags that fail the current quality gate.
+         *
+         *     Re-applies the TAG_STOPLIST + min-length + non-numeric rules to every
+         *     existing entity-1 provenance row and removes failures via the standard
+         *     sync path (canonical counts, shadow index, JSON column stay aligned).
+         *     Manual tags and LLM-suggested auto-tags are never touched.
+         */
+        post: operations["prune_auto_tags_endpoint_documents_tags_prune_auto_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/retag-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retag All Documents
+         * @description Schedule auto-tag enrichment for every complete document.
+         *
+         *     Runs each enrichment as a fire-and-forget background task so the response
+         *     returns immediately with the queued count. Errors during any individual
+         *     enrichment are swallowed and logged by enrich_document_tags.
+         *
+         *     Use this once after upgrading to populate auto-tags on existing docs that
+         *     pre-date the auto-tagger; new docs get enrichment automatically during
+         *     ingestion. Calling it again later is safe but cheap-ish work for docs
+         *     whose tag set has already stabilised.
+         */
+        post: operations["retag_all_documents_documents_retag_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/tags": {
         parameters: {
             query?: never;
@@ -1057,6 +1165,31 @@ export interface paths {
          *     Returns 404 if the document does not exist.
          */
         post: operations["save_reading_position_documents__document_id__position_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/{document_id}/activity/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Doc Read
+         * @description Bump content_activity for a meaningful read (open + scroll past 10%).
+         *
+         *     The frontend gates on the 10% threshold and a 5s debounce client-side
+         *     so the network call only fires once per "actually reading" window;
+         *     ActivityService re-applies a 5s server-side debounce as a safety net
+         *     against retries / multi-tab races (plan 2E.8).
+         */
+        post: operations["record_doc_read_documents__document_id__activity_read_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2275,6 +2408,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/home/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Home Overview */
+        get: operations["get_home_overview_home_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/images/notes": {
         parameters: {
             query?: never;
@@ -2620,7 +2770,7 @@ export interface paths {
         };
         /**
          * Get Note
-         * @description Get a single note by ID, including collection_ids.
+         * @description Get a single note by ID, including its collection memberships.
          *
          *     Registered AFTER all static-path GET routes (/search, /groups, /flashcards)
          *     to prevent the dynamic {note_id} segment from shadowing them.
@@ -3319,7 +3469,7 @@ export interface paths {
          *
          *     When ``graph_expand`` is true (default), entities detected in the query
          *     are resolved to canonical labels via Kuzu's alias graph and appended to
-         *     the query. Deterministic and local-first per I-16; pairs with 
+         *     the query. Deterministic and local-first per I-16; pairs with
          *     index-time entity injection.
          *
          *     When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
@@ -3871,7 +4021,7 @@ export interface paths {
         };
         /**
          * Get Study History
-         * @description Return daily study activity for the last N days.
+         * @description Return daily study activity for the last N days, bucketed in local time.
          */
         get: operations["get_study_history_study_history_get"];
         put?: never;
@@ -4167,7 +4317,7 @@ export interface paths {
         };
         /**
          * Autocomplete Tags
-         * @description Return up to 10 canonical tags matching the prefix q, sorted by note_count DESC.
+         * @description Return up to 10 canonical tags matching the prefix q, sorted by usage_count DESC.
          */
         get: operations["autocomplete_tags_tags_autocomplete_get"];
         put?: never;
@@ -4189,7 +4339,11 @@ export interface paths {
          * Get Tag Tree
          * @description Return all canonical tags as a hierarchical tree.
          *
-         *     node.note_count is the inclusive count (direct notes + all descendants).
+         *     `usage_count` is the inclusive count (direct + descendants) from
+         *     canonical_tags. `scoped_count` is the inclusive count restricted to the
+         *     requested scope (equal to usage_count when scope='all'). When scoped,
+         *     subtrees with zero matches are pruned but ancestors with any matching
+         *     descendant are preserved.
          */
         get: operations["get_tag_tree_tags_tree_get"];
         put?: never;
@@ -4209,7 +4363,11 @@ export interface paths {
         };
         /**
          * List Tags
-         * @description Return all canonical tags sorted by note_count DESC.
+         * @description Return canonical tags sorted by usage_count DESC.
+         *
+         *     scope='document' filters to tags that appear in document_tag_index;
+         *     scope='note' to tags in note_tag_index; default 'all' returns the full
+         *     canonical list. `limit` caps the result (no cap by default).
          */
         get: operations["list_tags_tags_get"];
         put?: never;
@@ -4308,9 +4466,10 @@ export interface paths {
          * Accept Normalization Suggestion
          * @description Accept a merge suggestion: merge source tag into the suggested canonical.
          *
-         *     Merge logic lives here (not in the service layer) because _sync_tag_index is
-         *     a router-layer helper and Services must not import from the API/Router layer
-         *     (six-layer invariant).
+         *     Wraps TagMergeService.merge_tag() so the same cascade also runs
+         *     behind `POST /tags/merge`. The endpoint additionally flips the
+         *     suggestion's status (accepted vs rejected if a tag was deleted in
+         *     the meantime) inside the same transaction.
          */
         post: operations["accept_normalization_suggestion_tags_normalization_suggestions__suggestion_id__accept_post"];
         delete?: never;
@@ -4355,7 +4514,7 @@ export interface paths {
          *     For canonical_tags: normalizes id and display_name.
          *     For note_tag_index: normalizes tag_full, tag_root, tag_parent.
          *     For NoteModel.tags: normalizes the JSON tags array on each note.
-         *     Merges duplicates that collapse to the same normalized form (keeps higher note_count).
+         *     Merges duplicates that collapse to the same normalized form (keeps higher usage_count).
          */
         post: operations["migrate_tag_naming_tags_migrate_naming_post"];
         delete?: never;
@@ -4384,6 +4543,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tags/{tag_id}/cross-content-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tag Cross Content Counts
+         * @description Per-content-type usage for a single tag.
+         *
+         *     Drives the Library/Notes spill-over chip ("Also in N notes →") when a
+         *     user has narrowed one surface and we want to surface the cross-content
+         *     overflow without making them hop back to ⌘K (plan 2E.4).
+         */
+        get: operations["get_tag_cross_content_counts_tags__tag_id__cross_content_counts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tags/{tag_id}": {
         parameters: {
             query?: never;
@@ -4400,7 +4583,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Tag
-         * @description Delete a canonical tag. Returns 409 if the tag has notes (note_count > 0).
+         * @description Delete a canonical tag. Returns 409 if the tag has notes (usage_count > 0).
          */
         delete: operations["delete_tag_tags__tag_id__delete"];
         options?: never;
@@ -4481,6 +4664,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActiveCollection */
+        ActiveCollection: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Color */
+            color: string;
+            /** Document Count */
+            document_count: number;
+            /** Note Count */
+            note_count: number;
+            /** Flashcard Count */
+            flashcard_count: number;
+        };
         /** AddMembersRequest */
         AddMembersRequest: {
             /** Member Ids */
@@ -4807,6 +5005,35 @@ export interface components {
              */
             sort_order: number;
         };
+        /**
+         * CollectionOverviewResponse
+         * @description Overview tab on /collections/:id (plan 2E.6).
+         *
+         *     Same shape language as the hub but scoped: recent activity only counts
+         *     members of this collection, and tag chips reflect tags applied to
+         *     those members.
+         */
+        CollectionOverviewResponse: {
+            /** Recent Items */
+            recent_items: components["schemas"]["RecentItem"][];
+            /** Tags */
+            tags: components["schemas"]["CollectionTagChip"][];
+            /** Document Count */
+            document_count: number;
+            /** Note Count */
+            note_count: number;
+            /** Flashcard Count */
+            flashcard_count: number;
+        };
+        /** CollectionRef */
+        CollectionRef: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Color */
+            color: string;
+        };
         /** CollectionResponse */
         CollectionResponse: {
             /** Id */
@@ -4854,6 +5081,18 @@ export interface components {
             /** Card Count */
             card_count: number;
         };
+        /**
+         * CollectionTagChip
+         * @description Tag with usage count restricted to a single collection's members.
+         */
+        CollectionTagChip: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name: string;
+            /** Count */
+            count: number;
+        };
         /** CollectionTopic */
         CollectionTopic: {
             /** Tag */
@@ -4877,6 +5116,8 @@ export interface components {
             note_count: number;
             /** Document Count */
             document_count: number;
+            /** Scoped Count */
+            scoped_count: number;
             /** Children */
             children: components["schemas"]["CollectionTreeItem"][];
         };
@@ -4925,6 +5166,23 @@ export interface components {
             no_flashcards: boolean;
             /** Document Ids */
             document_ids: string[];
+        };
+        /**
+         * ContinueReadingItem
+         * @description A doc the user has momentum on -- started, not finished, recently touched.
+         */
+        ContinueReadingItem: {
+            /** Document Id */
+            document_id: string;
+            /** Title */
+            title: string;
+            /** Reading Progress Pct */
+            reading_progress_pct: number;
+            /**
+             * Last Meaningful At
+             * Format: date-time
+             */
+            last_meaningful_at: string;
         };
         /** ConversationMessage */
         ConversationMessage: {
@@ -5154,6 +5412,13 @@ export interface components {
             enrichment_status?: string | null;
             /** Objective Progress Pct */
             objective_progress_pct?: number | null;
+            /** Mastery Pct */
+            mastery_pct?: number | null;
+            /**
+             * Collections
+             * @default []
+             */
+            collections: components["schemas"]["CollectionRef"][];
         };
         /** DocumentListResponse */
         DocumentListResponse: {
@@ -5506,6 +5771,32 @@ export interface components {
             text: string;
             /** Entity Names */
             entity_names: string[];
+        };
+        /**
+         * FadingItem
+         * @description Content the user engaged with 7-21 days ago and not since.
+         *
+         *     Surfaces the decay-risk corner of the library that a recency feed
+         *     deliberately hides. Hub copy frames it as "worth a refresher?" rather
+         *     than as a guilt trip.
+         */
+        FadingItem: {
+            /**
+             * Member Type
+             * @enum {string}
+             */
+            member_type: "document" | "note";
+            /** Member Id */
+            member_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Last Meaningful At
+             * Format: date-time
+             */
+            last_meaningful_at: string;
+            /** Days Since */
+            days_since: number;
         };
         /** FeynmanCompleteResponse */
         FeynmanCompleteResponse: {
@@ -5990,6 +6281,27 @@ export interface components {
             /** Card Count */
             card_count: number;
         };
+        /** HomeOverviewResponse */
+        HomeOverviewResponse: {
+            today_action: components["schemas"]["TodayAction"] | null;
+            /** Recent Items */
+            recent_items: components["schemas"]["RecentItem"][];
+            /** Active Collections */
+            active_collections: components["schemas"]["ActiveCollection"][];
+            /** Recent Tags */
+            recent_tags: components["schemas"]["RecentTag"][];
+            /**
+             * Continue Reading
+             * @default []
+             */
+            continue_reading: components["schemas"]["ContinueReadingItem"][];
+            /**
+             * Fading Items
+             * @default []
+             */
+            fading_items: components["schemas"]["FadingItem"][];
+            weekly_stats?: components["schemas"]["WeeklyStats"] | null;
+        };
         /** ImageItem */
         ImageItem: {
             /** Id */
@@ -6435,15 +6747,22 @@ export interface components {
             /** Group Name */
             group_name: string | null;
             /**
-             * Collection Ids
+             * Collections
              * @default []
              */
-            collection_ids: string[];
+            collections: components["schemas"]["CollectionRef"][];
             /**
              * Source Document Ids
              * @default []
              */
             source_document_ids: string[];
+            /** Title */
+            title?: string | null;
+            /**
+             * Title Auto Generated
+             * @default true
+             */
+            title_auto_generated: boolean;
             /**
              * Created At
              * Format: date-time
@@ -6503,6 +6822,8 @@ export interface components {
             section_id?: string | null;
             /** Source Document Ids */
             source_document_ids?: string[] | null;
+            /** Title */
+            title?: string | null;
         };
         /** OllamaPullRequest */
         OllamaPullRequest: {
@@ -6608,6 +6929,39 @@ export interface components {
              * Format: date-time
              */
             last_seen_at: string;
+        };
+        /**
+         * RecentItem
+         * @description One row in the interleaved recent-activity feed.
+         */
+        RecentItem: {
+            /**
+             * Member Type
+             * @enum {string}
+             */
+            member_type: "document" | "note";
+            /** Member Id */
+            member_id: string;
+            /** Title */
+            title: string;
+            /** Preview */
+            preview?: string | null;
+            /**
+             * Last Meaningful At
+             * Format: date-time
+             */
+            last_meaningful_at: string;
+        };
+        /** RecentTag */
+        RecentTag: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name: string;
+            /** Document Count */
+            document_count: number;
+            /** Note Count */
+            note_count: number;
         };
         /** ReviewRequest */
         ReviewRequest: {
@@ -7095,8 +7449,8 @@ export interface components {
             display_name: string;
             /** Parent Tag */
             parent_tag: string | null;
-            /** Note Count */
-            note_count: number;
+            /** Usage Count */
+            usage_count: number;
         };
         /** TagCreateRequest */
         TagCreateRequest: {
@@ -7106,6 +7460,16 @@ export interface components {
             display_name: string;
             /** Parent Tag */
             parent_tag?: string | null;
+        };
+        /**
+         * TagCrossContentCounts
+         * @description Per-content-type usage for a single tag (plan 2E.4 spill-over chips).
+         */
+        TagCrossContentCounts: {
+            /** Document Count */
+            document_count: number;
+            /** Note Count */
+            note_count: number;
         };
         /** TagEdgeItem */
         TagEdgeItem: {
@@ -7136,6 +7500,11 @@ export interface components {
         TagMergeResponse: {
             /** Affected Notes */
             affected_notes: number;
+            /**
+             * Affected Documents
+             * @default 0
+             */
+            affected_documents: number;
         };
         /** TagMergeSuggestionResponse */
         TagMergeSuggestionResponse: {
@@ -7163,8 +7532,8 @@ export interface components {
             display_name: string;
             /** Parent Tag */
             parent_tag: string | null;
-            /** Note Count */
-            note_count: number;
+            /** Usage Count */
+            usage_count: number;
         };
         /** TagResponse */
         TagResponse: {
@@ -7174,8 +7543,10 @@ export interface components {
             display_name: string;
             /** Parent Tag */
             parent_tag: string | null;
-            /** Note Count */
-            note_count: number;
+            /** Usage Count */
+            usage_count: number;
+            /** Scoped Count */
+            scoped_count: number;
             /**
              * Created At
              * Format: date-time
@@ -7190,8 +7561,10 @@ export interface components {
             display_name: string;
             /** Parent Tag */
             parent_tag: string | null;
-            /** Note Count */
-            note_count: number;
+            /** Usage Count */
+            usage_count: number;
+            /** Scoped Count */
+            scoped_count: number;
             /** Children */
             children: components["schemas"]["TagTreeItem"][];
         };
@@ -7287,6 +7660,24 @@ export interface components {
         TeachbackSubmitResponse: {
             /** Id */
             id: string;
+        };
+        /**
+         * TodayAction
+         * @description Single, dominant CTA on the hub. Picked by the backend so the UI
+         *     has one shape regardless of which signal was strongest.
+         */
+        TodayAction: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "review_cards" | "continue_reading" | "resume_note";
+            /** Target Id */
+            target_id?: string | null;
+            /** Label */
+            label: string;
+            /** Count */
+            count?: number | null;
         };
         /** TraceFlashcardRequest */
         TraceFlashcardRequest: {
@@ -7409,6 +7800,20 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /**
+         * WeeklyStats
+         * @description Foot-of-hub one-line summary for the last 7 days.
+         */
+        WeeklyStats: {
+            /** Minutes Studied */
+            minutes_studied: number;
+            /** Cards Reviewed */
+            cards_reviewed: number;
+            /** Notes Written */
+            notes_written: number;
+            /** Docs Touched */
+            docs_touched: number;
+        };
         /** SessionListItem */
         app__routers__chat_sessions__SessionListItem: {
             /** Id */
@@ -7507,8 +7912,8 @@ export interface components {
             id: string;
             /** Display Name */
             display_name: string;
-            /** Note Count */
-            note_count: number;
+            /** Usage Count */
+            usage_count: number;
         };
         /** BulkDeleteRequest */
         app__schemas__documents__BulkDeleteRequest: {
@@ -7896,7 +8301,10 @@ export interface operations {
     };
     get_collection_tree_collections_tree_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 'document' | 'note' -- restrict scoped_count to that member type and prune subtrees with zero matches (ancestors with matching descendants are kept). */
+                contains?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7910,6 +8318,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectionTreeItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8200,6 +8617,40 @@ export interface operations {
             };
         };
     };
+    get_collection_overview_collections__collection_id__overview_get: {
+        parameters: {
+            query?: {
+                recent_limit?: number;
+                tag_limit?: number;
+            };
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_collection_health_collections__collection_id__health_get: {
         parameters: {
             query?: never;
@@ -8268,7 +8719,10 @@ export interface operations {
     };
     remove_member_from_collection_collections__collection_id__members__member_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When set ('note' or 'document'), scope the delete to that member type. */
+                member_type?: string | null;
+            };
             header?: never;
             path: {
                 collection_id: string;
@@ -8629,6 +9083,8 @@ export interface operations {
                 content_type?: string | null;
                 /** @description Filter by tag value */
                 tag?: string | null;
+                /** @description Restrict to documents in this collection */
+                collection_id?: string | null;
                 sort?: "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed";
                 page?: number;
                 page_size?: number;
@@ -9137,6 +9593,77 @@ export interface operations {
             };
         };
     };
+    retag_document_documents__document_id__retag_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prune_auto_tags_endpoint_documents_tags_prune_auto_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    retag_all_documents_documents_retag_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     patch_document_tags_documents__document_id__tags_patch: {
         parameters: {
             query?: never;
@@ -9526,9 +10053,41 @@ export interface operations {
             };
         };
     };
-    get_streak_engagement_streak_get: {
+    record_doc_read_documents__document_id__activity_read_post: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_streak_engagement_streak_get: {
+        parameters: {
+            query?: {
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). When provided, streak / XP / focus buckets use the user's local date so a session at 11pm doesn't roll over into tomorrow. */
+                tz_offset_minutes?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9546,11 +10105,23 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_xp_engagement_xp_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). When provided, streak / XP / focus buckets use the user's local date so a session at 11pm doesn't roll over into tomorrow. */
+                tz_offset_minutes?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9566,6 +10137,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9574,6 +10154,8 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). When provided, streak / XP / focus buckets use the user's local date so a session at 11pm doesn't roll over into tomorrow. */
+                tz_offset_minutes?: number;
             };
             header?: never;
             path?: never;
@@ -9759,7 +10341,10 @@ export interface operations {
     };
     get_today_sessions_engagement_focus_today_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). When provided, streak / XP / focus buckets use the user's local date so a session at 11pm doesn't roll over into tomorrow. */
+                tz_offset_minutes?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9777,12 +10362,23 @@ export interface operations {
                     }[];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_focus_stats_engagement_focus_stats_get: {
         parameters: {
             query?: {
                 days?: number;
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). When provided, streak / XP / focus buckets use the user's local date so a session at 11pm doesn't roll over into tomorrow. */
+                tz_offset_minutes?: number;
             };
             header?: never;
             path?: never;
@@ -11622,6 +12218,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_home_overview_home_overview_get: {
+        parameters: {
+            query?: {
+                recent_limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeOverviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14084,6 +14711,8 @@ export interface operations {
             query?: {
                 document_id?: string | null;
                 days?: number;
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). Sessions are bucketed by the user's local date so a study session at 11pm local doesn't appear on the next day. */
+                tz_offset_minutes?: number;
             };
             header?: never;
             path?: never;
@@ -14524,7 +15153,10 @@ export interface operations {
     };
     get_tag_tree_tags_tree_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 'all' | 'note' | 'document' -- restrict scoped_count to that content type. */
+                scope?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14540,11 +15172,24 @@ export interface operations {
                     "application/json": components["schemas"]["TagTreeItem"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     list_tags_tags_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 'all' | 'note' | 'document' -- restrict to tags used by that content type. */
+                scope?: string;
+                limit?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14558,6 +15203,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -14768,6 +15422,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NoteItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tag_cross_content_counts_tags__tag_id__cross_content_counts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagCrossContentCounts"];
                 };
             };
             /** @description Validation Error */

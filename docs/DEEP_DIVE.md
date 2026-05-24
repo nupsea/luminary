@@ -20,7 +20,7 @@
 12. [Knowledge Graph: Entity Extraction and Disambiguation](#knowledge-graph-entity-extraction-and-disambiguation)
 13. [Summarization: A Hierarchical Knowledge Pyramid](#summarization-a-hierarchical-knowledge-pyramid)
 14. [The Learning Engine](#the-learning-engine)
-15. [The Frontend: Six Tabs, One Application](#the-frontend-six-tabs-one-application)
+15. [The Frontend: A 72px Nav Rail, Six Learner Surfaces, Two Dev Surfaces](#the-frontend-a-72px-nav-rail-six-learner-surfaces-two-dev-surfaces)
 16. [Observability and Evaluation](#observability-and-evaluation)
 17. [Deployment Model](#deployment-model)
 18. [Performance Characteristics](#performance-characteristics)
@@ -429,34 +429,43 @@ This is teach-back learning automated: the user proves their understanding by ex
 
 ---
 
-## The Frontend: Six Tabs, One Application
+## The Frontend: A 72px Nav Rail, Six Learner Surfaces, Two Dev Surfaces
 
-The frontend is a single-page React application with six primary tabs, each serving a distinct phase of the learning workflow:
+The frontend is a single-page React 19 application. A fixed 72px violet-gradient sidebar on the left holds six learner-facing tabs (top of rail) plus two dev surfaces (bottom of rail). A 450px slide-over chat panel docks on the right, callable from anywhere. `Cmd+K` opens a global search dialog over whichever tab is active.
 
-### Learning Tab
-The main document library. Two-column layout: document list with filters and search on the left, document reader on the right. The reader includes a hierarchical section outline, three summary modes (executive, detailed, one-sentence), an explanation sidebar with four modes (simple, detailed, concept, comparison), and a glossary tab. Text selection triggers a floating toolbar with explain, note, and flashcard actions.
+The post-refactor labels (`Ask` instead of `Chat`, `Map` instead of `Viz`) are cosmetic only — the underlying routes (`/chat`, `/viz`) are preserved so deep links and the cross-tab `luminary:navigate` event bus keep working.
 
-### Chat Tab
-Conversational Q&A with scope selector (single document, all documents, or selected documents). Responses stream in real-time via SSE with inline citations (section heading, page number, clickable excerpt). The chat graph topology (described above) is invisible to the user -- they just ask a question and get an answer.
+### Library (`/`, icon: BookOpen)
+The document grid is the landing surface. Cards carry a 1px top-edge gradient accent band per content-type (book, paper, code, audio, epub, kindle, tech-book, tech-article, conversation, youtube), hover-lift on `-translate-y-0.5`, content-type badge, eyebrow metadata row, and an action menu (read, chat about, study, view in graph, delete). A `TodayHero` strip at the top of the page surfaces the highest-leverage action: if cards are due, a full-violet "N cards due · Start review" CTA wins primary placement; otherwise the existing low-contrast "Continue reading" strip falls back in. Clicking a card opens the `DocumentReader` in place; PDF/EPUB/YouTube each render in their own viewer with shared chrome.
 
-### Viz Tab
-WebGL knowledge graph visualization using Sigma.js v3 and Graphology. Entity nodes are colored by type, edges show co-occurrence and relationship labels. Users can filter by entity type, search for specific entities, and switch to a code call-graph view for ingested source files. Handles 10,000+ nodes smoothly via GPU-accelerated rendering.
+### Notes (`/notes`, icon: StickyNote)
+Markdown notes with collections (sidebar tree), tags (sidebar list, auto-suggested via `NoteTaggerService`), source-document linking, link autocomplete between notes, and embeds (Mermaid diagrams, Excalidraw sketches). The list view supports filter-by-collection, filter-by-tag, filter-by-source-doc, and FTS5 + vector hybrid search. Notes opens its editor in a side sheet (`NoteReaderSheet`).
 
-### Study Tab
-Flashcard management and study sessions. Generate flashcards from any document or section, review them with FSRS scheduling (Again / Hard / Good / Easy buttons), and track progress via Recharts visualizations (retention curve, mastery heatmap, streak calendar). A weak areas panel shows gap detection results and confusion signals (concepts the user has asked about repeatedly).
+### Study (`/study`, icon: BarChart2)
+Flashcard review with FSRS scheduling (Again / Hard / Good / Easy), teach-back sessions (free-text explanation graded against the source for accuracy, completeness, clarity), and a collection-scoped study dashboard that surfaces struggling cards, deck health, and Bloom-taxonomy distribution.
 
-### Notes Tab
-Personal notes editor with side-by-side Write (Markdown textarea) and Preview (rendered Markdown). Notes are organized by group and tag, searchable via hybrid FTS5+semantic search (debounced at 300ms). Gap detection compares notes against book content to surface under-explored topics.
+### Ask (`/chat`, icon: MessageSquare)
+Conversational Q&A backed by the agentic chat graph. Scope selector chooses single document, all documents, or selected documents. Responses stream in real-time via SSE with inline citations (section heading, page number, clickable excerpt). Sessions are persisted; the left rail lists past chats grouped by date. The same Chat component also renders in a 450px right slide-over panel that's callable from any tab.
 
-### Monitoring Tab
-System health and quality metrics. Shows Ollama availability, Phoenix tracing status, RAG quality charts (HR@5, MRR, Faithfulness with threshold lines), model usage breakdown, ingestion queue status, recent traces, and evaluation run history. Each section fetches independently -- if one endpoint fails, the others still render.
+### Map (`/viz`, icon: Network)
+WebGL knowledge graph using Sigma.js v3 and Graphology. Entity nodes are colored by type, edges show relationship labels (co-occurrence, prerequisite, same-concept, mentioned-in). Sidebar filters by entity type, retention strength, and document scope. View modes include the default entity graph, a learning-path mode (prerequisite chains), and a code call-graph for ingested source files. Handles 10,000+ nodes smoothly via GPU-accelerated rendering.
+
+### Progress (`/progress`, icon: Luminary lantern glyph)
+The learner's progress dashboard: streak + XP widget, FSRS due-count, knowledge gap scanner (LLM-graded gap detection against notes), study activity (last 30 days), notes-over-time chart, and the study habits section. The nav icon is a custom `LuminaryGlyph` SVG (lantern silhouette) — the only custom icon on the rail; all other nav icons are Lucide stroke-style.
+
+### Dev rail (bottom of sidebar)
+
+- **Quality (`/quality`, icon: ClipboardCheck)** — RAGAS retrieval eval dashboard. Demoted from the learner rail because it's an engineering surface, not a learner surface.
+- **Admin (`/admin`, icon: Wrench)** — dev tools: ingestion queue, model usage, recent OpenTelemetry traces, mastery heatmap, weak-spots panel.
 
 **Architectural patterns:**
-- All tabs are lazily loaded (React.lazy + Suspense) to minimize initial bundle size
-- Navigation hover triggers TanStack Query prefetch for the destination tab's data
-- All API state is managed through TanStack Query (staleTime: 60s, no refetch on window focus)
-- Global UI state (active document, LLM mode, library view) is managed through Zustand
-- All API responses are validated at the boundary with Zod schemas
+- All tabs lazily loaded (React.lazy + Suspense) to keep the initial bundle small
+- Nav-link hover triggers TanStack Query prefetch for the destination tab's primary query
+- All API state is managed through TanStack Query (staleTime 60s, no refetch on window focus)
+- Global UI state (active document, chat scope, library view, etc.) lives in Zustand stores (`store.ts` for the main app, `vizStore.ts` for the graph)
+- API responses are typed via openapi-generated `frontend/src/types/api.ts` (regenerated from the FastAPI schema); the `apiClient` helpers in `lib/apiClient.ts` wrap fetch with typed payloads
+- Design tokens live in `frontend/src/index.css`: shadcn token base, expanded `--type-*` content-type accents, motion easings, shadow tiers, type scale, and the `.lum-*` semantic role classes (`lum-h1` through `lum-mono`, `lum-eyebrow`)
+- The 72px sidebar gradient (`bg-gradient-to-b from-sidebar via-sidebar to-primary/5`) is the most decorative element in the app; everything else stays calm
 
 ---
 
@@ -505,7 +514,7 @@ User's machine
   |           +-- models/           (bge-m3, GLiNER model cache)
   |           +-- phoenix/          (trace storage)
   |
-  +-- Luminary Frontend (Vite dev server or Tauri desktop app, port 5173)
+  +-- Luminary Frontend (Vite dev server, port 5173)
 ```
 
 **Prerequisites:**
@@ -523,7 +532,7 @@ make dev            # Terminal 2 (starts both backend and frontend)
 
 **Cloud LLM is opt-in.** If the user configures an OpenAI, Anthropic, or Google API key, LiteLLM routes requests to the cloud provider. Otherwise, all LLM calls go to Ollama. The system degrades gracefully when Ollama is offline: search, entity browsing, and flashcard review still work; features requiring LLM (summarization, chat, flashcard generation) return HTTP 503 with an actionable message ("Ollama is unreachable. Start it with: `ollama serve`").
 
-**Desktop packaging** via Tauri (v1.6) is planned for Phase 5. Tauri wraps the frontend in a native window and bundles the backend as a sidecar process, producing a single installable application.
+**Desktop packaging.** Luminary ships as a web app today (Vite dev server in development, served static from FastAPI in single-binary builds). A native desktop wrapper (e.g. Tauri) is not on the active roadmap; if pursued, it would wrap the existing frontend bundle and run the Python backend as a sidecar — no architectural changes required.
 
 ---
 
@@ -561,7 +570,7 @@ Luminary's engineering practices are codified in 25 "golden principles" derived 
 
 **Repository is the system of record.** All architectural decisions, design choices, patterns, and conventions live as versioned Markdown in `docs/`. If it is not in the repo, it does not exist. This is critical for agent-assisted development: an AI agent has no memory between sessions, so the repository must contain everything it needs to make correct decisions.
 
-**Enforce invariants mechanically.** The project has 21 mechanically enforced invariants: no pip (only uv), no direct LLM SDK imports (only LiteLLM), no raw dicts at API boundaries (only Pydantic models), no `print()` in production code (only structured logging), TypeScript strict mode, and more. Each invariant is checked by either a CI linter, a pre-commit hook, or a Claude Code PreToolUse hook. Violation messages include remediation instructions.
+**Enforce invariants mechanically.** The project has 18 mechanically enforced invariants documented in `docs/invariants.md` (grouped by Async/Concurrency, FTS5/SQLite, Imports, LLM/SSE, Vector Dimensions, Frontend, Quality Gates, Packages, Privacy & Local-First). They include: no pip (only uv), no direct LLM SDK imports (only LiteLLM), no raw dicts at API boundaries (only Pydantic models), no `print()` in production code (only structured logging), TypeScript strict mode, and more. Each invariant is checked by either a CI linter, a pre-commit hook, or a Claude Code PreToolUse hook. Violation messages include remediation instructions.
 
 **Tests must use real artifacts at real scale.** Integration tests ingest full, untruncated public-domain books with real ML models (BAAI/bge-m3, GLiNER). Only LiteLLM is mocked (to avoid requiring Ollama in CI). Golden datasets for evaluation are grounded in actually ingested content with verifiable context passages.
 
@@ -573,28 +582,36 @@ Luminary's engineering practices are codified in 25 "golden principles" derived 
 
 ## Possible Future Extensions
 
-Based on the current architecture and the planned stories in `prd-v2.json`:
+The story-based PRD queue (ralph workflow, `prd-v2.json`) was retired on 2026-05-04. Active planning now lives in `docs/redesign-phase-2-plan.md`. The list below summarises near-term, medium-term, and long-term direction beyond what's already shipped.
 
-### Near-term (architected, stories written)
+### Active plan: design refactor Phase 2 (see `docs/redesign-phase-2-plan.md`)
 
-- **Note semantic search (S91)**: Hybrid FTS5+vector search over user notes, matching the same RRF strategy used for document chunks -- already implemented.
-- **Cross-document concept linking (S141)**: Identify when two documents discuss the same concept under different names (e.g., "attention mechanism" in one paper and "self-attention" in another). SAME_CONCEPT edges in Kuzu with confidence and contradiction tracking.
-- **Image enrichment (S134)**: Extract diagrams and figures from PDFs, generate text descriptions via vision model (LLaVA), and create searchable embeddings for visual content.
-- **Prerequisite detection (S117)**: Automatically identify concept dependencies (A must be understood before B) using graph structure and LLM analysis. PREREQUISITE_OF edges in Kuzu for learning path generation.
-- **Study path generation**: Sequence documents and sections into an optimal learning order based on prerequisite graph, FSRS mastery levels, and gap detection results.
+- **Collections + tags as cross-cutting primitives** — extend the existing polymorphic `CollectionMemberModel` so docs, notes, and flashcards share collections and tags as first-class navigation. Library gains a collapsible left rail for collections + tags; `/collections/:id` becomes a unified workspace.
+- **Editor real-estate consolidation** — collapse `NoteEditorDialog` (90vw) and `NoteReaderSheet` (85vw) into one layout-agnostic `<NoteEditor>` core, with a slim in-reader side panel replacing the dialog-takeover when capturing notes mid-read.
+- **Auto-tagging at ingestion** — apply the existing `NoteTaggerService` to document one-sentence summaries so docs get tagged automatically; optionally project top-N graph entities onto doc tags as reinforcement.
+- **`⌘K` cross-content seek** — upgrade `SearchDialog` from docs-only full-text to a faceted seek across docs + notes + flashcards with collection / tag / content-type chips.
+- **Workflow seams** — `⌘+1..6` tab nav, `⌘+N` capture-from-anywhere, drag-drop docs into collections, reader→notes co-presence indicator.
 
-### Medium-term (architecturally compatible)
+### Deferred from Phase 1
 
-- **Multi-modal ingestion**: YouTube video transcription (yt-dlp + faster-whisper) is already scaffolded. Podcast ingestion, slide deck parsing, and handwritten note OCR would follow the same pipeline with format-specific parse nodes.
-- **Collaborative knowledge bases**: Multiple users sharing a Luminary instance with access controls. Requires authentication (not present in v1), per-user data isolation, and conflict resolution for shared entities.
-- **Mobile companion**: A read-only mobile app for flashcard review and note browsing. The backend API is already HTTP-based; a React Native or Flutter frontend could consume it directly.
-- **Export and interop**: Export flashcards to Anki format, knowledge graphs to Neo4j/GraphML, and summaries to Markdown or Notion. The data is already structured; export is a serialization problem.
+- **Mastery aggregate on `DocumentListItem`** — backend SQL subquery over `FlashcardModel.fsrs_stability` to power a "Weakest first" sort and per-card mastery rings. Investigated but non-trivial; spec in the Phase 2 plan.
 
-### Long-term (would require architectural evolution)
+### Architecturally compatible, not yet started
 
-- **Federated knowledge graphs**: Connect multiple Luminary instances to share entity relationships across users or organizations. Would require a gossip protocol or central coordination service.
-- **Active learning**: The system actively suggests what to read next based on gap detection, prerequisite analysis, and calendar availability. Would require a planning agent that reasons over the user's learning state.
-- **Fine-tuned local models**: Use the user's Q&A history and flashcard performance as training signal to fine-tune the local LLM for their specific domain. Would require PEFT/LoRA infrastructure and careful evaluation to prevent catastrophic forgetting.
+- **Cross-document concept linking** — `SAME_CONCEPT` edges in Kuzu when two documents discuss the same idea under different names. Confidence + contradiction tracking.
+- **Image enrichment** — extract diagrams from PDFs, generate text descriptions via vision model, embed for retrieval.
+- **Prerequisite detection** — `PREREQUISITE_OF` edges in Kuzu, used for learning-path generation.
+- **Study path generation** — sequence documents into an optimal learning order from prerequisite graph + FSRS mastery + gap detection.
+- **Multi-modal ingestion** — YouTube transcription is already scaffolded; podcasts, slide decks, and handwritten OCR would follow the same pipeline with format-specific parse nodes.
+- **Export and interop** — Anki flashcard export, Neo4j/GraphML knowledge-graph export, Notion / Markdown summary export.
+
+### Would require architectural evolution
+
+- **Collaborative knowledge bases** — multi-user with access controls, per-user data isolation, conflict resolution for shared entities. Needs authentication (not present in v1).
+- **Mobile companion** — read-only mobile app for flashcard review and note browsing. Backend API is already HTTP-based.
+- **Federated knowledge graphs** — connect multiple Luminary instances across users/orgs. Needs a gossip protocol or central coordination service.
+- **Active learning planner** — agent that reasons over gap detection + prerequisite chains + calendar availability to suggest what to read next.
+- **Fine-tuned local models** — use Q&A history + flashcard performance as training signal for PEFT/LoRA. Would require careful evaluation to prevent catastrophic forgetting.
 
 ---
 

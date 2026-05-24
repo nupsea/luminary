@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 import { toast } from "sonner"
 
-import type { Note } from "@/components/NoteEditorDialog"
 import { apiPost } from "@/lib/apiClient"
 
 import type { SourceRef } from "../SelectionActionBar"
@@ -28,7 +27,6 @@ export function useSelectionWorkflow({
   const [noteText, setNoteText] = useState("")
   const [noteSourceRef, setNoteSourceRef] = useState<SourceRef | null>(null)
   const [noteHeading, setNoteHeading] = useState<string | undefined>(undefined)
-  const [editingCreatedNote, setEditingCreatedNote] = useState<Note | null>(null)
 
   const [flashcardOpen, setFlashcardOpen] = useState(false)
   const [flashcardText, setFlashcardText] = useState("")
@@ -93,7 +91,6 @@ export function useSelectionWorkflow({
 
   const closeNote = useCallback(() => setNoteOpen(false), [])
   const closeFlashcard = useCallback(() => setFlashcardOpen(false), [])
-  const clearEditingCreatedNote = useCallback(() => setEditingCreatedNote(null), [])
 
   return {
     noteOpen,
@@ -104,9 +101,6 @@ export function useSelectionWorkflow({
     flashcardText,
     flashcardSourceRef,
     flashcardHeading,
-    editingCreatedNote,
-    setEditingCreatedNote,
-    clearEditingCreatedNote,
     closeNote,
     closeFlashcard,
     handleAddToNote,

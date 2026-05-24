@@ -6,7 +6,12 @@ import {
 } from "./focusUtils"
 
 describe("inferSurfaceFromPath", () => {
-  it("maps root to read (Learning tab)", () => {
+  it("maps /library to read (Library tab)", () => {
+    expect(inferSurfaceFromPath("/library")).toBe("read")
+    expect(inferSurfaceFromPath("/library/")).toBe("read")
+  })
+
+  it("maps root to read until the hub UI ships (2E.0 transitional)", () => {
     expect(inferSurfaceFromPath("/")).toBe("read")
     expect(inferSurfaceFromPath("")).toBe("read")
   })
@@ -32,6 +37,7 @@ describe("inferSurfaceFromPath", () => {
   })
 
   it("strips query strings before matching", () => {
+    expect(inferSurfaceFromPath("/library?doc=abc")).toBe("read")
     expect(inferSurfaceFromPath("/?doc=abc")).toBe("read")
     expect(inferSurfaceFromPath("/study?deck=xyz")).toBe("recall")
   })

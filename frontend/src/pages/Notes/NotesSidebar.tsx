@@ -114,7 +114,7 @@ export function NotesSidebar({
             <Plus size={12} />
           </button>
         </div>
-        <CollectionTree />
+        <CollectionTree contains="note" />
         <button
           onClick={onShowCreateCollection}
           className="mt-1 flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -130,7 +130,7 @@ export function NotesSidebar({
             Tags
           </p>
         </div>
-        <TagTree />
+        <TagTree scope="note" />
       </div>
 
       {(clusterSuggestions.length > 0 || isClusterQueued) && (

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, Trash2, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, StickyNote, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -9,7 +9,6 @@ import type { ExplainMode } from "@/components/FloatingToolbar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
-import { NoteEditorDialog, type Note } from "@/components/NoteEditorDialog"
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
@@ -29,7 +28,7 @@ import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
 import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
 import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
 import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
-import { NoteCreationDialog } from "./NoteCreationDialog"
+import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
 import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
@@ -158,13 +157,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // the sticky banner in the sections tab and the active-row visual treatment.
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
-  // noteCount for "Compare my notes" button visibility
-  const [noteCount, setNoteCount] = useState(0)
   // in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
   const [searchHitIndex, setSearchHitIndex] = useState(0)
   const [listLimit, setListLimit] = useState(200)
+  // Initial query pushed into the in-doc search bar when the Tags tab fires
+  // a tag click. Cleared on consumption so subsequent ⌘F opens fresh.
+  const [pendingSearchQuery, setPendingSearchQuery] = useState<string>("")
 
   // reading position — resume banner
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
@@ -177,6 +177,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const navigate = useNavigate()
   const setChatPreload = useAppStore((s) => s.setChatPreload)
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
 
   // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -402,6 +403,35 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     staleTime: 30_000,
   })
 
+  // Auto-collection for this document: used to lock the collection chip
+  // when capturing a note from a selection.
+  const { data: autoCollection } = useQuery<{ id: string } | null>({
+    queryKey: ["auto-collection-by-doc", documentId],
+    queryFn: async () => {
+      try {
+        return await apiGet<{ id: string }>(`/collections/by-document/${documentId}`)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null
+        throw err
+      }
+    },
+    staleTime: 60_000,
+  })
+
+  // Documents list used to populate the source-doc picker in NoteReaderSheet.
+  const { data: docsList = [] } = useQuery<{ id: string; title: string }[]>({
+    queryKey: ["documents-list-mini"],
+    queryFn: async () => {
+      try {
+        const data = await apiGet<{ items?: { id: string; title: string }[] }>("/documents", { page_size: 200 })
+        return data.items ?? []
+      } catch {
+        return []
+      }
+    },
+    staleTime: 60_000,
+  })
+
   // Fetch annotations for highlight reconstruction and panel
   const {
     data: docAnnotations,
@@ -480,6 +510,21 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   useEffect(() => {
     if (leftTab !== "sections" && searchOpen) closeReaderSearch()
   }, [leftTab, searchOpen, closeReaderSearch])
+
+  // Tags-tab click -> open in-doc search with the tag's surface form prefilled.
+  // Listens on window so the panel doesn't need a prop drilled through SummaryPanel.
+  useEffect(() => {
+    function onDocSearch(e: Event) {
+      const detail = (e as CustomEvent<{ query?: string }>).detail
+      const query = detail?.query?.trim()
+      if (!query) return
+      setLeftTab("sections")
+      setPendingSearchQuery(query)
+      setSearchOpen(true)
+    }
+    window.addEventListener("luminary:doc-search", onDocSearch)
+    return () => window.removeEventListener("luminary:doc-search", onDocSearch)
+  }, [])
 
   // scroll current hit into view when hitIndex or results change
   useEffect(() => {
@@ -863,24 +908,39 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Back
           </button>
         </div>
-        {noteCount >= 3 && (
-          <button
-            onClick={() => {
-              setChatPreload({ text: "compare my notes with this book", documentId, autoSubmit: true })
-              window.dispatchEvent(
-                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } })
-              )
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-          >
-            <GitCompareArrows size={14} />
-            Compare my notes
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {(docNotes?.length ?? 0) > 0 && (
+            <button
+              onClick={() => {
+                setNotesDocumentId(documentId)
+                navigate("/notes")
+              }}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-foreground/80 hover:bg-muted transition-colors"
+              title="Open notes for this document"
+            >
+              <StickyNote size={12} />
+              {docNotes?.length ?? 0} note{(docNotes?.length ?? 0) === 1 ? "" : "s"}
+            </button>
+          )}
+          {(docNotes?.length ?? 0) >= 3 && (
+            <button
+              onClick={() => {
+                setChatPreload({ text: "compare my notes with this book", documentId, autoSubmit: true })
+                window.dispatchEvent(
+                  new CustomEvent("luminary:navigate", { detail: { tab: "chat" } })
+                )
+              }}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            >
+              <GitCompareArrows size={14} />
+              Compare my notes
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Two-panel layout */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* Two-panel layout (NoteReaderSheet overlays from the right when capturing) */}
+      <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex w-3/5 flex-col overflow-hidden border-r border-border">
           {/* Document header — hidden in PDF/Book view to maximise canvas area */}
@@ -1085,6 +1145,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   {searchOpen && (
                     <InDocSearchBar
                       documentId={documentId}
+                      initialQuery={pendingSearchQuery}
+                      onConsumeInitialQuery={() => setPendingSearchQuery("")}
                       onResults={(results) => {
                         setSearchResults(results)
                         setSearchHitIndex(0)
@@ -1093,6 +1155,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                         setSearchOpen(false)
                         setSearchResults([])
                         setSearchHitIndex(0)
+                        setPendingSearchQuery("")
                       }}
                       hitIndex={searchHitIndex}
                       totalHits={searchResults.length}
@@ -1172,20 +1235,28 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           <SummaryPanel
             documentId={documentId}
             contentType={doc.content_type}
-            activeSectionId={readSectionId}
-            onNoteCountKnown={setNoteCount}
-            onScrollToSection={(sectionId) => {
-              if (leftTab !== "read") {
-                pushHistory()
-                setReadSectionId(sectionId)
-                setLeftTab("read")
-              } else {
-                const el = document.getElementById(`read-sec-${sectionId}`)
-                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
-            }}
           />
         </div>
+
+        <NoteReaderSheet
+          note={null}
+          documents={docsList}
+          onClose={selection.closeNote}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+            void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+            selection.closeNote()
+          }}
+          isNew={selection.noteOpen}
+          initialContent={(() => {
+            if (!selection.noteOpen) return ""
+            const parts = [selection.noteSourceRef?.documentTitle, selection.noteHeading].filter(Boolean)
+            const attribution = parts.length > 0 ? parts.join(", ") : ""
+            return `> "${selection.noteText}"\n>\n> -- ${attribution}`
+          })()}
+          initialSourceDocIds={[documentId]}
+          lockedCollectionId={autoCollection?.id ?? null}
+        />
       </div>
 
       {/* Audio mini-player — sticky bottom bar, audio documents only */}
@@ -1226,37 +1297,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           }}
         />
       )}
-
-      {/* Note creation dialog — pre-filled with selected text blockquote */}
-      <NoteCreationDialog
-        open={selection.noteOpen}
-        selectedText={selection.noteText}
-        sourceRef={selection.noteSourceRef}
-        sectionHeading={selection.noteHeading}
-        onClose={selection.closeNote}
-        onSaved={(note: Note) => {
-          void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-          void qc.invalidateQueries({ queryKey: ["notes"] })
-          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-          void qc.invalidateQueries({ queryKey: ["collections"] })
-          selection.setEditingCreatedNote(note)
-        }}
-      />
-
-      {/* NoteEditorDialog -- opens after NoteCreationDialog saves for full editing */}
-      <NoteEditorDialog
-        note={selection.editingCreatedNote}
-        onClose={selection.clearEditingCreatedNote}
-        onSaved={(_updated) => {
-          void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-          void qc.invalidateQueries({ queryKey: ["notes"] })
-          void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-          void qc.invalidateQueries({ queryKey: ["collections"] })
-          selection.clearEditingCreatedNote()
-        }}
-      />
 
       {/* Flashcard generation dialog — scoped to selected text context */}
       <DocumentFlashcardDialog

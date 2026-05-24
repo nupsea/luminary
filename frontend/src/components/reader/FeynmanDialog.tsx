@@ -533,7 +533,7 @@ export function FeynmanDialog({
                     <p className="text-sm text-muted-foreground">
                       {completeResult.gap_count > 0
                         ? `${completeResult.flashcard_ids.length} flashcard${completeResult.flashcard_ids.length !== 1 ? "s" : ""} created from ${completeResult.gap_count} gap${completeResult.gap_count !== 1 ? "s" : ""}.`
-                        : "No gaps identified -- great job!"}
+                        : "No gaps identified in your explanation."}
                     </p>
                   )}
 

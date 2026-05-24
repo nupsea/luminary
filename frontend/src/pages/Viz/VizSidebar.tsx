@@ -122,7 +122,7 @@ export function VizSidebar(props: VizSidebarProps) {
       <div className="p-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2 mb-2.5">
           <Library size={13} className="text-primary/70" />
-          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+          <span className="lum-eyebrow">
             Library
           </span>
         </div>
@@ -210,7 +210,7 @@ export function VizSidebar(props: VizSidebarProps) {
         <div className="p-4 py-3 border-b border-border/50 bg-yellow-50/10">
           <div className="flex items-center gap-2 mb-2.5">
             <StickyNote size={13} className="text-yellow-600/70" />
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+            <span className="lum-eyebrow">
               Notes in Context
             </span>
           </div>
@@ -258,7 +258,7 @@ export function VizSidebar(props: VizSidebarProps) {
       {/* Learning path: start entity input */}
       {viewMode === "learning_path" && (
         <div className="p-4 border-b border-border/50">
-          <p className="mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+          <p className="lum-eyebrow mb-2">
             Start Entity
           </p>
           <div className="flex gap-1.5">
@@ -289,7 +289,7 @@ export function VizSidebar(props: VizSidebarProps) {
       <div className="p-4 border-b border-border/50">
         <div className="flex items-center gap-2 mb-3">
           <Eye size={13} className="text-primary/70" />
-          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+          <span className="lum-eyebrow">
             Layers
           </span>
         </div>

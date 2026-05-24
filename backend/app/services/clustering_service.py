@@ -23,6 +23,7 @@ from app.models import (
     CanonicalTagModel,
     ClusterSuggestionModel,
     CollectionModel,
+    DocumentTagIndexModel,
     NoteModel,
     NoteTagIndexModel,
     TagAliasModel,
@@ -36,6 +37,25 @@ from app.services.naming import normalize_collection_name, normalize_tag_slug
 logger = logging.getLogger(__name__)
 
 RATE_LIMIT_HOURS = 1
+
+
+async def _count_usage(db: AsyncSession, tag_full: str) -> int:
+    """Total notes + documents that reference a tag, via the shadow indexes."""
+    note_n = (
+        await db.execute(
+            select(func.count())
+            .select_from(NoteTagIndexModel)
+            .where(NoteTagIndexModel.tag_full == tag_full)
+        )
+    ).scalar_one()
+    doc_n = (
+        await db.execute(
+            select(func.count())
+            .select_from(DocumentTagIndexModel)
+            .where(DocumentTagIndexModel.tag_full == tag_full)
+        )
+    ).scalar_one()
+    return int(note_n) + int(doc_n)
 
 
 class ClusteringService:
@@ -496,22 +516,26 @@ class ClusteringService:
                 new_slug = fix["suggested_name"]
                 action = fix.get("action", "rename")
 
+                tag_root = new_slug.split("/")[0]
+                tag_parent = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
+
                 if action == "merge":
-                    # Merge: update NoteTagIndexModel rows, delete old canonical tag,
-                    # ensure target canonical tag exists
-                    # Update tag index rows from old to new
+                    # Repoint both shadow indexes from old_slug -> new_slug.
+                    # NOTE: NoteModel.tags / DocumentModel.tags JSON columns are
+                    # NOT rewritten here -- the shadow indexes now diverge from
+                    # those columns until the next per-row write. The proper
+                    # cross-content rewrite lives in TagMergeService; this
+                    # bulk-clustering path should be migrated to call it.
                     await db.execute(
                         update(NoteTagIndexModel)
                         .where(NoteTagIndexModel.tag_full == old_slug)
-                        .values(
-                            tag_full=new_slug,
-                            tag_root=new_slug.split("/")[0],
-                            tag_parent=(
-                                "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
-                            ),
-                        )
+                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
                     )
-                    # Delete old canonical tag
+                    await db.execute(
+                        update(DocumentTagIndexModel)
+                        .where(DocumentTagIndexModel.tag_full == old_slug)
+                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
+                    )
                     old_tag = (
                         await db.execute(
                             select(CanonicalTagModel).where(CanonicalTagModel.id == old_slug)
@@ -520,34 +544,24 @@ class ClusteringService:
                     if old_tag:
                         await db.delete(old_tag)
 
-                    # Ensure target canonical tag exists; recount notes
                     target_tag = (
                         await db.execute(
                             select(CanonicalTagModel).where(CanonicalTagModel.id == new_slug)
                         )
                     ).scalar_one_or_none()
-
-                    note_count = (
-                        await db.execute(
-                            select(func.count())
-                            .select_from(NoteTagIndexModel)
-                            .where(NoteTagIndexModel.tag_full == new_slug)
-                        )
-                    ).scalar_one()
+                    new_usage = await _count_usage(db, new_slug)
                     if target_tag:
-                        target_tag.note_count = note_count
+                        target_tag.usage_count = new_usage
                     else:
                         db.add(
                             CanonicalTagModel(
                                 id=new_slug,
                                 display_name=new_slug.split("/")[-1],
                                 parent_tag=new_slug.split("/")[0] if "/" in new_slug else None,
-                                note_count=note_count,
+                                usage_count=new_usage,
                                 created_at=datetime.now(UTC),
                             )
                         )
-
-                    # Create tag alias
 
                     existing_alias = (
                         await db.execute(
@@ -559,8 +573,8 @@ class ClusteringService:
 
                     tags_merged += 1
                 else:
-                    # Rename: update canonical tag PK (delete old, insert new),
-                    # update NoteTagIndexModel rows
+                    # Rename: re-key the canonical tag PK and repoint both
+                    # shadow indexes from old_slug to new_slug.
                     old_tag = (
                         await db.execute(
                             select(CanonicalTagModel).where(CanonicalTagModel.id == old_slug)
@@ -568,32 +582,32 @@ class ClusteringService:
                     ).scalar_one_or_none()
 
                     if old_tag:
-                        note_count = old_tag.note_count
+                        prev_usage_count = old_tag.usage_count
                         display_name = new_slug.split("/")[-1]
-                        parent_tag = "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else None
+                        parent_tag_id = (
+                            "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else None
+                        )
                         await db.delete(old_tag)
                         await db.flush()
                         db.add(
                             CanonicalTagModel(
                                 id=new_slug,
                                 display_name=display_name,
-                                parent_tag=parent_tag,
-                                note_count=note_count,
+                                parent_tag=parent_tag_id,
+                                usage_count=prev_usage_count,
                                 created_at=datetime.now(UTC),
                             )
                         )
 
-                    # Update tag index rows
                     await db.execute(
                         update(NoteTagIndexModel)
                         .where(NoteTagIndexModel.tag_full == old_slug)
-                        .values(
-                            tag_full=new_slug,
-                            tag_root=new_slug.split("/")[0],
-                            tag_parent=(
-                                "/".join(new_slug.split("/")[:-1]) if "/" in new_slug else ""
-                            ),
-                        )
+                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
+                    )
+                    await db.execute(
+                        update(DocumentTagIndexModel)
+                        .where(DocumentTagIndexModel.tag_full == old_slug)
+                        .values(tag_full=new_slug, tag_root=tag_root, tag_parent=tag_parent)
                     )
 
                     # Create tag alias

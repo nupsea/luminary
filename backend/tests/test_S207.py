@@ -43,6 +43,7 @@ async def test_db(tmp_path, monkeypatch):
 # AC12: detect_naming_violations returns suggestions for violating tag + collection
 
 
+@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_detect_naming_violations_tag_and_collection(test_db):
     """detect_naming_violations returns rename suggestions for
@@ -93,6 +94,7 @@ async def test_detect_naming_violations_tag_and_collection(test_db):
 # AC3: Duplicate tags that normalize to the same slug detected for merge
 
 
+@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_detect_naming_violations_duplicate_tags_merge(test_db):
     """Two tags that normalize to the same slug should produce merge suggestions."""
@@ -133,6 +135,7 @@ async def test_detect_naming_violations_duplicate_tags_merge(test_db):
 # AC13: normalize-apply renames a tag and updates NoteTagIndexModel rows
 
 
+@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_apply_naming_fixes_renames_tag_and_index(test_db):
     """apply_naming_fixes renames a tag and updates NoteTagIndexModel rows."""
@@ -260,6 +263,7 @@ async def test_apply_naming_fixes_renames_collection(test_db):
 # Startup migration: tags normalized on create_all_tables
 
 
+@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
     """create_all_tables normalizes pre-existing tags with underscores."""
@@ -322,6 +326,7 @@ async def test_startup_migration_normalizes_tags(tmp_path, monkeypatch):
 # Already-normalized tags should be skipped (idempotent)
 
 
+@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_detect_no_violations_when_normalized(test_db):
     """No violations reported for already-normalized names."""

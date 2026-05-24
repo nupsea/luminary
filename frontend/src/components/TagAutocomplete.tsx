@@ -21,7 +21,7 @@ interface AutocompleteResult {
   id: string
   display_name: string
   parent_tag: string | null
-  note_count: number
+  usage_count: number
 }
 
 async function fetchAutocomplete(q: string, signal?: AbortSignal): Promise<AutocompleteResult[]> {
@@ -197,7 +197,7 @@ export function TagAutocomplete({ tags, onChange, onUnsavedChange }: TagAutocomp
               {result.parent_tag && (
                 <span className="text-muted-foreground shrink-0">{result.parent_tag}</span>
               )}
-              <span className="text-muted-foreground shrink-0">{result.note_count}</span>
+              <span className="text-muted-foreground shrink-0">{result.usage_count}</span>
             </button>
           ))}
         </div>

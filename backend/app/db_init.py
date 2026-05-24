@@ -124,6 +124,18 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             await conn.execute(text("DROP TABLE note_sources"))
             await conn.execute(text("ALTER TABLE note_sources_rebuild_s175 RENAME TO note_sources"))
         await conn.run_sync(Base.metadata.create_all)
+
+        # Rename canonical_tags.note_count -> usage_count for existing DBs.
+        # Fresh DBs created by Base.metadata.create_all already have the new
+        # name; this only fires on the legacy schema. Idempotent via PRAGMA.
+        canonical_cols = (
+            await conn.execute(text("PRAGMA table_info(canonical_tags)"))
+        ).fetchall()
+        if any(c[1] == "note_count" for c in canonical_cols):
+            await conn.execute(
+                text("ALTER TABLE canonical_tags RENAME COLUMN note_count TO usage_count")
+            )
+
         await conn.execute(text(FTS5_DDL))
         await conn.execute(text(NOTES_FTS5_DDL))
         await conn.execute(text(IMAGES_FTS5_DDL))
@@ -189,6 +201,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE flashcards ADD COLUMN deck TEXT NOT NULL DEFAULT 'default'",
             "ALTER TABLE flashcards ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'medium'",
             "ALTER TABLE notes ADD COLUMN section_id TEXT",
+            "ALTER TABLE notes ADD COLUMN title TEXT",
+            "ALTER TABLE notes ADD COLUMN title_auto_generated INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE annotations ADD COLUMN note_text TEXT",
             "ALTER TABLE study_sessions ADD COLUMN accuracy_pct REAL",
             "ALTER TABLE documents ADD COLUMN audio_duration_seconds REAL",
@@ -407,14 +421,64 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 """
             )
         )
-        # Backfill canonical_tags from note_tag_index (idempotent via INSERT OR IGNORE).
-        # display_name = last path segment (correct for 1-2 level tags);
-        # parent_tag = NULL for top-level, first segment for simple 2-level tags.
+        # Mirror indexes for document_tag_index.
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_document_tag_index_tag_full "
+                "ON document_tag_index(tag_full)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_document_tag_index_document_id "
+                "ON document_tag_index(document_id)"
+            )
+        )
+
+        # Backfill document_tag_provenance: every existing doc tag is 'manual'.
+        # Auto-tag runs append to this table with source='auto'; idempotent via PK.
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO document_tag_provenance
+                    (document_id, tag_full, source, tagger_version, created_at)
+                SELECT d.id, j.value, 'manual', NULL, datetime('now')
+                FROM documents d, json_each(d.tags) AS j
+                WHERE json_type(d.tags) = 'array'
+                """
+            )
+        )
+
+        # Backfill document_tag_index from existing documents.tags JSON.
+        await conn.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO document_tag_index
+                    (document_id, tag_full, tag_root, tag_parent)
+                SELECT
+                    d.id AS document_id,
+                    j.value AS tag_full,
+                    CASE
+                        WHEN instr(j.value, '/') > 0
+                        THEN substr(j.value, 1, instr(j.value, '/') - 1)
+                        ELSE j.value
+                    END AS tag_root,
+                    '' AS tag_parent
+                FROM documents d, json_each(d.tags) AS j
+                WHERE json_type(d.tags) = 'array'
+                """
+            )
+        )
+
+        # Backfill canonical_tags from note_tag_index + document_tag_index.
+        # usage_count = COUNT(DISTINCT note_id) + COUNT(DISTINCT document_id).
+        # Idempotent on first insert (INSERT OR IGNORE); does not recompute counts
+        # for tags that already exist -- those stay accurate via sync_*_tag_index.
         await conn.execute(
             text(
                 """
                 INSERT OR IGNORE INTO canonical_tags
-                    (id, display_name, parent_tag, note_count, created_at)
+                    (id, display_name, parent_tag, usage_count, created_at)
                 SELECT
                     tag_full AS id,
                     CASE
@@ -425,10 +489,37 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                         WHEN instr(tag_full, '/') = 0 THEN NULL
                         ELSE substr(tag_full, 1, instr(tag_full, '/') - 1)
                     END AS parent_tag,
-                    COUNT(DISTINCT note_id) AS note_count,
+                    SUM(usage) AS usage_count,
                     datetime('now') AS created_at
-                FROM note_tag_index
+                FROM (
+                    SELECT tag_full, COUNT(DISTINCT note_id) AS usage FROM note_tag_index
+                        GROUP BY tag_full
+                    UNION ALL
+                    SELECT tag_full, COUNT(DISTINCT document_id) AS usage FROM document_tag_index
+                        GROUP BY tag_full
+                )
                 GROUP BY tag_full
+                """
+            )
+        )
+
+        # Reconcile canonical_tags.usage_count against both indexes. Runs at startup
+        # before requests are accepted, so concurrency with sync_*_tag_index is
+        # not a concern. Idempotent.
+        await conn.execute(
+            text(
+                """
+                UPDATE canonical_tags
+                SET usage_count = (
+                    SELECT
+                        COALESCE((SELECT COUNT(DISTINCT note_id)
+                                  FROM note_tag_index
+                                  WHERE tag_full = canonical_tags.id), 0)
+                        +
+                        COALESCE((SELECT COUNT(DISTINCT document_id)
+                                  FROM document_tag_index
+                                  WHERE tag_full = canonical_tags.id), 0)
+                )
                 """
             )
         )
@@ -647,7 +738,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     )
                 ).scalar() or 0
                 await conn.execute(
-                    text("UPDATE canonical_tags SET note_count = :cnt WHERE id = :tid"),
+                    text("UPDATE canonical_tags SET usage_count = :cnt WHERE id = :tid"),
                     {"cnt": cnt, "tid": new_slug},
                 )
             else:
@@ -656,7 +747,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     await conn.execute(
                         text(
                             "SELECT display_name, parent_tag, "
-                            "note_count, created_at "
+                            "usage_count, created_at "
                             "FROM canonical_tags WHERE id = :oid"
                         ),
                         {"oid": old_slug},
@@ -673,7 +764,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                         text(
                             "INSERT OR IGNORE INTO canonical_tags "
                             "(id, display_name, parent_tag, "
-                            "note_count, created_at) "
+                            "usage_count, created_at) "
                             "VALUES (:id, :dn, :pt, :nc, :ca)"
                         ),
                         {
