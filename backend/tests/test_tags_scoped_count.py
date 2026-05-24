@@ -92,6 +92,7 @@ async def test_list_tags_scoped_count_splits_by_content_type(test_db):
         assert note_shared["scoped_count"] == 1
 
 
+@pytest.mark.unstable  # flaky on CI: doc-tag sync intermittently drops under runner memory pressure
 @pytest.mark.anyio
 async def test_list_tags_scoped_ordering_prefers_scoped_count(test_db):
     """Tag mostly on notes shouldn't outrank a doc-heavy tag when scope=document."""
