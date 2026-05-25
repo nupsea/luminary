@@ -7,6 +7,8 @@ import { useAppStore } from "@/store"
 
 import { apiGet, apiPatch } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { SURFACE_TIER } from "@/lib/surfaceManifest"
+import { SettingsLabsPanel } from "@/components/SettingsLabsPanel"
 
 // Types
 
@@ -500,6 +502,15 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
           </section>
 
           <div className="border-t border-border" />
+
+          {/* Section 3.5: Labs — runtime feature toggles. Hidden on public
+              builds; labs ship in public bundles but stay opt-in for QA/dev. */}
+          {SURFACE_TIER !== "public" && (
+            <>
+              <SettingsLabsPanel />
+              <div className="border-t border-border" />
+            </>
+          )}
 
           {/* Section 4: Privacy notice */}
           <section>

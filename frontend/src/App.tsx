@@ -7,14 +7,17 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
+import { Activity, AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
-import { lazy, Suspense, useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import { Toaster } from "sonner"
+import { Toaster, toast } from "sonner"
 import { cn } from "./lib/utils"
 import { getHomeRedirectTarget } from "./lib/homeRedirect"
 import { useAppStore } from "./store"
+import { useSurfaceStore } from "./store/surface"
+import { SURFACE_TIER, navTabs, routedSurfaces, findLabsSurfaceByRoute } from "./lib/surfaceManifest"
+import type { Surface } from "./lib/surfaceManifest"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { StreakXPWidget } from "./components/StreakXPWidget"
@@ -24,9 +27,9 @@ import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
 import { IngestionProgressPills } from "./components/IngestionProgressPills"
-// All core pages are lazy-loaded to reduce the initial bundle and improve tab-switch
-// performance. Viz and Monitoring were already lazy -- Chat, Learning, Notes, Study added in S84.
-// Monitoring -> Progress (learner view); Admin page added at /admin (dev view).
+// All pages are lazy-loaded to reduce the initial bundle and improve tab-switch
+// performance. Keyed by their manifest `frontend.component` path so the router
+// and nav rail can be generated from surface-manifest.json.
 const Chat = lazy(() => import("./pages/Chat"))
 const Learning = lazy(() => import("./pages/Learning"))
 const Notes = lazy(() => import("./pages/Notes"))
@@ -35,16 +38,40 @@ const Viz = lazy(() => import("./pages/Viz"))
 const Quality = lazy(() => import("./pages/Quality"))
 const Progress = lazy(() => import("./pages/Progress"))
 const Admin = lazy(() => import("./pages/Admin"))
+const Monitoring = lazy(() => import("./pages/Monitoring"))
 const CollectionWorkspace = lazy(() => import("./pages/CollectionWorkspace"))
 const Hub = lazy(() => import("./pages/Hub"))
 
-// 2F.5: dev-only surfaces (Quality / Admin / Evals / Monitoring). Default
-// to enabled in any non-prod build so contributors can poke at them; allow
-// an explicit override via VITE_DEV_SURFACES=true|false for staging builds
-// that need to flip independently of Vite's mode.
-const DEV_SURFACES_ENABLED =
-  (import.meta.env.VITE_DEV_SURFACES as string | undefined) === "true"
-  || ((import.meta.env.VITE_DEV_SURFACES as string | undefined) !== "false" && import.meta.env.DEV)
+type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>
+
+const COMPONENT_REGISTRY: Record<string, LazyPage> = {
+  "pages/Hub": Hub,
+  "pages/Learning": Learning,
+  "pages/Notes": Notes,
+  "pages/Study": Study,
+  "pages/Chat": Chat,
+  "pages/Viz": Viz,
+  "pages/Progress": Progress,
+  "pages/CollectionWorkspace": CollectionWorkspace,
+  "pages/Quality": Quality,
+  "pages/Admin": Admin,
+  "pages/Monitoring": Monitoring,
+}
+
+type IconComponent = React.ComponentType<{ size?: number; className?: string }>
+
+const ICONS: Record<string, IconComponent> = {
+  luminary_hub: LuminaryGlyph,
+  library: BookOpen,
+  notes: StickyNote,
+  study: BarChart2,
+  ask: MessageSquare,
+  map: Network,
+  progress: TrendingUp,
+  quality_dashboard: ClipboardCheck,
+  admin: Wrench,
+  monitoring: Activity,
+}
 
 import { apiGet } from "@/lib/apiClient"
 
@@ -58,6 +85,19 @@ const prefetchDueCards = (): Promise<unknown> => apiGet("/study/due")
 const prefetchProgressData = (): Promise<unknown> => apiGet("/study/due-count")
 
 const prefetchHomeOverview = (): Promise<unknown> => apiGet("/home/overview")
+
+interface PrefetchDef {
+  key: QueryKey
+  fn: () => Promise<unknown>
+}
+
+const PREFETCH: Record<string, PrefetchDef> = {
+  luminary_hub: { key: ["home-overview"], fn: prefetchHomeOverview },
+  library: { key: ["documents", undefined, null, "newest", 1, 20], fn: prefetchDocuments },
+  study: { key: ["study-due"], fn: prefetchDueCards },
+  ask: { key: ["llm-settings"], fn: prefetchLLMSettings },
+  progress: { key: ["study-due"], fn: prefetchProgressData },
+}
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -75,56 +115,6 @@ const queryClient = new QueryClient({
     },
   },
 })
-
-// Nav items with per-tab prefetch config
-
-interface NavItemDef {
-  to: string
-  icon: React.ComponentType<{ size?: number; className?: string }>
-  label: string
-  prefetchKey?: QueryKey
-  prefetchFn?: () => Promise<unknown>
-}
-
-const NAV_ITEMS: NavItemDef[] = [
-  {
-    to: "/",
-    icon: LuminaryGlyph,
-    label: "Luminary",
-    prefetchKey: ["home-overview"],
-    prefetchFn: prefetchHomeOverview,
-  },
-  {
-    to: "/library",
-    icon: BookOpen,
-    label: "Library",
-    prefetchKey: ["documents", undefined, null, "newest", 1, 20],
-    prefetchFn: prefetchDocuments,
-  },
-  { to: "/notes", icon: StickyNote, label: "Notes" },
-  {
-    to: "/study",
-    icon: BarChart2,
-    label: "Study",
-    prefetchKey: ["study-due"],
-    prefetchFn: prefetchDueCards,
-  },
-  {
-    to: "/chat",
-    icon: MessageSquare,
-    label: "Ask",
-    prefetchKey: ["llm-settings"],
-    prefetchFn: prefetchLLMSettings,
-  },
-  { to: "/viz", icon: Network, label: "Map" },
-  {
-    to: "/progress",
-    icon: TrendingUp,
-    label: "Progress",
-    prefetchKey: ["study-due"],
-    prefetchFn: prefetchProgressData,
-  },
-]
 
 // Global top-of-page loading bar
 
@@ -170,9 +160,26 @@ function PageSkeleton() {
   )
 }
 
-// Sidebar with hover-prefetch
+// Whole-shell fallback while the surface manifest state loads, so the nav rail
+// never flashes a set of tabs it then has to remove.
+function BootSkeleton() {
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
+      <div className="flex h-full w-[4.5rem] flex-col items-center gap-2 border-r border-border/50 bg-sidebar py-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-12 rounded-xl" />
+        ))}
+      </div>
+      <div className="flex-1">
+        <PageSkeleton />
+      </div>
+    </div>
+  )
+}
 
-function Sidebar() {
+// Sidebar with hover-prefetch. Tabs are manifest-driven; `mainTabs` are the
+// learner-facing rail and `devTabs` are demoted to small icons at the bottom.
+function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[] }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const qc = useQueryClient()
 
@@ -197,51 +204,56 @@ function Sidebar() {
   return (
     <>
       <nav className="flex h-full w-[4.5rem] flex-col items-center gap-1 bg-gradient-to-b from-sidebar via-sidebar to-primary/5 py-4 border-r border-border/50">
-        {NAV_ITEMS.map(({ to, icon: Icon, label, prefetchKey, prefetchFn }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/" || to === "/library"}
-            className={({ isActive }) =>
-              cn(
-                "relative flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl text-sidebar-foreground/60 transition-all duration-200 hover:bg-accent hover:text-sidebar-foreground group",
-                isActive && "bg-accent text-sidebar-foreground",
-              )
-            }
-            title={label}
-            onMouseEnter={() => {
-              if (prefetchKey && prefetchFn) {
-                void handleHoverPrefetch(prefetchKey, prefetchFn)
+        {mainTabs.map((s) => {
+          const to = s.frontend!.route!
+          const Icon = ICONS[s.id] ?? BookOpen
+          const label = s.labels.en
+          const prefetch = PREFETCH[s.id]
+          return (
+            <NavLink
+              key={s.id}
+              to={to}
+              end={to === "/" || to === "/library"}
+              className={({ isActive }) =>
+                cn(
+                  "relative flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl text-sidebar-foreground/60 transition-all duration-200 hover:bg-accent hover:text-sidebar-foreground group",
+                  isActive && "bg-accent text-sidebar-foreground",
+                )
               }
-            }}
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-primary transition-all" />
-                )}
-                <Icon size={18} className={cn("transition-colors", isActive && "text-primary")} />
-                <span className={cn("text-[9px] font-medium leading-none", isActive ? "text-foreground" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")}>
-                  {label}
-                </span>
-              </>
-            )}
-          </NavLink>
-        ))}
+              title={label}
+              onMouseEnter={() => {
+                if (prefetch) void handleHoverPrefetch(prefetch.key, prefetch.fn)
+              }}
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-primary transition-all" />
+                  )}
+                  <Icon size={18} className={cn("transition-colors", isActive && "text-primary")} />
+                  <span className={cn("text-[9px] font-medium leading-none", isActive ? "text-foreground" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")}>
+                    {label}
+                  </span>
+                </>
+              )}
+            </NavLink>
+          )
+        })}
         {/* Streak & XP widget */}
         <div className="mt-auto mb-2">
           <StreakXPWidget />
         </div>
         <div className="flex flex-col items-center gap-2">
-          {/* Dev surfaces are demoted from the learner nav rail and gated
-              behind VITE_DEV_SURFACES so prod bundles don't ship the link
-              (plan 2F.5). Routes are dropped too -- deep links resolve only
-              in dev/staging builds. */}
-          {DEV_SURFACES_ENABLED && (
-            <>
+          {/* Dev-tier surfaces are demoted from the learner rail to small icons.
+              They are only present here on a `dev` bundle — lower tiers shed them
+              from the manifest entirely, so prod ships no link or route. */}
+          {devTabs.map((s) => {
+            const Icon = ICONS[s.id] ?? Wrench
+            return (
               <NavLink
-                to="/quality"
-                title="Quality (dev)"
+                key={s.id}
+                to={s.frontend!.route!}
+                title={`${s.labels.en} (dev)`}
                 className={({ isActive }) =>
                   cn(
                     "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
@@ -249,22 +261,10 @@ function Sidebar() {
                   )
                 }
               >
-                <ClipboardCheck size={14} />
+                <Icon size={14} />
               </NavLink>
-              <NavLink
-                to="/admin"
-                title="Dev Tools"
-                className={({ isActive }) =>
-                  cn(
-                    "flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground",
-                    isActive && "bg-accent text-sidebar-foreground",
-                  )
-                }
-              >
-                <Wrench size={14} />
-              </NavLink>
-            </>
-          )}
+            )
+          })}
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
           {/* Dark mode toggle */}
           <button
@@ -298,6 +298,24 @@ function HomeRoute() {
   )
 }
 
+// Self-healing 404. A stale bookmark into a gated labs surface gets a toast and
+// a redirect home rather than a dead route; truly unknown URLs just redirect.
+function NotFoundRedirect() {
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
+
+  useEffect(() => {
+    const labs = findLabsSurfaceByRoute(pathname)
+    if (labs && SURFACE_TIER !== "dev" && !labsEnabled.has(labs.id)) {
+      toast.info(`${labs.labels.en} is a Labs feature — enable it in Settings → Labs to use it.`)
+    }
+    navigate("/", { replace: true })
+  }, [pathname, navigate, labsEnabled])
+
+  return <PageSkeleton />
+}
+
 // App shell with startup prefetch
 
 function AppShell() {
@@ -310,6 +328,18 @@ function AppShell() {
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
+
+  const surfaceLoaded = useSurfaceStore((s) => s.loaded)
+  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
+
+  const mainTabs = useMemo(() => navTabs(labsEnabled).filter((s) => s.tier !== "dev"), [labsEnabled])
+  const devTabs = useMemo(() => navTabs(labsEnabled).filter((s) => s.tier === "dev"), [labsEnabled])
+  const routes = useMemo(() => routedSurfaces(labsEnabled), [labsEnabled])
+
+  // Boot: load surface tier + labs toggles before rendering the rail/routes.
+  useEffect(() => {
+    void useSurfaceStore.getState().fetch()
+  }, [])
 
   // Surface a global warning when Ollama is unreachable in private mode
   const { data: llmData } = useQuery<{
@@ -426,10 +456,10 @@ function AppShell() {
       // a numeric keystroke inside a search field doesn't navigate.
       if (mod && !e.shiftKey && /^[1-6]$/.test(e.key) && !isTypingTarget(e.target)) {
         const idx = parseInt(e.key, 10) - 1
-        const item = NAV_ITEMS[idx]
-        if (item) {
+        const item = mainTabs[idx]
+        if (item?.frontend?.route) {
           e.preventDefault()
-          navigate(item.to)
+          navigate(item.frontend.route)
         }
         return
       }
@@ -446,11 +476,13 @@ function AppShell() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [navigate])
+  }, [navigate, mainTabs])
+
+  if (!surfaceLoaded) return <BootSkeleton />
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
-      <Sidebar />
+      <Sidebar mainTabs={mainTabs} devTabs={devTabs} />
       <main className="flex-1 h-full overflow-auto relative animate-[fadeIn_0.2s_ease-out]">
         {ollamaUnavailable && !ollamaWarningDismissed && (
           <div className="mx-4 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
@@ -468,27 +500,29 @@ function AppShell() {
           <FocusTimerPill />
         </div>
         <Routes>
-          <Route path="/" element={<HomeRoute />} />
-          <Route path="/library" element={<Suspense fallback={<PageSkeleton />}><Learning /></Suspense>} />
-          <Route path="/chat" element={<Suspense fallback={<PageSkeleton />}><Chat /></Suspense>} />
-          <Route path="/viz" element={<Suspense fallback={<PageSkeleton />}><Viz /></Suspense>} />
-          <Route path="/study" element={<Suspense fallback={<PageSkeleton />}><Study /></Suspense>} />
-          <Route path="/notes" element={<Suspense fallback={<PageSkeleton />}><Notes /></Suspense>} />
-          <Route path="/progress" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
-          <Route path="/collections/:id" element={<Suspense fallback={<PageSkeleton />}><CollectionWorkspace /></Suspense>} />
-          {DEV_SURFACES_ENABLED && (
-            <>
-              <Route path="/quality" element={<Suspense fallback={<PageSkeleton />}><Quality /></Suspense>} />
-              <Route path="/evals" element={<Navigate to="/quality" replace />} />
-              <Route path="/admin" element={<Suspense fallback={<PageSkeleton />}><Admin /></Suspense>} />
-              <Route path="/monitoring" element={<Suspense fallback={<PageSkeleton />}><Progress /></Suspense>} />
-            </>
-          )}
+          {routes.map((s) => {
+            const route = s.frontend!.route!
+            if (route === "/") return <Route key={s.id} path="/" element={<HomeRoute />} />
+            const Comp = COMPONENT_REGISTRY[s.frontend!.component ?? ""]
+            if (!Comp) {
+              logger.warn("[Routes] no component registered", { id: s.id, component: s.frontend?.component })
+              return null
+            }
+            return (
+              <Route
+                key={s.id}
+                path={route}
+                element={<Suspense fallback={<PageSkeleton />}><Comp /></Suspense>}
+              />
+            )
+          })}
+          {SURFACE_TIER === "dev" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
+          <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </main>
 
       {/* Global Sliding Chat Panel Overlay */}
-      <div 
+      <div
         className={cn(
            "fixed top-0 right-0 h-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] border-l border-border bg-background shadow-2xl z-50 transform flex flex-col",
            chatPanelOpen ? "w-[450px] translate-x-0 opacity-100" : "w-0 translate-x-[200px] opacity-0 pointer-events-none"
