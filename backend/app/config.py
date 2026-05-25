@@ -1,10 +1,12 @@
 import functools
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     DATA_DIR: str = ".luminary"
+    LUMINARY_SURFACE_TIER: Literal["public", "labs", "dev"] = "dev"
     OLLAMA_URL: str = "http://localhost:11434"
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/gemma4"

@@ -59,7 +59,8 @@ from app.services.image_extractor import image_extract_handler
 from app.services.prereq_extractor import prereq_extract_handler
 from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
-from app.services.settings_service import load_llm_settings
+from app.services.settings_service import load_llm_settings, read_labs_enabled_sync
+from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
 
 
@@ -198,36 +199,46 @@ app.add_middleware(
 )
 
 
-app.include_router(admin_router)
-app.include_router(annotations_router)
-app.include_router(clips_router)
-app.include_router(collections_router)
-app.include_router(chat_meta_router)
-app.include_router(chat_sessions_router)
-app.include_router(documents_router)
-app.include_router(engagement_router)
-app.include_router(evals_router)
-app.include_router(explain_router)
-app.include_router(goals_router)
-app.include_router(feynman_router)
-app.include_router(flashcards_router)
-app.include_router(graph_router)
-app.include_router(home_router)
-app.include_router(images_router)
-app.include_router(monitoring_router)
-app.include_router(notes_router)
-app.include_router(pomodoro_router)
-app.include_router(qa_router)
-app.include_router(reading_router)
-app.include_router(references_router)
-app.include_router(search_router)
-app.include_router(sections_router)
-app.include_router(settings_router)
-app.include_router(mastery_router)
-app.include_router(study_router)
-app.include_router(code_executor_router)
-app.include_router(summarize_router)
-app.include_router(tags_router)
+ROUTER_REGISTRY = {
+    "admin": admin_router,
+    "annotations": annotations_router,
+    "clips": clips_router,
+    "collections": collections_router,
+    "chat_meta": chat_meta_router,
+    "chat_sessions": chat_sessions_router,
+    "documents": documents_router,
+    "engagement": engagement_router,
+    "evals": evals_router,
+    "explain": explain_router,
+    "goals": goals_router,
+    "feynman": feynman_router,
+    "flashcards": flashcards_router,
+    "graph": graph_router,
+    "home": home_router,
+    "images": images_router,
+    "monitoring": monitoring_router,
+    "notes": notes_router,
+    "pomodoro": pomodoro_router,
+    "qa": qa_router,
+    "reading": reading_router,
+    "references": references_router,
+    "search": search_router,
+    "sections": sections_router,
+    "settings": settings_router,
+    "mastery": mastery_router,
+    "study": study_router,
+    "code_executor": code_executor_router,
+    "summarize": summarize_router,
+    "tags": tags_router,
+}
+
+# settings is always registered: the Settings -> Labs panel needs it to toggle tiers.
+_tier = get_settings().LUMINARY_SURFACE_TIER
+_labs_enabled = read_labs_enabled_sync() if _tier != "dev" else set()
+_enabled = enabled_routers(_tier, _labs_enabled) | {"settings"}
+for _name, _router in ROUTER_REGISTRY.items():
+    if _name in _enabled:
+        app.include_router(_router)
 
 
 @app.get("/health")

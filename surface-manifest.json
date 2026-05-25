@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "surfaces": [
+    {
+      "id": "luminary_hub",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/", "component": "pages/Hub" },
+      "backend": { "routers": ["home", "engagement", "goals", "mastery"] },
+      "labels": { "en": "Luminary" }
+    },
+    {
+      "id": "library",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/library", "component": "pages/Learning" },
+      "backend": { "routers": ["documents", "sections", "reading"] },
+      "labels": { "en": "Library" }
+    },
+    {
+      "id": "notes",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/notes", "component": "pages/Notes" },
+      "backend": { "routers": ["notes", "annotations", "references", "clips"] },
+      "labels": { "en": "Notes" }
+    },
+    {
+      "id": "study",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/study", "component": "pages/Study" },
+      "backend": { "routers": ["study", "flashcards"] },
+      "labels": { "en": "Study" }
+    },
+    {
+      "id": "ask",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/chat", "component": "pages/Chat" },
+      "backend": { "routers": ["qa", "chat_sessions", "chat_meta", "summarize", "search"] },
+      "labels": { "en": "Ask" }
+    },
+    {
+      "id": "map",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/viz", "component": "pages/Viz" },
+      "backend": { "routers": ["graph"] },
+      "labels": { "en": "Map" }
+    },
+    {
+      "id": "progress",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/progress", "component": "pages/Progress" },
+      "backend": { "routers": [] },
+      "labels": { "en": "Progress" }
+    },
+    {
+      "id": "collections",
+      "tier": "public",
+      "kind": "feature",
+      "frontend": { "route": "/collections/:id", "component": "pages/CollectionWorkspace" },
+      "backend": { "routers": ["collections"] },
+      "labels": { "en": "Collections" }
+    },
+    {
+      "id": "tags",
+      "tier": "public",
+      "kind": "feature",
+      "backend": { "routers": ["tags"] },
+      "labels": { "en": "Tags" }
+    },
+    {
+      "id": "feynman",
+      "tier": "labs",
+      "kind": "feature",
+      "frontend": { "components": ["components/Teachback"] },
+      "backend": { "routers": ["feynman"], "services": ["feynman_service", "feynman_strategies"] },
+      "labels": { "en": "Feynman / Teach-back" },
+      "description": "Socratic explanation sessions graded against source material.",
+      "default_off": true
+    },
+    {
+      "id": "code_executor",
+      "tier": "labs",
+      "kind": "feature",
+      "backend": { "routers": ["code_executor"], "services": ["code_executor"] },
+      "labels": { "en": "Code executor" },
+      "description": "Run code snippets extracted from technical documents in a sandbox.",
+      "default_off": true
+    },
+    {
+      "id": "image_enrichment",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "routers": ["images"], "services": ["image_extractor", "image_enricher"] },
+      "labels": { "en": "Image extraction & enrichment" },
+      "description": "Extract figures from documents and caption them with a vision model (LLaVA).",
+      "default_off": true
+    },
+    {
+      "id": "concept_linker",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "routers": ["explain"], "services": ["concept_linker"] },
+      "labels": { "en": "Concept linker" },
+      "description": "Cross-link related concepts across documents in the knowledge graph.",
+      "default_off": true
+    },
+    {
+      "id": "web_ingest",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "services": ["web_searcher", "article_extractor"] },
+      "labels": { "en": "Web search & URL ingestion" },
+      "description": "Augment answers with live web search and ingest articles from URLs (requires the labs dependency group).",
+      "default_off": true
+    },
+    {
+      "id": "youtube_ingest",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "services": ["youtube_downloader"] },
+      "labels": { "en": "YouTube ingestion" },
+      "description": "Ingest and transcribe YouTube lectures as study documents.",
+      "default_off": true
+    },
+    {
+      "id": "audio_transcribe",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "services": ["audio_transcriber"] },
+      "labels": { "en": "Audio transcription" },
+      "description": "Transcribe audio files into study documents.",
+      "default_off": true
+    },
+    {
+      "id": "code_parsing",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "services": ["code_parser", "tech_book_chunker", "tech_section_parser", "tech_relation_extractor"] },
+      "labels": { "en": "Technical-book parsing" },
+      "description": "Code-aware chunking and relation extraction for technical books.",
+      "default_off": true
+    },
+    {
+      "id": "clustering_orgplan",
+      "tier": "labs",
+      "kind": "feature",
+      "frontend": { "components": ["components/OrganizationPlanDialog"] },
+      "backend": { "services": ["clustering_service"] },
+      "labels": { "en": "Clustering / organization plan" },
+      "description": "Suggest collections by clustering related documents.",
+      "default_off": true
+    },
+    {
+      "id": "dataset_generator",
+      "tier": "labs",
+      "kind": "service",
+      "backend": { "services": ["dataset_generator_service"] },
+      "labels": { "en": "Dataset generator" },
+      "description": "Generate golden Q&A datasets from ingested documents for eval.",
+      "default_off": true
+    },
+    {
+      "id": "pomodoro",
+      "tier": "labs",
+      "kind": "feature",
+      "frontend": { "components": ["components/FocusTimerPill"] },
+      "backend": { "routers": ["pomodoro"], "services": ["pomodoro_service"] },
+      "labels": { "en": "Pomodoro timer" },
+      "description": "Focus-timer pill for timed study sessions.",
+      "default_off": true
+    },
+    {
+      "id": "quality_dashboard",
+      "tier": "dev",
+      "kind": "nav_tab",
+      "frontend": { "route": "/quality", "component": "pages/Quality" },
+      "backend": { "routers": ["evals"] },
+      "labels": { "en": "Quality" }
+    },
+    {
+      "id": "admin",
+      "tier": "dev",
+      "kind": "nav_tab",
+      "frontend": { "route": "/admin", "component": "pages/Admin" },
+      "backend": { "routers": ["admin"] },
+      "labels": { "en": "Admin" }
+    },
+    {
+      "id": "monitoring",
+      "tier": "dev",
+      "kind": "nav_tab",
+      "frontend": { "route": "/monitoring", "component": "pages/Monitoring" },
+      "backend": { "routers": ["monitoring"] },
+      "labels": { "en": "Monitoring" }
+    }
+  ]
+}

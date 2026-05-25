@@ -83,6 +83,7 @@ else
 	cd backend && uv run ruff check .
 	cd backend && uv run python tools/layer_linter.py
 	cd backend && uv run python tools/boundary_checker.py
+	./scripts/check_public_import.sh
 	cd backend && uv run pytest
 endif
 	cd frontend && npm run build

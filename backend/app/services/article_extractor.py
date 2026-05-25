@@ -4,11 +4,10 @@ import logging
 import re
 from pathlib import Path
 
-import cloudscraper
 import httpx
-import trafilatura
 
 from app.config import get_settings
+from app.labs_extras import require_extra
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -32,6 +31,11 @@ class ArticleExtractor:
 
     async def extract(self, url: str) -> ParsedDocument:
         logger.info("Extracting unified article from URL: %s", url)
+
+        require_extra("cloudscraper", "URL article extraction")
+        require_extra("trafilatura", "URL article extraction")
+        import cloudscraper
+        import trafilatura
 
         html_content = None
         # 1. Fetch with Cloudflare bypass
@@ -94,6 +98,8 @@ class ArticleExtractor:
 
     async def _mirror_markdown_images(self, md: str, doc_id: str) -> str:
         """Finds ![alt](url) in markdown, downloads them, and updates to local path."""
+        import cloudscraper
+
         img_re = re.compile(r"!\[(.*?)\]\((.*?)\)")
         settings = get_settings()
         images_dir = Path(settings.DATA_DIR).expanduser() / "images" / doc_id
