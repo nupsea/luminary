@@ -30,17 +30,17 @@ import { IngestionProgressPills } from "./components/IngestionProgressPills"
 // All pages are lazy-loaded to reduce the initial bundle and improve tab-switch
 // performance. Keyed by their manifest `frontend.component` path so the router
 // and nav rail can be generated from surface-manifest.json.
-const Chat = lazy(() => import("./pages/Chat"))
-const Learning = lazy(() => import("./pages/Learning"))
-const Notes = lazy(() => import("./pages/Notes"))
-const Study = lazy(() => import("./pages/Study"))
-const Viz = lazy(() => import("./pages/Viz"))
-const Quality = lazy(() => import("./pages/Quality"))
-const Progress = lazy(() => import("./pages/Progress"))
-const Admin = lazy(() => import("./pages/Admin"))
-const Monitoring = lazy(() => import("./pages/Monitoring"))
-const CollectionWorkspace = lazy(() => import("./pages/CollectionWorkspace"))
-const Hub = lazy(() => import("./pages/Hub"))
+const Chat = lazy(() => import("@/pages/Chat"))
+const Learning = lazy(() => import("@/pages/Learning"))
+const Notes = lazy(() => import("@/pages/Notes"))
+const Study = lazy(() => import("@/pages/Study"))
+const Viz = lazy(() => import("@/pages/Viz"))
+const Quality = lazy(() => import("@/pages/Quality"))
+const Progress = lazy(() => import("@/pages/Progress"))
+const Admin = lazy(() => import("@/pages/Admin"))
+const Monitoring = lazy(() => import("@/pages/Monitoring"))
+const CollectionWorkspace = lazy(() => import("@/pages/CollectionWorkspace"))
+const Hub = lazy(() => import("@/pages/Hub"))
 
 type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>
 

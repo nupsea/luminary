@@ -26,6 +26,8 @@ frontend:
 lint:
 	cd backend && uv run ruff check .
 	cd frontend && npx tsc --noEmit
+	python3 scripts/check_manifest_schema.py
+	python3 scripts/check_manifest_coverage.py
 
 test:
 	cd backend && uv run pytest
@@ -86,6 +88,8 @@ else
 	./scripts/check_public_import.sh
 	cd backend && uv run pytest
 endif
+	python3 scripts/check_manifest_schema.py
+	python3 scripts/check_manifest_coverage.py
 	cd frontend && npm run build
 	cd frontend && npx tsc --noEmit
 	@echo "CI passed."

@@ -15,15 +15,11 @@ export interface Surface {
 
 const ORDER: Record<Tier, number> = { public: 0, labs: 1, dev: 2 }
 
-// Build-time tier. VITE_SURFACE_TIER is the forward switch (Step 3 makes it the
-// only one); until then we bridge from the legacy VITE_DEV_SURFACES gate so dev
-// and prod keep behaving exactly as before.
+// Build-time tier. Set via VITE_SURFACE_TIER (vite.config defines it from the
+// env, defaulting to dev for `vite dev` and public for `vite build`).
 function resolveTier(): Tier {
   const explicit = import.meta.env.VITE_SURFACE_TIER as string | undefined
   if (explicit === "public" || explicit === "labs" || explicit === "dev") return explicit
-  const legacy = import.meta.env.VITE_DEV_SURFACES as string | undefined
-  if (legacy === "true") return "dev"
-  if (legacy === "false") return "public"
   return import.meta.env.DEV ? "dev" : "public"
 }
 
