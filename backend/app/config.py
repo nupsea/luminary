@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     DATA_DIR: str = ".luminary"
     LUMINARY_SURFACE_TIER: Literal["public", "labs", "dev"] = "dev"
+    # prod: serve the built SPA and mount the API under /api on one port (no CORS).
+    # dev: routers at root, CORS open, frontend served separately by Vite.
+    LUMINARY_MODE: Literal["dev", "prod"] = "dev"
     OLLAMA_URL: str = "http://localhost:11434"
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/gemma4"

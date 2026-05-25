@@ -9,9 +9,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
@@ -190,13 +190,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Luminary", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"http://localhost:\d+",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_mode = get_settings().LUMINARY_MODE
+# prod is single-origin (SPA + API on one port), so CORS is unnecessary; dev
+# serves the frontend from Vite on a different port and needs it.
+if _mode == "dev":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"http://localhost:\d+",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# In prod the whole API lives under /api so SPA client routes (/notes, /study,
+# /collections/:id, ...) never collide with router paths. dev/test keep routers
+# at root, so no test paths change.
+_API_PREFIX = "/api" if _mode == "prod" else ""
 
 
 ROUTER_REGISTRY = {
@@ -238,7 +247,10 @@ _labs_enabled = read_labs_enabled_sync() if _tier != "dev" else set()
 _enabled = enabled_routers(_tier, _labs_enabled) | {"settings"}
 for _name, _router in ROUTER_REGISTRY.items():
     if _name in _enabled:
-        app.include_router(_router)
+        app.include_router(_router, prefix=_API_PREFIX)
+
+# Misc app-level endpoints that live alongside the routers (root in dev, /api in prod).
+misc_router = APIRouter()
 
 
 @app.get("/health")
@@ -246,7 +258,7 @@ async def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
-@app.get("/settings")
+@misc_router.get("/settings")
 async def read_settings(settings: Settings = Depends(get_settings)):
     def mask(value: str) -> str:
         if value:
@@ -271,7 +283,7 @@ class SettingsUpdate(RootModel[dict[str, str]]):
     pass
 
 
-@app.patch("/settings")
+@misc_router.patch("/settings")
 async def patch_settings(
     request: SettingsUpdate,
     session: AsyncSession = Depends(get_db),
@@ -289,7 +301,7 @@ class OllamaPullRequest(BaseModel):
     model: str
 
 
-@app.post("/settings/ollama/pull")
+@misc_router.post("/settings/ollama/pull")
 async def pull_ollama_model(request: OllamaPullRequest) -> StreamingResponse:
     model = request.model.strip()
     if not model:
@@ -312,7 +324,7 @@ async def pull_ollama_model(request: OllamaPullRequest) -> StreamingResponse:
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
-@app.get("/settings/storage")
+@misc_router.get("/settings/storage")
 async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
     data_dir = Path(settings.DATA_DIR).expanduser()
 
@@ -331,3 +343,21 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
         if (data_dir / "luminary.db").exists()
         else 0.0,
     }
+
+
+app.include_router(misc_router, prefix=_API_PREFIX)
+
+
+# In prod, serve the built SPA. The API is under /api, so everything else falls
+# back to index.html for client-side routing (real files are served directly).
+if _mode == "prod":
+    _DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = _DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_DIST / "index.html")
