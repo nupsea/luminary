@@ -1,4 +1,6 @@
-.PHONY: dev ci backend frontend build start lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types
+
+LUMINARY_PORT ?= 7820
 
 clean:
 	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
@@ -29,6 +31,25 @@ build:
 
 start:
 	bash scripts/start.sh
+
+stop:
+	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
+	if [ -z "$$pids" ]; then \
+		echo "No Luminary app running on :$(LUMINARY_PORT)."; \
+	else \
+		echo "Gracefully stopping Luminary on :$(LUMINARY_PORT) (SIGTERM to $$pids)..."; \
+		kill $$pids 2>/dev/null || true; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			sleep 0.5; \
+			pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
+			[ -z "$$pids" ] && break; \
+		done; \
+		if [ -n "$$pids" ]; then \
+			echo "  still alive after 5s; sending SIGKILL to $$pids"; \
+			kill -9 $$pids 2>/dev/null || true; \
+		fi; \
+		echo "Stopped."; \
+	fi
 
 lint:
 	cd backend && uv run ruff check .
