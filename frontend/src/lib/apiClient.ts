@@ -29,7 +29,7 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
 function buildUrl(path: string, params?: QueryParams): string {
   const base = path.startsWith("http") ? path : `${API_BASE}${path}`
   if (!params) return base
-  const url = new URL(base)
+  const url = new URL(base, window.location.origin)
   for (const [key, value] of Object.entries(params)) {
     if (value === null || value === undefined) continue
     url.searchParams.set(key, String(value))
