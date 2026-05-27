@@ -78,15 +78,18 @@ async def _extract_references(section_content: str) -> list[dict]:
         f"Section summary:\n{section_content}\n\n"
         "Extract up to 5 key technical terms and for each provide a canonical reference."
     )
-    raw = await get_llm_service().complete(
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.0,
-        timeout=30.0,
-        background=True,
-    )
+    from app.services.enrichment_concurrency import get_enrichment_llm_semaphore  # noqa: PLC0415
+
+    async with get_enrichment_llm_semaphore():
+        raw = await get_llm_service().complete(
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            timeout=180.0,
+            background=True,
+        )
     cleaned = _strip_fences(raw)
     try:
         parsed = json.loads(cleaned)

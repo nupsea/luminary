@@ -7,6 +7,7 @@ parallel across different documents.
 
 import asyncio
 import logging
+import random
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Type alias: (document_id, job_id) -> None (raises on failure)
 JobHandler = Callable[[str, str], Coroutine[Any, Any, None]]
+
+# Insurance against a genuinely transient LLM outage (Ollama restarting): retry
+# in-process with exponential backoff + jitter before terminally failing. Calls
+# are bounded by enrichment_concurrency + a 180s timeout, so the common slow/
+# saturated case no longer fails here -- attempts stay low to bound worst-case
+# churn on a deterministic failure.
+_LLM_RETRY_MAX_ATTEMPTS = 3
+_LLM_RETRY_BASE_DELAY_S = 2.0
+_LLM_RETRY_MAX_DELAY_S = 30.0
 
 
 class EnrichmentQueueWorker:
@@ -159,6 +169,34 @@ class EnrichmentQueueWorker:
             await session.commit()
         logger.info("EnrichmentQueueWorker: document enrichment complete doc=%s", document_id)
 
+    async def _invoke_with_backoff(
+        self, handler: JobHandler, document_id: str, job_id: str
+    ) -> None:
+        attempt = 0
+        while True:
+            try:
+                await handler(document_id, job_id)
+                return
+            except LLMUnavailableError:
+                attempt += 1
+                if attempt >= _LLM_RETRY_MAX_ATTEMPTS:
+                    raise
+                delay = min(
+                    _LLM_RETRY_BASE_DELAY_S * 2 ** (attempt - 1),
+                    _LLM_RETRY_MAX_DELAY_S,
+                )
+                delay += random.uniform(0, delay * 0.25)
+                logger.info(
+                    "EnrichmentQueueWorker: LLM unavailable, retry %d/%d in %.1fs "
+                    "job_id=%s doc=%s",
+                    attempt,
+                    _LLM_RETRY_MAX_ATTEMPTS - 1,
+                    delay,
+                    job_id,
+                    document_id,
+                )
+                await asyncio.sleep(delay)
+
     async def _run_job(self, job_id: str, document_id: str, job_type: str) -> None:
         handler = self._handlers.get(job_type)
 
@@ -194,7 +232,7 @@ class EnrichmentQueueWorker:
             return
 
         try:
-            await handler(document_id, job_id)
+            await self._invoke_with_backoff(handler, document_id, job_id)
             async with get_session_factory()() as session:
                 await session.execute(
                     update(EnrichmentJobModel)
@@ -204,9 +242,8 @@ class EnrichmentQueueWorker:
                 await session.commit()
             logger.info("EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id)
         except LLMUnavailableError as exc:
-            # Ollama offline / timeout / rate-limited -- expected failure mode
-            # for local-first deployments; record the failure but skip the
-            # noisy traceback.
+            # Exhausted backoff retries -- Ollama genuinely offline for the whole
+            # window. Record the failure (re-queued to pending on next startup).
             logger.info(
                 "EnrichmentQueueWorker: job skipped (LLM unavailable) "
                 "job_id=%s doc=%s job_type=%s: %s",

@@ -94,14 +94,19 @@ class PrereqExtractorService:
             f"Section summary:\n{section_content[:2000]}\n\n"
             "List all concepts this section requires the reader to already understand."
         )
-        raw = await get_llm_service().complete(
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
-            background=True,
+        from app.services.enrichment_concurrency import (
+            get_enrichment_llm_semaphore,  # noqa: PLC0415
         )
+
+        async with get_enrichment_llm_semaphore():
+            raw = await get_llm_service().complete(
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                background=True,
+            )
         return _parse_prereqs(raw)
 
     async def enrich(self, document_id: str) -> int:

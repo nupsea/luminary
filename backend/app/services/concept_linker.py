@@ -166,14 +166,19 @@ class ConceptLinkerService:
             f"Passage A:\n{summary_a[:600]}\n\n"
             f"Passage B:\n{summary_b[:600]}"
         )
-        raw = await get_llm_service().complete(
-            messages=[
-                {"role": "system", "content": _CONTRADICTION_SYSTEM},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
-            background=True,
+        from app.services.enrichment_concurrency import (
+            get_enrichment_llm_semaphore,  # noqa: PLC0415
         )
+
+        async with get_enrichment_llm_semaphore():
+            raw = await get_llm_service().complete(
+                messages=[
+                    {"role": "system", "content": _CONTRADICTION_SYSTEM},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                background=True,
+            )
         cleaned = _strip_json_fences(raw)
         # Find first JSON object in response
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
