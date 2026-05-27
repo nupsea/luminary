@@ -61,5 +61,23 @@ def isolated_data_dir(tmp_path_factory):
     _gs.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_lancedb_singleton():
+    """Drop the cached LanceDB service before each test.
+
+    The service is a module-level singleton; without this it persists across
+    the whole suite, so note/chunk vectors from 1676 tests pile into one
+    instance until LanceDB spills to disk under memory pressure and errors
+    (LanceError(IO): Spill) -- which flakes note/embed-adjacent tests. Resetting
+    per test gives each a fresh, small store (recreated lazily against the
+    current DATA_DIR; on-disk data for shared dirs is reopened intact). Kuzu is
+    intentionally left alone to avoid file-lock churn from rapid reopens.
+    """
+    import app.services.vector_store as _vs_module
+
+    _vs_module._lancedb_service = None
+    yield
+
+
 # Deterministic service stubs live in tests/stubs.py (Belief #25)
 # Test files import directly: from stubs import MockLLMService

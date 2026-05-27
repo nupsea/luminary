@@ -1,6 +1,5 @@
 """GET /home/overview hub contract (plan 2E.8)."""
 
-import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -76,11 +75,28 @@ async def test_recent_items_interleave_docs_and_notes_by_activity(test_db):
         # Create a note (auto-bumps activity).
         nr = await c.post("/notes", json={"content": "first note", "tags": [], "document_id": None})
         note_id = nr.json()["id"]
-        # Bump docs with controlled timestamps so order is deterministic.
+        # Let the real service create the activity rows, then rewrite all three
+        # to explicit, well-separated timestamps so ordering is deterministic
+        # regardless of system load. record_doc_read stamps wall-clock now();
+        # under a busy full suite those stamps don't separate reliably, which
+        # flaked this test (passed in isolation, failed under load).
+        base = datetime(2026, 1, 1, tzinfo=UTC)
         async with factory() as s:
             await ActivityService(s).record_doc_read(d1)
-            await asyncio.sleep(0.01)
             await ActivityService(s).record_doc_read(d2)
+            for member_id, member_type, offset in (
+                (note_id, "note", 0),
+                (d1, "document", 1),
+                (d2, "document", 2),
+            ):
+                await s.execute(
+                    text(
+                        "UPDATE content_activity SET last_meaningful_at = :t "
+                        "WHERE member_type = :mt AND member_id = :i"
+                    ),
+                    {"t": base + timedelta(seconds=offset), "mt": member_type, "i": member_id},
+                )
+            await s.commit()
 
         body = (await c.get("/home/overview")).json()
         items = body["recent_items"]
