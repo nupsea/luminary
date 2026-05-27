@@ -581,7 +581,7 @@ async def test_tech_book_excludes_person_and_place(test_db, monkeypatch):
     monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
     captured: dict = {}
 
-    def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",)):
+    def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
         captured["allowed_types"] = allowed_types
         return []
 
@@ -607,7 +607,7 @@ async def test_narrative_book_includes_person_and_place(test_db, monkeypatch):
     monkeypatch.setattr(_doc_tagger_module, "get_document_tagger", lambda: _FakeTagger([[]]))
     captured: dict = {}
 
-    def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",)):
+    def _spy(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
         captured["allowed_types"] = allowed_types
         return []
 
@@ -651,7 +651,7 @@ async def test_prune_drops_entity_tags_no_longer_in_graph(test_db, monkeypatch):
 
     # Today's graph rules would only return 'data-lakehouse' (CONCEPT) for a
     # tech_book; 'raghu-ramakrishnan' (PERSON) is now excluded.
-    def _fresh_graph(doc_id, min_mentions, allowed_types=("CONCEPT",)):
+    def _fresh_graph(doc_id, min_mentions, allowed_types=("CONCEPT",), limit=None):
         # The prune passes allowed_types based on content_type; honour it.
         if allowed_types == ("CONCEPT",):
             return ["data-lakehouse"]

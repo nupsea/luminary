@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.database import get_session_factory
@@ -34,6 +35,27 @@ logger = logging.getLogger(__name__)
 
 LLM_TAGGER_VERSION = "doc-1"
 ENTITY_TAGGER_VERSION = "entity-1"
+
+# Entity-tag budget scales with the log of chunk count: K = BASE + SLOPE*log2,
+# clamped to [MIN, AUTO_TAG_ENTITY_CAP_MAX]. Calibrated so ~18 chunks -> ~12
+# tags, ~5k chunks -> ~29, with the cap holding the top.
+_ENTITY_TAG_BUDGET_BASE = 4.0
+_ENTITY_TAG_BUDGET_SLOPE = 2.0
+_ENTITY_TAG_BUDGET_MIN = 5
+
+
+def _entity_tag_budget(num_chunks: int, cap_max: int) -> int:
+    raw = _ENTITY_TAG_BUDGET_BASE + _ENTITY_TAG_BUDGET_SLOPE * math.log2(max(num_chunks, 2))
+    return max(_ENTITY_TAG_BUDGET_MIN, min(round(raw), cap_max))
+
+
+async def _count_chunks(doc_id: str) -> int:
+    async with get_session_factory()() as session:
+        return (
+            await session.execute(
+                select(func.count(ChunkModel.id)).where(ChunkModel.document_id == doc_id)
+            )
+        ).scalar_one() or 0
 
 # Content-type aware entity-type selection. Tech writing rarely benefits from
 # PERSON / PLACE entities surfacing as tags (they're author cites, example
@@ -191,13 +213,15 @@ def _fetch_entity_tags(
     doc_id: str,
     min_mentions: int,
     allowed_types: tuple[str, ...] = ("CONCEPT",),
+    limit: int | None = None,
 ) -> list[str]:
-    """Pull entity names with at least `min_mentions` MENTIONED_IN edges
-    among `allowed_types`.
+    """Pull the top-`limit` entity names (by MENTIONED_IN count, descending)
+    with at least `min_mentions` edges among `allowed_types`.
 
-    Score-ranked: more-mentioned entities lead the list. No fixed cap so doc
-    length scales the result -- a long technical book gets dozens of tags,
-    a short article a handful. Returns [] on any Kuzu error.
+    Score-ranked, so slicing to `limit` keeps the most-mentioned entities --
+    the cap acts as a dynamic threshold: a long book keeps its central
+    concepts, a short doc keeps all of its (low-count) ones. Returns [] on any
+    Kuzu error.
     """
     try:
         svc = _graph_module.get_graph_service()
@@ -207,7 +231,8 @@ def _fetch_entity_tags(
             )
             or []
         )
-        return [name for name, _count in pairs]
+        names = [name for name, _count in pairs]
+        return names[:limit] if limit is not None else names
     except Exception as exc:
         logger.warning("entity tag fetch failed (non-fatal): %s", exc)
         return []
@@ -293,11 +318,13 @@ async def enrich_document_tags(doc_id: str) -> int:
             ).scalar_one_or_none()
 
         allowed_types = _allowed_entity_types_for(content_type)
+        budget = _entity_tag_budget(await _count_chunks(doc_id), settings.AUTO_TAG_ENTITY_CAP_MAX)
         entity_raw: list[str] = (
             _fetch_entity_tags(
                 doc_id,
                 settings.AUTO_TAG_ENTITY_MIN_MENTIONS,
                 allowed_types=allowed_types,
+                limit=budget,
             )
             if settings.AUTO_TAG_USE_ENTITIES
             else []
@@ -463,13 +490,35 @@ async def prune_auto_entity_tags() -> dict[str, int]:
         ).all()
         content_type_by_doc: dict[str, str] = {d: ct or "" for d, ct in ct_rows}
 
+        # Chunk counts per doc so the fresh set uses the SAME budget as
+        # enrich_document_tags -- otherwise prune would flag the newly-allowed
+        # tags as stale and strip them right back out.
+        chunk_count_by_doc: dict[str, int] = {}
+        if docs_with_entity_rows:
+            chunk_count_by_doc = {
+                d: n
+                for d, n in (
+                    await session.execute(
+                        select(ChunkModel.document_id, func.count(ChunkModel.id))
+                        .where(ChunkModel.document_id.in_(docs_with_entity_rows))
+                        .group_by(ChunkModel.document_id)
+                    )
+                ).all()
+            }
+
         # Per-doc set of slugs the CURRENT entity query would produce. Any
         # entity-1 index row for a slug NOT in this set is now stale.
         fresh_entity_by_doc: dict[str, set[str]] = {}
         for d in docs_with_entity_rows:
             allowed_types = _allowed_entity_types_for(content_type_by_doc.get(d))
+            budget = _entity_tag_budget(
+                chunk_count_by_doc.get(d, 0), settings.AUTO_TAG_ENTITY_CAP_MAX
+            )
             fresh_names = _fetch_entity_tags(
-                d, settings.AUTO_TAG_ENTITY_MIN_MENTIONS, allowed_types=allowed_types
+                d,
+                settings.AUTO_TAG_ENTITY_MIN_MENTIONS,
+                allowed_types=allowed_types,
+                limit=budget,
             )
             fresh_entity_by_doc[d] = {
                 normalize_tag_slug(n) for n in fresh_names if normalize_tag_slug(n)

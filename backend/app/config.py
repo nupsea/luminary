@@ -30,12 +30,17 @@ class Settings(BaseSettings):
     # entity_extract_node. Requires GLINER_ENABLED at ingestion time for old docs
     # to have entities; new ingestions get entities automatically.
     AUTO_TAG_USE_ENTITIES: bool = True
-    # Per-doc mention threshold for entity-as-tag selection. Higher = fewer,
-    # more central tags. Scales naturally with document length: long technical
-    # books yield many tags, short articles a handful. Default 3 -- combined
-    # with the CONCEPT-only entity query and the stoplist, this keeps the
-    # generic ambient-noun tail out of the rail.
-    AUTO_TAG_ENTITY_MIN_MENTIONS: int = 3
+    # Noise floor for entity-as-tag selection: drop entities mentioned fewer
+    # than this many times. Kept LOW (1) so short content (a YouTube transcript
+    # mentions a concept once or twice) still surfaces its distinctive concepts.
+    # Tag *count* is governed by AUTO_TAG_ENTITY_CAP_MAX + a log-of-chunks
+    # budget, not by this floor -- the top-K-by-mention cap is what keeps a long
+    # book's central concepts and sheds a short doc's tail.
+    AUTO_TAG_ENTITY_MIN_MENTIONS: int = 1
+    # Upper bound on entity-derived tags per document. The actual budget scales
+    # with chunk count (log) up to this cap, so a book gets dozens, a short
+    # transcript a handful.
+    AUTO_TAG_ENTITY_CAP_MAX: int = 40
     # Auto-tag minimum slug length. Two-char concept tags like 'ai' are useful
     # but anything shorter is almost always an extraction artifact.
     AUTO_TAG_MIN_SLUG_LENGTH: int = 2
