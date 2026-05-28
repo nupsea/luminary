@@ -109,13 +109,16 @@ export async function prepareStudySession(
   }
 
   // 4. Create fresh
-  const cards = await fetchDueCards(documentId, collectionId, {
+  const rawCards = await fetchDueCards(documentId, collectionId, {
     ...(filters || {}),
     limit: cardLimit,
   })
-  if (cards.length === 0) {
+  if (rawCards.length === 0) {
     return { kind: "empty" }
   }
+
+  // Shape the queue: warm-up first (high stability + multiple reps), engage last.
+  const cards = shapeQueue(rawCards)
 
   const id = await startSession(
     documentId,
@@ -194,4 +197,21 @@ async function reattach(
       collectionId: ctx.collectionId,
     },
   }
+}
+
+// Sort cards into warm-up → engage order.
+// Warm-up: top 25% by stability (well-retained, comfortable to recall).
+// Engage: remaining cards (lower stability, newer, harder).
+function shapeQueue(cards: Flashcard[]): Flashcard[] {
+  if (cards.length <= 3) return cards
+  const sorted = [...cards].sort((a, b) => b.fsrs_stability - a.fsrs_stability)
+  const warmUpCount = Math.max(1, Math.floor(cards.length * 0.25))
+  const warmUp = sorted.slice(0, warmUpCount)
+  const engage = sorted.slice(warmUpCount)
+  // Shuffle engage bucket so high-stability cards don't cluster together there too.
+  for (let i = engage.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[engage[i], engage[j]] = [engage[j], engage[i]]
+  }
+  return [...warmUp, ...engage]
 }

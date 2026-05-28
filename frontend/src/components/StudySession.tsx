@@ -356,6 +356,14 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNex
   )
 }
 
+function getSessionPhase(index: number, total: number): { label: string; style: string } {
+  if (total <= 3) return { label: "Review", style: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" }
+  const pct = index / total
+  if (pct < 0.25) return { label: "Warm-up", style: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" }
+  if (pct < 0.85) return { label: "Engage", style: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" }
+  return { label: "Reflect", style: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" }
+}
+
 // StudySession -- main component (flashcard-only)
 
 interface StudySessionProps {
@@ -531,6 +539,8 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
   const currentCard = queue[currentIndex]
   if (!currentCard) return null
 
+  const sessionPhase = getSessionPhase(currentIndex, queue.length)
+
   return (
     <div className="flex h-full flex-col items-center gap-6 overflow-auto bg-background px-6 py-8">
       {/* Header */}
@@ -539,6 +549,9 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           <Zap size={18} className="text-blue-500" />
           <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
             Flashcard Review
+          </span>
+          <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-medium ${sessionPhase.style}`}>
+            {sessionPhase.label}
           </span>
         </div>
         <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">

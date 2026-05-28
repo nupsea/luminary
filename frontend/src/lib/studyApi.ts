@@ -19,6 +19,8 @@ export interface Flashcard {
   section_id: string | null
   flashcard_type: string | null
   cloze_text: string | null
+  fsrs_stability: number
+  reps: number
 }
 
 export interface SourceContext {
