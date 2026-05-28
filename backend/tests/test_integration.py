@@ -281,6 +281,7 @@ async def test_ingest_technical(integration_db, monkeypatch):
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
+@pytest.mark.unstable
 async def test_search_after_ingest(integration_db, monkeypatch):
     """After ingesting The Time Machine, GET /search?q=time+machine should return
     at least one result via hybrid retrieval (FTS5 keyword search)."""

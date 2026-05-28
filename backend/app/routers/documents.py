@@ -160,7 +160,9 @@ async def list_documents(
     collection_id: str | None = Query(
         default=None, description="Restrict to documents in this collection"
     ),
-    sort: Literal["newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"] = Query(
+    sort: Literal[
+        "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"
+    ] = Query(
         default="newest"
     ),
     page: int = Query(default=1, ge=1),

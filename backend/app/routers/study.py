@@ -1858,10 +1858,16 @@ async def get_decay_debt(
         days_since_due = (now - due_aware).total_seconds() / 86400
         # stability is measured in days; retention at 'days_since_due' days past due
         current_retention = math.exp(-max(0.0, days_since_due) / stability)
-        # days until retention crosses threshold from now
         # R_target = e^(-t/S)  =>  t = -S * ln(R_target)
-        days_to_threshold = -stability * math.log(_DECAY_DEBT_RETENTION_THRESHOLD) - max(0.0, days_since_due)
-        if current_retention < _DECAY_DEBT_RETENTION_THRESHOLD or days_to_threshold <= _DECAY_DEBT_WINDOW_DAYS:
+        days_to_threshold = (
+            -stability * math.log(_DECAY_DEBT_RETENTION_THRESHOLD)
+            - max(0.0, days_since_due)
+        )
+        at_risk = (
+            current_retention < _DECAY_DEBT_RETENTION_THRESHOLD
+            or days_to_threshold <= _DECAY_DEBT_WINDOW_DAYS
+        )
+        if at_risk:
             doc_cards[doc_id].append((current_retention, int(max(0, days_to_threshold))))
 
     if not doc_cards:

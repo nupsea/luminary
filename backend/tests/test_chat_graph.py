@@ -241,7 +241,7 @@ async def test_summary_question_resolves_targeted_book(test_db):
 
 @pytest.mark.asyncio
 async def test_summary_question_resolves_targeted_book_fuzzy(test_db):
-    """If scope='all' but a specific book's title is mentioned with a typo, classify_node resolves it using fuzzy match."""
+    """scope='all' + typo in book title → classify_node resolves via fuzzy match."""
     _, factory, _ = test_db
 
     from app.models import DocumentModel
