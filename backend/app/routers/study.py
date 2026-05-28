@@ -42,6 +42,8 @@ from app.models import (
 from app.repos.study_repo import StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
 from app.schemas.study import (
+    CalibrationStatsResponse,
+    CalibrationWeekItem,
     CardStabilityItem,
     CollectionSource,
     CollectionSubEnclave,
@@ -1882,6 +1884,58 @@ async def get_decay_debt(
     items.sort(key=lambda x: x.avg_retention)
     total_at_risk = sum(i.card_count for i in items)
     return DecayDebtResponse(items=items[:limit], total_at_risk=total_at_risk)
+
+
+@router.get("/calibration-stats", response_model=CalibrationStatsResponse)
+async def get_calibration_stats(
+    days: int = Query(default=30, ge=7, le=90),
+    session: AsyncSession = Depends(get_db),
+) -> CalibrationStatsResponse:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    rows = (
+        await session.execute(
+            select(
+                ReviewEventModel.predicted_rating,
+                ReviewEventModel.rating,
+                ReviewEventModel.reviewed_at,
+            ).where(
+                ReviewEventModel.predicted_rating.is_not(None),
+                ReviewEventModel.reviewed_at >= cutoff,
+            )
+        )
+    ).all()
+
+    if not rows:
+        return CalibrationStatsResponse(overall_match_rate=None, total_predictions=0, weeks=[])
+
+    from collections import defaultdict
+
+    week_buckets: dict[str, list[bool]] = defaultdict(list)
+    for predicted, actual, reviewed_at in rows:
+        aware = reviewed_at.replace(tzinfo=UTC) if reviewed_at.tzinfo is None else reviewed_at
+        monday = (aware - timedelta(days=aware.weekday())).date().isoformat()
+        week_buckets[monday].append(predicted == actual)
+
+    weeks: list[CalibrationWeekItem] = []
+    for week_start in sorted(week_buckets):
+        matches = week_buckets[week_start]
+        matched = sum(matches)
+        weeks.append(
+            CalibrationWeekItem(
+                week_start=week_start,
+                total=len(matches),
+                matched=matched,
+                match_rate=round(matched / len(matches), 3),
+            )
+        )
+
+    total = len(rows)
+    overall_matched = sum(1 for p, a, _ in rows if p == a)
+    return CalibrationStatsResponse(
+        overall_match_rate=round(overall_matched / total, 3),
+        total_predictions=total,
+        weeks=weeks,
+    )
 
 
 @router.get("/section-heatmap", response_model=SectionHeatmapResponse)

@@ -185,6 +185,7 @@ class ReviewEventModel(Base):
     rating: Mapped[str] = mapped_column(String, nullable=False)  # again|hard|good|easy
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    predicted_rating: Mapped[str | None] = mapped_column(String, nullable=True)  # again|hard|good|easy; null = no prediction
 
 
 class TeachbackResultModel(Base):

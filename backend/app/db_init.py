@@ -275,6 +275,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE eval_runs ADD COLUMN routing_accuracy REAL",
             "ALTER TABLE eval_runs ADD COLUMN per_route JSON",
             "ALTER TABLE eval_runs ADD COLUMN ablation_metrics JSON",
+            "ALTER TABLE review_events ADD COLUMN predicted_rating TEXT",
         ]:
             try:
                 await conn.execute(text(ddl))

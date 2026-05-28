@@ -168,11 +168,16 @@ export async function submitReview(
   cardId: string,
   rating: Rating,
   sessionId: string,
+  predictedRating?: Rating,
 ): Promise<void> {
   await fetch(`${API_BASE}/flashcards/${cardId}/review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rating, session_id: sessionId }),
+    body: JSON.stringify({
+      rating,
+      session_id: sessionId,
+      ...(predictedRating !== undefined && { predicted_rating: predictedRating }),
+    }),
   })
 }
 

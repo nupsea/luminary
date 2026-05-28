@@ -703,6 +703,7 @@ async def review_flashcard(
             flashcard_id=card_id,
             rating=req.rating,
             is_correct=req.rating != "again",
+            predicted_rating=req.predicted_rating,
         )
         session.add(event)
         await session.commit()

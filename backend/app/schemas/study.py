@@ -219,6 +219,19 @@ class DecayDebtResponse(BaseModel):
     total_at_risk: int  # total individual cards across all items
 
 
+class CalibrationWeekItem(BaseModel):
+    week_start: str  # ISO date of Monday
+    total: int
+    matched: int
+    match_rate: float  # 0..1
+
+
+class CalibrationStatsResponse(BaseModel):
+    overall_match_rate: float | None  # None when no data
+    total_predictions: int
+    weeks: list[CalibrationWeekItem]
+
+
 # Collection dashboard
 
 

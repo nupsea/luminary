@@ -17,6 +17,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -292,6 +294,90 @@ function KnowledgeGapScanner({ docs }: { docs: DocListItem[] }) {
   )
 }
 
+interface CalibrationStats {
+  overall_match_rate: number | null
+  total_predictions: number
+  weeks: { week_start: string; total: number; matched: number; match_rate: number }[]
+}
+
+function CalibrationWidget() {
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState<CalibrationStats | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiGet<CalibrationStats>("/study/calibration-stats")
+      .then((d) => { if (!cancelled) { setStats(d); setLoading(false) } })
+      .catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  if (loading) return <SectionSkeleton rows={2} />
+  if (!stats || stats.total_predictions === 0) {
+    return (
+      <div className="flex h-16 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+        Make a few predictions to see your calibration here.
+      </div>
+    )
+  }
+
+  const overallPct = stats.overall_match_rate !== null
+    ? Math.round(stats.overall_match_rate * 100)
+    : null
+
+  const chartData = stats.weeks.map((w) => ({
+    week: w.week_start.slice(5),
+    match_rate: Math.round(w.match_rate * 100),
+  }))
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border/50 bg-card/60 p-5">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium text-foreground">
+            {overallPct !== null ? `${overallPct}% prediction accuracy` : "—"}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {stats.total_predictions} graded prediction{stats.total_predictions !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <span
+          className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+            overallPct !== null && overallPct >= 70
+              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+              : overallPct !== null && overallPct >= 50
+              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+              : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+          }`}
+        >
+          {overallPct !== null && overallPct >= 70
+            ? "Well calibrated"
+            : overallPct !== null && overallPct >= 50
+            ? "Getting there"
+            : "Needs attention"}
+        </span>
+      </div>
+      {chartData.length > 1 && (
+        <ResponsiveContainer width="100%" height={100}>
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="week" tick={{ fontSize: 10 }} />
+            <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} />
+            <Tooltip formatter={(v) => [`${String(v)}%`, "Match rate"]} />
+            <Line
+              type="monotone"
+              dataKey="match_rate"
+              stroke="#6366f1"
+              strokeWidth={2}
+              dot={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
 export default function Progress() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
@@ -531,6 +617,12 @@ export default function Progress() {
             </BarChart>
           </ResponsiveContainer>
         )}
+      </section>
+
+      {/* Calibration delta */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Prediction calibration</h2>
+        <CalibrationWidget />
       </section>
 
       {/* Study Habits: streaks, XP, achievements */}

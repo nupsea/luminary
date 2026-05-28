@@ -53,6 +53,7 @@ class EntityPairsResponse(BaseModel):
 class ReviewRequest(BaseModel):
     rating: Literal["again", "hard", "good", "easy"]
     session_id: str | None = None
+    predicted_rating: Literal["again", "hard", "good", "easy"] | None = None
 
 
 class GenerateTechnicalRequest(BaseModel):

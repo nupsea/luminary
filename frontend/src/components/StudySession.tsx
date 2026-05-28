@@ -385,6 +385,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
   const [correct, setCorrect] = useState(0)
   const [isRating, setIsRating] = useState(false)
   const [lastRating, setLastRating] = useState<Rating | null>(null)
+  const [predictedRating, setPredictedRating] = useState<Rating | null>(null)
   const [nextReviewDate, setNextReviewDate] = useState<string | null>(null)
   const [sourceContext, setSourceContext] = useState<SourceContext | null>(null)
   const [sourceContextLoading, setSourceContextLoading] = useState(false)
@@ -398,7 +399,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
     setIsRating(true)
 
     try {
-      await submitReview(card.id, rating, sessionId)
+      await submitReview(card.id, rating, sessionId, predictedRating ?? undefined)
       const isCorrect = rating !== "again"
       setReviewed((r) => r + 1)
       setCorrect((c) => c + (isCorrect ? 1 : 0))
@@ -436,6 +437,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
             setCurrentIndex(nextIdx)
             setShowAnswer(false)
             setLastRating(null)
+            setPredictedRating(null)
           }
         }
         return
@@ -449,6 +451,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         setCurrentIndex(nextIdx)
         setShowAnswer(false)
         setLastRating(null)
+        setPredictedRating(null)
       }
     } finally {
       setIsRating(false)
@@ -465,6 +468,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
       setCurrentIndex(nextIdx)
       setShowAnswer(false)
       setLastRating(null)
+      setPredictedRating(null)
     }
   }
 
@@ -512,6 +516,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           onStartNext={() => {
             setCorrect(0)
             setLastRating(null)
+            setPredictedRating(null)
             setShowAnswer(false)
             setNextReviewDate(null)
             setSourceContext(null)
@@ -579,12 +584,39 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           </AnimatePresence>
 
           {!showAnswer ? (
-            <button
-              onClick={() => setShowAnswer(true)}
-              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              Show Answer
-            </button>
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-xs text-muted-foreground">How confident are you?</p>
+              <div className="flex gap-2">
+                {(
+                  [
+                    { label: "Know it", value: "good" as Rating },
+                    { label: "Unsure", value: "hard" as Rating },
+                    { label: "Blank", value: "again" as Rating },
+                  ] as const
+                ).map(({ label, value }) => (
+                  <button
+                    key={value}
+                    onClick={() => {
+                      setPredictedRating(value)
+                      setShowAnswer(true)
+                    }}
+                    className={`rounded border px-4 py-1.5 text-xs font-medium transition-colors ${
+                      predictedRating === value
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background text-muted-foreground hover:bg-accent"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowAnswer(true)}
+                className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Skip prediction → Show Answer
+              </button>
+            </div>
           ) : lastRating === null ? (
             <div className="flex gap-3">
               {RATINGS.map(({ label, value, className }) => (
