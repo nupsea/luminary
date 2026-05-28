@@ -16,7 +16,7 @@ import { cn } from "./lib/utils"
 import { getHomeRedirectTarget } from "./lib/homeRedirect"
 import { useAppStore } from "./store"
 import { useSurfaceStore } from "./store/surface"
-import { SURFACE_TIER, navTabs, routedSurfaces, findLabsSurfaceByRoute } from "./lib/surfaceManifest"
+import { SURFACE_TIER, navTabs, routedSurfaces, visibleSurfaces, findLabsSurfaceByRoute } from "./lib/surfaceManifest"
 import type { Surface } from "./lib/surfaceManifest"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
@@ -335,6 +335,7 @@ function AppShell() {
   const mainTabs = useMemo(() => navTabs(labsEnabled).filter((s) => s.tier !== "dev"), [labsEnabled])
   const devTabs = useMemo(() => navTabs(labsEnabled).filter((s) => s.tier === "dev"), [labsEnabled])
   const routes = useMemo(() => routedSurfaces(labsEnabled), [labsEnabled])
+  const pomodoroVisible = useMemo(() => visibleSurfaces(labsEnabled).some((s) => s.id === "pomodoro"), [labsEnabled])
 
   // Boot: load surface tier + labs toggles before rendering the rail/routes.
   useEffect(() => {
@@ -495,10 +496,12 @@ function AppShell() {
             </button>
           </div>
         )}
-        {/* global focus timer pill -- visible on every tab */}
-        <div className="flex items-center justify-end gap-2 px-4 pt-3">
-          <FocusTimerPill />
-        </div>
+        {/* global focus timer pill -- labs surface, only when pomodoro is visible */}
+        {pomodoroVisible && (
+          <div className="flex items-center justify-end gap-2 px-4 pt-3">
+            <FocusTimerPill />
+          </div>
+        )}
         <Routes>
           {routes.map((s) => {
             const route = s.frontend!.route!

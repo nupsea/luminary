@@ -39,7 +39,7 @@ async function fetchDocs(): Promise<DocItem[]> {
     const data = await apiGet<{ items: DocItem[] }>("/documents", {
       sort: "newest",
       page: 1,
-      page_size: 200,
+      page_size: 100,
     })
     return data.items ?? []
   } catch {

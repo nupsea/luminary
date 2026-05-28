@@ -38,7 +38,7 @@ export async function fetchDocumentList(): Promise<DocumentItem[]> {
   try {
     const data = await apiGet<{ items?: DocumentItem[] } | DocumentItem[]>(
       "/documents",
-      { page_size: 200 },
+      { page_size: 100 },
     )
     return Array.isArray(data) ? data : (data.items ?? [])
   } catch {

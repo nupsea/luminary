@@ -102,7 +102,7 @@ async function fetchGroups(): Promise<GroupsData> {
 }
 
 async function fetchDocumentList(): Promise<DocumentItem[]> {
-  const res = await fetch(`${API_BASE}/documents?page_size=200`)
+  const res = await fetch(`${API_BASE}/documents?page_size=100`)
   if (!res.ok) return []
   const data = (await res.json()) as { items?: DocumentItem[] } | DocumentItem[]
   return Array.isArray(data) ? data : (data.items ?? [])

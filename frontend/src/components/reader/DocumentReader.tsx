@@ -16,6 +16,7 @@ import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
+import { SURFACE_TIER } from "@/lib/surfaceManifest"
 import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
@@ -423,7 +424,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     queryKey: ["documents-list-mini"],
     queryFn: async () => {
       try {
-        const data = await apiGet<{ items?: { id: string; title: string }[] }>("/documents", { page_size: 200 })
+        const data = await apiGet<{ items?: { id: string; title: string }[] }>("/documents", { page_size: 100 })
         return data.items ?? []
       } catch {
         return []
@@ -577,6 +578,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         return new Map<string, string>()
       }
     },
+    enabled: SURFACE_TIER !== "public",
     staleTime: 30_000,
   })
 

@@ -78,6 +78,20 @@ def configure_logging(log_level: str = "INFO") -> None:
 logger = logging.getLogger(__name__)
 
 
+def _read_app_version() -> str:
+    try:
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with pyproject.open("rb") as fh:
+            return tomllib.load(fh)["project"]["version"]
+    except Exception:
+        return "0.0.0"
+
+
+_APP_VERSION = _read_app_version()
+
+
 def _release_kuzu_lock(kuzu_path: Path) -> None:
     """Kill any other processes holding an open file handle on the Kuzu database file."""
     if not kuzu_path.exists():
@@ -255,7 +269,7 @@ misc_router = APIRouter()
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": _APP_VERSION}
 
 
 @misc_router.get("/settings")

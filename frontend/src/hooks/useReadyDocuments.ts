@@ -4,7 +4,7 @@ import { apiGet } from "@/lib/apiClient"
 import { isDocumentReady } from "@/lib/documentReadiness"
 import type { DocumentListItem, DocumentListResponse } from "@/components/library/types"
 
-const READY_PAGE_SIZE = 200
+const READY_PAGE_SIZE = 100
 
 async function fetchAllDocuments(): Promise<DocumentListItem[]> {
   const data = await apiGet<DocumentListResponse>("/documents", {
